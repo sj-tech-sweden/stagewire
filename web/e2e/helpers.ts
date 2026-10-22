@@ -19,6 +19,10 @@ export async function waitForApi(request: APIRequestContext, timeoutMs = 120_000
 
 export async function ensureAdmin(request: APIRequestContext): Promise<void> {
   await waitForApi(request);
+  const status = await request.get(`${API_BASE}/api/v1/auth/bootstrap-status`);
+  if (!status.ok()) return;
+  const body = (await status.json()) as { setup_needed?: boolean };
+  if (!body.setup_needed) return;
   await request.post(`${API_BASE}/api/v1/auth/setup`, {
     data: {
       email: ADMIN.email,
@@ -34,5 +38,8 @@ export async function login(page: import('@playwright/test').Page): Promise<void
   await page.locator('input[type="email"]').fill(ADMIN.email);
   await page.locator('input[type="password"]').fill(ADMIN.password);
   await page.getByRole('button', { name: /sign in/i }).click();
-  await page.waitForURL(/\/$/);
+  // Wait for an authenticated element rather than the URL: after sign-in the
+  // SPA navigates client-side (history mode), so the address bar does not
+  // reliably end in "/" and waiting on it flakes.
+  await page.getByRole('button', { name: /admin@stagewire\.test/i }).waitFor();
 }
