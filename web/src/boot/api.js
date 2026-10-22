@@ -1,9 +1,7 @@
 import axios from 'axios'
+import { getApiBaseUrl } from '../utils/runtime-config'
 
-const baseURL = (process.env.API_BASE_URL || 'http://localhost:8010').replace(
-  /\/$/,
-  '',
-) + '/api/v1'
+const baseURL = getApiBaseUrl() + '/api/v1'
 
 const api = axios.create({
   baseURL,
