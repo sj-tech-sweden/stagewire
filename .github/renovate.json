@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "argocd": {
+    "managerFilePatterns": [
+      "/k8s/.+\\.yaml$/"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^k8s/.*\\.ya?ml$/",
+        "/^k8s/.*\\.yaml$/",
+        "/^charts/.+values\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "image:\\s*['\\\"]?(?<depName>(?:[A-Za-z0-9.-]+(?::\\d+)?/)?[A-Za-z0-9._/-]+):(?<currentValue>[^'\\\"\\s@]+)['\\\"]?",
+        "image:\\s*['\\\"]?(?<depName>(?:[A-Za-z0-9.-]+(?::\\d+)?/)?[A-Za-z0-9._/-]+)@(?<currentValue>sha256:[0-9a-fA-F]+)['\\\"]?",
+        "(?s)image:\\s*\\n(?:[ \\t]+(?:repository|repo):\\s*['\\\"]?(?<depName>(?:[A-Za-z0-9.-]+(?::\\d+)?/)?[A-Za-z0-9._/-]+)['\\\"]?.*?)*\\n[ \\t]*tag:\\s*['\\\"]?(?<currentValue>[^'\\\"\\s]+)['\\\"]?",
+        "image\\.repository:\\s*['\\\"]?(?<depName>(?:[A-Za-z0-9.-]+(?::\\d+)?/)?[A-Za-z0-9._/-]+)['\\\"]?\\s*\\n?\\s*image\\.tag:\\s*['\\\"]?(?<currentValue>[^'\\\"\\s]+)['\\\"]?"
+      ],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "{{{depName}}}",
+      "versioningTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "groupName": "Stagewire",
+      "description": "Group backend and frontend updates into one PR",
+      "matchPackageNames": [
+        "ghcr.io/sj-tech-sweden/stagewire-{/,}**"
+      ],
+      "sourceUrl": "https://github.com/sj-tech-sweden/stagewire"
+    }
+  ]
+}

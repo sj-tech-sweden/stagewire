@@ -1,0 +1,122 @@
+/* Stagewire global styles — mirrors the Stockwire Rental design system
+   (design/tokens/tokens.css). Brand palette is also set in quasar.config.js. */
+
+@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700&display=swap');
+
+:root {
+  /* Brand colors */
+  --ec-primary: #3f873f;
+  --ec-primary-600: #2d9148;
+  --ec-accent: #35a853;
+  --ec-profile-blue: #4f80ff;
+
+  /* Semantic colors */
+  --ec-success: #3f873f;
+  --ec-warning: #f7b84b;
+  --ec-danger: #e65656;
+  --ec-info: #3f873f;
+
+  /* Surfaces */
+  --ec-surface-900: #0c1114;
+  --ec-surface-800: #11181d;
+  --ec-surface-700: #182228;
+
+  /* Text */
+  --ec-text-primary: #e9f1ee;
+  --ec-text-secondary: #a8bab1;
+
+  /* Border */
+  --ec-border-subtle: #243138;
+
+  /* Typography */
+  --ec-font-heading: 'Raleway', Arial, sans-serif;
+  --ec-font-body: 'Myriad Pro', 'Myriad Roman', Arial, sans-serif;
+  --ec-font-numeric: 'Myriad Pro', 'Myriad Roman', Arial, sans-serif;
+
+  --ec-font-regular: 400;
+  --ec-font-semibold: 600;
+  --ec-font-bold: 700;
+
+  /* Spacing */
+  --ec-space-xs: 4px;
+  --ec-space-sm: 8px;
+  --ec-space-md: 16px;
+  --ec-space-lg: 24px;
+  --ec-space-xl: 32px;
+  --ec-space-2xl: 48px;
+
+  /* Radius */
+  --ec-radius-sm: 4px;
+  --ec-radius-md: 8px;
+  --ec-radius-lg: 12px;
+  --ec-radius-xl: 16px;
+
+  /* Shadows */
+  --ec-shadow-card: 0 1px 0 rgba(0, 0, 0, 0.25);
+  --ec-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* Dark theme (default) */
+html.q-dark,
+body.q-dark,
+html.body--dark,
+body.body--dark,
+body {
+  --ec-bg: radial-gradient(circle at top left, #14222a 0%, #0c1114 55%, #090d10 100%);
+  --ec-surface: var(--ec-surface-700);
+  --ec-drawer-bg: var(--ec-surface-800);
+  --ec-drawer-text: #b8ccc4;
+  --ec-text: var(--ec-text-primary);
+  background: var(--ec-bg);
+  color: var(--ec-text);
+}
+
+/* Light theme */
+html:not(.q-dark):not(.body--dark),
+body:not(.q-dark):not(.body--dark),
+html.body--light,
+body.body--light {
+  --ec-bg: linear-gradient(90deg, #f7fcf7, #f3f9f3 40%);
+  --ec-surface: #ffffff;
+  --ec-drawer-bg: #f6faf6;
+  --ec-drawer-text: #2f3a3a;
+  --ec-text: #111827;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--ec-font-body);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.q-heading {
+  font-family: var(--ec-font-heading);
+  font-weight: var(--ec-font-semibold);
+}
+
+/* Print: show only the selected patch sheet */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+  #print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .q-table__top,
+  .q-table__bottom {
+    display: none !important;
+  }
+}

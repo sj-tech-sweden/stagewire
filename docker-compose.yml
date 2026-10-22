@@ -1,0 +1,79 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: stagewire-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stagewire
+      POSTGRES_PASSWORD: stagewire
+      POSTGRES_DB: stagewire
+    ports:
+      - "5433:5432"
+    volumes:
+      - stagewire-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stagewire -d stagewire"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    container_name: stagewire-valkey
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - stagewire-valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: stagewire-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      APP_NAME: "Stagewire API"
+      APP_ENV: "development"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8010"
+      DATABASE_URL: "postgresql+asyncpg://stagewire:stagewire@db:5432/stagewire"
+      REDIS_URL: "redis://valkey:6379/0"
+      CORS_ORIGINS: "http://localhost:9010"
+      STOCKWIRE_API_BASE_URL: "https://rental-api.sj-tech.se"
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/api/v1/health/live').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      target: dev
+    container_name: stagewire-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_BASE_URL: "http://localhost:8010"
+    ports:
+      - "9010:9010"
+    command: ["npx", "quasar", "dev", "-p", "9010", "--host"]
+
+volumes:
+  stagewire-db-data:
+  stagewire-valkey-data:

@@ -1,0 +1,45 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment files (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Node
+node_modules/
+dist/
+dist_pwa/
+.quasar/
+*.log
+
+# Playwright
+web/test-results/
+web/playwright-report/
+web/blob-report/
+.playwright/
+

@@ -1,0 +1,2 @@
+# Generated Alembic migrations live here. Create the first one with:
+#   alembic revision --autogenerate -m "initial schema"

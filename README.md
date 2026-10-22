@@ -1,0 +1,99 @@
+# Stagewire
+
+Stage plot, patch sheet and input-list tooling for live audio, video and lighting
+professionals, with first-class sync to **Stockwire Rental** for gear lists and job
+assignments.
+
+This is a monorepo:
+
+```
+.
+├── api/   FastAPI backend (Python 3.12+, SQLAlchemy 2 async, Alembic)
+├── web/   Quasar / Vue 3 PWA frontend (Pinia, Konva.js stage-plot canvas)
+└── .github/  CI/CD, release-please, Renovate
+```
+
+## Architecture at a glance
+
+- **12-factor**: all configuration via environment variables (pydantic-settings).
+  Nothing is hardcoded.
+- **Backend**: stateless FastAPI processes; PostgreSQL + Valkey (cache / WebSocket
+  sessions) as backing services.
+- **Frontend**: Quasar PWA, talks to the backend over REST + async WebSockets.
+- **Releases**: `release-please` semantic versioning → GitHub Container Registry
+  (`ghcr.io/sj-tech-sweden/stagewire-*`) via GitHub Actions.
+- **Dependencies**: bundled & kept current with Renovate.
+
+See [`AGENTS.md`](./AGENTS.md) for contributor / LLM agent guidelines.
+
+## Default dev ports (non-conflicting with stockwire-rental)
+
+| Service   | Stagewire dev | Stockwire-rental (avoid) |
+|-----------|---------------|--------------------------|
+| API       | `8010`        | `8000`                   |
+| Web dev   | `9010`        | `9000`                   |
+| Postgres  | `5433`        | `5432`                   |
+| Valkey    | `6380`        | `6379`                   |
+
+## Quick start
+
+```bash
+# 1. Start backing services
+docker compose up -d db valkey
+
+# 2. Backend
+cd api
+uv sync                 # or: pip install -e .
+cp .env.example .env
+uv run uvicorn app.main:app --reload --port 8010
+
+# 3. Frontend (separate terminal)
+cd web
+npm install
+npx quasar dev -p 9010
+```
+
+Or run the whole stack (api + web + db + valkey) with:
+
+```bash
+docker compose up --build
+```
+
+## First-time setup & admin account
+
+Stagewire has **no hardcoded credentials**. The first time the API boots against an
+empty database it is in *setup mode*; you create the initial admin account via the
+`/setup` page in the UI, or by calling the setup endpoint:
+
+```bash
+curl -X POST http://localhost:8010/api/v1/auth/setup \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@stagewire.test","password":"Test1234!","first_name":"Admin","last_name":"User"}'
+```
+
+For local development the convention is to use `admin@stagewire.test` /
+`Test1234!` (this is the account the E2E suite provisions). **Change this password
+as soon as you log in.**
+
+After logging in as an admin:
+
+- Change your password or manage users under **Admin Settings → Users**.
+- Configure single sign-on (OIDC / SAML) under **Admin Settings → SSO**. SSO
+  providers are stored in the database (`AppSetting` key `sso_config`) and only
+  appear on the login page when **SSO is enabled** and the individual provider is
+  **enabled**. Re-run `/auth/sso/config` (PUT) after editing to persist changes.
+
+The database schema is owned by **Alembic**. On every API container start the
+entrypoint runs `alembic upgrade head`, so migrations are applied automatically
+when you redeploy. `Base.metadata.create_all` is only used as a fallback by the
+SQLite test suite.
+
+## Feature phases
+
+- **Phase 1 (this scaffold)**: Audio engine — input list / patch sheet, stage-plot
+  designer models, mic & wireless plotter; Stockwire Rental integration (job/gear
+  linking + "request to add" push-back stub).
+- **Phase 2 (prep)**: Video suite — pixel map / LED wall, video patch & signal flow.
+- **Phase 3 (prep)**: Lighting & rigging — DMX fixture patch, rigging & power plot.
+
+Domain folders for video and lighting exist as stubs for later phases.
