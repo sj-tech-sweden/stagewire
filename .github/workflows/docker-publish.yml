@@ -3,10 +3,6 @@ name: Docker Publish
 on:
   release:
     types: [published]
-  push:
-    tags:
-      - "api-v*"
-      - "web-v*"
 
 permissions:
   contents: read
@@ -19,9 +15,12 @@ jobs:
       matrix:
         include:
           - service: api
+            context: api
             dockerfile: api/Dockerfile
             image: stagewire-backend
+            target: production
           - service: web
+            context: web
             dockerfile: web/Dockerfile
             image: stagewire-frontend
             target: production
@@ -37,10 +36,11 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target || '' }}
+          target: ${{ matrix.target }}
           push: true
           tags: |
             ghcr.io/sj-tech-sweden/${{ matrix.image }}:latest
             ghcr.io/sj-tech-sweden/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/sj-tech-sweden/${{ matrix.image }}:${{ github.ref_name }}
