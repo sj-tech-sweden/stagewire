@@ -1,8 +1,10 @@
 <template>
+  <!-- eslint-disable vue/no-v-html -- content is markdown rendered and sanitized with DOMPurify before injection -->
   <div
     class="sw-markdown"
     v-html="html"
   />
+  <!-- eslint-enable vue/no-v-html -->
 </template>
 
 <script setup>
