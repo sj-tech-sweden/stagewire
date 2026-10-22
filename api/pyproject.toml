@@ -1,6 +1,6 @@
 [project]
 name = "stagewire-api"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stagewire backend API — stage plots, patch sheets, Stockwire sync"
 requires-python = ">=3.12"
 dependencies = [
