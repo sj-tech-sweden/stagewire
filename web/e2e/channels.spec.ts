@@ -8,9 +8,6 @@ test.beforeEach(async ({ request }) => {
 test('create a job and manage channel lists', async ({ page, request }) => {
   await login(page);
 
-  // Always accept prompt()/confirm() dialogs (used for list naming).
-  page.on('dialog', (dialog) => dialog.accept('FOH'));
-
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   const title = `E2E Show ${Date.now()}`;
   const created = await request.post(`${API_BASE}/api/v1/jobs`, {
@@ -24,9 +21,12 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await expect(page).toHaveURL(/\/jobs\//);
   await expect(page.locator('.text-h5')).toContainText(title);
 
-  // Add a channel list (prompts for a name, answered "FOH")
+  // Add a channel list via the dialog
   await page.getByRole('button', { name: /add list/i }).click();
-  await expect(page.getByRole('button', { name: 'FOH' })).toBeVisible();
+  const listDialog = page.locator('.q-dialog');
+  await listDialog.locator('input').first().fill('FOH');
+  await listDialog.getByRole('button', { name: /save/i }).click();
+  await expect(page.locator('.q-item', { hasText: 'FOH' }).first()).toBeVisible();
 
   // Add a channel to the list
   await page.getByRole('button', { name: /add channel/i }).click();
@@ -35,5 +35,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await channelDialog.locator('input').nth(1).fill('Kick In');
   await channelDialog.getByRole('button', { name: /save/i }).click();
 
-  await expect(page.getByText('Kick In')).toBeVisible();
+  // Save is async; wait for the dialog to close, then the row appears.
+  await expect(page.locator('.q-dialog')).toHaveCount(0);
+  await expect(page.locator('table').first().getByRole('textbox')).toHaveValue('Kick In');
 });
