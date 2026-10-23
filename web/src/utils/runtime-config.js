@@ -13,7 +13,7 @@ export function getApiBaseUrl() {
   )
   if (runtimeValue) return runtimeValue
 
-  const builtValue = trimTrailingSlash(process.env.API_BASE_URL || '')
+  const builtValue = trimTrailingSlash(import.meta.env.API_BASE_URL || '')
   if (builtValue) return builtValue
 
   return trimTrailingSlash(window.location.origin)

@@ -29,7 +29,7 @@ module.exports = function (/* ctx */) {
       },
       vueRouterMode: 'history',
       distDir: 'dist/pwa',
-      env: {
+      defineEnv: {
         API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:8010',
       },
     },
