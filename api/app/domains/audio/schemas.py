@@ -10,6 +10,8 @@ class ProductionJobBase(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str = ""
+    stage_width_cm: float = 0.0
+    stage_height_cm: float = 0.0
 
 
 class ProductionJobCreate(ProductionJobBase):
@@ -223,10 +225,14 @@ class ExportPluginInfo(BaseModel):
 class StagePlotElementBase(BaseModel):
     element_type: str
     linked_channel_id: UUID | None = None
+    linked_patch_point_id: UUID | None = None
     position_x: float = 0.0
     position_y: float = 0.0
     rotation: float = 0.0
+    width_cm: float = 60.0
+    height_cm: float = 60.0
     label: str = ""
+    image_url: str = ""
 
 
 class StagePlotElementCreate(StagePlotElementBase):

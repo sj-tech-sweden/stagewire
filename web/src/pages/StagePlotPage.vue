@@ -1,10 +1,72 @@
 <template>
   <q-page padding>
+    <div class="row items-center q-mb-md">
+      <q-btn
+        flat
+        round
+        icon="arrow_back"
+        :aria-label="t('stagePlot.back')"
+        class="q-mr-sm"
+        @click="router.push(`/jobs/${jobId}`)"
+      />
+      <div class="col">
+        <div class="text-h6">
+          {{ t('stagePlot.title') }}
+        </div>
+        <div
+          v-if="job"
+          class="text-subtitle2 text-grey-7"
+        >
+          <span v-if="job.title">{{ job.title }}</span>
+          <span v-if="job.venue_name"> · {{ job.venue_name }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-3">
         <q-card
           flat
           bordered
+        >
+          <q-card-section>
+            <div class="text-subtitle1 q-mb-sm">
+              {{ t('stagePlot.stageSetup') }}
+            </div>
+            <div
+              v-if="job && job.venue_name"
+              class="text-caption text-grey-7 q-mb-xs"
+            >
+              {{ job.venue_name }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="stageW"
+                type="number"
+                :label="t('stagePlot.stageWidth')"
+                dense
+                class="col"
+                @change="saveStage"
+              />
+              <q-input
+                v-model.number="stageH"
+                type="number"
+                :label="t('stagePlot.stageHeight')"
+                dense
+                class="col"
+                @change="saveStage"
+              />
+            </div>
+            <div class="text-caption text-grey-7 q-mt-xs">
+              {{ t('stagePlot.stageUnitsHint') }}
+            </div>
+          </q-card-section>
+        </q-card>
+
+        <q-card
+          flat
+          bordered
+          class="q-mt-md"
         >
           <q-card-section>
             <div class="text-subtitle1 q-mb-sm">
@@ -58,6 +120,53 @@
               :label="t('stagePlot.label')"
               dense
               @change="commitDraft"
+            />
+            <q-select
+              v-model="draft.linked_channel_id"
+              :label="t('stagePlot.linkChannel')"
+              :options="channelOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitLink"
+            />
+            <q-select
+              v-model="draft.linked_patch_point_id"
+              :label="t('stagePlot.linkPatchPoint')"
+              :options="patchPointOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitPatchPoint"
+            />
+            <div class="row q-gutter-sm q-mt-sm">
+              <q-input
+                v-model.number="draft.width_cm"
+                type="number"
+                :label="t('stagePlot.widthCm')"
+                dense
+                class="col"
+                @update:model-value="commitSize"
+              />
+              <q-input
+                v-model.number="draft.height_cm"
+                type="number"
+                :label="t('stagePlot.heightCm')"
+                dense
+                class="col"
+                @update:model-value="commitSize"
+              />
+            </div>
+            <q-input
+              v-model="draft.image_url"
+              :label="t('stagePlot.imageUrl')"
+              dense
+              class="q-mt-sm"
+              @change="commitImage"
             />
             <q-input
               v-model.number="draft.rotation"
@@ -129,9 +238,6 @@
           bordered
         >
           <q-card-section>
-            <div class="text-h6">
-              {{ t('stagePlot.title') }}
-            </div>
             <div class="text-caption text-grey-7">
               {{ t('stagePlot.addHint') }}
             </div>
@@ -171,6 +277,10 @@
                   @tap="select(el.id)"
                 >
                   <v-rect :config="rectConfig(el)" />
+                  <v-image
+                    v-if="imageFor(el)"
+                    :config="imageConfig(el)"
+                  />
                   <v-text :config="textConfig(el)" />
                 </v-group>
                 <v-transformer
@@ -188,17 +298,19 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import { api } from '@/boot/api';
 import { useStagePlotStore } from '@/stores/stageplot';
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
+const router = useRouter();
 const jobId = route.params.jobId;
 const store = useStagePlotStore();
 
-const STAGE_W_CM = 1200;
-const STAGE_H_CM = 700;
+const DEFAULT_W = 1200;
+const DEFAULT_H = 700;
 const GRID_CM = 50;
 
 const palette = {
@@ -226,23 +338,73 @@ const unitOptions = [
 const selectedId = ref(null);
 const stageRef = ref(null);
 const trRef = ref(null);
-const draft = ref({ label: '', rotation: 0, position_x: 0, position_y: 0 });
+const draft = ref({
+  label: '',
+  rotation: 0,
+  position_x: 0,
+  position_y: 0,
+  linked_channel_id: null,
+  linked_patch_point_id: null,
+  width_cm: 60,
+  height_cm: 60,
+  image_url: '',
+});
+
+const stageW = ref(DEFAULT_W);
+const stageH = ref(DEFAULT_H);
+const job = ref(null);
+const channelLists = ref([]);
+const imageCache = ref({});
 
 const pxPerCm = computed(() => scale.value);
 const selected = computed(
   () => store.elements.find((e) => e.id === selectedId.value) || null,
 );
+const channelOptions = computed(() => {
+  const opts = [];
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      const bits = [`Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
+      if (ch.input_type) bits.push(ch.input_type);
+      opts.push({ value: ch.id, label: bits.join(' · ') });
+    }
+  }
+  return opts;
+});
+const patchPointOptions = computed(() => {
+  const opts = [];
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) {
+        opts.push({
+          value: p.id,
+          label: `Ch ${ch.channel_number} · ${p.name || p.point_type || 'point'}`,
+        });
+      }
+    }
+  }
+  return opts;
+});
+const pointChannelMap = computed(() => {
+  const m = {};
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) m[p.id] = ch.id;
+    }
+  }
+  return m;
+});
 const xLabel = computed(() => `X (${unit.value})`);
 const yLabel = computed(() => `Y (${unit.value})`);
 const stageConfig = computed(() => ({
-  width: STAGE_W_CM * pxPerCm.value,
-  height: STAGE_H_CM * pxPerCm.value,
+  width: stageW.value * pxPerCm.value,
+  height: stageH.value * pxPerCm.value,
 }));
 const stageBg = computed(() => ({
   x: 0,
   y: 0,
-  width: STAGE_W_CM * pxPerCm.value,
-  height: STAGE_H_CM * pxPerCm.value,
+  width: stageW.value * pxPerCm.value,
+  height: stageH.value * pxPerCm.value,
   fill: '#0f161a',
   stroke: '#37474f',
   strokeWidth: 2,
@@ -250,8 +412,8 @@ const stageBg = computed(() => ({
 }));
 const gridLines = computed(() => {
   const lines = [];
-  const w = STAGE_W_CM * pxPerCm.value;
-  const h = STAGE_H_CM * pxPerCm.value;
+  const w = stageW.value * pxPerCm.value;
+  const h = stageH.value * pxPerCm.value;
   const step = GRID_CM * pxPerCm.value;
   for (let x = step; x < w; x += step) {
     lines.push({ points: [x, 0, x, h], stroke: '#1c272d', strokeWidth: 1, listening: false });
@@ -283,28 +445,52 @@ function groupConfig(el) {
 function rectConfig(el) {
   const def = defFor(el.element_type);
   return {
-    width: def.w * pxPerCm.value,
-    height: def.h * pxPerCm.value,
+    width: el.width_cm * pxPerCm.value,
+    height: el.height_cm * pxPerCm.value,
     fill: def.color,
     cornerRadius: 4,
     opacity: selectedId.value === el.id ? 1 : 0.85,
   };
 }
 function textConfig(el) {
-  const def = defFor(el.element_type);
   const s = pxPerCm.value;
   return {
-    text: el.label || def.label,
+    text: el.label || defFor(el.element_type).label,
     x: 0,
     y: 0,
-    width: def.w * s,
-    height: def.h * s,
+    width: el.width_cm * s,
+    height: el.height_cm * s,
     align: 'center',
     verticalAlign: 'middle',
     fontSize: Math.max(10, 12 * s),
     fill: '#ffffff',
     listening: false,
   };
+}
+function imageFor(el) {
+  return el.image_url ? imageCache.value[el.id] || null : null;
+}
+function imageConfig(el) {
+  return {
+    image: imageFor(el),
+    x: 0,
+    y: 0,
+    width: el.width_cm * pxPerCm.value,
+    height: el.height_cm * pxPerCm.value,
+    listening: false,
+  };
+}
+function loadImages(els) {
+  for (const el of els) {
+    if (!el.image_url) continue;
+    const cached = imageCache.value[el.id];
+    if (cached && cached.src === el.image_url) continue;
+    const img = new Image();
+    img.onload = () => {
+      imageCache.value = { ...imageCache.value, [el.id]: img };
+    };
+    img.src = el.image_url;
+  }
 }
 
 function updateTransformer() {
@@ -330,6 +516,11 @@ function select(id) {
       rotation: el.rotation,
       position_x: el.position_x,
       position_y: el.position_y,
+      linked_channel_id: el.linked_channel_id || null,
+      linked_patch_point_id: el.linked_patch_point_id || null,
+      width_cm: el.width_cm,
+      height_cm: el.height_cm,
+      image_url: el.image_url || '',
     };
   }
   updateTransformer();
@@ -363,10 +554,12 @@ function addElement(type) {
   const def = palette[type];
   const payload = {
     element_type: type,
-    position_x: STAGE_W_CM / 2 - def.w / 2,
-    position_y: STAGE_H_CM / 2 - def.h / 2,
+    position_x: stageW.value / 2 - def.w / 2,
+    position_y: stageH.value / 2 - def.h / 2,
     rotation: 0,
     label: def.label,
+    width_cm: def.w,
+    height_cm: def.h,
   };
   store.createElement(jobId, payload).then((created) => select(created.id));
 }
@@ -374,10 +567,12 @@ function addElement(type) {
 function addCustom() {
   const payload = {
     element_type: 'custom',
-    position_x: STAGE_W_CM / 2 - CUSTOM_DEF.w / 2,
-    position_y: STAGE_H_CM / 2 - CUSTOM_DEF.h / 2,
+    position_x: stageW.value / 2 - CUSTOM_DEF.w / 2,
+    position_y: stageH.value / 2 - CUSTOM_DEF.h / 2,
     rotation: 0,
     label: t('stagePlot.custom'),
+    width_cm: CUSTOM_DEF.w,
+    height_cm: CUSTOM_DEF.h,
   };
   store.createElement(jobId, payload).then((created) => select(created.id));
 }
@@ -385,6 +580,30 @@ function addCustom() {
 function commitDraft() {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { label: draft.value.label });
+}
+function commitLink(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_channel_id: val || null });
+}
+function commitPatchPoint(val) {
+  if (!selected.value) return;
+  const payload = { linked_patch_point_id: val || null };
+  if (val && pointChannelMap.value[val]) {
+    payload.linked_channel_id = pointChannelMap.value[val];
+    draft.value.linked_channel_id = pointChannelMap.value[val];
+  }
+  store.updateElement(jobId, selected.value.id, payload);
+}
+function commitSize() {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, {
+    width_cm: Number(draft.value.width_cm) || 0,
+    height_cm: Number(draft.value.height_cm) || 0,
+  });
+}
+function commitImage() {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { image_url: draft.value.image_url || '' });
 }
 function commitRotation() {
   if (!selected.value) return;
@@ -407,10 +626,48 @@ async function removeSelected() {
   await store.deleteElement(jobId, id);
 }
 
+async function saveStage() {
+  try {
+    await api.patch(`/jobs/${jobId}`, {
+      stage_width_cm: stageW.value,
+      stage_height_cm: stageH.value,
+    });
+  } catch (err) {
+    console.error('Failed to save stage size', err);
+  }
+}
+
+async function loadJob() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}`);
+    job.value = data;
+    if (data.stage_width_cm && data.stage_width_cm > 0) stageW.value = data.stage_width_cm;
+    if (data.stage_height_cm && data.stage_height_cm > 0) stageH.value = data.stage_height_cm;
+  } catch (err) {
+    console.error('Failed to load job', err);
+  }
+}
+
+async function loadChannels() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/channel-lists`);
+    channelLists.value = data || [];
+  } catch (err) {
+    console.error('Failed to load channel lists', err);
+  }
+}
+
 watch(selectedId, updateTransformer);
 watch(scale, updateTransformer);
+watch(
+  () => store.elements,
+  (els) => loadImages(els),
+  { deep: false },
+);
 
 onMounted(() => {
+  loadJob();
+  loadChannels();
   store.fetchElements(jobId);
 });
 </script>

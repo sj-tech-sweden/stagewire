@@ -26,6 +26,8 @@ class ProductionJob(Base):
     venue_name: Mapped[str] = mapped_column(String(255), default="")
     event_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -116,11 +118,17 @@ class StagePlotElement(Base):
     linked_channel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_channel_patches.id", ondelete="SET NULL"), nullable=True
     )
+    linked_patch_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("channel_patch_points.id", ondelete="SET NULL"), nullable=True
+    )
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)
     rotation: Mapped[float] = mapped_column(Float, default=0.0)
+    width_cm: Mapped[float] = mapped_column(Float, default=60.0)
+    height_cm: Mapped[float] = mapped_column(Float, default=60.0)
     label: Mapped[str] = mapped_column(String(255), default="")
+    image_url: Mapped[str] = mapped_column(String(1024), default="")
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 

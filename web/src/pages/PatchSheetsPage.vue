@@ -192,7 +192,9 @@
               </div>
             </div>
             <div class="row q-gutter-sm items-center">
-              <div class="text-caption text-grey-7 col-4">48V</div>
+              <div class="text-caption text-grey-7 col-4">
+                48V
+              </div>
               <div class="col">
                 {{ ch.phantom_power ? '✓' : '' }}
               </div>
@@ -247,7 +249,7 @@
       </q-list>
       <q-table
         v-else
-        :rows="current.channels"
+        :rows="tableRows"
         :columns="columns"
         row-key="channel_id"
         dense
@@ -322,6 +324,7 @@ const sheets = ref([])
 const lists = ref([])
 const selected = ref(null)
 const error = ref(null)
+const plotElements = ref([])
 
 const typeKey = {
   mixer: 'typeMixer',
@@ -349,6 +352,24 @@ const sheetOptions = computed(() =>
 
 const current = computed(
   () => sheets.value.find((s) => s.name === selected.value) || null,
+)
+
+const stageByChannel = computed(() => {
+  const m = new Map()
+  for (const el of plotElements.value) {
+    if (!el.linked_channel_id) continue
+    const arr = m.get(el.linked_channel_id) || []
+    arr.push(el.label || el.element_type)
+    m.set(el.linked_channel_id, arr)
+  }
+  return m
+})
+
+const tableRows = computed(() =>
+  (current.value?.channels || []).map((ch) => ({
+    ...ch,
+    stageLabel: (stageByChannel.value.get(ch.channel_id) || []).join(', '),
+  })),
 )
 
 const modeLabel = (mode) =>
@@ -436,6 +457,7 @@ const columns = [
   { name: 'patch_label', label: t('channels.patchPoint.label'), field: (row) => row.point.patch_label, align: 'left' },
   { name: 'notes', label: t('channels.fieldNotes'), field: 'notes', align: 'left' },
   { name: 'point_notes', label: t('channels.patchPoint.notes'), field: (row) => row.point.notes, align: 'left' },
+  { name: 'stageLabel', label: t('stagePlot.onStage'), field: 'stageLabel', align: 'left' },
 ]
 
 function printSheet() {
@@ -447,10 +469,17 @@ onMounted(async () => {
     const jobReq = api.get(`/jobs/${jobId}`)
     const sheetsReq = api.get(`/jobs/${jobId}/patch-sheets`)
     const listsReq = api.get(`/jobs/${jobId}/channel-lists`)
-    const [jobRes, sheetsRes, listsRes] = await Promise.all([jobReq, sheetsReq, listsReq])
+    const plotReq = api.get(`/jobs/${jobId}/plot-elements`)
+    const [jobRes, sheetsRes, listsRes, plotRes] = await Promise.all([
+      jobReq,
+      sheetsReq,
+      listsReq,
+      plotReq,
+    ])
     job.value = jobRes.data
     sheets.value = sheetsRes.data
     lists.value = listsRes.data
+    plotElements.value = plotRes.data || []
     if (sheets.value.length) selected.value = sheets.value[0].name
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred')
