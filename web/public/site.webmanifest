@@ -1,0 +1,19 @@
+{
+  "name": "Stagewire",
+  "short_name": "Stagewire",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#3F873F",
+  "background_color": "#0C1114",
+  "display": "standalone"
+}
