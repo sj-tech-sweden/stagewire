@@ -146,7 +146,7 @@
               class="row items-center flow-linear-row wrap"
             >
               <template
-                v-for="(n, i) in [chain.tree, ...(chain.tree.children || [])]"
+                v-for="(n, i) in chain.nodes"
                 :key="n.id || i"
               >
                 <q-card
@@ -163,9 +163,15 @@
                   <div class="text-caption text-grey-7">
                     {{ [n.connector, n.patch_label].filter(Boolean).join(' · ') || '—' }}
                   </div>
+                  <div
+                    v-if="n.device"
+                    class="text-caption text-primary"
+                  >
+                    ⬡ {{ n.device }}
+                  </div>
                 </q-card>
                 <q-icon
-                  v-if="i < [chain.tree, ...(chain.tree.children || [])].length - 1"
+                  v-if="i < chain.nodes.length - 1"
                   name="arrow_forward"
                   class="q-mx-xs flow-linear-arrow"
                 />
@@ -490,7 +496,6 @@
               :options="deviceOptions"
               emit-value
               map-options
-              clearable
               dense
               class="col"
               @update:model-value="(v) => assignPoint(p, v)"
@@ -528,6 +533,7 @@ import TruncateText from '@/components/TruncateText.vue'
 import FlowTree from '@/components/FlowTree.vue'
 import StagePlotMini from '@/components/StagePlotMini.vue'
 import { useDevicesStore } from '@/stores/devices'
+import { chainNodes } from '@/utils/patchFlow'
 
 const { t } = useI18n({ useScope: 'global' })
 const route = useRoute()
@@ -785,11 +791,13 @@ const flowChains = computed(() => {
     const full = fullById(row.channel_id)
     if (!full) continue
     if (row.kind === 'channel') {
+      const tree = buildInputTree(full)
       chains.push({
         label: row.source_label || `${t('channels.fieldChannelNumber')} ${row.channel_number}`,
         kind: 'input',
         channelId: row.channel_id,
-        tree: buildInputTree(full),
+        tree,
+        nodes: chainNodes(tree),
       })
     } else {
       chains.push({

@@ -279,6 +279,13 @@ async def _publish_channel(db: AsyncSession, channel: AudioChannelPatch) -> None
     await publish_job_event(channel_list.job_id, "channel.upsert", read)
 
 
+async def _linked_device_type(db: AsyncSession, job_id: UUID, device_id: UUID) -> str:
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Device not found for this job")
+    return device.device_type
+
+
 @router.post(
     "/{job_id}/channels/{channel_id}/patch-points",
     response_model=schemas.ChannelPatchPointRead,
@@ -295,7 +302,13 @@ async def create_patch_point(
     channel = await service.get_channel(db, channel_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
-    point = await service.create_patch_point(db, channel_id, payload.model_dump(exclude_unset=True))
+    if payload.device_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "A patch point must be linked to a device"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    data["point_type"] = await _linked_device_type(db, job_id, payload.device_id)
+    point = await service.create_patch_point(db, channel_id, data)
     await _publish_channel(db, channel)
     return schemas.ChannelPatchPointRead.model_validate(point)
 
@@ -316,7 +329,14 @@ async def update_patch_point(
     point = await service.get_patch_point(db, point_id)
     if point is None or point.channel_id != channel_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
-    point = await service.update_patch_point(db, point, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "device_id" in data:
+        if data["device_id"] is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "A patch point must be linked to a device"
+            )
+        data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
+    point = await service.update_patch_point(db, point, data)
     channel = await service.get_channel(db, channel_id)
     await _publish_channel(db, channel)
     return schemas.ChannelPatchPointRead.model_validate(point)

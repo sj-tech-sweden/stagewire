@@ -43,13 +43,28 @@ async def test_device_crud_and_linking(auth_headers):
         assert ch.status_code == 201, ch.text
         channel_id = ch.json()["id"]
 
+        no_device = await client.post(
+            f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points",
+            json={"position": 0, "name": "Stagebox A"},
+            headers=auth_headers,
+        )
+        assert no_device.status_code == 422, no_device.text
+
         pt = await client.post(
             f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points",
-            json={"position": 0, "point_type": "digital_stagebox", "name": "Stagebox A"},
+            json={"position": 0, "point_type": "mixer", "name": "Stagebox A", "device_id": dev_id},
             headers=auth_headers,
         )
         assert pt.status_code == 201, pt.text
+        assert pt.json()["point_type"] == "digital_stagebox"
         point_id = pt.json()["id"]
+
+        unlink = await client.patch(
+            f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",
+            json={"device_id": None},
+            headers=auth_headers,
+        )
+        assert unlink.status_code == 422, unlink.text
 
         upd = await client.patch(
             f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",

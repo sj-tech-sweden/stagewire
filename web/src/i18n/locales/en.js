@@ -183,6 +183,7 @@ export default {
       nameHint: 'Box or stage in the chain, e.g. Stagebox A',
       device: 'Device',
       deviceHint: 'The device this connection runs through',
+      deviceRequired: 'Link every patch point to a device (create one if needed)',
       connector: 'Connector',
       connectorHint: 'Plug type used at this box (XLR, TRS…)',
       label: 'Port',

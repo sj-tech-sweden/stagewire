@@ -183,6 +183,7 @@ export default {
       nameHint: 'Låda eller steg i kedjan, t.ex. Stagebox A',
       device: 'Enhet',
       deviceHint: 'Enheten som denna koppling går via',
+      deviceRequired: 'Koppla varje patchpunkt till en enhet (skapa en vid behov)',
       connector: 'Kontakt',
       connectorHint: 'Kontakttyp i denna låda (XLR, TRS…)',
       label: 'Port',

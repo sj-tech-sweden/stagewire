@@ -232,15 +232,6 @@
                 <span class="text-grey-7"> ({{ p.listName }})</span>
               </span>
             </q-item-section>
-            <q-item-section side>
-              <q-btn
-                flat
-                dense
-                icon="link_off"
-                color="negative"
-                @click="unassignPoint(p)"
-              />
-            </q-item-section>
           </q-item>
         </q-list>
       </q-card-section>
@@ -579,11 +570,6 @@ async function assignPoint(device, pointId) {
   const p = allPoints.value.find((x) => x.id === pointId);
   if (p) await devicesStore.assignPatchPoint(jobId, p, device.id);
   assignPick[device.id] = null;
-  await refresh();
-}
-
-async function unassignPoint(p) {
-  await devicesStore.assignPatchPoint(jobId, p, null);
   await refresh();
 }
 
