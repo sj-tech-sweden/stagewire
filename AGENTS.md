@@ -28,7 +28,7 @@ directly; it goes through the REST/WebSocket API.
   URLs. Add new settings there and document them in `api/.env.example`.
 - **Stateless processes.** Backend containers hold no local state. Sessions/cache live
   in Valkey; durable data lives in PostgreSQL.
-- **Backing services**: PostgreSQL (async via `asyncpg`) and Valkey
+- **Backing services**: PostgreSQL (async via `psycopg` v3) and Valkey
   (`redis://...` from `REDIS_URL`).
 - **Health checks**: expose `/api/v1/health/live` and `/api/v1/health/ready`
   (mirrors stockwire-rental). `ready` must reflect DB/Valkey connectivity.
