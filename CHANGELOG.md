@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.5.0...stagewire-v0.5.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **web:** move channel-list sidebar behind a dropdown on mobile ([af94b26](https://github.com/sj-tech-sweden/stagewire/commit/af94b26a5830021864284646cec0db526cac8c78))
+* **web:** move channel-list sidebar behind a dropdown on mobile ([afe34da](https://github.com/sj-tech-sweden/stagewire/commit/afe34dad0fffb2b4dd3deadbd884600e9ca26fa2))
+
 ## [0.5.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.4.0...stagewire-v0.5.0) (2026-10-23)
 
 
