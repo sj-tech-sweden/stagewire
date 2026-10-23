@@ -401,4 +401,13 @@ export default {
     pushed: 'Skickade {count} objekt till Stockwire-jobb {id}',
     nothingToPush: 'Inga länkade Stockwire-produkter att skicka',
   },
+  export: {
+    title: 'Exportera patch till mixer',
+    action: 'Exportera',
+    pickFormat: 'Välj format / mixer',
+    download: 'Ladda ner',
+    close: 'Stäng',
+    description: 'Exporterar kanalListans ingångar, utgångar och kanalnamn för att laddas in på en mixer eller som ett generiskt blad.',
+    fromList: 'Kanallista',
+  },
 }

@@ -234,6 +234,19 @@ export const useChannelsStore = defineStore('channels', {
         this.channels = [];
       }
     },
+    async fetchExportPlugins(jobId, listId) {
+      const { data } = await api.get(
+        `/jobs/${jobId}/channel-lists/${listId}/export-plugins`,
+      );
+      return data;
+    },
+    async downloadExport(jobId, listId, plugin) {
+      const { data, headers } = await api.get(
+        `/jobs/${jobId}/channel-lists/${listId}/export`,
+        { params: { plugin }, responseType: 'blob' },
+      );
+      return { data, headers };
+    },
     applyRealtimeEvent(event) {
       const { type, payload } = event;
       if (type === 'channel.upsert') this.upsertChannel(payload);

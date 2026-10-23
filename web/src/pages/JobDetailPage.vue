@@ -182,6 +182,15 @@
                       icon="delete"
                       @click.stop="removeList(list)"
                     />
+                    <q-btn
+                      dense
+                      flat
+                      round
+                      size="sm"
+                      icon="download"
+                      :aria-label="t('export.title')"
+                      @click.stop="openExport(list)"
+                    />
                   </div>
                 </q-item-section>
               </q-item>
@@ -262,7 +271,17 @@
                   color="primary"
                   icon="playlist_add"
                   :label="t('channels.bulkAdd')"
+                  class="q-mr-xs"
                   @click="bulkDialog = true"
+                />
+                <q-btn
+                  outline
+                  color="primary"
+                  icon="download"
+                  :label="t('export.action')"
+                  class="q-mr-xs"
+                  :disable="!store.selectedList"
+                  @click="openExport(store.selectedList)"
                 />
               </div>
 
@@ -1132,6 +1151,82 @@
       </q-card>
     </q-dialog>
 
+    <!-- Export to console dialog -->
+    <q-dialog
+      v-model="exportDialog"
+      persistent
+    >
+      <q-card style="min-width: 420px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('export.title') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <div
+            v-if="exportList"
+            class="text-caption text-grey-7 q-mb-xs"
+          >
+            {{ t('export.fromList') }}: {{ exportList.name }}
+          </div>
+          <div class="text-caption q-mb-sm">
+            {{ t('export.description') }}
+          </div>
+          <q-list
+            bordered
+            separator
+          >
+            <q-item
+              v-for="p in exportPlugins"
+              :key="p.key"
+              v-ripple
+              clickable
+              :active="exportSelected === p.key"
+              active-class="bg-primary text-white"
+              @click="exportSelected = p.key"
+            >
+              <q-item-section>
+                <div class="text-subtitle2">
+                  {{ p.label }}
+                </div>
+                <div class="text-caption text-grey-7">
+                  {{ p.description }}
+                </div>
+              </q-item-section>
+              <q-item-section side>
+                <q-chip
+                  dense
+                  outline
+                >
+                  {{ p.file_extension }}
+                </q-chip>
+              </q-item-section>
+            </q-item>
+          </q-list>
+          <div
+            v-if="exportError"
+            class="text-negative q-mt-sm"
+          >
+            {{ exportError }}
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('export.close')"
+            color="primary"
+          />
+          <q-btn
+            flat
+            :disable="!exportSelected"
+            :label="t('export.download')"
+            color="primary"
+            :loading="exportLoading"
+            @click="downloadExportFile"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- Job edit dialog -->
     <q-dialog
       v-model="jobDialog"
@@ -1517,6 +1612,12 @@ const editingChannel = ref(null)
 const listDialog = ref(false)
 const listEditing = ref(null)
 const listName = ref('')
+const exportDialog = ref(false)
+const exportList = ref(null)
+const exportPlugins = ref([])
+const exportSelected = ref(null)
+const exportError = ref(null)
+const exportLoading = ref(false)
 const mixerDialog = ref(false)
 const mixerList = ref(null)
 const mixerProduct = ref(null)
@@ -2221,6 +2322,52 @@ function openRenameList(list) {
   listEditing.value = list
   listName.value = list.name
   listDialog.value = true
+}
+
+async function openExport(list) {
+  exportList.value = list
+  exportSelected.value = null
+  exportError.value = null
+  exportPlugins.value = []
+  exportDialog.value = true
+  try {
+    exportPlugins.value = await store.fetchExportPlugins(route.params.jobId, list.id)
+  } catch (err) {
+    exportError.value = err.message || t('common.errorOccurred')
+  }
+}
+
+function selectedPluginExtension() {
+  const p = exportPlugins.value.find((x) => x.key === exportSelected.value)
+  return p?.file_extension || ''
+}
+
+async function downloadExportFile() {
+  if (!exportList.value || !exportSelected.value) return
+  exportError.value = null
+  exportLoading.value = true
+  try {
+    const { data } = await store.downloadExport(
+      route.params.jobId,
+      exportList.value.id,
+      exportSelected.value,
+    )
+    const ext = selectedPluginExtension()
+    const filename = `${exportList.value.name}${ext}`
+    const url = window.URL.createObjectURL(new Blob([data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    exportDialog.value = false
+  } catch (err) {
+    exportError.value = err.message || t('common.errorOccurred')
+  } finally {
+    exportLoading.value = false
+  }
 }
 
 async function saveList() {
