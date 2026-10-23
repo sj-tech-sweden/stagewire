@@ -45,11 +45,6 @@
       "groupName": "backend dependencies",
       "description": "Group all Python/backend dependency updates into a single PR",
       "matchManagers": ["pyproject"]
-    },
-    {
-      "matchPackageNames": ["pinia"],
-      "allowedVersions": "<3.0.0",
-      "description": "Keep pinia on v2 — @quasar/app-vite@1.x peers pinia ^2, so a v4 major fails npm ERESOLVE when regenerating the lockfile"
     }
   ]
 }
