@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -106,6 +107,21 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @field_validator("database_url")
+    @classmethod
+    def _require_async_driver(cls, v: str) -> str:
+        # CloudNativePG (and most operators) hand out a bare `postgresql://` URI.
+        # SQLAlchemy's asyncio engine needs a genuinely async DBAPI, so rewrite the
+        # scheme to the psycopg3 dialect. psycopg2 (sync) is rejected.
+        if v.startswith("sqlite") and "+aiosqlite" not in v:
+            v = v.replace("sqlite", "sqlite+aiosqlite", 1)
+        scheme = v.split(":", 1)[0]
+        if scheme in ("postgresql", "postgres"):
+            v = v.replace(scheme, "postgresql+psycopg", 1)
+        elif scheme == "postgresql+psycopg2":
+            v = v.replace("postgresql+psycopg2", "postgresql+psycopg", 1)
+        return v
 
 
 @lru_cache
