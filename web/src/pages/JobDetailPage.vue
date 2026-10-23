@@ -1775,6 +1775,7 @@ import FlowTree from '@/components/FlowTree.vue'
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue'
 import ColumnChooser from '@/components/ColumnChooser.vue'
 import { useColumnPrefs } from '../composables/useColumnPrefs'
+import { CONNECTOR_OPTIONS } from '@/constants/connectors'
 
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
@@ -1874,27 +1875,7 @@ function outputCellDisplay(col, point) {
   return value == null ? '' : String(value)
 }
 
-const connectorOptions = [
-  'XLR',
-  'TRS',
-  'TS',
-  'Jack',
-  'AES/EBU',
-  'Dante',
-  'Analog',
-  'Optical',
-  'Speakon',
-  'BNC',
-  'Ethernet',
-  'Cat5e',
-  'Cat6',
-  'dsnake',
-  'AES50',
-  'MADI',
-  'AVB',
-  'Optocore',
-  'Network',
-]
+const connectorOptions = CONNECTOR_OPTIONS
 
 const outputModeOptions = [
   { label: t('channels.outputModeMono'), value: 'mono' },

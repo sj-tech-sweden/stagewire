@@ -484,22 +484,34 @@ async def list_patch_sheets(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     lists = await service.list_channel_lists(db, job_id)
-    sheets: dict[str, dict] = {}
+    devices = {d.id: d for d in await service.list_devices(db, job_id)}
+    sheets: dict[UUID, dict] = {}
+
+    def _add(device_id, point_type, kind, owner, p, direction):
+        if not device_id:
+            return
+        device = devices.get(device_id)
+        if device is None:
+            return
+        sheet = sheets.setdefault(
+            device_id,
+            {
+                "name": device.name or str(device.id),
+                "point_type": point_type or "mixer",
+                "rows": [],
+            },
+        )
+        sheet["rows"].append((kind, owner, p, direction, None))
+
     for lst in lists:
         for ch in lst.channels:
             for pt in ch.patch_points:
-                if not pt.name:
-                    continue
-                sheet = sheets.setdefault(pt.name, {"point_type": pt.point_type, "rows": []})
-                sheet["rows"].append(("channel", ch, pt, "in", None))
+                _add(pt.device_id, pt.point_type, "channel", ch, pt, "in")
         for output in lst.outputs:
             for op in output.points:
-                if not op.name:
-                    continue
-                sheet = sheets.setdefault(op.name, {"point_type": op.point_type, "rows": []})
-                sheet["rows"].append(("output", output, op, "out", None))
+                _add(op.device_id, op.point_type, "output", output, op, "out")
     out: list[schemas.PatchSheetRead] = []
-    for name, data in sheets.items():
+    for _device_id, data in sheets.items():
         rows = []
         for kind, owner, p, direction, chain_label in data["rows"]:
             if kind == "channel":
@@ -543,9 +555,7 @@ async def list_patch_sheets(
                 )
         rows.sort(key=lambda r: (r.direction != "in", r.channel_number))
         out.append(
-            schemas.PatchSheetRead(
-                name=name, point_type=data["point_type"] or "mixer", channels=rows
-            )
+            schemas.PatchSheetRead(name=data["name"], point_type=data["point_type"], channels=rows)
         )
     out.sort(key=lambda s: s.name)
     return out

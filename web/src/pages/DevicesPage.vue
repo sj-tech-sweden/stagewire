@@ -65,10 +65,12 @@
             :label="t('devices.direction')"
             class="col-3"
           />
-          <q-input
+          <q-select
             v-model="port.connector"
+            :options="connectorOptions"
             :label="t('channels.patchPoint.connector')"
             dense
+            clearable
             class="col"
           />
           <q-input
@@ -301,10 +303,12 @@
               :label="t('devices.direction')"
               class="col-3"
             />
-            <q-input
+            <q-select
               v-model="port.connector"
+              :options="connectorOptions"
               :label="t('channels.patchPoint.connector')"
               dense
+              clearable
               class="col"
             />
             <q-input
@@ -363,6 +367,9 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '@/boot/api';
 import { useDevicesStore } from '@/stores/devices';
+import { CONNECTOR_OPTIONS } from '@/constants/connectors';
+
+const connectorOptions = CONNECTOR_OPTIONS;
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();

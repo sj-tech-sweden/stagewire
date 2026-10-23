@@ -610,45 +610,19 @@ const deviceChannelMap = computed(() => {
   }
   return m
 })
-const devicePatchPointMap = computed(() => {
-  const m = {}
-  for (const list of lists.value) {
-    for (const ch of list.channels || []) {
-      for (const p of ch.patch_points || []) {
-        if (p.device_id) (m[p.device_id] = m[p.device_id] || new Set()).add(p.id)
-      }
-    }
-  }
-  return m
-})
 
 const currentHighlightIds = computed(() => {
   if (!current.value) return []
-  const name = current.value.name
   const deviceSet = new Set()
   const channelSet = new Set()
   const pointSet = new Set()
-  const dev = devicesStore.devices.find(
-    (d) => (d.name || '').toLowerCase() === (name || '').toLowerCase(),
-  )
-  if (dev) {
-    deviceSet.add(dev.id)
-    for (const c of deviceChannelMap.value[dev.id] || []) channelSet.add(c)
-    for (const p of devicePatchPointMap.value[dev.id] || []) pointSet.add(p)
-  }
-  // Name-based matching is only a fallback for sheets that have no linked device.
-  if (!dev) {
-    for (const list of lists.value) {
-      for (const ch of list.channels || []) {
-        if (ch.source_label === name) channelSet.add(ch.channel_id)
-        for (const p of ch.patch_points || []) {
-          if (p.name === name) {
-            pointSet.add(p.id)
-            channelSet.add(ch.channel_id)
-          }
-        }
-      }
-    }
+  // Drive everything off the device assignments on the sheet's patch points —
+  // no name matching.
+  for (const row of current.value.channels || []) {
+    const pid = row.point?.device_id
+    if (pid) deviceSet.add(pid)
+    if (row.channel_id) channelSet.add(row.channel_id)
+    if (row.point?.id) pointSet.add(row.point.id)
   }
   const ids = []
   for (const el of plotElements.value) {
@@ -706,27 +680,42 @@ const modeLabel = (mode) =>
 
 const flowChains = computed(() => {
   if (!current.value) return []
-  const name = current.value.name
-  const dev = devicesStore.devices.find(
-    (d) => (d.name || '').toLowerCase() === (name || '').toLowerCase(),
-  )
-  const chains = []
+  const deviceName = (id) => (id ? devicesStore.byId(id)?.name || '' : '')
+  const fullById = (cid) => {
+    for (const list of lists.value) {
+      const c = (list.channels || []).find((x) => x.channel_id === cid)
+      if (c) return c
+      const o = (list.outputs || []).find((x) => x.id === cid)
+      if (o) return o
+    }
+    return null
+  }
   const buildInputTree = (ch) => {
     const srcLabel = ch.source_label || `${t('channels.fieldChannelNumber')} ${ch.channel_number}`
-    const srcMeta = [ch.device, ch.input_type ? t(`channels.type.${ch.input_type}`) : ''].filter(Boolean).join(' · ')
-    const root = { id: 'src', name: srcLabel, connector: ch.connector, patch_label: '', notes: ch.notes || '', meta: srcMeta, children: [] }
+    const srcMeta = [ch.device, ch.input_type ? t(`channels.type.${ch.input_type}`) : '']
+      .filter(Boolean)
+      .join(' · ')
+    const root = {
+      id: 'src',
+      name: srcLabel,
+      connector: ch.connector,
+      patch_label: '',
+      notes: ch.notes || '',
+      meta: srcMeta,
+      children: [],
+    }
     let prev = root
     for (const p of ch.patch_points || []) {
-      const isDevice = dev && (p.device_id || null) === dev.id
-      if (!p.name && !isDevice) continue
+      if (!p.name && !p.device_id) continue
+      const isDevice = !!p.device_id
       const node = {
         id: p.id,
-        name: p.name || (dev ? dev.name : ''),
+        name: p.name || (isDevice ? deviceName(p.device_id) : ''),
         connector: p.connector,
         patch_label: p.patch_label,
         notes: p.notes,
         ptype: pointTypeLabel(p.point_type),
-        device: isDevice ? dev.name : '',
+        device: isDevice ? deviceName(p.device_id) : '',
         children: [],
       }
       prev.children.push(node)
@@ -735,23 +724,31 @@ const flowChains = computed(() => {
     return root
   }
   const buildOutputTree = (out) => {
-    const root = { id: 'bus', name: out.name, connector: out.connector, patch_label: '', notes: out.notes || '', meta: out.mode && out.mode !== 'mono' ? modeLabel(out.mode) : '', children: [] }
+    const root = {
+      id: 'bus',
+      name: out.name,
+      connector: out.connector,
+      patch_label: '',
+      notes: out.notes || '',
+      meta: out.mode && out.mode !== 'mono' ? modeLabel(out.mode) : '',
+      children: [],
+    }
     const pts = (out.points || [])
-      .filter((p) => p.name || (dev && (p.device_id || null) === dev.id))
+      .filter((p) => p.name || p.device_id)
       .slice()
       .sort((a, b) => a.position - b.position)
     const byId = new Map()
     for (const p of pts) {
-      const isDevice = dev && (p.device_id || null) === dev.id
+      const isDevice = !!p.device_id
       byId.set(p.id, {
         id: p.id,
-        name: p.name || (dev ? dev.name : ''),
+        name: p.name || (isDevice ? deviceName(p.device_id) : ''),
         connector: p.connector,
         patch_label: p.patch_label,
         notes: p.notes,
         ptype: pointTypeLabel(p.point_type),
         connectorTag: p.bus_connector || '',
-        device: isDevice ? dev.name : '',
+        device: isDevice ? deviceName(p.device_id) : '',
         children: [],
       })
     }
@@ -770,20 +767,25 @@ const flowChains = computed(() => {
     }
     return root
   }
-  for (const list of lists.value) {
-    for (const ch of list.channels || []) {
-      const hasDevice = dev && (ch.patch_points || []).some((p) => (p.device_id || null) === dev.id)
-      const nameMatch = !dev && ((ch.source_label && ch.source_label === name) || (ch.patch_points || []).some((p) => p.name === name))
-      if (hasDevice || nameMatch) {
-        chains.push({ label: ch.source_label || `${t('channels.fieldChannelNumber')} ${ch.channel_number}`, kind: 'input', tree: buildInputTree(ch) })
-      }
-    }
-    for (const out of list.outputs || []) {
-      const hasDevice = dev && (out.points || []).some((p) => (p.device_id || null) === dev.id)
-      const nameMatch = !dev && (out.name === name || (out.points || []).some((p) => p.name === name))
-      if (hasDevice || nameMatch) {
-        chains.push({ label: out.name, kind: 'output', tree: buildOutputTree(out) })
-      }
+  const seen = new Set()
+  const chains = []
+  for (const row of current.value.channels || []) {
+    if (seen.has(row.channel_id)) continue
+    seen.add(row.channel_id)
+    const full = fullById(row.channel_id)
+    if (!full) continue
+    if (row.kind === 'channel') {
+      chains.push({
+        label: row.source_label || `${t('channels.fieldChannelNumber')} ${row.channel_number}`,
+        kind: 'input',
+        tree: buildInputTree(full),
+      })
+    } else {
+      chains.push({
+        label: row.output_name || full.name,
+        kind: 'output',
+        tree: buildOutputTree(full),
+      })
     }
   }
   return chains
