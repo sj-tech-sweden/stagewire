@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { api } from 'boot/api';
+import { api } from '@/boot/api';
 
 export const useChannelsStore = defineStore('channels', {
   state: () => ({

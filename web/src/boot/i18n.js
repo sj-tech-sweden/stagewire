@@ -3,7 +3,7 @@ import quasarEn from 'quasar/lang/en-GB'
 import quasarSv from 'quasar/lang/sv'
 import { i18n, onLocaleChange, resolveAppLocale, setLocale, applyLocale } from '../i18n'
 import { api } from './api'
-import { useAuthStore } from 'stores/auth'
+import { useAuthStore } from '@/stores/auth'
 
 // Pre-load Quasar language packs for the supported locales so component strings
 // (e.g. q-table footer) are available synchronously and update immediately when

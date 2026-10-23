@@ -9,7 +9,7 @@ RUN npm install
 FROM deps AS dev
 COPY . .
 EXPOSE 9010
-CMD ["npx", "quasar", "dev", "-p", "9010", "--host"]
+CMD ["npx", "quasar", "dev", "-p", "9010", "-H", "0.0.0.0"]
 
 FROM deps AS build
 COPY . .

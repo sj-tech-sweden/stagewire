@@ -165,7 +165,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { SUPPORTED_LOCALES, setLocale } from '../i18n'
-import { useAuthStore } from 'stores/auth'
+import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n({ useScope: 'global' })
 const router = useRouter()

@@ -72,7 +72,7 @@ services:
       API_BASE_URL: "http://localhost:8010"
     ports:
       - "9010:9010"
-    command: ["npx", "quasar", "dev", "-p", "9010", "--host"]
+    command: ["npx", "quasar", "dev", "-p", "9010", "-H", "0.0.0.0"]
 
 volumes:
   stagewire-db-data:

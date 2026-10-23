@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { api } from 'boot/api'
+import { api } from '@/boot/api'
 import { setLocale, setUserLocalePreference } from '../i18n'
 
 const TOKEN_KEY = 'sw_access_token'
