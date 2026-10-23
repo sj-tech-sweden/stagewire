@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import (
     AudioChannelPatch,
+    AudioDevice,
     ChannelList,
     ChannelListOutput,
     ChannelPatchPoint,
@@ -306,3 +307,41 @@ async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID) 
     await db.delete(element)
     await db.commit()
     return True
+
+
+async def create_device(db: AsyncSession, job_id: UUID, data: dict) -> AudioDevice:
+    device = AudioDevice(job_id=job_id, **data)
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def list_devices(db: AsyncSession, job_id: UUID) -> list[AudioDevice]:
+    result = await db.execute(
+        select(AudioDevice)
+        .where(AudioDevice.job_id == job_id)
+        .order_by(AudioDevice.position)
+    )
+    return list(result.scalars().all())
+
+
+async def get_device(db: AsyncSession, device_id: UUID) -> AudioDevice | None:
+    result = await db.execute(select(AudioDevice).where(AudioDevice.id == device_id))
+    return result.scalars().first()
+
+
+async def update_device(
+    db: AsyncSession, device: AudioDevice, data: dict
+) -> AudioDevice:
+    for key, value in data.items():
+        if value is not None:
+            setattr(device, key, value)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def delete_device(db: AsyncSession, device: AudioDevice) -> None:
+    await db.delete(device)
+    await db.commit()

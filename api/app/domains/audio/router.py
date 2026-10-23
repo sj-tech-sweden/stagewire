@@ -616,6 +616,74 @@ async def delete_plot_element(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
 
 
+@router.post(
+    "/{job_id}/devices",
+    response_model=schemas.AudioDeviceRead,
+    status_code=201,
+)
+async def create_device(
+    job_id: UUID,
+    payload: schemas.AudioDeviceCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.AudioDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
+    read = schemas.AudioDeviceRead.model_validate(device)
+    read.patch_point_count = len(device.patch_points)
+    await publish_job_event(job_id, "device.upsert", read)
+    return read
+
+
+@router.get("/{job_id}/devices", response_model=list[schemas.AudioDeviceRead])
+async def list_devices(
+    job_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.AudioDeviceRead]:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    devices = await service.list_devices(db, job_id)
+    return [
+        schemas.AudioDeviceRead.model_validate(d).model_copy(
+            update={"patch_point_count": len(d.patch_points)}
+        )
+        for d in devices
+    ]
+
+
+@router.patch("/{job_id}/devices/{device_id}", response_model=schemas.AudioDeviceRead)
+async def update_device(
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AudioDeviceUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.AudioDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    device = await service.update_device(db, device, payload.model_dump(exclude_unset=True))
+    read = schemas.AudioDeviceRead.model_validate(device)
+    read.patch_point_count = len(device.patch_points)
+    await publish_job_event(job_id, "device.upsert", read)
+    return read
+
+
+@router.delete("/{job_id}/devices/{device_id}", status_code=204)
+async def delete_device(
+    job_id: UUID,
+    device_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    await service.delete_device(db, device)
+    await publish_job_event(job_id, "device.delete", {"id": str(device_id)})
+
+
 class StockwireSyncResult(BaseModel):
     stockwire_job_id: str | None = None
     item_count: int = 0

@@ -23,6 +23,25 @@
       </div>
     </div>
 
+    <q-banner
+      v-if="highlightIds.length"
+      class="bg-accent text-white q-mb-md rounded-borders"
+      dense
+    >
+      <template #avatar>
+        <q-icon name="visibility" />
+      </template>
+      {{ t('stagePlot.highlightActive', { name: highlightLabel }) }}
+      <template #action>
+        <q-btn
+          flat
+          color="white"
+          :label="t('stagePlot.highlightClear')"
+          @click="clearHighlight"
+        />
+      </template>
+    </q-banner>
+
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-3">
         <q-card
@@ -142,6 +161,17 @@
               dense
               class="q-mt-sm"
               @update:model-value="commitPatchPoint"
+            />
+            <q-select
+              v-model="draft.linked_device_id"
+              :label="t('stagePlot.linkDevice')"
+              :options="deviceOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitDevice"
             />
             <div class="row q-gutter-sm q-mt-sm">
               <q-input
@@ -302,12 +332,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { useStagePlotStore } from '@/stores/stageplot';
+import { useDevicesStore } from '@/stores/devices';
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
 const router = useRouter();
 const jobId = route.params.jobId;
 const store = useStagePlotStore();
+const devicesStore = useDevicesStore();
 
 const DEFAULT_W = 1200;
 const DEFAULT_H = 700;
@@ -363,6 +395,7 @@ const draft = ref({
   position_y: 0,
   linked_channel_id: null,
   linked_patch_point_id: null,
+  linked_device_id: null,
   width_cm: 60,
   height_cm: 60,
   image_url: '',
@@ -424,6 +457,112 @@ const pointNameMap = computed(() => {
   }
   return m;
 });
+const deviceOptions = computed(() =>
+  devicesStore.devices.map((d) => ({ value: d.id, label: d.name || '—' })),
+);
+const deviceNameMap = computed(() => {
+  const m = {};
+  for (const d of devicesStore.devices) m[d.id] = d.name || '—';
+  return m;
+});
+const deviceChannelMap = computed(() => {
+  const m = {};
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) {
+        if (p.device_id) {
+          (m[p.device_id] = m[p.device_id] || new Set()).add(ch.channel_id);
+        }
+      }
+    }
+  }
+  return m;
+});
+const devicePatchPointMap = computed(() => {
+  const m = {};
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) {
+        if (p.device_id) {
+          (m[p.device_id] = m[p.device_id] || new Set()).add(p.id);
+        }
+      }
+    }
+  }
+  return m;
+});
+
+const highlightParam = computed(() => route.query.highlight || '');
+const highlightIds = computed(() => {
+  const raw = highlightParam.value;
+  if (!raw) return [];
+  const idx = String(raw).indexOf(':');
+  const mode = idx >= 0 ? String(raw).slice(0, idx) : String(raw);
+  const value = idx >= 0 ? String(raw).slice(idx + 1) : '';
+  const deviceSet = new Set();
+  const channelSet = new Set();
+  const pointSet = new Set();
+  if (mode === 'device' && value) {
+    deviceSet.add(value);
+  } else if (mode === 'channel' && value) {
+    channelSet.add(value);
+    for (const [devId, chans] of Object.entries(deviceChannelMap.value)) {
+      if (chans.has(value)) deviceSet.add(devId);
+    }
+  } else if (mode === 'patchpoint' && value) {
+    pointSet.add(value);
+    if (pointChannelMap.value[value]) channelSet.add(pointChannelMap.value[value]);
+    for (const [devId, pts] of Object.entries(devicePatchPointMap.value)) {
+      if (pts.has(value)) deviceSet.add(devId);
+    }
+  } else if (mode === 'sheet' && value) {
+    const name = decodeURIComponent(value);
+    const dev = devicesStore.devices.find(
+      (d) => (d.name || '').toLowerCase() === name.toLowerCase(),
+    );
+    if (dev) deviceSet.add(dev.id);
+    for (const list of channelLists.value) {
+      for (const ch of list.channels || []) {
+        if (ch.source_label === name) channelSet.add(ch.channel_id);
+        for (const p of ch.patch_points || []) {
+          if (p.name === name) {
+            pointSet.add(p.id);
+            channelSet.add(ch.channel_id);
+          }
+        }
+      }
+    }
+  }
+  const ids = [];
+  for (const el of store.elements) {
+    if (
+      (el.linked_device_id && deviceSet.has(el.linked_device_id)) ||
+      (el.linked_channel_id && channelSet.has(el.linked_channel_id)) ||
+      (el.linked_patch_point_id && pointSet.has(el.linked_patch_point_id))
+    ) {
+      ids.push(el.id);
+    }
+  }
+  return ids;
+});
+const highlightLabel = computed(() => {
+  const raw = highlightParam.value;
+  if (!raw) return '';
+  const idx = String(raw).indexOf(':');
+  const mode = idx >= 0 ? String(raw).slice(0, idx) : String(raw);
+  const value = idx >= 0 ? String(raw).slice(idx + 1) : '';
+  if (mode === 'sheet') return decodeURIComponent(value || '');
+  if (mode === 'device') return deviceNameMap.value[value] || '';
+  if (mode === 'channel') {
+    const ch = findChannel(value);
+    return ch ? `Ch ${ch.channel_number}` : '';
+  }
+  if (mode === 'patchpoint') return pointNameMap.value[value] || '';
+  return '';
+});
+function clearHighlight() {
+  router.replace({ name: route.name, params: route.params });
+}
 const xLabel = computed(() => `X (${unit.value})`);
 const yLabel = computed(() => `Y (${unit.value})`);
 const stageConfig = computed(() => ({
@@ -478,12 +617,17 @@ function groupConfig(el) {
 }
 function rectConfig(el) {
   const def = defFor(el.element_type);
+  const hi = highlightIds.value.includes(el.id);
   return {
     width: el.width_cm * pxPerCm.value,
     height: el.height_cm * pxPerCm.value,
     fill: def.color,
     cornerRadius: 4,
-    opacity: selectedId.value === el.id ? 1 : 0.85,
+    opacity: hi ? 1 : selectedId.value === el.id ? 1 : 0.85,
+    stroke: hi ? '#35A853' : 'transparent',
+    strokeWidth: hi ? 4 : 0,
+    shadowColor: hi ? '#35A853' : 'transparent',
+    shadowBlur: hi ? 14 : 0,
   };
 }
 function textConfig(el) {
@@ -514,6 +658,10 @@ function findChannel(channelId) {
 }
 function linkedSummary(el) {
   const parts = [];
+  if (el.linked_device_id) {
+    const name = deviceNameMap.value[el.linked_device_id];
+    if (name) parts.push(name);
+  }
   if (el.linked_channel_id) {
     const ch = findChannel(el.linked_channel_id);
     if (ch) parts.push(`Ch ${ch.channel_number}`);
@@ -585,6 +733,7 @@ function select(id) {
       position_y: el.position_y,
       linked_channel_id: el.linked_channel_id || null,
       linked_patch_point_id: el.linked_patch_point_id || null,
+      linked_device_id: el.linked_device_id || null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
       image_url: el.image_url || '',
@@ -661,6 +810,10 @@ function commitPatchPoint(val) {
   }
   store.updateElement(jobId, selected.value.id, payload);
 }
+function commitDevice(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_device_id: val || null });
+}
 function commitSize() {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, {
@@ -735,6 +888,7 @@ watch(
 onMounted(() => {
   loadJob();
   loadChannels();
+  devicesStore.fetchDevices(jobId);
   store.fetchElements(jobId);
 });
 </script>

@@ -46,6 +46,13 @@
               class="q-ml-sm"
               @click="router.push(`/jobs/${route.params.jobId}/stage-plot`)"
             />
+            <q-btn
+              flat
+              icon="developer_board"
+              :label="t('devices.nav')"
+              class="q-ml-sm"
+              @click="router.push(`/jobs/${route.params.jobId}/devices`)"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip

@@ -76,6 +76,7 @@ class ChannelPatchPointBase(BaseModel):
     connector: str | None = None
     patch_label: str | None = None
     notes: str | None = None
+    device_id: UUID | None = None
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
 
@@ -226,6 +227,7 @@ class StagePlotElementBase(BaseModel):
     element_type: str
     linked_channel_id: UUID | None = None
     linked_patch_point_id: UUID | None = None
+    linked_device_id: UUID | None = None
     position_x: float = 0.0
     position_y: float = 0.0
     rotation: float = 0.0
@@ -248,6 +250,32 @@ class StagePlotElementRead(StagePlotElementBase):
 
     id: UUID
     job_id: UUID
+
+
+class AudioDeviceBase(BaseModel):
+    name: str = ""
+    device_type: str = "other"
+    position: int = 0
+    notes: str = ""
+
+
+class AudioDeviceCreate(AudioDeviceBase):
+    pass
+
+
+class AudioDeviceUpdate(AudioDeviceBase):
+    name: str | None = None
+    device_type: str | None = None
+    position: int | None = None
+    notes: str | None = None
+
+
+class AudioDeviceRead(AudioDeviceBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID
+    patch_point_count: int = 0
 
 
 __all__ = [
@@ -278,6 +306,10 @@ __all__ = [
     "StagePlotElementCreate",
     "StagePlotElementUpdate",
     "StagePlotElementRead",
+    "AudioDeviceBase",
+    "AudioDeviceCreate",
+    "AudioDeviceUpdate",
+    "AudioDeviceRead",
 ]
 
 AudioChannelPatchRead.model_rebuild()
