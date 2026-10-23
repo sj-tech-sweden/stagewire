@@ -40,10 +40,10 @@ export const useDevicesStore = defineStore('devices', {
       await api.delete(`/jobs/${jobId}/devices/${id}`);
       this.devices = this.devices.filter((d) => d.id !== id);
     },
-    async assignPatchPoint(jobId, point, deviceId, direction) {
+    async assignPatchPoint(jobId, point, deviceId) {
       const { data } = await api.patch(
         `/jobs/${jobId}/channels/${point.channel_id}/patch-points/${point.id}`,
-        { device_id: deviceId || null, direction: direction || null },
+        { device_id: deviceId || null },
       );
       return data;
     },

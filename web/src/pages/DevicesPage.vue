@@ -48,34 +48,53 @@
             @click="createDevice"
           />
         </div>
-        <div class="row q-gutter-sm items-end q-mt-sm">
+        <div class="text-caption q-mt-sm">
+          {{ t('devices.ports') }}
+        </div>
+        <div
+          v-for="(port, idx) in newPorts"
+          :key="idx"
+          class="row q-gutter-xs items-end q-mt-xs"
+        >
+          <q-select
+            v-model="port.direction"
+            :options="directionOptions"
+            emit-value
+            map-options
+            dense
+            :label="t('devices.direction')"
+            class="col-3"
+          />
           <q-input
-            v-model.number="newInputs"
+            v-model="port.connector"
+            :label="t('channels.patchPoint.connector')"
+            dense
+            class="col"
+          />
+          <q-input
+            v-model.number="port.count"
             type="number"
-            :label="t('devices.inputs')"
+            :label="t('devices.count')"
             dense
-            class="col"
+            class="col-3"
           />
-          <q-input
-            v-model.number="newOutputs"
-            type="number"
-            :label="t('devices.outputs')"
+          <q-btn
+            flat
             dense
-            class="col"
-          />
-          <q-input
-            v-model="newInConnector"
-            :label="t('devices.inputConnector')"
-            dense
-            class="col"
-          />
-          <q-input
-            v-model="newOutConnector"
-            :label="t('devices.outputConnector')"
-            dense
-            class="col"
+            round
+            icon="delete"
+            color="negative"
+            @click="newPorts.splice(idx, 1)"
           />
         </div>
+        <q-btn
+          dense
+          flat
+          icon="add"
+          class="q-mt-xs"
+          :label="t('devices.addPort')"
+          @click="newPorts.push({ direction: 'in', connector: '', count: 1 })"
+        />
       </q-card-section>
     </q-card>
 
@@ -139,63 +158,36 @@
           </div>
         </div>
         <div
-          v-if="device.input_count || device.output_count"
+          v-if="(device.ports || []).length"
           class="q-mt-sm"
         >
           <div
-            v-if="device.input_count"
-            class="row items-center q-gutter-sm"
-          >
-            <div
-              class="text-caption text-grey-7"
-              style="min-width: 64px"
-            >
-              {{ t('devices.inputs') }}
-            </div>
-            <q-linear-progress
-              :value="usageIn(device) / device.input_count"
-              color="primary"
-              class="col"
-              style="height: 10px"
-            />
-            <div class="text-caption">
-              {{ usageIn(device) }}/{{ device.input_count }}
-            </div>
-            <q-badge
-              v-if="usageIn(device) >= device.input_count"
-              color="negative"
-            >
-              {{ t('devices.full') }}
-            </q-badge>
-          </div>
-          <div
-            v-if="device.output_count"
+            v-for="(port, idx) in device.ports"
+            :key="idx"
             class="row items-center q-gutter-sm q-mt-xs"
           >
             <div
-              class="text-caption text-grey-7"
-              style="min-width: 64px"
+              class="text-caption"
+              style="min-width: 96px"
             >
-              {{ t('devices.outputs') }}
+              {{ port.direction === 'out' ? t('devices.directionOut') : t('devices.directionIn') }}
+              · {{ port.connector || '—' }}
             </div>
             <q-linear-progress
-              :value="usageOut(device) / device.output_count"
-              color="secondary"
+              :value="portUsage(device, port) / (port.count || 1)"
+              :color="port.direction === 'out' ? 'secondary' : 'primary'"
               class="col"
               style="height: 10px"
             />
             <div class="text-caption">
-              {{ usageOut(device) }}/{{ device.output_count }}
+              {{ portUsage(device, port) }}/{{ port.count }}
             </div>
             <q-badge
-              v-if="usageOut(device) >= device.output_count"
+              v-if="portUsage(device, port) >= (port.count || 0)"
               color="negative"
             >
               {{ t('devices.full') }}
             </q-badge>
-          </div>
-          <div class="text-caption text-grey-7 q-mt-xs">
-            {{ device.input_connector || '—' }} → {{ device.output_connector || '—' }}
           </div>
         </div>
         <div class="row q-gutter-sm q-mt-sm items-end">
@@ -292,41 +284,59 @@
             map-options
             dense
           />
-          <div class="row q-gutter-sm items-end">
+          <div class="text-caption q-mt-sm">
+            {{ t('devices.ports') }}
+          </div>
+          <div
+            v-for="(port, idx) in editForm.ports"
+            :key="idx"
+            class="row q-gutter-xs items-end q-mt-xs"
+          >
+            <q-select
+              v-model="port.direction"
+              :options="directionOptions"
+              emit-value
+              map-options
+              dense
+              :label="t('devices.direction')"
+              class="col-3"
+            />
             <q-input
-              v-model.number="editForm.input_count"
-              type="number"
-              :label="t('devices.inputs')"
+              v-model="port.connector"
+              :label="t('channels.patchPoint.connector')"
               dense
               class="col"
             />
             <q-input
-              v-model.number="editForm.output_count"
+              v-model.number="port.count"
               type="number"
-              :label="t('devices.outputs')"
+              :label="t('devices.count')"
               dense
-              class="col"
+              class="col-3"
+            />
+            <q-btn
+              flat
+              dense
+              round
+              icon="delete"
+              color="negative"
+              @click="editForm.ports.splice(idx, 1)"
             />
           </div>
-          <div class="row q-gutter-sm items-end">
-            <q-input
-              v-model="editForm.input_connector"
-              :label="t('devices.inputConnector')"
-              dense
-              class="col"
-            />
-            <q-input
-              v-model="editForm.output_connector"
-              :label="t('devices.outputConnector')"
-              dense
-              class="col"
-            />
-          </div>
+          <q-btn
+            dense
+            flat
+            icon="add"
+            class="q-mt-xs"
+            :label="t('devices.addPort')"
+            @click="editForm.ports.push({ direction: 'in', connector: '', count: 1 })"
+          />
           <q-input
             v-model="editForm.notes"
             :label="t('channels.fieldNotes')"
             dense
             type="textarea"
+            class="q-mt-sm"
           />
         </q-card-section>
         <q-card-actions align="right">
@@ -376,10 +386,7 @@ const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
 
 const newName = ref('');
 const newType = ref('digital_stagebox');
-const newInputs = ref(0);
-const newOutputs = ref(0);
-const newInConnector = ref('');
-const newOutConnector = ref('');
+const newPorts = ref([]);
 const creating = ref(false);
 const loading = ref(false);
 const autoAssigning = ref(null);
@@ -390,12 +397,13 @@ const editTarget = ref(null);
 const editForm = reactive({
   name: '',
   device_type: 'other',
-  input_count: 0,
-  output_count: 0,
-  input_connector: '',
-  output_connector: '',
+  ports: [],
   notes: '',
 });
+const directionOptions = [
+  { value: 'in', label: t('devices.directionIn') },
+  { value: 'out', label: t('devices.directionOut') },
+];
 const assignPick = reactive({});
 const lists = ref([]);
 const plotElements = ref([]);
@@ -413,7 +421,8 @@ const allPoints = computed(() => {
           channel_number: ch.channel_number,
           listName: list.name,
           device_id: p.device_id || null,
-          direction: p.direction || null,
+          connector: p.connector || '',
+          position: p.position,
         });
       }
     }
@@ -435,20 +444,60 @@ function pointsForDevice(deviceId) {
 function linkedElementCount(deviceId) {
   return plotElements.value.filter((el) => el.linked_device_id === deviceId).length;
 }
-function usageIn(device) {
-  return pointsForDevice(device.id).filter((p) => p.direction === 'in').length;
+
+// Derive each patch point's in/out direction from its position in the channel's
+// signal chain: the device's connector closest to the source is an input, the
+// one closest to the destination is an output.
+function deviceUsedMap(deviceId) {
+  const used = {};
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      const cps = (ch.patch_points || []).slice().sort((a, b) => a.position - b.position);
+      if (!cps.length) continue;
+      const startPos = cps[0].position;
+      const endPos = cps[cps.length - 1].position;
+      const devPoints = cps.filter((p) => (p.device_id || null) === deviceId);
+      if (!devPoints.length) continue;
+      const devMin = devPoints[0].position;
+      const devMax = devPoints[devPoints.length - 1].position;
+      const isInputSide = devMin === startPos;
+      const isOutputSide = devMax === endPos;
+      for (const p of devPoints) {
+        let dir;
+        if (isInputSide && !isOutputSide) dir = 'in';
+        else if (isOutputSide && !isInputSide) dir = 'out';
+        else if (p.position === devMin) dir = 'in';
+        else if (p.position === devMax) dir = 'out';
+        else dir = 'in';
+        const conn = (p.connector || '').toLowerCase();
+        const key = `${dir}|${conn}`;
+        used[key] = (used[key] || 0) + 1;
+      }
+    }
+  }
+  return used;
 }
-function usageOut(device) {
-  return pointsForDevice(device.id).filter((p) => p.direction === 'out').length;
+const usedByDevice = computed(() => {
+  const result = {};
+  for (const device of devicesStore.devices) {
+    result[device.id] = deviceUsedMap(device.id);
+  }
+  return result;
+});
+function portUsage(device, port) {
+  const used = usedByDevice.value[device.id] || {};
+  const key = `${port.direction}|${(port.connector || '').toLowerCase()}`;
+  return used[key] || 0;
 }
 function openEdit(device) {
   editTarget.value = device;
   editForm.name = device.name || '';
   editForm.device_type = device.device_type || 'other';
-  editForm.input_count = device.input_count || 0;
-  editForm.output_count = device.output_count || 0;
-  editForm.input_connector = device.input_connector || '';
-  editForm.output_connector = device.output_connector || '';
+  editForm.ports = (device.ports || []).map((p) => ({
+    direction: p.direction || 'in',
+    connector: p.connector || '',
+    count: p.count || 0,
+  }));
   editForm.notes = device.notes || '';
   editDialog.value = true;
 }
@@ -488,16 +537,14 @@ async function createDevice() {
     await devicesStore.createDevice(jobId, {
       name: newName.value.trim(),
       device_type: newType.value,
-      input_count: Number(newInputs.value) || 0,
-      output_count: Number(newOutputs.value) || 0,
-      input_connector: newInConnector.value,
-      output_connector: newOutConnector.value,
+      ports: newPorts.value.map((p) => ({
+        direction: p.direction || 'in',
+        connector: p.connector || '',
+        count: Number(p.count) || 0,
+      })),
     });
     newName.value = '';
-    newInputs.value = 0;
-    newOutputs.value = 0;
-    newInConnector.value = '';
-    newOutConnector.value = '';
+    newPorts.value = [];
     await refresh();
   } finally {
     creating.value = false;

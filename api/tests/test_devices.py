@@ -98,3 +98,36 @@ async def test_device_requires_job(auth_headers):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         missing = await client.get(f"{BASE}/jobs/00000000-0000-0000-0000-000000000000/devices", headers=auth_headers)
         assert missing.status_code == 404
+
+
+async def test_device_ports_roundtrip(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job = await client.post(
+            f"{BASE}/jobs", json={"title": "DevJob2", "venue_name": "V"}, headers=auth_headers
+        )
+        assert job.status_code == 201, job.text
+        job_id = job.json()["id"]
+
+        ports = [
+            {"direction": "in", "connector": "xlr", "count": 4},
+            {"direction": "in", "connector": "trs", "count": 4},
+            {"direction": "out", "connector": "xlr", "count": 8},
+        ]
+        dev = await client.post(
+            f"{BASE}/jobs/{job_id}/devices",
+            json={"name": "SB", "device_type": "digital_stagebox", "ports": ports},
+            headers=auth_headers,
+        )
+        assert dev.status_code == 201, dev.text
+        assert dev.json()["ports"] == ports
+
+        # Update the ports list.
+        new_ports = [{"direction": "out", "connector": "xlr", "count": 16}]
+        upd = await client.patch(
+            f"{BASE}/jobs/{job_id}/devices/{dev.json()['id']}",
+            json={"ports": new_ports},
+            headers=auth_headers,
+        )
+        assert upd.status_code == 200, upd.text
+        assert upd.json()["ports"] == new_ports

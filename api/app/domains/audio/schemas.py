@@ -77,7 +77,6 @@ class ChannelPatchPointBase(BaseModel):
     patch_label: str | None = None
     notes: str | None = None
     device_id: UUID | None = None
-    direction: str | None = None
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
 
@@ -253,15 +252,18 @@ class StagePlotElementRead(StagePlotElementBase):
     job_id: UUID
 
 
+class AudioDevicePort(BaseModel):
+    direction: str = "in"  # 'in' | 'out'
+    connector: str = ""
+    count: int = 0
+
+
 class AudioDeviceBase(BaseModel):
     name: str = ""
     device_type: str = "other"
     position: int = 0
     notes: str = ""
-    input_count: int = 0
-    output_count: int = 0
-    input_connector: str = ""
-    output_connector: str = ""
+    ports: list[AudioDevicePort] | None = []
 
 
 class AudioDeviceCreate(AudioDeviceBase):
