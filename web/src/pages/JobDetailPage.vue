@@ -1582,18 +1582,18 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import TruncateText from 'components/TruncateText.vue'
+import TruncateText from '@/components/TruncateText.vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
-import { api } from 'boot/api'
-import { useChannelsStore } from 'stores/channels'
-import { useAuthStore } from 'stores/auth'
-import { useStockwireStore } from 'stores/stockwire'
-import DateTimePicker from 'components/DateTimePicker.vue'
-import MarkdownText from 'components/MarkdownText.vue'
-import FlowTree from 'components/FlowTree.vue'
-import StockwireProductPicker from 'components/StockwireProductPicker.vue'
-import ColumnChooser from 'components/ColumnChooser.vue'
+import { api } from '@/boot/api'
+import { useChannelsStore } from '@/stores/channels'
+import { useAuthStore } from '@/stores/auth'
+import { useStockwireStore } from '@/stores/stockwire'
+import DateTimePicker from '@/components/DateTimePicker.vue'
+import MarkdownText from '@/components/MarkdownText.vue'
+import FlowTree from '@/components/FlowTree.vue'
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue'
+import ColumnChooser from '@/components/ColumnChooser.vue'
 import { useColumnPrefs } from '../composables/useColumnPrefs'
 
 const { t } = useI18n({ useScope: 'global' })

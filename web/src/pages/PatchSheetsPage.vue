@@ -200,10 +200,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from 'boot/api'
-import MarkdownText from 'components/MarkdownText.vue'
-import TruncateText from 'components/TruncateText.vue'
-import FlowTree from 'components/FlowTree.vue'
+import { api } from '@/boot/api'
+import MarkdownText from '@/components/MarkdownText.vue'
+import TruncateText from '@/components/TruncateText.vue'
+import FlowTree from '@/components/FlowTree.vue'
 
 const { t } = useI18n({ useScope: 'global' })
 const route = useRoute()

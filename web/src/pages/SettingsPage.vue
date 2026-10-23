@@ -708,8 +708,8 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api } from 'boot/api'
-import { useAuthStore } from 'stores/auth'
+import { api } from '@/boot/api'
+import { useAuthStore } from '@/stores/auth'
 import { SUPPORTED_LOCALES } from '../i18n'
 
 const { t } = useI18n({ useScope: "global" })

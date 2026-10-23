@@ -61,7 +61,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import TruncateText from 'components/TruncateText.vue'
+import TruncateText from '@/components/TruncateText.vue'
 
 defineOptions({ name: 'FlowTree' })
 

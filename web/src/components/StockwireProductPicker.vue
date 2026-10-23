@@ -46,7 +46,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useStockwireStore } from 'stores/stockwire';
+import { useStockwireStore } from '@/stores/stockwire';
 
 const props = defineProps({
   modelValue: { type: Object, default: null },

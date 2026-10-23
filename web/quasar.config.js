@@ -52,8 +52,6 @@ module.exports = function (/* ctx */) {
       author: 'SJ Tech Sweden',
     },
 
-    extras: {
-      icons: ['material-icons'],
-    },
+    extras: ['material-icons'],
   };
 };

@@ -5,7 +5,7 @@ import {
   createWebHashHistory,
   createWebHistory,
 } from 'vue-router';
-import { api } from 'boot/api';
+import { api } from '@/boot/api';
 import routes from './routes';
 
 export default route(function (/* ctx */) {
