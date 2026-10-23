@@ -489,7 +489,7 @@
             class="row q-gutter-xs items-center q-mt-xs"
           >
             <div class="col-5 text-caption ellipsis">
-              {{ p.name || t('devices.none') }}
+              {{ devicesStore.byId(p.device_id)?.name || t('devices.none') }}
             </div>
             <q-select
               :model-value="p.device_id"
@@ -610,7 +610,7 @@ const pointNameMap = computed(() => {
   const m = {}
   for (const list of lists.value) {
     for (const ch of list.channels || []) {
-      for (const p of ch.patch_points || []) m[p.id] = p.name || ''
+      for (const p of ch.patch_points || []) m[p.id] = devicesStore.byId(p.device_id)?.name || ''
     }
   }
   return m
@@ -722,11 +722,11 @@ const flowChains = computed(() => {
     }
     let prev = root
     for (const p of ch.patch_points || []) {
-      if (!p.name && !p.device_id) continue
+      if (!p.device_id) continue
       const isDevice = !!p.device_id
       const node = {
         id: p.id,
-        name: p.name || (isDevice ? deviceName(p.device_id) : ''),
+        name: isDevice ? deviceName(p.device_id) : '',
         connector: p.connector,
         patch_label: p.patch_label,
         notes: p.notes,
@@ -750,7 +750,7 @@ const flowChains = computed(() => {
       children: [],
     }
     const pts = (out.points || [])
-      .filter((p) => p.name || p.device_id)
+      .filter((p) => p.device_id)
       .slice()
       .sort((a, b) => a.position - b.position)
     const byId = new Map()
@@ -758,7 +758,7 @@ const flowChains = computed(() => {
       const isDevice = !!p.device_id
       byId.set(p.id, {
         id: p.id,
-        name: p.name || (isDevice ? deviceName(p.device_id) : ''),
+        name: isDevice ? deviceName(p.device_id) : '',
         connector: p.connector,
         patch_label: p.patch_label,
         notes: p.notes,

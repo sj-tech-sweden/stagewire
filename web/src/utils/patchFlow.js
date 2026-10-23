@@ -13,14 +13,14 @@ export function chainNodes(tree) {
 
 // Map channel id -> labels of stage-plot elements that sit on that channel,
 // either directly, through one of its patch points, or through a device.
-export function buildStageByChannel(channels, elements) {
+export function buildStageByChannel(channels, elements, deviceName) {
   const pointChannel = new Map();
   const pointName = new Map();
   const deviceChannels = new Map();
   for (const ch of channels || []) {
     for (const p of ch.patch_points || []) {
       pointChannel.set(p.id, ch.id);
-      pointName.set(p.id, p.name || '');
+      pointName.set(p.id, deviceName ? deviceName(p.device_id) : '');
       if (p.device_id) {
         if (!deviceChannels.has(p.device_id)) deviceChannels.set(p.device_id, new Set());
         deviceChannels.get(p.device_id).add(ch.id);

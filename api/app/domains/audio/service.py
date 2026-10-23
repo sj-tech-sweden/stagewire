@@ -15,7 +15,7 @@ from app.domains.audio.models import (
     StagePlotElement,
 )
 
-_POINT_STRING_FIELDS = {"name", "connector", "patch_label", "notes", "point_type"}
+_POINT_STRING_FIELDS = {"connector", "patch_label", "notes", "point_type"}
 
 
 def _clean_point_data(data: dict) -> dict:
@@ -319,9 +319,7 @@ async def create_device(db: AsyncSession, job_id: UUID, data: dict) -> AudioDevi
 
 async def list_devices(db: AsyncSession, job_id: UUID) -> list[AudioDevice]:
     result = await db.execute(
-        select(AudioDevice)
-        .where(AudioDevice.job_id == job_id)
-        .order_by(AudioDevice.position)
+        select(AudioDevice).where(AudioDevice.job_id == job_id).order_by(AudioDevice.position)
     )
     return list(result.scalars().all())
 
@@ -331,11 +329,9 @@ async def get_device(db: AsyncSession, device_id: UUID) -> AudioDevice | None:
     return result.scalars().first()
 
 
-async def update_device(
-    db: AsyncSession, device: AudioDevice, data: dict
-) -> AudioDevice:
+async def update_device(db: AsyncSession, device: AudioDevice, data: dict) -> AudioDevice:
     for key, value in data.items():
-        if value is not None:
+        if value is not None or key in {"stockwire_product_id", "stockwire_product_name"}:
             setattr(device, key, value)
     await db.commit()
     await db.refresh(device)

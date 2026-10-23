@@ -193,16 +193,6 @@
           </div>
         </div>
         <div class="row q-gutter-sm q-mt-sm items-end">
-          <q-btn
-            dense
-            outline
-            color="primary"
-            :label="t('devices.autoAssign')"
-            :loading="autoAssigning === device.id"
-            @click="autoAssign(device)"
-          >
-            <q-tooltip>{{ t('devices.autoAssignHint') }}</q-tooltip>
-          </q-btn>
           <q-select
             v-model="assignPick[device.id]"
             :options="unassignedOptions"
@@ -228,7 +218,7 @@
           >
             <q-item-section>
               <span>
-                Ch {{ p.channel_number }} · {{ p.name || t('devices.none') }}
+                Ch {{ p.channel_number }} · {{ p.listName }}
                 <span class="text-grey-7"> ({{ p.listName }})</span>
               </span>
             </q-item-section>
@@ -387,7 +377,6 @@ const newType = ref('digital_stagebox');
 const newPorts = ref([]);
 const creating = ref(false);
 const loading = ref(false);
-const autoAssigning = ref(null);
 const deleteDialog = ref(false);
 const pendingDelete = ref(null);
 const editDialog = ref(false);
@@ -413,7 +402,6 @@ const allPoints = computed(() => {
       for (const p of ch.patch_points || []) {
         pts.push({
           id: p.id,
-          name: p.name || '',
           point_type: p.point_type,
           channel_id: ch.channel_id,
           channel_number: ch.channel_number,
@@ -432,7 +420,7 @@ const unassignedOptions = computed(() =>
     .filter((p) => !p.device_id)
     .map((p) => ({
       value: p.id,
-      label: `Ch ${p.channel_number} · ${p.name || t('devices.none')} (${p.listName})`,
+      label: `Ch ${p.channel_number} · ${p.listName}`,
     })),
 );
 
@@ -546,22 +534,6 @@ async function createDevice() {
     await refresh();
   } finally {
     creating.value = false;
-  }
-}
-
-async function autoAssign(device) {
-  autoAssigning.value = device.id;
-  try {
-    const target = (device.name || '').toLowerCase();
-    const matches = allPoints.value.filter(
-      (p) => (p.name || '').toLowerCase() === target && p.device_id !== device.id,
-    );
-    for (const p of matches) {
-      await devicesStore.assignPatchPoint(jobId, p, device.id);
-    }
-    await refresh();
-  } finally {
-    autoAssigning.value = null;
   }
 }
 

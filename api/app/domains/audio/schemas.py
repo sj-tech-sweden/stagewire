@@ -72,13 +72,10 @@ class AudioChannelPatchRead(AudioChannelPatchBase):
 class ChannelPatchPointBase(BaseModel):
     position: int = 0
     point_type: str | None = None
-    name: str | None = None
     connector: str | None = None
     patch_label: str | None = None
     notes: str | None = None
     device_id: UUID | None = None
-    stockwire_product_id: str | None = None
-    stockwire_product_name: str | None = None
 
 
 class ChannelPatchPointCreate(ChannelPatchPointBase):
@@ -88,7 +85,6 @@ class ChannelPatchPointCreate(ChannelPatchPointBase):
 class ChannelPatchPointUpdate(ChannelPatchPointBase):
     position: int | None = None
     point_type: str | None = None
-    name: str | None = None
 
 
 class ChannelPatchPointRead(ChannelPatchPointBase):
@@ -101,15 +97,13 @@ class ChannelPatchPointRead(ChannelPatchPointBase):
 class OutputPatchPointBase(BaseModel):
     position: int = 0
     point_type: str | None = None
-    name: str | None = None
     connector: str | None = None
     patch_label: str | None = None
     notes: str | None = None
     parallel: bool = False
     parent_id: UUID | None = None
     bus_connector: str | None = None
-    stockwire_product_id: str | None = None
-    stockwire_product_name: str | None = None
+    device_id: UUID | None = None
 
 
 class OutputPatchPointCreate(OutputPatchPointBase):
@@ -119,7 +113,6 @@ class OutputPatchPointCreate(OutputPatchPointBase):
 class OutputPatchPointUpdate(OutputPatchPointBase):
     position: int | None = None
     point_type: str | None = None
-    name: str | None = None
 
 
 class OutputPatchPointRead(OutputPatchPointBase):
@@ -264,6 +257,8 @@ class AudioDeviceBase(BaseModel):
     position: int = 0
     notes: str = ""
     ports: list[AudioDevicePort] | None = []
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
 
 
 class AudioDeviceCreate(AudioDeviceBase):

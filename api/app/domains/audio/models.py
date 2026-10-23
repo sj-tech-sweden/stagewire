@@ -130,6 +130,8 @@ class AudioDevice(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
     ports: Mapped[list] = mapped_column(JSON, default=list)
+    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -137,8 +139,11 @@ class AudioDevice(Base):
     job: Mapped[ProductionJob] = relationship(back_populates="devices")
     patch_points: Mapped[list["ChannelPatchPoint"]] = relationship(
         back_populates="device",
-        cascade="all, delete-orphan",
         order_by="ChannelPatchPoint.position",
+        lazy="selectin",
+    )
+    output_points: Mapped[list["OutputPatchPoint"]] = relationship(
+        back_populates="device",
         lazy="selectin",
     )
 
@@ -180,12 +185,9 @@ class ChannelPatchPoint(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     point_type: Mapped[str] = mapped_column(String(64), nullable=False, default="mixer")
-    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
-    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -226,7 +228,6 @@ class OutputPatchPoint(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     point_type: Mapped[str] = mapped_column(String(64), nullable=False, default="mixer")
-    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
@@ -235,10 +236,12 @@ class OutputPatchPoint(Base):
         ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
     )
     bus_connector: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     output: Mapped[ChannelListOutput] = relationship(back_populates="points")
+    device: Mapped["AudioDevice"] = relationship(back_populates="output_points")
 
 
 class StockwireRequirementLink(Base):

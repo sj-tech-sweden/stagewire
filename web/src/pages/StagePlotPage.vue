@@ -424,7 +424,7 @@ const pointNameMap = computed(() => {
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
       for (const p of ch.patch_points || []) {
-        m[p.id] = p.name || patchPointTypeLabel(p.point_type);
+        m[p.id] = deviceNameMap.value[p.device_id] || patchPointTypeLabel(p.point_type);
       }
     }
   }
@@ -496,9 +496,8 @@ const highlightIds = computed(() => {
     if (dev) deviceSet.add(dev.id);
     for (const list of channelLists.value) {
       for (const ch of list.channels || []) {
-        if (ch.source_label === name) channelSet.add(ch.channel_id);
         for (const p of ch.patch_points || []) {
-          if (p.name === name) {
+          if (p.device_id && p.device_id === dev?.id) {
             pointSet.add(p.id);
             channelSet.add(ch.channel_id);
           }

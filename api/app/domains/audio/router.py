@@ -282,7 +282,7 @@ async def _publish_channel(db: AsyncSession, channel: AudioChannelPatch) -> None
 async def _linked_device_type(db: AsyncSession, job_id: UUID, device_id: UUID) -> str:
     device = await service.get_device(db, device_id)
     if device is None or device.job_id != job_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Device not found for this job")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
     return device.device_type
 
 
@@ -304,7 +304,7 @@ async def create_patch_point(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
     if payload.device_id is None:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "A patch point must be linked to a device"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A patch point must be linked to a device"
         )
     data = payload.model_dump(exclude_unset=True)
     data["point_type"] = await _linked_device_type(db, job_id, payload.device_id)
@@ -333,7 +333,7 @@ async def update_patch_point(
     if "device_id" in data:
         if data["device_id"] is None:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "A patch point must be linked to a device"
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "A patch point must be linked to a device"
             )
         data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
     point = await service.update_patch_point(db, point, data)
@@ -447,7 +447,13 @@ async def create_output_point(
     output = await service.get_output(db, output_id)
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
-    point = await service.create_output_point(db, output_id, payload.model_dump(exclude_unset=True))
+    if payload.device_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Every output point must be linked to a device"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    data["point_type"] = await _linked_device_type(db, job_id, payload.device_id)
+    point = await service.create_output_point(db, output_id, data)
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
 
@@ -469,7 +475,15 @@ async def update_output_point(
     point = await service.get_output_point(db, point_id)
     if point is None or point.output_id != output_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
-    point = await service.update_output_point(db, point, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "device_id" in data:
+        if data["device_id"] is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Every output point must be linked to a device",
+            )
+        data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
+    point = await service.update_output_point(db, point, data)
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
 
@@ -566,7 +580,7 @@ async def list_patch_sheets(
                             channel_id=owner.id,
                             position=p.position,
                             point_type=p.point_type,
-                            name=p.name,
+                            device_id=p.device_id,
                             connector=p.connector,
                             patch_label=p.patch_label,
                             notes=p.notes,
@@ -710,6 +724,11 @@ async def delete_device(
     device = await service.get_device(db, device_id)
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    if device.patch_points or device.output_points:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Move or delete the patch points on this device before removing it",
+        )
     await service.delete_device(db, device)
     await publish_job_event(job_id, "device.delete", {"id": str(device_id)})
 
@@ -729,7 +748,7 @@ class StockwireSyncResult(BaseModel):
 def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[str]]:
     """Catalog products used in the job, one entry per product with its total quantity.
 
-    Each patch slot that holds a product adds one unit. Freetext entries (no catalog
+    Each device that holds a product adds one unit. Freetext entries (no catalog
     product) cannot be pushed and are returned separately.
     """
     desired: dict[int, dict] = {}
@@ -768,21 +787,13 @@ def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[
                 f"{slot} stand",
                 freetext_name=ch.stand_product_name,
             )
-            for pp in ch.patch_points:
-                put(
-                    pp.stockwire_product_id,
-                    pp.stockwire_product_name or pp.name,
-                    f"{slot} {pp.name or 'patch'}".strip(),
-                    freetext_name=pp.stockwire_product_name,
-                )
-        for out in clist.outputs:
-            for op in out.points:
-                put(
-                    op.stockwire_product_id,
-                    op.stockwire_product_name or op.name,
-                    f"{out.name} {op.name or ''}".strip(),
-                    freetext_name=op.stockwire_product_name,
-                )
+    for device in job.devices:
+        put(
+            device.stockwire_product_id,
+            device.stockwire_product_name or device.name,
+            device.name or "device",
+            freetext_name=device.stockwire_product_name,
+        )
     return desired, freetext
 
 
@@ -806,6 +817,7 @@ async def sync_job_to_stockwire(
     result = await db.execute(
         select(ProductionJob)
         .options(
+            selectinload(ProductionJob.devices),
             selectinload(ProductionJob.channel_lists)
             .selectinload(ChannelList.channels)
             .selectinload(AudioChannelPatch.patch_points),

@@ -99,9 +99,17 @@ async def test_device_crud_and_linking(auth_headers):
         )
         assert u.status_code == 200 and u.json()["name"] == "Stagebox B"
 
-        dele = await client.delete(
+        blocked = await client.delete(
             f"{BASE}/jobs/{job_id}/devices/{dev_id}", headers=auth_headers
         )
+        assert blocked.status_code == 409, blocked.text
+
+        gone = await client.delete(
+            f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",
+            headers=auth_headers,
+        )
+        assert gone.status_code == 204, gone.text
+        dele = await client.delete(f"{BASE}/jobs/{job_id}/devices/{dev_id}", headers=auth_headers)
         assert dele.status_code == 204
 
         final = await client.get(f"{BASE}/jobs/{job_id}/devices", headers=auth_headers)
@@ -111,7 +119,9 @@ async def test_device_crud_and_linking(auth_headers):
 async def test_device_requires_job(auth_headers):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        missing = await client.get(f"{BASE}/jobs/00000000-0000-0000-0000-000000000000/devices", headers=auth_headers)
+        missing = await client.get(
+            f"{BASE}/jobs/00000000-0000-0000-0000-000000000000/devices", headers=auth_headers
+        )
         assert missing.status_code == 404
 
 
