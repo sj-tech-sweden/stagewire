@@ -139,7 +139,114 @@
           </div>
         </div>
       </div>
+      <q-list
+        v-if="$q.screen.lt.sm"
+        separator
+        class="q-mt-sm"
+      >
+        <q-card
+          v-for="ch in current.channels"
+          :key="ch.channel_id"
+          flat
+          bordered
+          class="q-ma-xs q-pa-xs"
+        >
+          <q-card-section class="q-gutter-xs">
+            <div class="row items-center justify-between">
+              <div class="text-subtitle2">
+                <span v-if="ch.kind === 'output'">OUT</span>
+                <span v-else>{{ ch.channel_number }}</span>
+              </div>
+              <q-badge :color="ch.kind === 'output' ? 'secondary' : 'primary'">
+                {{ ch.kind === 'output' ? t('channels.outputs') : t('channels.inputs') }}
+              </q-badge>
+            </div>
+            <div class="row q-gutter-sm items-center">
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.fieldSource') }}
+              </div>
+              <div class="col">
+                {{ ch.output_name || ch.source_label || '—' }}
+              </div>
+            </div>
+            <div
+              v-if="ch.device"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.fieldDevice') }}
+              </div>
+              <div class="col">
+                {{ ch.device }}
+              </div>
+            </div>
+            <div
+              v-if="ch.input_type"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.type.label') }}
+              </div>
+              <div class="col">
+                {{ t(`channels.type.${ch.input_type}`) }}
+              </div>
+            </div>
+            <div class="row q-gutter-sm items-center">
+              <div class="text-caption text-grey-7 col-4">48V</div>
+              <div class="col">
+                {{ ch.phantom_power ? '✓' : '' }}
+              </div>
+            </div>
+            <div
+              v-if="ch.direction"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.patchPoint.direction') }}
+              </div>
+              <div class="col">
+                {{ ch.direction === 'out' ? t('channels.patchPoint.directionOut') : ch.direction === 'in' ? t('channels.patchPoint.directionIn') : '' }}
+              </div>
+            </div>
+            <div
+              v-if="ch.connector"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.patchPoint.connector') }}
+              </div>
+              <div class="col">
+                {{ ch.connector }}
+              </div>
+            </div>
+            <div
+              v-if="ch.patch_label"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('channels.patchPoint.label') }}
+              </div>
+              <div class="col">
+                {{ ch.patch_label }}
+              </div>
+            </div>
+            <div
+              v-if="ch.notes"
+              class="text-caption"
+            >
+              <MarkdownText :source="ch.notes" />
+            </div>
+            <div
+              v-if="ch.point_notes"
+              class="text-caption"
+            >
+              <MarkdownText :source="ch.point_notes" />
+            </div>
+          </q-card-section>
+        </q-card>
+      </q-list>
       <q-table
+        v-else
         :rows="current.channels"
         :columns="columns"
         row-key="channel_id"

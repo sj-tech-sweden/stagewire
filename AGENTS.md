@@ -131,3 +131,25 @@ like one product:
 
 When the Stockwire Rental design tokens change, re-sync those two files. Do not
 fork the palette per app.
+
+## 10. Responsiveness (mobile-first frontend)
+
+The web app is a PWA used on phones, not only desktops. Any new frontend
+functionality must remain usable on small screens:
+
+- Use Quasar's `$q.screen` breakpoints (`xs`/`sm`/`md`/`lg`/`xl`). The phone
+  boundary is `lt.sm` (below 600px). Prefer `$q.screen.lt.sm` / `gt.sm` helpers
+  over fixed-pixel media queries.
+- **Tables become cards on phones.** Dense `q-table` grids do not fit a phone.
+  When a page shows tabular data, render a `q-list` of `q-card`s on
+  `$q.screen.lt.sm` (wrap the `q-table` in `v-else` and add a
+  `v-if="$q.screen.lt.sm"` card block) and reuse the same rows, handlers, and
+  inline editors — never drop editing or row actions on mobile.
+- **Multi-pane layouts stack on phones.** A side-by-side `q-splitter` (e.g. a
+  list beside detail) must not stay side-by-side on a phone. Make it stack
+  vertically (`:horizontal="$q.screen.lt.sm"`) or move the secondary pane into a
+  `q-drawer` / `q-tabs` so both panes are reachable without horizontal scrolling.
+- Provide touch-friendly tap targets; avoid hover-only interactions. Every action
+  reachable on desktop must also be reachable by tap on mobile.
+- Verify with a narrow viewport (Quasar devtools device toolbar / `lt.sm`) before
+  declaring a UI task done.

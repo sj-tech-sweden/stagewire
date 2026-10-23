@@ -117,6 +117,7 @@ export default {
     renameList: 'Rename list',
     deleteList: 'Delete list',
     deleteListConfirm: 'Delete list "{name}" and all of its channels?',
+    mono: 'Mono',
     noLists: 'No channel lists yet. Create one to get started.',
     addChannel: 'Add channel',
     bulkAdd: 'Bulk add',

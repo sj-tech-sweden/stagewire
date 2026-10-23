@@ -55,7 +55,57 @@
             />
           </div>
 
+          <q-list
+            v-if="$q.screen.lt.sm"
+            separator
+            class="q-mt-sm"
+          >
+            <q-card
+              v-for="u in users"
+              :key="u.id"
+              flat
+              bordered
+              class="q-ma-xs q-pa-xs"
+            >
+              <q-card-section>
+                <div class="text-subtitle2">
+                  {{ u.email }}
+                </div>
+                <div class="text-caption text-grey-7">
+                  {{ `${u.first_name} ${u.last_name}`.trim() }}
+                </div>
+                <q-badge
+                  :color="u.is_active ? 'positive' : 'grey'"
+                  class="q-mt-xs"
+                >
+                  {{ u.is_active ? t('settings.users.isActive') : t('settings.users.isInactive') }}
+                </q-badge>
+                <div class="text-caption q-mt-xs">
+                  {{ t('settings.users.role') }}: {{ u.role }}
+                </div>
+              </q-card-section>
+              <q-card-actions align="right">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="edit"
+                  @click="openEditUser(u)"
+                />
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="delete"
+                  color="negative"
+                  @click="deleteUser(u)"
+                />
+              </q-card-actions>
+            </q-card>
+          </q-list>
+
           <q-table
+            v-else
             :rows="users"
             :columns="userColumns"
             row-key="id"
@@ -632,7 +682,54 @@
             class="q-pa-md"
           >
             <div style="max-width: 620px">
+              <q-list
+                v-if="$q.screen.lt.sm"
+                separator
+                class="q-mt-sm"
+              >
+                <q-card
+                  v-for="row in categoryRows"
+                  :key="row.idx"
+                  flat
+                  bordered
+                  class="q-ma-xs q-pa-xs"
+                >
+                  <q-card-section class="q-gutter-xs">
+                    <q-select
+                      :model-value="row.categoryId"
+                      :options="stockwireCategories"
+                      option-value="id"
+                      option-label="path"
+                      emit-value
+                      map-options
+                      dense
+                      use-input
+                      input-debounce="0"
+                      :label="t('stockwire.category')"
+                    />
+                    <q-select
+                      :model-value="row.gearType"
+                      :options="gearTypeOptions"
+                      dense
+                      emit-value
+                      map-options
+                      :label="t('stockwire.gearType')"
+                    />
+                  </q-card-section>
+                  <q-card-actions align="right">
+                    <q-btn
+                      dense
+                      flat
+                      round
+                      icon="delete"
+                      color="negative"
+                      @click="categoryRows.splice(row.idx, 1)"
+                    />
+                  </q-card-actions>
+                </q-card>
+              </q-list>
               <q-table
+                v-else
                 :rows="categoryRows"
                 :columns="categoryColumns"
                 row-key="idx"

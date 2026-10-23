@@ -156,6 +156,7 @@ export default {
     patchPoints: 'Signalkedja / patchpunkter',
     inputs: 'Ingångar',
     outputs: 'Utgångar',
+    mono: 'Mono',
     outputsHint: 'Bussar som Main, Aux eller Matrix. Varje buss kan grenas ut till flera destinationer (t.ex. ut 14 på mixern och ut 1,2,24 på en stagebox). Punkter länkas via namn till nästa nod.',
     bulkAddOutputs: 'Lägg till flera utgångar',
     bulkOutputsHint: 'Skapar {count} utgångar, var och en med bus-kontakterna för sitt läge.',
