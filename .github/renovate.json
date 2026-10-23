@@ -35,6 +35,16 @@
         "ghcr.io/sj-tech-sweden/stagewire-{/,}**"
       ],
       "sourceUrl": "https://github.com/sj-tech-sweden/stagewire"
+    },
+    {
+      "groupName": "frontend dependencies",
+      "description": "Group all npm/frontend dependency updates into a single PR",
+      "matchManagers": ["npm"]
+    },
+    {
+      "groupName": "backend dependencies",
+      "description": "Group all Python/backend dependency updates into a single PR",
+      "matchManagers": ["pyproject"]
     }
   ]
 }
