@@ -293,7 +293,132 @@
                 <ColumnChooser :prefs="channelPrefs" />
               </div>
 
+              <q-list
+                v-if="$q.screen.lt.sm"
+                separator
+                class="q-mt-sm"
+              >
+                <q-card
+                  v-for="row in store.channels"
+                  :key="row.id"
+                  flat
+                  bordered
+                  class="q-ma-xs q-pa-xs"
+                >
+                  <q-card-section class="q-gutter-xs">
+                    <div class="row q-gutter-sm items-center">
+                      <q-input
+                        :model-value="row.channel_number"
+                        type="number"
+                        dense
+                        :label="t('channels.fieldChannelNumber')"
+                        style="width: 72px"
+                        @change="(v) => saveInline(row, 'channel_number', v === '' || v === null ? null : Number(v))"
+                      />
+                      <q-input
+                        :model-value="row.source_label"
+                        dense
+                        :label="t('channels.fieldSource')"
+                        class="col"
+                        @change="(v) => saveInline(row, 'source_label', v)"
+                      />
+                    </div>
+                    <div class="row q-gutter-sm">
+                      <q-select
+                        :model-value="row.input_type"
+                        :options="inputTypeOptions"
+                        dense
+                        emit-value
+                        map-options
+                        clearable
+                        :label="t('channels.type.label')"
+                        class="col"
+                        @update:model-value="(v) => saveInline(row, 'input_type', v)"
+                      />
+                      <q-select
+                        :model-value="row.connector"
+                        :options="connectorOptions"
+                        dense
+                        clearable
+                        :label="t('channels.fieldConnector')"
+                        class="col"
+                        @update:model-value="(v) => saveInline(row, 'connector', v)"
+                      />
+                    </div>
+                    <StockwireProductPicker
+                      :model-value="standModel(row)"
+                      gear-type="stand"
+                      :label="t('stockwire.selectStand')"
+                      hint=""
+                      @update:model-value="(v) => saveStand(row, v)"
+                    />
+                    <StockwireProductPicker
+                      :model-value="deviceModel(row)"
+                      :gear-type="gearTypeForInput(row.input_type)"
+                      :label="t('channels.fieldDevice')"
+                      hint=""
+                      @update:model-value="(v) => saveDevice(row, v)"
+                    />
+                    <div class="row items-center justify-between">
+                      <q-toggle
+                        :model-value="row.phantom_power"
+                        :label="t('channels.fieldPhantom')"
+                        @update:model-value="(v) => saveInline(row, 'phantom_power', v)"
+                      />
+                      <q-chip
+                        v-if="stereoView(row).linked"
+                        dense
+                        color="primary"
+                        text-color="white"
+                        size="sm"
+                      >
+                        {{ stereoView(row).isL ? 'L' : 'R' }}
+                      </q-chip>
+                      <span
+                        v-else
+                        class="text-grey-6 text-caption"
+                      >{{ t('channels.mono') }}</span>
+                    </div>
+                    <div
+                      v-if="row.notes"
+                      class="text-caption"
+                    >
+                      <MarkdownText :source="row.notes" />
+                    </div>
+                  </q-card-section>
+                  <q-card-actions align="right">
+                    <q-btn
+                      dense
+                      flat
+                      round
+                      size="sm"
+                      icon="edit"
+                      @click="openChannelDialog(row)"
+                    />
+                    <q-btn
+                      dense
+                      flat
+                      round
+                      size="sm"
+                      icon="delete"
+                      color="negative"
+                      @click="removeChannel(row)"
+                    />
+                    <q-btn
+                      dense
+                      flat
+                      round
+                      size="sm"
+                      icon="account_tree"
+                      :aria-label="t('channels.viewFlow')"
+                      @click="openFlow('input', row)"
+                    />
+                  </q-card-actions>
+                </q-card>
+              </q-list>
+
               <q-table
+                v-else
                 :rows="store.channels"
                 :columns="channelColumns"
                 row-key="id"
@@ -549,7 +674,48 @@
                       <q-space />
                       <ColumnChooser :prefs="outputPrefs" />
                     </div>
+                    <q-list
+                      v-if="$q.screen.lt.sm"
+                      separator
+                      class="q-mt-xs"
+                    >
+                      <q-card
+                        v-for="point in bus.points || []"
+                        :key="point.id"
+                        flat
+                        bordered
+                        class="q-ma-xs q-pa-xs"
+                      >
+                        <q-card-section class="q-gutter-xs">
+                          <template
+                            v-for="col in outputTableColumns"
+                            :key="col.name"
+                          >
+                            <div
+                              v-if="col.name !== 'device' && col.name !== 'actions'"
+                              class="row q-gutter-sm items-center"
+                            >
+                              <div class="text-caption text-grey-7 col-5">
+                                {{ col.label }}
+                              </div>
+                              <div class="col">
+                                {{ outputCellDisplay(col, point) || '—' }}
+                              </div>
+                            </div>
+                          </template>
+                          <StockwireProductPicker
+                            v-if="outputTableColumns.find((c) => c.name === 'device')"
+                            :model-value="outputDeviceModel(point)"
+                            :gear-type="pointGearType(point.point_type)"
+                            :label="t('channels.fieldDevice')"
+                            hint=""
+                            @update:model-value="(v) => saveOutputDevice(bus, point, v)"
+                          />
+                        </q-card-section>
+                      </q-card>
+                    </q-list>
                     <q-table
+                      v-else
                       :rows="bus.points || []"
                       :columns="outputTableColumns"
                       row-key="id"
@@ -1685,6 +1851,14 @@ const outputColumns = [
 
 const outputPrefs = useColumnPrefs('stagewire.cols.outputs', outputColumns)
 const outputTableColumns = outputPrefs.visible
+
+function outputCellDisplay(col, point) {
+  if (col.name === 'device' || col.name === 'actions') return ''
+  const raw =
+    typeof col.field === 'function' ? col.field(point) : point[col.field]
+  const value = col.format ? col.format(raw, point) : raw
+  return value == null ? '' : String(value)
+}
 
 const connectorOptions = [
   'XLR',
