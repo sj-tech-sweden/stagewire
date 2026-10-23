@@ -65,9 +65,7 @@ async def test_export_plugins_listed(auth_headers: dict) -> None:
             f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels",
             json={"channel_number": 1, "source_label": "Kick"},
         )
-        plugins = await client.get(
-            f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/export-plugins"
-        )
+        plugins = await client.get(f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/export-plugins")
         assert plugins.status_code == 200
         assert len(plugins.json()) == 5
 

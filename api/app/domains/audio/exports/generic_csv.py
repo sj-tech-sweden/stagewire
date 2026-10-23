@@ -24,9 +24,7 @@ class GenericCsvExporter(ConsoleExporter):
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             base = safe_filename(channel_list.name)
             zf.writestr(f"{base}_inputs.csv", render_inputs_csv(channel_list, channels))
-            zf.writestr(
-                f"{base}_outputs.csv", render_outputs_csv(channel_list, outputs)
-            )
+            zf.writestr(f"{base}_outputs.csv", render_outputs_csv(channel_list, outputs))
         return ExportResult(
             content=buf.getvalue(),
             filename=f"{base}_csv.zip",

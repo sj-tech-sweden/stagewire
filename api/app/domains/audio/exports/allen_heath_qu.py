@@ -48,8 +48,7 @@ class AllenHeathQuExporter(ConsoleExporter):
     def export(self, channel_list, channels, outputs) -> ExportResult:
         if _QU_BASE_SCENE_PATH and os.path.exists(_QU_BASE_SCENE_PATH):
             names = [
-                c.source_label or ""
-                for c in sorted(channels, key=lambda x: x.channel_number or 0)
+                c.source_label or "" for c in sorted(channels, key=lambda x: x.channel_number or 0)
             ][:QU_MAX_INPUTS]
             with open(_QU_BASE_SCENE_PATH, "rb") as fh:
                 data = patch_qu_scene(fh.read(), names)

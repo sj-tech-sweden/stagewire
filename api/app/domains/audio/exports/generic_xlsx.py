@@ -89,20 +89,14 @@ class GenericXlsxExporter(ConsoleExporter):
             ws,
             channel_list,
             INPUT_HEADER,
-            [
-                channel_row(c)
-                for c in sorted(channels, key=lambda x: x.channel_number or 0)
-            ],
+            [channel_row(c) for c in sorted(channels, key=lambda x: x.channel_number or 0)],
         )
         ws2 = wb.create_sheet("Outputs")
         _build_sheet(
             ws2,
             channel_list,
             OUTPUT_HEADER,
-            [
-                output_row(o)
-                for o in sorted(outputs, key=lambda x: x.position or 0)
-            ],
+            [output_row(o) for o in sorted(outputs, key=lambda x: x.position or 0)],
         )
         buf = io.BytesIO()
         wb.save(buf)
