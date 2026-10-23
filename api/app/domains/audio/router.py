@@ -580,6 +580,42 @@ async def list_plot_elements(
     return [schemas.StagePlotElementRead.model_validate(e) for e in elements]
 
 
+@router.patch(
+    "/{job_id}/plot-elements/{element_id}",
+    response_model=schemas.StagePlotElementRead,
+)
+async def update_plot_element(
+    job_id: UUID,
+    element_id: UUID,
+    payload: schemas.StagePlotElementUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.StagePlotElementRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    element = await service.update_plot_element(
+        db, job_id, element_id, payload.model_dump(exclude_unset=True)
+    )
+    if element is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+    return schemas.StagePlotElementRead.model_validate(element)
+
+
+@router.delete(
+    "/{job_id}/plot-elements/{element_id}",
+    status_code=204,
+)
+async def delete_plot_element(
+    job_id: UUID,
+    element_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    deleted = await service.delete_plot_element(db, job_id, element_id)
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+
+
 class StockwireSyncResult(BaseModel):
     stockwire_job_id: str | None = None
     item_count: int = 0

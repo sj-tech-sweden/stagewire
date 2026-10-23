@@ -39,6 +39,13 @@
               class="q-ml-sm"
               @click="router.push(`/jobs/${route.params.jobId}/patch-sheets`)"
             />
+            <q-btn
+              flat
+              icon="map"
+              :label="t('stagePlot.nav')"
+              class="q-ml-sm"
+              @click="router.push(`/jobs/${route.params.jobId}/stage-plot`)"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip

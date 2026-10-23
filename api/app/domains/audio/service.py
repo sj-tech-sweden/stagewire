@@ -273,3 +273,36 @@ async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict) -> Sta
 async def list_plot_elements(db: AsyncSession, job_id: UUID) -> list[StagePlotElement]:
     result = await db.execute(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
     return list(result.scalars().all())
+
+
+async def update_plot_element(
+    db: AsyncSession, job_id: UUID, element_id: UUID, data: dict
+) -> StagePlotElement | None:
+    result = await db.execute(
+        select(StagePlotElement).where(
+            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
+        )
+    )
+    element = result.scalar_one_or_none()
+    if element is None:
+        return None
+    for key, value in data.items():
+        if value is not None:
+            setattr(element, key, value)
+    await db.commit()
+    await db.refresh(element)
+    return element
+
+
+async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID) -> bool:
+    result = await db.execute(
+        select(StagePlotElement).where(
+            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
+        )
+    )
+    element = result.scalar_one_or_none()
+    if element is None:
+        return False
+    await db.delete(element)
+    await db.commit()
+    return True
