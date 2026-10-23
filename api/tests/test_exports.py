@@ -2,9 +2,9 @@ from httpx import ASGITransport, AsyncClient
 
 from app.domains.audio import exports
 from app.domains.audio.exports.qu_scene import (
+    QU_ENTRY_STRIDE,
     QU_FILE_SIZE,
     QU_INPUTS_BASE,
-    QU_ENTRY_STRIDE,
     QU_NAME_LEN,
     QU_NAME_OFFSET,
     crc_qu,
