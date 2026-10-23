@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.4.0...stagewire-v0.5.0) (2026-10-23)
+
+
+### Features
+
+* **web:** add favicon.io favicon pack and web manifest ([0b7bb70](https://github.com/sj-tech-sweden/stagewire/commit/0b7bb70f41d549bf85ab5dad7052c44484a523f7))
+* **web:** add favicon.io favicon pack and web manifest ([dc28196](https://github.com/sj-tech-sweden/stagewire/commit/dc281964899a65fdb629b1df7c7af593ce9f6f6e))
+* **web:** make table-heavy pages mobile-friendly with cards ([4bcb744](https://github.com/sj-tech-sweden/stagewire/commit/4bcb744dfb47a94fc5d889baf0d45006cb7cda96))
+* **web:** mobile-friendly cards for table-heavy pages ([b950e69](https://github.com/sj-tech-sweden/stagewire/commit/b950e6943bc361d8bc65f05027341a901d53b516))
+
+
+### Bug Fixes
+
+* **deps:** update frontend dependencies ([8fea682](https://github.com/sj-tech-sweden/stagewire/commit/8fea682a0d2e4c5b54f7b4adc9200e5d925ad9cd))
+* **deps:** update frontend dependencies (major) ([ed97ec3](https://github.com/sj-tech-sweden/stagewire/commit/ed97ec31f2647bc5f706b0892477afde7ffbabae))
+* **web:** bind quasar dev server with -H instead of unsupported --host ([a2d9e67](https://github.com/sj-tech-sweden/stagewire/commit/a2d9e671802cc30539b2fb7fbde5f2e4fe7879f0))
+* **web:** inject env via import.meta.env after app-vite v3 upgrade ([2e1fd5c](https://github.com/sj-tech-sweden/stagewire/commit/2e1fd5cf8d4068471c0a39211ebcec60166bcb6f))
+* **web:** migrate ESLint to flat config (eslint.config.js) for ESLint 10 ([2c3d736](https://github.com/sj-tech-sweden/stagewire/commit/2c3d7368cddd9e82a2659d83914fa28ad425eaaa))
+* **web:** migrate ESLint to flat config for ESLint 10 ([1c65f4b](https://github.com/sj-tech-sweden/stagewire/commit/1c65f4b3ae719abaf9344249112549adace9ec68))
+
 ## [0.4.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.3.0...stagewire-v0.4.0) (2026-10-23)
 
 
