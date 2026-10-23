@@ -354,13 +354,43 @@ const current = computed(
   () => sheets.value.find((s) => s.name === selected.value) || null,
 )
 
+const pointChannelMap = computed(() => {
+  const m = {}
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) m[p.id] = ch.channel_id
+    }
+  }
+  return m
+})
+const pointNameMap = computed(() => {
+  const m = {}
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) m[p.id] = p.name || ''
+    }
+  }
+  return m
+})
+
 const stageByChannel = computed(() => {
   const m = new Map()
+  const add = (channelId, text) => {
+    const arr = m.get(channelId) || []
+    arr.push(text)
+    m.set(channelId, arr)
+  }
   for (const el of plotElements.value) {
-    if (!el.linked_channel_id) continue
-    const arr = m.get(el.linked_channel_id) || []
-    arr.push(el.label || el.element_type)
-    m.set(el.linked_channel_id, arr)
+    const channelId =
+      el.linked_channel_id ||
+      (el.linked_patch_point_id ? pointChannelMap.value[el.linked_patch_point_id] : null)
+    if (!channelId) continue
+    const ppName = el.linked_patch_point_id ? pointNameMap.value[el.linked_patch_point_id] : ''
+    const text =
+      ppName && el.linked_patch_point_id
+        ? `${el.label || el.element_type} (${ppName})`
+        : el.label || el.element_type
+    add(channelId, text)
   }
   return m
 })

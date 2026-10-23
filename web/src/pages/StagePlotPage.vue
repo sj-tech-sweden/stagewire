@@ -271,10 +271,6 @@
                   v-for="el in store.elements"
                   :key="el.id"
                   :config="groupConfig(el)"
-                  @dragend="onDragEnd(el, $event)"
-                  @transformend="onTransformEnd(el, $event)"
-                  @click="select(el.id)"
-                  @tap="select(el.id)"
                 >
                   <v-rect :config="rectConfig(el)" />
                   <v-image
@@ -282,6 +278,10 @@
                     :config="imageConfig(el)"
                   />
                   <v-text :config="textConfig(el)" />
+                  <v-text
+                    v-if="linkedSummary(el)"
+                    :config="linkedTextConfig(el)"
+                  />
                 </v-group>
                 <v-transformer
                   ref="trRef"
@@ -324,6 +324,24 @@ const palette = {
   dais: { label: 'Dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
 };
 const CUSTOM_DEF = { label: 'Custom', icon: 'add', color: '#90A4AE', w: 60, h: 60 };
+
+const pointTypeKey = {
+  mixer: 'typeMixer',
+  analog_stagebox: 'typeAnalog',
+  digital_stagebox: 'typeDigital',
+  split: 'typeSplit',
+  network: 'typeNetwork',
+  direct: 'typeDirect',
+  speaker: 'typeSpeaker',
+  monitor: 'typeMonitor',
+  recorder: 'typeRecorder',
+  amp: 'typeAmp',
+  stage: 'typeStage',
+  other: 'typeOther',
+};
+function patchPointTypeLabel(pt) {
+  return t(`channels.patchPoint.${pointTypeKey[pt] || 'typeDirect'}`);
+}
 
 function defFor(type) {
   return palette[type] || CUSTOM_DEF;
@@ -376,9 +394,10 @@ const patchPointOptions = computed(() => {
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
       for (const p of ch.patch_points || []) {
+        const name = p.name || patchPointTypeLabel(p.point_type);
         opts.push({
           value: p.id,
-          label: `Ch ${ch.channel_number} · ${p.name || p.point_type || 'point'}`,
+          label: `${name} · Ch ${ch.channel_number}`,
         });
       }
     }
@@ -390,6 +409,17 @@ const pointChannelMap = computed(() => {
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
       for (const p of ch.patch_points || []) m[p.id] = ch.id;
+    }
+  }
+  return m;
+});
+const pointNameMap = computed(() => {
+  const m = {};
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) {
+        m[p.id] = p.name || patchPointTypeLabel(p.point_type);
+      }
     }
   }
   return m;
@@ -440,6 +470,10 @@ function groupConfig(el) {
     y: el.position_y * pxPerCm.value,
     rotation: el.rotation,
     draggable: true,
+    onclick: () => select(el.id),
+    ontap: () => select(el.id),
+    ondragend: (e) => onDragEnd(el, e),
+    ontransformend: (e) => onTransformEnd(el, e),
   };
 }
 function rectConfig(el) {
@@ -469,6 +503,39 @@ function textConfig(el) {
 }
 function imageFor(el) {
   return el.image_url ? imageCache.value[el.id] || null : null;
+}
+function findChannel(channelId) {
+  for (const list of channelLists.value) {
+    for (const ch of list.channels || []) {
+      if (ch.id === channelId) return ch;
+    }
+  }
+  return null;
+}
+function linkedSummary(el) {
+  const parts = [];
+  if (el.linked_channel_id) {
+    const ch = findChannel(el.linked_channel_id);
+    if (ch) parts.push(`Ch ${ch.channel_number}`);
+  }
+  if (el.linked_patch_point_id) {
+    const name = pointNameMap.value[el.linked_patch_point_id];
+    if (name) parts.push(name);
+  }
+  return parts.join(' · ');
+}
+function linkedTextConfig(el) {
+  const s = pxPerCm.value;
+  return {
+    text: linkedSummary(el),
+    x: 0,
+    y: el.height_cm * s + 2,
+    width: el.width_cm * s,
+    align: 'center',
+    fontSize: Math.max(9, 10 * s),
+    fill: '#9ccc9c',
+    listening: false,
+  };
 }
 function imageConfig(el) {
   return {
