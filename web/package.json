@@ -20,7 +20,7 @@
     "pinia": "^2.2.4",
     "quasar": "^2.16.9",
     "vue": "^3.5.11",
-    "vue-konva": "^3.2.0",
+    "vue-konva": "^4.0.0",
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
