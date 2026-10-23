@@ -401,4 +401,13 @@ export default {
     pushed: 'Pushed {count} items to Stockwire job {id}',
     nothingToPush: 'No linked Stockwire products to push',
   },
+  export: {
+    title: 'Export patch to console',
+    action: 'Export',
+    pickFormat: 'Choose a format / console',
+    download: 'Download',
+    close: 'Close',
+    description: 'Exports the channel list inputs, outputs and channel names for loading onto a console or as a generic sheet.',
+    fromList: 'Channel list',
+  },
 }

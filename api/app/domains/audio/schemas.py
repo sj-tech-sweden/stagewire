@@ -212,6 +212,14 @@ class ChannelListRead(ChannelListBase):
     outputs: list[ChannelListOutputRead] = []
 
 
+class ExportPluginInfo(BaseModel):
+    key: str
+    label: str
+    description: str
+    media_type: str
+    file_extension: str
+
+
 class StagePlotElementBase(BaseModel):
     element_type: str
     linked_channel_id: UUID | None = None
@@ -259,6 +267,7 @@ __all__ = [
     "ChannelListOutputRead",
     "PatchSheetChannel",
     "PatchSheetRead",
+    "ExportPluginInfo",
     "StagePlotElementBase",
     "StagePlotElementCreate",
     "StagePlotElementUpdate",

@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.domains.audio import schemas, service
+from app.domains.audio.exports import get_exporter, list_exporters
+from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
     AudioChannelPatch,
     ChannelList,
@@ -143,6 +146,53 @@ async def delete_channel_list(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
     await service.delete_channel_list(db, channel_list)
     await publish_job_event(job_id, "list.delete", {"id": str(list_id)})
+
+
+@router.get(
+    "/{job_id}/channel-lists/{list_id}/export-plugins",
+    response_model=list[schemas.ExportPluginInfo],
+)
+async def list_export_plugins(
+    job_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.ExportPluginInfo]:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    channel_list = await service.get_channel_list(db, list_id)
+    if channel_list is None or channel_list.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    return [
+        schemas.ExportPluginInfo(
+            key=e.key,
+            label=e.label,
+            description=e.description,
+            media_type=e.media_type,
+            file_extension=e.file_extension,
+        )
+        for e in list_exporters()
+    ]
+
+
+@router.get("/{job_id}/channel-lists/{list_id}/export")
+async def export_channel_list(
+    job_id: UUID,
+    list_id: UUID,
+    plugin: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    channel_list = await service.get_channel_list(db, list_id)
+    if channel_list is None or channel_list.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    exporter: ConsoleExporter | None = get_exporter(plugin)
+    if exporter is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown export plugin")
+    result = exporter.export(channel_list, channel_list.channels, channel_list.outputs)
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    )
 
 
 @router.post(
