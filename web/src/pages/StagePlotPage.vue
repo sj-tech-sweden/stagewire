@@ -286,6 +286,25 @@
                   :key="'g' + i"
                   :config="g"
                 />
+                <v-line
+                  v-for="w in cablePlan.cableways"
+                  :key="'w' + w.id"
+                  :config="cableWayConfig(w)"
+                />
+                <v-line
+                  v-for="row in visibleCableRows"
+                  :key="'c' + row.key"
+                  :config="cableConfig(row)"
+                />
+                <v-line
+                  v-if="drawingWay && drawPoints.length"
+                  :config="drawConfig"
+                />
+                <v-circle
+                  v-for="(wp, i) in rerouteWaypoints"
+                  :key="'wp' + i"
+                  :config="waypointConfig(wp)"
+                />
                 <v-group
                   v-for="el in store.elements"
                   :key="el.id"
@@ -311,6 +330,234 @@
           </q-card-section>
         </q-card>
       </div>
+      <div class="col-12">
+        <q-card
+          flat
+          bordered
+        >
+          <q-card-section>
+            <div class="row items-center q-gutter-sm">
+              <div class="text-subtitle1 col">
+                {{ t('cables.title') }}
+              </div>
+              <q-toggle
+                v-model="cablesVisible"
+                :label="t('cables.show')"
+              />
+              <q-btn
+                flat
+                dense
+                icon="alt_route"
+                :label="t('cables.drawWay')"
+                :disable="drawingWay || !!rerouteKey"
+                @click="startDrawWay"
+              />
+              <q-btn
+                flat
+                dense
+                icon="download"
+                :label="t('cables.exportCsv')"
+                :disable="!cableRows.length"
+                @click="exportCables"
+              />
+            </div>
+            <div
+              v-if="drawingWay"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('cables.drawHint') }}
+              </div>
+              <q-btn
+                dense
+                color="primary"
+                :label="t('cables.finishWay')"
+                :disable="drawPoints.length < 2"
+                @click="finishDrawWay"
+              />
+              <q-btn
+                dense
+                flat
+                :label="t('app.actions.cancel')"
+                @click="cancelDrawWay"
+              />
+            </div>
+            <div
+              v-if="rerouteRow"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('cables.rerouteHint', { name: 'C' + rerouteRow.index }) }}
+              </div>
+              <q-btn
+                dense
+                flat
+                :label="t('cables.undoWaypoint')"
+                :disable="!rerouteWaypoints.length"
+                @click="undoWaypoint"
+              />
+              <q-btn
+                dense
+                flat
+                :label="t('cables.resetRoute')"
+                @click="resetRoute(rerouteRow)"
+              />
+              <q-btn
+                dense
+                color="primary"
+                :label="t('cables.doneReroute')"
+                @click="rerouteKey = null"
+              />
+            </div>
+
+            <div class="row q-col-gutter-md q-mt-xs">
+              <q-input
+                :model-value="cablePlan.settings.slack_pct"
+                type="number"
+                dense
+                outlined
+                :label="t('cables.slackPct')"
+                class="col-12 col-sm-3"
+                @update:model-value="(v) => saveCableSettings({ slack_pct: Number(v) || 0 })"
+              />
+              <q-input
+                :model-value="cablePlan.settings.slack_m"
+                type="number"
+                dense
+                outlined
+                :label="t('cables.slackM')"
+                class="col-12 col-sm-3"
+                @update:model-value="(v) => saveCableSettings({ slack_m: Number(v) || 0 })"
+              />
+              <q-input
+                :model-value="standardLengthsText"
+                dense
+                outlined
+                :label="t('cables.standardLengths')"
+                class="col-12 col-sm-6"
+                @update:model-value="saveStandardLengths"
+              />
+            </div>
+
+            <div
+              v-if="cableOrder.length"
+              class="q-mt-md"
+            >
+              <div class="text-subtitle2 q-mb-xs">
+                {{ t('cables.order') }}
+              </div>
+              <q-chip
+                v-for="o in cableOrder"
+                :key="String(o.length)"
+                dense
+                color="primary"
+                text-color="white"
+              >
+                {{ o.count }} × {{ o.length === 'over' ? t('cables.overMax') : `${o.length} m` }}
+              </q-chip>
+            </div>
+
+            <q-list
+              separator
+              class="q-mt-md"
+            >
+              <q-item
+                v-for="row in cableRows"
+                :key="row.key"
+                :active="selectedCableKey === row.key || rerouteKey === row.key"
+                clickable
+                @click="selectedCableKey = row.key"
+              >
+                <q-item-section>
+                  <q-item-label>
+                    C{{ row.index }} · {{ row.fromName }} → {{ row.toName }}
+                  </q-item-label>
+                  <q-item-label caption>
+                    {{ row.label }} · {{ row.connector || '—' }} ·
+                    {{ row.placed ? t(`cables.route.${row.mode}`) : t('cables.notPlaced') }}
+                  </q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-item-label v-if="row.placed">
+                    {{ row.pathM }} m
+                  </q-item-label>
+                  <q-item-label
+                    v-if="row.placed"
+                    caption
+                  >
+                    {{ t('cables.cut') }}:
+                    {{ row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m` }}
+                  </q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <div class="row no-wrap">
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      :icon="row.hidden ? 'visibility_off' : 'visibility'"
+                      :aria-label="t('cables.show')"
+                      @click.stop="toggleCableHidden(row)"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      icon="edit_route"
+                      :aria-label="t('cables.reroute')"
+                      :disable="!row.placed || !!drawingWay"
+                      @click.stop="startReroute(row)"
+                    />
+                    <q-btn
+                      v-if="row.requestedMode === 'manual'"
+                      flat
+                      dense
+                      round
+                      icon="undo"
+                      :aria-label="t('cables.resetRoute')"
+                      @click.stop="resetRoute(row)"
+                    />
+                  </div>
+                </q-item-section>
+              </q-item>
+            </q-list>
+            <div
+              v-if="!cableRows.length"
+              class="text-grey-7 q-mt-sm"
+            >
+              {{ t('cables.none') }}
+            </div>
+
+            <div
+              v-if="cablePlan.cableways.length"
+              class="q-mt-md"
+            >
+              <div class="text-subtitle2 q-mb-xs">
+                {{ t('cables.waysTitle') }}
+              </div>
+              <div
+                v-for="(w, i) in cablePlan.cableways"
+                :key="w.id"
+                class="row items-center q-gutter-sm"
+              >
+                <div class="col">
+                  {{ t('cables.wayLabel', { n: i + 1 }) }}
+                  <span class="text-grey-7">({{ w.points.length }} {{ t('cables.points') }})</span>
+                </div>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="delete"
+                  color="negative"
+                  :aria-label="t('cables.deleteWay')"
+                  @click="removeCableway(w.id)"
+                />
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
     </div>
   </q-page>
 </template>
@@ -322,6 +569,13 @@ import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useDevicesStore } from '@/stores/devices';
+import {
+  buildCableRows,
+  cablesToCsv,
+  DEFAULT_CABLE_SETTINGS,
+  emptyCablePlan,
+  lengthOrder,
+} from '@/utils/cables';
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
@@ -710,8 +964,17 @@ function select(id) {
 }
 
 function onStageClick(e) {
+  if (drawingWay.value) {
+    addDrawPoint(e);
+    return;
+  }
+  if (rerouteKey.value) {
+    addWaypoint(e);
+    return;
+  }
   if (e.target === e.target.getStage()) {
     selectedId.value = null;
+    selectedCableKey.value = null;
     updateTransformer();
   }
 }
@@ -833,6 +1096,167 @@ async function loadChannels() {
   } catch (err) {
     console.error('Failed to load channel lists', err);
   }
+}
+
+const cablesVisible = ref(true);
+const selectedCableKey = ref(null);
+const rerouteKey = ref(null);
+const drawingWay = ref(false);
+const drawPoints = ref([]);
+
+const cablePlan = computed(() => emptyCablePlan(job.value?.cable_plan));
+const cableRows = computed(() =>
+  buildCableRows({
+    lists: channelLists.value,
+    devices: devicesStore.devices,
+    elements: store.elements,
+    plan: cablePlan.value,
+  }),
+);
+const visibleCableRows = computed(() =>
+  cablesVisible.value ? cableRows.value.filter((r) => r.placed && !r.hidden) : [],
+);
+const cableOrder = computed(() => lengthOrder(cableRows.value));
+const rerouteRow = computed(() => cableRows.value.find((r) => r.key === rerouteKey.value) || null);
+const rerouteWaypoints = computed(
+  () => cablePlan.value.routes[rerouteKey.value]?.waypoints || [],
+);
+const standardLengthsText = computed(() =>
+  (cablePlan.value.settings.standard_lengths_m || DEFAULT_CABLE_SETTINGS.standard_lengths_m).join(', '),
+);
+
+async function savePlan(next) {
+  job.value = { ...job.value, cable_plan: next };
+  try {
+    const { data } = await api.patch(`/jobs/${jobId}`, { cable_plan: next });
+    job.value = { ...job.value, cable_plan: data.cable_plan };
+  } catch (err) {
+    console.error('Failed to save cables', err);
+  }
+}
+function updateRoute(key, patch) {
+  const plan = cablePlan.value;
+  const current = plan.routes[key] || { mode: 'auto', waypoints: [], hidden: false };
+  savePlan({ ...plan, routes: { ...plan.routes, [key]: { ...current, ...patch } } });
+}
+function toggleCableHidden(row) {
+  updateRoute(row.key, { hidden: !row.hidden });
+}
+function resetRoute(row) {
+  updateRoute(row.key, { mode: 'auto', waypoints: [] });
+  if (rerouteKey.value === row.key) rerouteKey.value = null;
+}
+function startReroute(row) {
+  selectedCableKey.value = row.key;
+  rerouteKey.value = row.key;
+  const keep = row.requestedMode === 'manual' ? row.waypoints : [];
+  updateRoute(row.key, { mode: 'manual', waypoints: keep });
+}
+function stagePoint(e) {
+  const p = e.target.getStage().getPointerPosition();
+  if (!p) return null;
+  return [p.x / pxPerCm.value, p.y / pxPerCm.value];
+}
+function addWaypoint(e) {
+  const cm = stagePoint(e);
+  const key = rerouteKey.value;
+  if (!cm || !key) return;
+  const current = cablePlan.value.routes[key]?.waypoints || [];
+  updateRoute(key, { mode: 'manual', waypoints: [...current, cm] });
+}
+function undoWaypoint() {
+  const key = rerouteKey.value;
+  if (!key) return;
+  const current = cablePlan.value.routes[key]?.waypoints || [];
+  updateRoute(key, { mode: 'manual', waypoints: current.slice(0, -1) });
+}
+function startDrawWay() {
+  rerouteKey.value = null;
+  drawPoints.value = [];
+  drawingWay.value = true;
+}
+function cancelDrawWay() {
+  drawingWay.value = false;
+  drawPoints.value = [];
+}
+function addDrawPoint(e) {
+  const cm = stagePoint(e);
+  if (cm) drawPoints.value = [...drawPoints.value, cm];
+}
+function finishDrawWay() {
+  if (drawPoints.value.length < 2) return;
+  const plan = cablePlan.value;
+  savePlan({
+    ...plan,
+    cableways: [...plan.cableways, { id: crypto.randomUUID(), points: drawPoints.value }],
+  });
+  cancelDrawWay();
+}
+function removeCableway(id) {
+  const plan = cablePlan.value;
+  savePlan({ ...plan, cableways: plan.cableways.filter((w) => w.id !== id) });
+}
+function saveCableSettings(patch) {
+  const plan = cablePlan.value;
+  savePlan({ ...plan, settings: { ...plan.settings, ...patch } });
+}
+function saveStandardLengths(text) {
+  const lengths = String(text)
+    .split(',')
+    .map((v) => Number(v.trim()))
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  saveCableSettings({ standard_lengths_m: lengths });
+}
+function exportCables() {
+  const blob = new Blob([cablesToCsv(cableRows.value)], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cables.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function cableLinePoints(points) {
+  return points.flatMap(([x, y]) => [x * pxPerCm.value, y * pxPerCm.value]);
+}
+function cableConfig(row) {
+  const active = selectedCableKey.value === row.key || rerouteKey.value === row.key;
+  return {
+    points: cableLinePoints(row.points),
+    stroke: active ? '#ffb300' : '#b0bec5',
+    strokeWidth: active ? 3 : 2,
+    lineCap: 'round',
+    lineJoin: 'round',
+    dash: row.mode === 'direct' ? [8, 6] : undefined,
+    hitStrokeWidth: 12,
+    onclick: () => (selectedCableKey.value = row.key),
+  };
+}
+function cableWayConfig(w) {
+  return {
+    points: cableLinePoints(w.points),
+    stroke: '#546e7a',
+    strokeWidth: 2,
+    dash: [4, 4],
+    listening: false,
+  };
+}
+const drawConfig = computed(() => ({
+  points: cableLinePoints(drawPoints.value),
+  stroke: '#ffb300',
+  strokeWidth: 2,
+  dash: [6, 4],
+  listening: false,
+}));
+function waypointConfig(wp) {
+  return {
+    x: wp[0] * pxPerCm.value,
+    y: wp[1] * pxPerCm.value,
+    radius: 5,
+    fill: '#ffb300',
+    listening: false,
+  };
 }
 
 watch(selectedId, updateTransformer);

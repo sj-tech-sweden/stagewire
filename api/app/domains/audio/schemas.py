@@ -12,6 +12,7 @@ class ProductionJobBase(BaseModel):
     notes: str = ""
     stage_width_cm: float = 0.0
     stage_height_cm: float = 0.0
+    cable_plan: dict = Field(default_factory=dict)
 
 
 class ProductionJobCreate(ProductionJobBase):
@@ -24,6 +25,7 @@ class ProductionJobUpdate(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str | None = None
+    cable_plan: dict | None = None
 
 
 class ProductionJobRead(ProductionJobBase):

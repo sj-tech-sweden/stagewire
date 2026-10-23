@@ -29,6 +29,7 @@ class ProductionJob(Base):
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
