@@ -129,12 +129,16 @@
 
       <q-splitter
         v-model="split"
-        :limits="[20, 50]"
+        :horizontal="!$q.screen.lt.sm"
+        :limits="$q.screen.lt.sm ? [18, 18] : [20, 50]"
         class="full-height"
       >
         <!-- Channel lists -->
         <template #before>
-          <div class="q-pa-sm">
+          <div
+            v-if="!$q.screen.lt.sm"
+            class="q-pa-sm"
+          >
             <div class="row items-center q-mb-sm">
               <div class="text-subtitle1">
                 {{ t('channels.lists') }}
@@ -200,6 +204,73 @@
               class="text-grey q-pa-sm"
             >
               {{ t('channels.noLists') }}
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="q-pa-sm"
+          >
+            <div class="row items-center q-gutter-sm">
+              <q-select
+                :model-value="store.selectedListId"
+                :options="listOptions"
+                emit-value
+                map-options
+                :label="t('channels.lists')"
+                class="col"
+                @update:model-value="selectList"
+              />
+              <q-btn
+                dense
+                flat
+                round
+                icon="add"
+                :aria-label="t('channels.addList')"
+                @click="openNewList"
+              />
+              <q-btn-dropdown
+                v-if="store.selectedList"
+                dense
+                flat
+                icon="more_vert"
+                auto-close
+              >
+                <q-list>
+                  <q-item
+                    clickable
+                    @click="openRenameList(store.selectedList)"
+                  >
+                    <q-item-section avatar>
+                      <q-icon name="edit" />
+                    </q-item-section>
+                    <q-item-section>{{ t('channels.renameList') }}</q-item-section>
+                  </q-item>
+                  <q-item
+                    clickable
+                    @click="openExport(store.selectedList)"
+                  >
+                    <q-item-section avatar>
+                      <q-icon name="download" />
+                    </q-item-section>
+                    <q-item-section>{{ t('export.title') }}</q-item-section>
+                  </q-item>
+                  <q-item
+                    clickable
+                    @click="removeList(store.selectedList)"
+                  >
+                    <q-item-section avatar>
+                      <q-icon
+                        name="delete"
+                        color="negative"
+                      />
+                    </q-item-section>
+                    <q-item-section class="text-negative">
+                      {{ t('common.delete') }}
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+              </q-btn-dropdown>
             </div>
           </div>
         </template>
@@ -1881,6 +1952,10 @@ const connectorOptions = [
   'Optocore',
   'Network',
 ]
+
+const listOptions = computed(() =>
+  store.lists.map((l) => ({ label: l.name, value: l.id })),
+)
 
 const outputModeOptions = [
   { label: t('channels.outputModeMono'), value: 'mono' },
