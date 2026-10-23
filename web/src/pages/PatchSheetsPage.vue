@@ -264,6 +264,17 @@
               </div>
             </div>
             <div
+              v-if="stageByChannel.get(ch.channel_id)?.length"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('stagePlot.onStage') }}
+              </div>
+              <div class="col">
+                {{ (stageByChannel.get(ch.channel_id) || []).join(', ') }}
+              </div>
+            </div>
+            <div
               v-if="ch.notes"
               class="text-caption"
             >
@@ -412,6 +423,80 @@
             </div>
           </div>
           <q-separator class="q-my-sm" />
+          <div class="row items-center justify-between">
+            <div class="text-subtitle2">
+              {{ t('devices.title') }}
+            </div>
+            <q-btn
+              v-close-popup
+              flat
+              dense
+              icon="add"
+              :label="t('devices.add')"
+              @click="showCreateDevice = !showCreateDevice"
+            />
+          </div>
+          <q-card
+            v-if="showCreateDevice"
+            flat
+            bordered
+            class="q-pa-xs q-mt-xs"
+          >
+            <div class="row q-gutter-sm items-end">
+              <q-input
+                v-model="newDevName"
+                :label="t('devices.name')"
+                dense
+                class="col"
+              />
+              <q-select
+                v-model="newDevType"
+                :options="deviceTypeOptions"
+                :label="t('devices.type')"
+                emit-value
+                map-options
+                dense
+                class="col"
+              />
+              <q-btn
+                color="primary"
+                dense
+                :label="t('devices.createDevice')"
+                :disable="!newDevName.trim()"
+                @click="createDeviceInline"
+              />
+            </div>
+          </q-card>
+          <div
+            v-for="p in activeChannelFull?.patch_points || []"
+            :key="p.id"
+            class="row q-gutter-xs items-center q-mt-xs"
+          >
+            <div class="col-5 text-caption ellipsis">
+              {{ p.name || t('devices.none') }}
+            </div>
+            <q-select
+              :model-value="p.device_id"
+              :options="deviceOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="col"
+              @update:model-value="(v) => assignPoint(p, v)"
+            />
+            <q-select
+              :model-value="p.direction"
+              :options="directionOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="col-3"
+              @update:model-value="(v) => assignDirection(p, v)"
+            />
+          </div>
+          <q-separator class="q-my-sm" />
           <div class="text-subtitle2">
             {{ t('stagePlot.onStage') }}
           </div>
@@ -458,6 +543,29 @@ const error = ref(null)
 const plotElements = ref([])
 const channelDialog = ref(false)
 const activeChannel = ref(null)
+const activeChannelId = ref(null)
+const showCreateDevice = ref(false)
+const newDevName = ref('')
+const newDevType = ref('digital_stagebox')
+
+const DEVICE_TYPES = [
+  'digital_stagebox',
+  'analog_stagebox',
+  'mixer',
+  'split',
+  'network',
+  'direct',
+  'other',
+]
+const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
+  value: v,
+  label: t(`devices.types.${v}`),
+}))
+const directionOptions = [
+  { value: 'in', label: t('devices.directionIn') },
+  { value: 'out', label: t('devices.directionOut') },
+]
+const deviceOptions = computed(() => devicesStore.options)
 
 const typeKey = {
   mixer: 'typeMixer',
@@ -699,9 +807,51 @@ function openStagePlot() {
   )
 }
 
+const activeChannelFull = computed(() => {
+  if (!activeChannelId.value) return null
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      if (ch.channel_id === activeChannelId.value) return ch
+    }
+  }
+  return null
+})
+
+async function reloadData() {
+  const [listsRes, plotRes] = await Promise.all([
+    api.get(`/jobs/${jobId}/channel-lists`),
+    api.get(`/jobs/${jobId}/plot-elements`),
+  ])
+  lists.value = listsRes.data
+  plotElements.value = plotRes.data
+  await devicesStore.fetchDevices(jobId)
+}
+
 function openChannel(row) {
   activeChannel.value = row
+  activeChannelId.value = row.channel_id
   channelDialog.value = true
+}
+
+async function assignPoint(p, deviceId) {
+  await devicesStore.assignPatchPoint(jobId, p, deviceId, p.direction)
+  await reloadData()
+}
+
+async function assignDirection(p, direction) {
+  await devicesStore.assignPatchPoint(jobId, p, p.device_id, direction)
+  await reloadData()
+}
+
+async function createDeviceInline() {
+  if (!newDevName.value.trim()) return
+  await devicesStore.createDevice(jobId, {
+    name: newDevName.value.trim(),
+    device_type: newDevType.value,
+  })
+  newDevName.value = ''
+  showCreateDevice.value = false
+  await reloadData()
 }
 
 const activeChannelStage = computed(() =>

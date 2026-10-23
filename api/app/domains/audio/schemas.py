@@ -77,6 +77,7 @@ class ChannelPatchPointBase(BaseModel):
     patch_label: str | None = None
     notes: str | None = None
     device_id: UUID | None = None
+    direction: str | None = None
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
 
@@ -257,6 +258,10 @@ class AudioDeviceBase(BaseModel):
     device_type: str = "other"
     position: int = 0
     notes: str = ""
+    input_count: int = 0
+    output_count: int = 0
+    input_connector: str = ""
+    output_connector: str = ""
 
 
 class AudioDeviceCreate(AudioDeviceBase):

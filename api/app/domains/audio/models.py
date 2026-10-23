@@ -128,6 +128,10 @@ class AudioDevice(Base):
     device_type: Mapped[str] = mapped_column(String(64), default="other")
     position: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    input_count: Mapped[int] = mapped_column(Integer, default=0)
+    output_count: Mapped[int] = mapped_column(Integer, default=0)
+    input_connector: Mapped[str] = mapped_column(String(64), default="")
+    output_connector: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -187,6 +191,7 @@ class ChannelPatchPoint(Base):
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    direction: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     channel: Mapped[AudioChannelPatch] = relationship(back_populates="patch_points")
     device: Mapped["AudioDevice"] = relationship(back_populates="patch_points")

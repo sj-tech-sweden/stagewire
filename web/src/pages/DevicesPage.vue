@@ -48,6 +48,34 @@
             @click="createDevice"
           />
         </div>
+        <div class="row q-gutter-sm items-end q-mt-sm">
+          <q-input
+            v-model.number="newInputs"
+            type="number"
+            :label="t('devices.inputs')"
+            dense
+            class="col"
+          />
+          <q-input
+            v-model.number="newOutputs"
+            type="number"
+            :label="t('devices.outputs')"
+            dense
+            class="col"
+          />
+          <q-input
+            v-model="newInConnector"
+            :label="t('devices.inputConnector')"
+            dense
+            class="col"
+          />
+          <q-input
+            v-model="newOutConnector"
+            :label="t('devices.outputConnector')"
+            dense
+            class="col"
+          />
+        </div>
       </q-card-section>
     </q-card>
 
@@ -93,6 +121,14 @@
             class="q-ml-sm"
             @click="confirmDelete(device)"
           />
+          <q-btn
+            flat
+            dense
+            round
+            icon="edit"
+            class="q-ml-sm"
+            @click="openEdit(device)"
+          />
         </div>
         <div class="row q-gutter-md q-mt-sm text-caption text-grey-7">
           <div>
@@ -100,6 +136,66 @@
           </div>
           <div>
             {{ t('devices.linkedElements') }}: <b>{{ linkedElementCount(device.id) }}</b>
+          </div>
+        </div>
+        <div
+          v-if="device.input_count || device.output_count"
+          class="q-mt-sm"
+        >
+          <div
+            v-if="device.input_count"
+            class="row items-center q-gutter-sm"
+          >
+            <div
+              class="text-caption text-grey-7"
+              style="min-width: 64px"
+            >
+              {{ t('devices.inputs') }}
+            </div>
+            <q-linear-progress
+              :value="usageIn(device) / device.input_count"
+              color="primary"
+              class="col"
+              style="height: 10px"
+            />
+            <div class="text-caption">
+              {{ usageIn(device) }}/{{ device.input_count }}
+            </div>
+            <q-badge
+              v-if="usageIn(device) >= device.input_count"
+              color="negative"
+            >
+              {{ t('devices.full') }}
+            </q-badge>
+          </div>
+          <div
+            v-if="device.output_count"
+            class="row items-center q-gutter-sm q-mt-xs"
+          >
+            <div
+              class="text-caption text-grey-7"
+              style="min-width: 64px"
+            >
+              {{ t('devices.outputs') }}
+            </div>
+            <q-linear-progress
+              :value="usageOut(device) / device.output_count"
+              color="secondary"
+              class="col"
+              style="height: 10px"
+            />
+            <div class="text-caption">
+              {{ usageOut(device) }}/{{ device.output_count }}
+            </div>
+            <q-badge
+              v-if="usageOut(device) >= device.output_count"
+              color="negative"
+            >
+              {{ t('devices.full') }}
+            </q-badge>
+          </div>
+          <div class="text-caption text-grey-7 q-mt-xs">
+            {{ device.input_connector || '—' }} → {{ device.output_connector || '—' }}
           </div>
         </div>
         <div class="row q-gutter-sm q-mt-sm items-end">
@@ -176,6 +272,78 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="editDialog">
+      <q-card style="min-width: 320px; max-width: 520px">
+        <q-card-section class="text-h6">
+          {{ t('devices.editDevice') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <q-input
+            v-model="editForm.name"
+            :label="t('devices.name')"
+            dense
+          />
+          <q-select
+            v-model="editForm.device_type"
+            :options="deviceTypeOptions"
+            :label="t('devices.type')"
+            emit-value
+            map-options
+            dense
+          />
+          <div class="row q-gutter-sm items-end">
+            <q-input
+              v-model.number="editForm.input_count"
+              type="number"
+              :label="t('devices.inputs')"
+              dense
+              class="col"
+            />
+            <q-input
+              v-model.number="editForm.output_count"
+              type="number"
+              :label="t('devices.outputs')"
+              dense
+              class="col"
+            />
+          </div>
+          <div class="row q-gutter-sm items-end">
+            <q-input
+              v-model="editForm.input_connector"
+              :label="t('devices.inputConnector')"
+              dense
+              class="col"
+            />
+            <q-input
+              v-model="editForm.output_connector"
+              :label="t('devices.outputConnector')"
+              dense
+              class="col"
+            />
+          </div>
+          <q-input
+            v-model="editForm.notes"
+            :label="t('channels.fieldNotes')"
+            dense
+            type="textarea"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            flat
+            color="primary"
+            :label="t('app.actions.save')"
+            @click="saveEdit"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -208,11 +376,26 @@ const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
 
 const newName = ref('');
 const newType = ref('digital_stagebox');
+const newInputs = ref(0);
+const newOutputs = ref(0);
+const newInConnector = ref('');
+const newOutConnector = ref('');
 const creating = ref(false);
 const loading = ref(false);
 const autoAssigning = ref(null);
 const deleteDialog = ref(false);
 const pendingDelete = ref(null);
+const editDialog = ref(false);
+const editTarget = ref(null);
+const editForm = reactive({
+  name: '',
+  device_type: 'other',
+  input_count: 0,
+  output_count: 0,
+  input_connector: '',
+  output_connector: '',
+  notes: '',
+});
 const assignPick = reactive({});
 const lists = ref([]);
 const plotElements = ref([]);
@@ -230,6 +413,7 @@ const allPoints = computed(() => {
           channel_number: ch.channel_number,
           listName: list.name,
           device_id: p.device_id || null,
+          direction: p.direction || null,
         });
       }
     }
@@ -250,6 +434,30 @@ function pointsForDevice(deviceId) {
 }
 function linkedElementCount(deviceId) {
   return plotElements.value.filter((el) => el.linked_device_id === deviceId).length;
+}
+function usageIn(device) {
+  return pointsForDevice(device.id).filter((p) => p.direction === 'in').length;
+}
+function usageOut(device) {
+  return pointsForDevice(device.id).filter((p) => p.direction === 'out').length;
+}
+function openEdit(device) {
+  editTarget.value = device;
+  editForm.name = device.name || '';
+  editForm.device_type = device.device_type || 'other';
+  editForm.input_count = device.input_count || 0;
+  editForm.output_count = device.output_count || 0;
+  editForm.input_connector = device.input_connector || '';
+  editForm.output_connector = device.output_connector || '';
+  editForm.notes = device.notes || '';
+  editDialog.value = true;
+}
+async function saveEdit() {
+  if (!editTarget.value) return;
+  await devicesStore.updateDevice(jobId, editTarget.value.id, { ...editForm });
+  editDialog.value = false;
+  editTarget.value = null;
+  await refresh();
 }
 
 async function loadLists() {
@@ -280,8 +488,16 @@ async function createDevice() {
     await devicesStore.createDevice(jobId, {
       name: newName.value.trim(),
       device_type: newType.value,
+      input_count: Number(newInputs.value) || 0,
+      output_count: Number(newOutputs.value) || 0,
+      input_connector: newInConnector.value,
+      output_connector: newOutConnector.value,
     });
     newName.value = '';
+    newInputs.value = 0;
+    newOutputs.value = 0;
+    newInConnector.value = '';
+    newOutConnector.value = '';
     await refresh();
   } finally {
     creating.value = false;

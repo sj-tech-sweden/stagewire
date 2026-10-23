@@ -152,17 +152,6 @@
               @update:model-value="commitLink"
             />
             <q-select
-              v-model="draft.linked_patch_point_id"
-              :label="t('stagePlot.linkPatchPoint')"
-              :options="patchPointOptions"
-              emit-value
-              map-options
-              clearable
-              dense
-              class="q-mt-sm"
-              @update:model-value="commitPatchPoint"
-            />
-            <q-select
               v-model="draft.linked_device_id"
               :label="t('stagePlot.linkDevice')"
               :options="deviceOptions"
@@ -394,7 +383,6 @@ const draft = ref({
   position_x: 0,
   position_y: 0,
   linked_channel_id: null,
-  linked_patch_point_id: null,
   linked_device_id: null,
   width_cm: 60,
   height_cm: 60,
@@ -418,21 +406,6 @@ const channelOptions = computed(() => {
       const bits = [`Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
       if (ch.input_type) bits.push(ch.input_type);
       opts.push({ value: ch.id, label: bits.join(' · ') });
-    }
-  }
-  return opts;
-});
-const patchPointOptions = computed(() => {
-  const opts = [];
-  for (const list of channelLists.value) {
-    for (const ch of list.channels || []) {
-      for (const p of ch.patch_points || []) {
-        const name = p.name || patchPointTypeLabel(p.point_type);
-        opts.push({
-          value: p.id,
-          label: `${name} · Ch ${ch.channel_number}`,
-        });
-      }
     }
   }
   return opts;
@@ -666,10 +639,6 @@ function linkedSummary(el) {
     const ch = findChannel(el.linked_channel_id);
     if (ch) parts.push(`Ch ${ch.channel_number}`);
   }
-  if (el.linked_patch_point_id) {
-    const name = pointNameMap.value[el.linked_patch_point_id];
-    if (name) parts.push(name);
-  }
   return parts.join(' · ');
 }
 function linkedTextConfig(el) {
@@ -732,7 +701,6 @@ function select(id) {
       position_x: el.position_x,
       position_y: el.position_y,
       linked_channel_id: el.linked_channel_id || null,
-      linked_patch_point_id: el.linked_patch_point_id || null,
       linked_device_id: el.linked_device_id || null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
@@ -800,15 +768,6 @@ function commitDraft() {
 function commitLink(val) {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { linked_channel_id: val || null });
-}
-function commitPatchPoint(val) {
-  if (!selected.value) return;
-  const payload = { linked_patch_point_id: val || null };
-  if (val && pointChannelMap.value[val]) {
-    payload.linked_channel_id = pointChannelMap.value[val];
-    draft.value.linked_channel_id = pointChannelMap.value[val];
-  }
-  store.updateElement(jobId, selected.value.id, payload);
 }
 function commitDevice(val) {
   if (!selected.value) return;
