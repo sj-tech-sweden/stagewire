@@ -129,6 +129,16 @@
               class="q-mr-sm"
             />
             <span class="text-subtitle2">{{ chain.label }}</span>
+            <q-btn
+              dense
+              flat
+              round
+              size="sm"
+              icon="map"
+              class="q-ml-sm"
+              :aria-label="t('stagePlot.highlightChannel')"
+              @click="highlightChannelOnStage(chain.channelId)"
+            />
           </div>
           <div class="flow-tree-wrap q-mt-xs">
             <div
@@ -778,12 +788,14 @@ const flowChains = computed(() => {
       chains.push({
         label: row.source_label || `${t('channels.fieldChannelNumber')} ${row.channel_number}`,
         kind: 'input',
+        channelId: row.channel_id,
         tree: buildInputTree(full),
       })
     } else {
       chains.push({
         label: row.output_name || full.name,
         kind: 'output',
+        channelId: row.channel_id,
         tree: buildOutputTree(full),
       })
     }
@@ -829,6 +841,11 @@ function openStagePlot() {
   )
 }
 
+function highlightChannelOnStage(channelId) {
+  if (!channelId) return
+  router.push(`/jobs/${jobId}/stage-plot?highlight=channel:${channelId}`)
+}
+
 const activeChannelFull = computed(() => {
   if (!activeChannelId.value) return null
   for (const list of lists.value) {
@@ -840,13 +857,18 @@ const activeChannelFull = computed(() => {
 })
 
 async function reloadData() {
-  const [listsRes, plotRes] = await Promise.all([
+  const [listsRes, plotRes, sheetsRes] = await Promise.all([
     api.get(`/jobs/${jobId}/channel-lists`),
     api.get(`/jobs/${jobId}/plot-elements`),
+    api.get(`/jobs/${jobId}/patch-sheets`),
   ])
   lists.value = listsRes.data
   plotElements.value = plotRes.data
+  sheets.value = sheetsRes.data
   await devicesStore.fetchDevices(jobId)
+  if (!selected.value && sheets.value.length) {
+    selected.value = sheets.value[0].name
+  }
 }
 
 function openChannel(row) {

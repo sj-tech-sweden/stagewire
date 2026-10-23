@@ -907,6 +907,20 @@
                     clearable
                     style="width: 120px"
                   />
+                  <q-select
+                    v-model="pt.device_id"
+                    :options="deviceOptions"
+                    :label="t('channels.patchPoint.device')"
+                    :hint="t('channels.patchPoint.deviceHint')"
+                    emit-value
+                    map-options
+                    use-input
+                    clearable
+                    dense
+                    class="col"
+                    style="min-width: 160px"
+                    @new-value="(val, done) => onCreateDevicePoint(pt, val, done)"
+                  />
                   <q-input
                     v-model="pt.patch_label"
                     :label="t('channels.patchPoint.label')"
@@ -1768,6 +1782,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { api } from '@/boot/api'
 import { useChannelsStore } from '@/stores/channels'
 import { useAuthStore } from '@/stores/auth'
+import { useDevicesStore } from '@/stores/devices'
 import { useStockwireStore } from '@/stores/stockwire'
 import DateTimePicker from '@/components/DateTimePicker.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
@@ -1877,6 +1892,9 @@ function outputCellDisplay(col, point) {
 
 const connectorOptions = CONNECTOR_OPTIONS
 
+const devicesStore = useDevicesStore()
+const deviceOptions = computed(() => devicesStore.options)
+
 const outputModeOptions = [
   { label: t('channels.outputModeMono'), value: 'mono' },
   { label: t('channels.outputModeStereo'), value: 'stereo' },
@@ -1966,8 +1984,22 @@ function addPatchPoint() {
     connector: form.connector || '',
     patch_label: form.channel_number ? String(form.channel_number) : '',
     notes: '',
+    device_id: null,
     stockwire_product: null,
   })
+}
+
+async function onCreateDevicePoint(pt, val, done) {
+  const name = (val || '').trim()
+  if (name) {
+    const dev = await devicesStore.createDevice(route.params.jobId, {
+      name,
+      device_type: 'other',
+    })
+    await devicesStore.fetchDevices(route.params.jobId)
+    pt.device_id = dev.id
+  }
+  done()
 }
 
 function ensureDefaultMixerPoint() {
@@ -2036,6 +2068,7 @@ function openChannelDialog(channel = null) {
   } else {
     patchPoints.value = []
   }
+  devicesStore.fetchDevices(route.params.jobId)
   ensureDefaultMixerPoint()
   patchOriginalIds.value = new Set(
     patchPoints.value.filter((p) => p.id).map((p) => p.id),
@@ -2103,6 +2136,7 @@ async function saveChannel() {
       connector: p.connector,
       patch_label: p.patch_label,
       notes: p.notes,
+      device_id: p.device_id || null,
       stockwire_product_id: p.stockwire_product?.id || null,
       stockwire_product_name: p.stockwire_product?.name || null,
     }

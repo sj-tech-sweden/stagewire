@@ -181,6 +181,8 @@ export default {
       type: 'Typ',
       name: 'Namn',
       nameHint: 'Låda eller steg i kedjan, t.ex. Stagebox A',
+      device: 'Enhet',
+      deviceHint: 'Enheten som denna koppling går via',
       connector: 'Kontakt',
       connectorHint: 'Kontakttyp i denna låda (XLR, TRS…)',
       label: 'Port',
@@ -430,6 +432,7 @@ export default {
     viewOnStagePlot: 'Visa på scenkarta',
     highlightActive: 'Markerar objekt länkade till {name}',
     highlightClear: 'Rensa',
+    highlightChannel: 'Markera på scenkarta',
   },
   devices: {
     title: 'Enheter',

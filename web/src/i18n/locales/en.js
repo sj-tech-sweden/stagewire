@@ -181,6 +181,8 @@ export default {
       type: 'Type',
       name: 'Name',
       nameHint: 'Box or stage in the chain, e.g. Stagebox A',
+      device: 'Device',
+      deviceHint: 'The device this connection runs through',
       connector: 'Connector',
       connectorHint: 'Plug type used at this box (XLR, TRS…)',
       label: 'Port',
@@ -430,6 +432,7 @@ export default {
     viewOnStagePlot: 'View on stage plot',
     highlightActive: 'Highlighting items linked to {name}',
     highlightClear: 'Clear',
+    highlightChannel: 'Highlight on stage plot',
   },
   devices: {
     title: 'Devices',
