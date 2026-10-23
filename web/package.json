@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "quasar dev",
     "build": "quasar build",
-    "lint": "eslint . --ext .vue,.js,.cjs,.mjs",
+    "lint": "eslint .",
     "format": "prettier --write \"**/*.{js,vue,css,scss,html,md}\"",
     "e2e": "playwright test"
   },
@@ -26,9 +26,11 @@
   "devDependencies": {
     "@quasar/app-vite": "^3.10.3",
     "@playwright/test": "^1.48.0",
-    "eslint": "^8.57.1",
-    "eslint-plugin-vue": "^9.28.0",
-    "prettier": "^3.3.3"
+    "eslint": "^10.0.0",
+    "eslint-plugin-vue": "^10.0.0",
+    "globals": "^13.24.0",
+    "prettier": "^3.3.3",
+    "vue-eslint-parser": "^10.3.0"
   },
   "engines": {
     "node": ">=20",
