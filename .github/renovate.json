@@ -35,6 +35,16 @@
         "ghcr.io/sj-tech-sweden/stagewire-{/,}**"
       ],
       "sourceUrl": "https://github.com/sj-tech-sweden/stagewire"
+    },
+    {
+      "groupName": "frontend dependencies",
+      "description": "Group all npm/frontend dependency updates into a single PR",
+      "matchManagers": ["npm"]
+    },
+    {
+      "matchPackageNames": ["pinia"],
+      "allowedVersions": "<3.0.0",
+      "description": "Keep pinia on v2 — @quasar/app-vite@1.x peers pinia ^2, so a v4 major fails npm ERESOLVE when regenerating the lockfile"
     }
   ]
 }
