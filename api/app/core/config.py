@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8010
 
+    # Echo SQL to the logs. Off by default; enable for local debugging only
+    # (it is very noisy in the container logs otherwise).
+    sql_echo: bool = False
+
     database_url: str = "postgresql+asyncpg://stagewire:stagewire@localhost:5433/stagewire"
     redis_url: str = "redis://localhost:6380/0"
 
