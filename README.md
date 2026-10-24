@@ -106,6 +106,20 @@ SQLite test suite.
 - Application data (**PostgreSQL**) and cache/sessions (**Valkey**) are likewise
   persisted through the `stagewire-db-data` and `stagewire-valkey-data` volumes.
 
+## Venues and speaker coverage
+
+- **Venues** are a shared library (`/venues`): a venue has a size, a stage rectangle
+  inside it and an optional floor-plan image. Assigning one to a job copies those
+  values onto the job, so later edits to the venue do not change jobs by accident.
+  Use the venue's "update jobs" actions to push changes to all jobs or to jobs created
+  since the last push.
+- The stage plot draws the venue as its canvas. The stage can be dragged within the
+  venue, and elements and cables stay positioned relative to the stage.
+- Speakers (`speaker_main`, `speaker_sub`, `speaker_delay`, and `monitor`) carry a
+  horizontal coverage angle and throw distance, and can link to an output patch point.
+- **Show coverage** on the stage plot draws each speaker's sector and a covered/gap
+  overlay. The grid comes from `GET /api/v1/jobs/{job_id}/coverage?cell_cm=25`.
+
 ## Feature phases
 
 - **Phase 1 (this scaffold)**: Audio engine — input list / patch sheet, stage-plot
