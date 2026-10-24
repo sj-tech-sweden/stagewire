@@ -66,6 +66,20 @@ stockwire-rental (8000 / 9000 / 5432 / 6379).
   versions and changelogs from them.
 - Do not commit secrets, `.env`, or generated lockfile diffs that leak credentials.
 
+### 5a. Always run the linters before finishing
+
+Before declaring any backend change done (and before committing), an LLM agent MUST
+run the linters and fix every issue it reports — do not leave the tree red:
+
+- Backend: `cd api && ./.venv/bin/ruff check app tests` and
+  `./.venv/bin/ruff format --check app tests` (auto-fix with
+  `./.venv/bin/ruff format app tests` and `./.venv/bin/ruff check --fix app tests`).
+- Frontend: `cd web && ./node_modules/.bin/eslint .` (and the Quasar build for
+  type/template errors).
+- Treat `ruff format --check` failures as errors: a file "would be reformatted" means
+  you must reformat it. CI fails on any lint/format error, so a clean local run is the
+  bar for "done".
+
 ## 6. Testing
 
 - Backend: `pytest` under `api/tests/`. Each domain router gets at least one happy-path
