@@ -87,6 +87,22 @@ run the linters and fix every issue it reports — do not leave the tree red:
 - Frontend: component tests where practical.
 - CI runs lint + tests + image build on every PR (see `.github/workflows/ci.yml`).
 
+### 6a. Tests are mandatory for every edit
+
+An LLM agent MUST update or create a test for every behaviour-changing edit it makes —
+this is not optional. The tests are the regression guard for the agentic workflow
+itself: if a later change breaks something, the suite is what catches it.
+
+- If a test already covers the changed code path, extend it (add an assertion, a new
+  case) so the new behaviour is actually pinned down.
+- If no test exists for the area you touched, create one: a `pytest` case for backend
+  router/service changes, or a Playwright spec under `web/e2e/` for frontend flows.
+- For bug fixes, add a test that fails before the fix and passes after (a regression
+  test), so the bug cannot silently return.
+- Do not mark a task done until the relevant test exists and passes locally. If the
+  full e2e/Docker stack cannot run in the current environment, say so explicitly and
+  still land the test so CI exercises it.
+
 ## 6b. Database migrations (Alembic)
 
 Schema is defined in SQLAlchemy `Mapped` models under `app/domains/<domain>/models.py`
@@ -127,8 +143,9 @@ When implementing a later phase, create its `models.py`/`schemas.py`/`router.py`
 1. Read this file and the relevant domain before changing anything.
 2. If scope/behaviour is ambiguous → ask (see rule 0).
 3. Make the minimal change that satisfies the request; match existing patterns.
-4. Run the project's lint/test commands before declaring done.
-5. Never expand scope beyond what was asked without checking first.
+4. Update or create a test for the change (see rule 6a) — tests are mandatory, not optional.
+5. Run the project's lint/test commands before declaring done.
+6. Never expand scope beyond what was asked without checking first.
 
 ## 9. Shared design system (with stockwire-rental)
 
