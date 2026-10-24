@@ -79,6 +79,51 @@
             <div class="text-caption text-grey-7 q-mt-xs">
               {{ t('stagePlot.stageUnitsHint') }}
             </div>
+            <div class="text-subtitle2 q-mt-md">
+              {{ t('stagePlot.venueSize') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="venueW"
+                type="number"
+                :label="t('stagePlot.venueWidth')"
+                dense
+                class="col"
+                @change="saveVenueSize"
+              />
+              <q-input
+                v-model.number="venueH"
+                type="number"
+                :label="t('stagePlot.venueHeight')"
+                dense
+                class="col"
+                @change="saveVenueSize"
+              />
+            </div>
+            <div class="text-subtitle2 q-mt-sm">
+              {{ t('stagePlot.stagePosition') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="stageX"
+                type="number"
+                :label="t('stagePlot.stageX')"
+                dense
+                class="col"
+                @change="saveStagePosition"
+              />
+              <q-input
+                v-model.number="stageY"
+                type="number"
+                :label="t('stagePlot.stageY')"
+                dense
+                class="col"
+                @change="saveStagePosition"
+              />
+            </div>
+            <div class="text-caption text-grey-7 q-mt-xs">
+              {{ t('stagePlot.venueHint') }}
+            </div>
           </q-card-section>
         </q-card>
 
@@ -108,7 +153,7 @@
                     :style="{ color: def.color }"
                   />
                 </q-item-section>
-                <q-item-section>{{ def.label }}</q-item-section>
+                <q-item-section>{{ paletteLabel(def) }}</q-item-section>
               </q-item>
               <q-item
                 v-ripple
@@ -260,6 +305,43 @@
               class="q-mt-sm"
               @update:model-value="commitRotation"
             />
+            <div
+              v-if="isSpeakerElement(selected)"
+              class="q-mt-sm"
+            >
+              <div class="text-subtitle2">
+                {{ t('stagePlot.speakerSection') }}
+              </div>
+              <div class="row q-gutter-sm q-mt-xs">
+                <q-input
+                  v-model.number="draft.coverage_angle_h"
+                  type="number"
+                  :label="t('stagePlot.coverageAngle')"
+                  dense
+                  class="col"
+                  @update:model-value="commitCoverage"
+                />
+                <q-input
+                  v-model.number="draft.coverage_distance_m"
+                  type="number"
+                  :label="t('stagePlot.coverageDistance')"
+                  dense
+                  class="col"
+                  @update:model-value="commitCoverage"
+                />
+              </div>
+              <q-select
+                v-model="draft.linked_output_point_id"
+                :label="t('stagePlot.linkOutput')"
+                :options="outputPointOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="q-mt-sm"
+                @update:model-value="commitOutputPoint"
+              />
+            </div>
             <div class="row q-gutter-sm q-mt-sm">
               <q-input
                 v-model.number="draft.position_x"
@@ -328,6 +410,24 @@
             <div class="text-caption text-grey-7">
               {{ t('stagePlot.addHint') }}
             </div>
+            <div class="row items-center q-gutter-sm q-mt-xs">
+              <q-toggle
+                v-model="showCoverage"
+                :label="t('stagePlot.showCoverage')"
+              />
+              <div
+                v-if="showCoverage && !hasVenue"
+                class="text-caption text-warning"
+              >
+                {{ t('stagePlot.coverageNoVenue') }}
+              </div>
+              <div
+                v-else-if="showCoverage && coverageLabel"
+                class="text-caption"
+              >
+                {{ coverageLabel }}
+              </div>
+            </div>
             <div
               v-if="store.loading"
               class="q-my-md"
@@ -341,19 +441,28 @@
               {{ t('stagePlot.empty') }}
             </div>
             <v-stage
-              v-else
+              v-if="!store.loading"
               ref="stageRef"
               :config="stageConfig"
               @click="onStageClick"
               @tap="onStageClick"
             >
               <v-layer>
-                <v-rect :config="stageBg" />
+                <v-rect :config="venueFrameConfig" />
+                <v-image
+                  v-if="bgImage"
+                  :config="bgConfig"
+                />
                 <v-line
                   v-for="(g, i) in gridLines"
                   :key="'g' + i"
                   :config="g"
                 />
+                <v-image
+                  v-if="coverageImage"
+                  :config="coverageConfig"
+                />
+                <v-rect :config="stageBg" />
                 <v-line
                   v-for="w in cablePlan.cableways"
                   :key="'w' + w.id"
@@ -378,6 +487,10 @@
                   :key="el.id"
                   :config="groupConfig(el)"
                 >
+                  <v-wedge
+                    v-if="showCoverage && sectorFor(el)"
+                    :config="wedgeConfig(el)"
+                  />
                   <v-rect :config="rectConfig(el)" />
                   <v-image
                     v-if="imageFor(el)"
@@ -661,13 +774,55 @@ const palette = {
   performer: { label: 'Performer', icon: 'person', color: '#35A853', w: 60, h: 60 },
   instrument: { label: 'Instrument', icon: 'music_note', color: '#26A69A', w: 90, h: 60 },
   microphone: { label: 'Microphone', icon: 'mic', color: '#AB47BC', w: 26, h: 26 },
-  speaker: { label: 'Speaker', icon: 'volume_up', color: '#FF7043', w: 42, h: 72 },
-  monitor: { label: 'Monitor', icon: 'headphones', color: '#26C6DA', w: 46, h: 36 },
+  speaker_main: {
+    labelKey: 'stagePlot.types.speakerMain',
+    icon: 'volume_up',
+    color: '#FF7043',
+    w: 42,
+    h: 72,
+    coverageAngle: 90,
+    coverageDistance: 30,
+  },
+  speaker_sub: {
+    labelKey: 'stagePlot.types.speakerSub',
+    icon: 'graphic_eq',
+    color: '#F4511E',
+    w: 60,
+    h: 60,
+    coverageAngle: 360,
+    coverageDistance: 15,
+  },
+  speaker_delay: {
+    labelKey: 'stagePlot.types.speakerDelay',
+    icon: 'speaker',
+    color: '#FFA726',
+    w: 42,
+    h: 60,
+    coverageAngle: 60,
+    coverageDistance: 40,
+  },
+  monitor: {
+    label: 'Monitor',
+    icon: 'headphones',
+    color: '#26C6DA',
+    w: 46,
+    h: 36,
+    coverageAngle: 60,
+    coverageDistance: 8,
+  },
   di: { label: 'DI', icon: 'crop_square', color: '#5C6BC0', w: 24, h: 18 },
   multicore: { label: 'Multicore', icon: 'cable', color: '#8D6E63', w: 32, h: 120 },
   dais: { label: 'Dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
 };
 const CUSTOM_DEF = { label: 'Custom', icon: 'add', color: '#90A4AE', w: 60, h: 60 };
+const SPEAKER_TYPES = new Set(['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay', 'monitor']);
+const LEGACY_TYPE = { speaker: 'speaker_main' };
+function paletteLabel(def) {
+  return def.labelKey ? t(def.labelKey) : def.label;
+}
+function isSpeakerElement(el) {
+  return !!el && SPEAKER_TYPES.has(el.element_type);
+}
 
 const pointTypeKey = {
   mixer: 'typeMixer',
@@ -688,7 +843,7 @@ function patchPointTypeLabel(pt) {
 }
 
 function defFor(type) {
-  return palette[type] || CUSTOM_DEF;
+  return palette[type] || palette[LEGACY_TYPE[type]] || CUSTOM_DEF;
 }
 
 const scale = ref(0.7);
@@ -707,17 +862,33 @@ const draft = ref({
   position_y: 0,
   linked_channel_id: null,
   linked_device_id: null,
+  linked_output_point_id: null,
   width_cm: 60,
   height_cm: 60,
   image_url: '',
+  coverage_angle_h: 0,
+  coverage_distance_m: 0,
 });
 
 const stageW = ref(DEFAULT_W);
 const stageH = ref(DEFAULT_H);
+const stageX = ref(0);
+const stageY = ref(0);
+const venueW = ref(0);
+const venueH = ref(0);
 const job = ref(null);
 const channelLists = ref([]);
 const imageCache = ref({});
+const bgImage = ref(null);
 const uploading = ref(false);
+const showCoverage = ref(false);
+const coverage = ref(null);
+const coverageImage = ref(null);
+let coverageTimer = null;
+
+const hasVenue = computed(() => venueW.value > 0 && venueH.value > 0);
+const canvasW = computed(() => (hasVenue.value ? venueW.value : stageX.value + stageW.value));
+const canvasH = computed(() => (hasVenue.value ? venueH.value : stageY.value + stageH.value));
 
 const pxPerCm = computed(() => scale.value);
 
@@ -868,23 +1039,52 @@ function clearHighlight() {
 const xLabel = computed(() => `X (${unit.value})`);
 const yLabel = computed(() => `Y (${unit.value})`);
 const stageConfig = computed(() => ({
-  width: stageW.value * pxPerCm.value,
-  height: stageH.value * pxPerCm.value,
+  width: canvasW.value * pxPerCm.value,
+  height: canvasH.value * pxPerCm.value,
 }));
-const stageBg = computed(() => ({
+const venueFrameConfig = computed(() => ({
   x: 0,
   y: 0,
-  width: stageW.value * pxPerCm.value,
-  height: stageH.value * pxPerCm.value,
-  fill: '#0f161a',
-  stroke: '#37474f',
+  width: canvasW.value * pxPerCm.value,
+  height: canvasH.value * pxPerCm.value,
+  fill: bgImage.value ? 'transparent' : '#0b1013',
+  stroke: '#455a64',
   strokeWidth: 2,
   listening: false,
 }));
+const bgConfig = computed(() => ({
+  image: bgImage.value,
+  x: 0,
+  y: 0,
+  width: canvasW.value * pxPerCm.value,
+  height: canvasH.value * pxPerCm.value,
+  listening: false,
+}));
+const coverageConfig = computed(() => ({
+  image: coverageImage.value,
+  x: 0,
+  y: 0,
+  width: canvasW.value * pxPerCm.value,
+  height: canvasH.value * pxPerCm.value,
+  listening: false,
+}));
+const stageBg = computed(() => ({
+  x: stageX.value * pxPerCm.value,
+  y: stageY.value * pxPerCm.value,
+  width: stageW.value * pxPerCm.value,
+  height: stageH.value * pxPerCm.value,
+  fill: '#0f161a',
+  opacity: bgImage.value ? 0.6 : 1,
+  stroke: '#37474f',
+  strokeWidth: 2,
+  draggable: true,
+  name: 'stage-area',
+  ondragend: onStageDragEnd,
+}));
 const gridLines = computed(() => {
   const lines = [];
-  const w = stageW.value * pxPerCm.value;
-  const h = stageH.value * pxPerCm.value;
+  const w = canvasW.value * pxPerCm.value;
+  const h = canvasH.value * pxPerCm.value;
   const step = GRID_CM * pxPerCm.value;
   for (let x = step; x < w; x += step) {
     lines.push({ points: [x, 0, x, h], stroke: '#1c272d', strokeWidth: 1, listening: false });
@@ -907,8 +1107,8 @@ function round1(n) {
 function groupConfig(el) {
   return {
     id: el.id,
-    x: el.position_x * pxPerCm.value,
-    y: el.position_y * pxPerCm.value,
+    x: (stageX.value + el.position_x) * pxPerCm.value,
+    y: (stageY.value + el.position_y) * pxPerCm.value,
     rotation: el.rotation,
     draggable: true,
     onclick: () => select(el.id),
@@ -944,7 +1144,7 @@ function labelConfig(el) {
     // Photo fills the box; show the label below it so it stays readable.
     const labelFont = Math.max(9, 10 * s);
     return {
-      text: el.label || def.label,
+      text: el.label || paletteLabel(def),
       x: 0,
       y: el.height_cm * s + 2,
       width: el.width_cm * s,
@@ -955,7 +1155,7 @@ function labelConfig(el) {
     };
   }
   return {
-    text: el.label || def.label,
+    text: el.label || paletteLabel(def),
     x: 0,
     y: 0,
     width: el.width_cm * s,
@@ -970,6 +1170,41 @@ function labelConfig(el) {
 function imageFor(el) {
   return el.image_url ? imageCache.value[el.id] || null : null;
 }
+function sectorFor(el) {
+  return isSpeakerElement(el) && el.coverage_angle_h > 0 && el.coverage_distance_m > 0;
+}
+function wedgeConfig(el) {
+  const s = pxPerCm.value;
+  const angle = Math.min(el.coverage_angle_h, 360);
+  return {
+    x: (el.width_cm / 2) * s,
+    y: (el.height_cm / 2) * s,
+    radius: el.coverage_distance_m * 100 * s,
+    angle,
+    // Konva starts a wedge at its rotation and sweeps clockwise; face the wedge up
+    // (-90°, the element's front at rotation 0) and centre it on that heading.
+    rotation: -90 - angle / 2,
+    fill: 'rgba(255, 183, 77, 0.14)',
+    stroke: 'rgba(255, 183, 77, 0.55)',
+    strokeWidth: 1,
+    listening: false,
+  };
+}
+const outputPointOptions = computed(() => {
+  const opts = [];
+  for (const list of channelLists.value) {
+    for (const out of list.outputs || []) {
+      for (const pt of out.points || []) {
+        const bits = [out.name || 'Output'];
+        if (pt.patch_label) bits.push(pt.patch_label);
+        else bits.push(patchPointTypeLabel(pt.point_type));
+        if (pt.device_id && deviceNameMap.value[pt.device_id]) bits.push(deviceNameMap.value[pt.device_id]);
+        opts.push({ value: pt.id, label: bits.join(' · ') });
+      }
+    }
+  }
+  return opts;
+});
 function findChannel(channelId) {
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
@@ -1015,6 +1250,17 @@ function imageConfig(el) {
     listening: false,
   };
 }
+function loadBgImage(url) {
+  if (!url) {
+    bgImage.value = null;
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    bgImage.value = img;
+  };
+  img.src = fullImageUrl(url);
+}
 function loadImages(els) {
   for (const el of els) {
     if (!el.image_url) continue;
@@ -1053,9 +1299,12 @@ function select(id) {
       position_y: el.position_y,
       linked_channel_id: el.linked_channel_id || null,
       linked_device_id: el.linked_device_id || null,
+      linked_output_point_id: el.linked_output_point_id || null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
       image_url: el.image_url || '',
+      coverage_angle_h: el.coverage_angle_h || 0,
+      coverage_distance_m: el.coverage_distance_m || 0,
     };
   }
   updateTransformer();
@@ -1079,13 +1328,22 @@ function onStageClick(e) {
 
 function onDragEnd(el, e) {
   const node = e.target;
-  const x = round1(node.x() / pxPerCm.value);
-  const y = round1(node.y() / pxPerCm.value);
+  const x = round1(node.x() / pxPerCm.value - stageX.value);
+  const y = round1(node.y() / pxPerCm.value - stageY.value);
   store.updateElement(jobId, el.id, { position_x: x, position_y: y });
   if (selectedId.value === el.id) {
     draft.value.position_x = x;
     draft.value.position_y = y;
   }
+}
+
+function onStageDragEnd(e) {
+  const node = e.target;
+  const x = round1(node.x() / pxPerCm.value);
+  const y = round1(node.y() / pxPerCm.value);
+  stageX.value = x;
+  stageY.value = y;
+  saveStagePosition();
 }
 
 function onTransformEnd(el, e) {
@@ -1101,10 +1359,14 @@ function addElement(type) {
     position_x: stageW.value / 2 - def.w / 2,
     position_y: stageH.value / 2 - def.h / 2,
     rotation: 0,
-    label: def.label,
+    label: paletteLabel(def),
     width_cm: def.w,
     height_cm: def.h,
   };
+  if (def.coverageAngle) {
+    payload.coverage_angle_h = def.coverageAngle;
+    payload.coverage_distance_m = def.coverageDistance;
+  }
   store.createElement(jobId, payload).then((created) => select(created.id));
 }
 
@@ -1145,6 +1407,17 @@ function commitSize() {
     width_cm: Number(draft.value.width_cm) || 0,
     height_cm: Number(draft.value.height_cm) || 0,
   });
+}
+function commitCoverage() {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, {
+    coverage_angle_h: Number(draft.value.coverage_angle_h) || 0,
+    coverage_distance_m: Number(draft.value.coverage_distance_m) || 0,
+  });
+}
+function commitOutputPoint(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_output_point_id: val || null });
 }
 function commitImage() {
   if (!selected.value) return;
@@ -1200,8 +1473,8 @@ function onStageDrop(e) {
   let cmy = null;
   if (stage) {
     const rect = stage.container().getBoundingClientRect();
-    cmx = (e.clientX - rect.left) / pxPerCm.value;
-    cmy = (e.clientY - rect.top) / pxPerCm.value;
+    cmx = (e.clientX - rect.left) / pxPerCm.value - stageX.value;
+    cmy = (e.clientY - rect.top) / pxPerCm.value - stageY.value;
   }
   let targetId = null;
   if (cmx !== null) {
@@ -1251,16 +1524,87 @@ async function saveStage() {
   }
 }
 
+async function saveStagePosition() {
+  try {
+    const { data } = await api.patch(`/jobs/${jobId}`, {
+      stage_x_cm: stageX.value,
+      stage_y_cm: stageY.value,
+    });
+    job.value = data;
+  } catch (err) {
+    console.error('Failed to save stage position', err);
+  }
+}
+
+async function saveVenueSize() {
+  try {
+    const { data } = await api.patch(`/jobs/${jobId}`, {
+      venue_width_cm: venueW.value,
+      venue_height_cm: venueH.value,
+    });
+    job.value = data;
+  } catch (err) {
+    console.error('Failed to save venue size', err);
+  }
+}
+
 async function loadJob() {
   try {
     const { data } = await api.get(`/jobs/${jobId}`);
     job.value = data;
     if (data.stage_width_cm && data.stage_width_cm > 0) stageW.value = data.stage_width_cm;
     if (data.stage_height_cm && data.stage_height_cm > 0) stageH.value = data.stage_height_cm;
+    stageX.value = data.stage_x_cm || 0;
+    stageY.value = data.stage_y_cm || 0;
+    venueW.value = data.venue_width_cm || 0;
+    venueH.value = data.venue_height_cm || 0;
+    loadBgImage(data.venue_background_image_url);
   } catch (err) {
     console.error('Failed to load job', err);
   }
 }
+
+async function fetchCoverage() {
+  if (!showCoverage.value || !hasVenue.value) {
+    coverage.value = null;
+    return;
+  }
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/coverage`, { params: { cell_cm: 25 } });
+    coverage.value = data;
+  } catch (err) {
+    console.error('Failed to load coverage', err);
+  }
+}
+
+function scheduleCoverage() {
+  clearTimeout(coverageTimer);
+  coverageTimer = setTimeout(fetchCoverage, 250);
+}
+
+function buildCoverageCanvas(data) {
+  const canvas = document.createElement('canvas');
+  canvas.width = data.cols;
+  canvas.height = data.rows;
+  const ctx = canvas.getContext('2d');
+  const pixels = ctx.createImageData(data.cols, data.rows);
+  data.grid.forEach((line, r) => {
+    for (let c = 0; c < data.cols; c += 1) {
+      const covered = line[c] === '1';
+      const i = (r * data.cols + c) * 4;
+      pixels.data[i] = covered ? 53 : 229;
+      pixels.data[i + 1] = covered ? 168 : 57;
+      pixels.data[i + 2] = covered ? 83 : 53;
+      pixels.data[i + 3] = covered ? 90 : 70;
+    }
+  });
+  ctx.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
+const coverageLabel = computed(() =>
+  coverage.value ? t('stagePlot.coveragePct', { pct: coverage.value.covered_pct }) : '',
+);
 
 async function loadChannels() {
   try {
@@ -1358,7 +1702,7 @@ function startReroute(row) {
 function stagePoint(e) {
   const p = e.target.getStage().getPointerPosition();
   if (!p) return null;
-  return [p.x / pxPerCm.value, p.y / pxPerCm.value];
+  return [p.x / pxPerCm.value - stageX.value, p.y / pxPerCm.value - stageY.value];
 }
 function addWaypoint(e) {
   const cm = stagePoint(e);
@@ -1421,7 +1765,10 @@ function exportCables() {
   URL.revokeObjectURL(url);
 }
 function cableLinePoints(points) {
-  return points.flatMap(([x, y]) => [x * pxPerCm.value, y * pxPerCm.value]);
+  return points.flatMap(([x, y]) => [
+    (x + stageX.value) * pxPerCm.value,
+    (y + stageY.value) * pxPerCm.value,
+  ]);
 }
 function cableConfig(row) {
   const highlighted = highlightCableKeys.value.has(row.key);
@@ -1457,8 +1804,8 @@ const drawConfig = computed(() => ({
 }));
 function waypointConfig(wp) {
   return {
-    x: wp[0] * pxPerCm.value,
-    y: wp[1] * pxPerCm.value,
+    x: (wp[0] + stageX.value) * pxPerCm.value,
+    y: (wp[1] + stageY.value) * pxPerCm.value,
     radius: 5,
     fill: '#ffb300',
     listening: false,
@@ -1472,6 +1819,29 @@ watch(
   (els) => loadImages(els),
   { deep: false },
 );
+watch(showCoverage, fetchCoverage);
+watch(() => [venueW.value, venueH.value, stageX.value, stageY.value], scheduleCoverage);
+watch(
+  () =>
+    store.elements
+      .map((el) =>
+        [
+          el.position_x,
+          el.position_y,
+          el.rotation,
+          el.width_cm,
+          el.height_cm,
+          el.element_type,
+          el.coverage_angle_h,
+          el.coverage_distance_m,
+        ].join(','),
+      )
+      .join('|'),
+  scheduleCoverage,
+);
+watch(coverage, (data) => {
+  coverageImage.value = data && data.cols ? buildCoverageCanvas(data) : null;
+});
 
 onMounted(() => {
   loadJob();
