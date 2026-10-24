@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.6.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.5.0...stagewire-v0.6.0) (2026-10-24)
+
+
+### Features
+
+* **audio:** add Device entity linking whole boxes to plot and wire flow ([f8604af](https://github.com/sj-tech-sweden/stagewire/commit/f8604af33a746944d6c082f42b7abc7cfabb157a))
+* **audio:** connect device manager to channel editor and add device capacity ([3a68736](https://github.com/sj-tech-sweden/stagewire/commit/3a68736e873458c99adf05a89a44b12d3fd125e6))
+* **audio:** granular device port groups with chain-position-derived in/out ([5aac82f](https://github.com/sj-tech-sweden/stagewire/commit/5aac82f108d0593ece79e2e7b22a8134ccde7a71))
+* cables on the stage plot with cableways, rerouting and length list ([66b9122](https://github.com/sj-tech-sweden/stagewire/commit/66b912209a22ca6f901e0b5f32ef2ed4e1bcc591))
+* channel on-stage column shows linked performers/instruments; open linked channel/device from stage plot ([04da114](https://github.com/sj-tech-sweden/stagewire/commit/04da114cb34bb9847cb3cd1d2cffcb891ae05a8b))
+* device-level stockwire products; drop patch point names; outputs linked to devices ([61a0581](https://github.com/sj-tech-sweden/stagewire/commit/61a05810b0e52ff255653aedab35336b5f21b506))
+* link devices when building patch points; per-channel stage highlight ([ea3e3a9](https://github.com/sj-tech-sweden/stagewire/commit/ea3e3a9ac3a24e8178f90a20ce18c01406982f99))
+* make devices/connectors/patch-sheets fully device-driven ([e81c23f](https://github.com/sj-tech-sweden/stagewire/commit/e81c23f75b3d53f8e2fa0552331b5b5765886093))
+* mandatory device linking; full signal flow and on-stage labels ([19c4447](https://github.com/sj-tech-sweden/stagewire/commit/19c44471b8bfe42660409aeda1de434ae71a3890))
+* source cables from mic/DI (or performer) and channel-wide cable highlight ([a99a1aa](https://github.com/sj-tech-sweden/stagewire/commit/a99a1aa8adc583d9ced0cf7aa926be17f828d3b7))
+* **stage-plot:** render uploaded images in the mini stage plot too ([debce4e](https://github.com/sj-tech-sweden/stagewire/commit/debce4ec6c3d877d8b62e832b0648199d166a68c))
+* **stage-plot:** show uploaded images on the map instead of the coloured box ([cf66956](https://github.com/sj-tech-sweden/stagewire/commit/cf66956b8b4c0dde4c5ee681916a350447a5e57c))
+* **stage-plot:** stage size, per-element size/image, channel + patch-point links ([dea5280](https://github.com/sj-tech-sweden/stagewire/commit/dea52808f242c110d503dbc485aedd783f61235a))
+* upload stage-plot element images (file picker + drag-and-drop) served from /static ([377fb86](https://github.com/sj-tech-sweden/stagewire/commit/377fb86fef03d285296c20d1843de4d447174b90))
+* **web:** interactive Konva stage-plot editor ([896b95e](https://github.com/sj-tech-sweden/stagewire/commit/896b95eeaea40cbf11230b1d14f27ebfceb0f6d3))
+
+
+### Bug Fixes
+
+* quiet SQL logging by default and degrade stockwire catalog gracefully ([9dc6aec](https://github.com/sj-tech-sweden/stagewire/commit/9dc6aecd1d4d9d427bf7bdf23ac67020d309bb96))
+* **stage-plot:** resolve vue-konva warning and improve patch-point linking ([7c5e0c6](https://github.com/sj-tech-sweden/stagewire/commit/7c5e0c69cb223ba395c4c3950b63bd6fbab2ccd1))
+* **web:** auto-link new channel's default patch point to a Mixer device ([65a29b9](https://github.com/sj-tech-sweden/stagewire/commit/65a29b99d8f40618f7e0a93ab880de40060f305a))
+* **web:** move channel-list sidebar behind a dropdown on mobile ([af94b26](https://github.com/sj-tech-sweden/stagewire/commit/af94b26a5830021864284646cec0db526cac8c78))
+* **web:** move channel-list sidebar behind a dropdown on mobile ([afe34da](https://github.com/sj-tech-sweden/stagewire/commit/afe34dad0fffb2b4dd3deadbd884600e9ca26fa2))
+
 ## [0.5.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.4.0...stagewire-v0.5.0) (2026-10-23)
 
 
