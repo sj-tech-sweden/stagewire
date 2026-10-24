@@ -601,7 +601,7 @@ const pointChannelMap = computed(() => {
   const m = {}
   for (const list of lists.value) {
     for (const ch of list.channels || []) {
-      for (const p of ch.patch_points || []) m[p.id] = ch.channel_id
+      for (const p of ch.patch_points || []) m[p.id] = ch.id
     }
   }
   return m
@@ -620,7 +620,7 @@ const deviceChannelMap = computed(() => {
   for (const list of lists.value) {
     for (const ch of list.channels || []) {
       for (const p of ch.patch_points || []) {
-        if (p.device_id) (m[p.device_id] = m[p.device_id] || new Set()).add(ch.channel_id)
+        if (p.device_id) (m[p.device_id] = m[p.device_id] || new Set()).add(ch.id)
       }
     }
   }
@@ -699,7 +699,7 @@ const flowChains = computed(() => {
   const deviceName = (id) => (id ? devicesStore.byId(id)?.name || '' : '')
   const fullById = (cid) => {
     for (const list of lists.value) {
-      const c = (list.channels || []).find((x) => x.channel_id === cid)
+      const c = (list.channels || []).find((x) => x.id === cid)
       if (c) return c
       const o = (list.outputs || []).find((x) => x.id === cid)
       if (o) return o
@@ -858,7 +858,7 @@ const activeChannelFull = computed(() => {
   if (!activeChannelId.value) return null
   for (const list of lists.value) {
     for (const ch of list.channels || []) {
-      if (ch.channel_id === activeChannelId.value) return ch
+      if (ch.id === activeChannelId.value) return ch
     }
   }
   return null

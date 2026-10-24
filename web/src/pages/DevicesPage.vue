@@ -403,7 +403,7 @@ const allPoints = computed(() => {
         pts.push({
           id: p.id,
           point_type: p.point_type,
-          channel_id: ch.channel_id,
+          channel_id: ch.id,
           channel_number: ch.channel_number,
           listName: list.name,
           device_id: p.device_id || null,

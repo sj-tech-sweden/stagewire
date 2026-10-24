@@ -485,7 +485,7 @@
                     v-if="row.placed"
                     caption
                   >
-                    {{ t('cables.cut') }}:
+                    {{ t('cables.lengthClass') }}:
                     {{ row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m` }}
                   </q-item-label>
                 </q-item-section>
@@ -698,7 +698,7 @@ const deviceChannelMap = computed(() => {
     for (const ch of list.channels || []) {
       for (const p of ch.patch_points || []) {
         if (p.device_id) {
-          (m[p.device_id] = m[p.device_id] || new Set()).add(ch.channel_id);
+          (m[p.device_id] = m[p.device_id] || new Set()).add(ch.id);
         }
       }
     }
@@ -753,7 +753,7 @@ const highlightIds = computed(() => {
         for (const p of ch.patch_points || []) {
           if (p.device_id && p.device_id === dev?.id) {
             pointSet.add(p.id);
-            channelSet.add(ch.channel_id);
+            channelSet.add(ch.id);
           }
         }
       }
@@ -1113,8 +1113,38 @@ const cableRows = computed(() =>
     plan: cablePlan.value,
   }),
 );
+const highlightCableKeys = computed(() => {
+  const keys = new Set();
+  const raw = highlightParam.value;
+  if (!raw) return keys;
+  const idx = String(raw).indexOf(':');
+  const mode = idx >= 0 ? String(raw).slice(0, idx) : String(raw);
+  const value = idx >= 0 ? String(raw).slice(idx + 1) : '';
+  if (!value) return keys;
+  const name = decodeURIComponent(value).toLowerCase();
+  const sheetDevice = devicesStore.devices.find((d) => (d.name || '').toLowerCase() === name);
+  for (const r of cableRows.value) {
+    if (mode === 'channel' && r.channelId === value) keys.add(r.key);
+    else if (mode === 'patchpoint' && (r.toPointId === value || r.fromPointId === value)) {
+      keys.add(r.key);
+    } else if (mode === 'device' && (r.toDeviceId === value || r.fromDeviceId === value)) {
+      keys.add(r.key);
+    } else if (
+      mode === 'sheet' &&
+      sheetDevice &&
+      (r.toDeviceId === sheetDevice.id || r.fromDeviceId === sheetDevice.id)
+    ) {
+      keys.add(r.key);
+    }
+  }
+  return keys;
+});
 const visibleCableRows = computed(() =>
-  cablesVisible.value ? cableRows.value.filter((r) => r.placed && !r.hidden) : [],
+  cableRows.value.filter(
+    (r) =>
+      r.placed &&
+      (highlightCableKeys.value.has(r.key) || (cablesVisible.value && !r.hidden)),
+  ),
 );
 const cableOrder = computed(() => lengthOrder(cableRows.value));
 const rerouteRow = computed(() => cableRows.value.find((r) => r.key === rerouteKey.value) || null);
@@ -1221,11 +1251,14 @@ function cableLinePoints(points) {
   return points.flatMap(([x, y]) => [x * pxPerCm.value, y * pxPerCm.value]);
 }
 function cableConfig(row) {
+  const highlighted = highlightCableKeys.value.has(row.key);
   const active = selectedCableKey.value === row.key || rerouteKey.value === row.key;
   return {
     points: cableLinePoints(row.points),
-    stroke: active ? '#ffb300' : '#b0bec5',
-    strokeWidth: active ? 3 : 2,
+    stroke: highlighted ? '#35A853' : active ? '#ffb300' : '#b0bec5',
+    strokeWidth: highlighted ? 5 : active ? 3 : 2,
+    shadowColor: highlighted ? '#35A853' : 'transparent',
+    shadowBlur: highlighted ? 10 : 0,
     lineCap: 'round',
     lineJoin: 'round',
     dash: row.mode === 'direct' ? [8, 6] : undefined,

@@ -21,21 +21,50 @@ function orderedPoints(points) {
   return (points || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
 }
 
-export function deriveCables(lists) {
+// Stage elements that start a channel's chain: its microphones/DIs, or else its
+// performers when there is no mic or DI.
+export function sourceElementsFor(channelId, elements) {
+  const linked = (elements || []).filter((e) => e.linked_channel_id === channelId);
+  const mics = linked.filter((e) => e.element_type === 'microphone' || e.element_type === 'di');
+  return mics.length ? mics : linked.filter((e) => e.element_type === 'performer');
+}
+
+export function deriveCables(lists, elements) {
   const cables = [];
   for (const list of lists || []) {
     for (const ch of list.channels || []) {
       const label = `Ch ${ch.channel_number}${ch.source_label ? ` ${ch.source_label}` : ''}`;
       const pts = orderedPoints(ch.patch_points).filter((p) => p.device_id);
+      if (pts.length) {
+        for (const el of sourceElementsFor(ch.id, elements)) {
+          cables.push({
+            key: `src:${el.id}`,
+            kind: 'source',
+            label,
+            channelId: ch.id,
+            fromElementId: el.id,
+            fromPointId: null,
+            fromDeviceId: null,
+            toDeviceId: pts[0].device_id,
+            toPointId: pts[0].id,
+            connector: pts[0].connector || '',
+          });
+        }
+      }
       for (let i = 1; i < pts.length; i++) {
         const from = pts[i - 1];
         const to = pts[i];
         if (from.device_id === to.device_id) continue;
         cables.push({
           key: to.id,
+          kind: 'link',
           label,
+          channelId: ch.id,
+          fromElementId: null,
+          fromPointId: from.id,
           fromDeviceId: from.device_id,
           toDeviceId: to.device_id,
+          toPointId: to.id,
           connector: to.connector || '',
         });
       }
@@ -49,9 +78,14 @@ export function deriveCables(lists) {
         if (!parent || parent.device_id === to.device_id) continue;
         cables.push({
           key: to.id,
+          kind: 'link',
           label: out.name,
+          channelId: out.id,
+          fromElementId: null,
+          fromPointId: parent.id,
           fromDeviceId: parent.device_id,
           toDeviceId: to.device_id,
+          toPointId: to.id,
           connector: to.connector || '',
         });
       }
@@ -176,22 +210,28 @@ export function buildCableRows({ lists, devices, elements, plan }) {
   const p = emptyCablePlan(plan);
   const settings = { ...DEFAULT_CABLE_SETTINGS, ...(p.settings || {}) };
   const deviceName = new Map((devices || []).map((d) => [d.id, d.name || 'Device']));
-  const centerOf = new Map();
+  const centerOfDevice = new Map();
+  const centerOfElement = new Map();
   for (const el of elements || []) {
-    if (!el.linked_device_id || centerOf.has(el.linked_device_id)) continue;
-    centerOf.set(el.linked_device_id, [
-      el.position_x + (el.width_cm || 0) / 2,
-      el.position_y + (el.height_cm || 0) / 2,
-    ]);
+    const c = [el.position_x + (el.width_cm || 0) / 2, el.position_y + (el.height_cm || 0) / 2];
+    centerOfElement.set(el.id, c);
+    if (el.linked_device_id && !centerOfDevice.has(el.linked_device_id)) {
+      centerOfDevice.set(el.linked_device_id, c);
+    }
   }
-  const rows = deriveCables(lists).map((cable, i) => {
+  const elementName = new Map((elements || []).map((e) => [e.id, e.label || e.element_type]));
+  const rows = deriveCables(lists, elements).map((cable, i) => {
     const route = p.routes?.[cable.key] || { mode: 'auto', waypoints: [], hidden: false };
-    const from = centerOf.get(cable.fromDeviceId);
-    const to = centerOf.get(cable.toDeviceId);
+    const from = cable.fromElementId
+      ? centerOfElement.get(cable.fromElementId)
+      : centerOfDevice.get(cable.fromDeviceId);
+    const to = centerOfDevice.get(cable.toDeviceId);
     const base = {
       ...cable,
       index: i + 1,
-      fromName: deviceName.get(cable.fromDeviceId) || '—',
+      fromName: cable.fromElementId
+        ? elementName.get(cable.fromElementId) || '—'
+        : deviceName.get(cable.fromDeviceId) || '—',
       toName: deviceName.get(cable.toDeviceId) || '—',
       hidden: !!route.hidden,
       waypoints: route.waypoints || [],
@@ -234,7 +274,7 @@ export function lengthOrder(rows) {
 }
 
 export function cablesToCsv(rows) {
-  const head = ['Cable', 'From', 'To', 'Connector', 'Route', 'Path (m)', 'Needed (m)', 'Cable length (m)'];
+  const head = ['Cable', 'From', 'To', 'Connector', 'Route', 'Path (m)', 'Needed (m)', 'Length class (m)'];
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = rows.map((r) =>
     [
