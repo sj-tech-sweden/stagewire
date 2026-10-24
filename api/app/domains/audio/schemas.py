@@ -12,6 +12,11 @@ class ProductionJobBase(BaseModel):
     notes: str = ""
     stage_width_cm: float = 0.0
     stage_height_cm: float = 0.0
+    venue_width_cm: float = 0.0
+    venue_height_cm: float = 0.0
+    stage_x_cm: float = 0.0
+    stage_y_cm: float = 0.0
+    venue_background_image_url: str = ""
     cable_plan: dict = Field(default_factory=dict)
 
 
@@ -32,6 +37,7 @@ class ProductionJobRead(ProductionJobBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    venue_id: UUID | None = None
     created_at: datetime
 
 

@@ -33,6 +33,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     import app.domains.audio.models  # noqa: F401  (register models on metadata)
     import app.domains.auth.models  # noqa: F401
+    import app.domains.venues.models  # noqa: F401
 
     # Only create tables directly for the sqlite test suite. In every other
     # (containerised) environment the schema is owned by Alembic and applied
