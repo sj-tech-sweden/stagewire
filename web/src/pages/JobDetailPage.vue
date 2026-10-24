@@ -1843,7 +1843,7 @@ import { useChannelsStore } from '@/stores/channels'
 import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useStagePlotStore } from '@/stores/stageplot'
-import { buildStageByChannel, chainNodes } from '@/utils/patchFlow'
+import { chainNodes, performersByChannel } from '@/utils/patchFlow'
 import { useStockwireStore } from '@/stores/stockwire'
 import DateTimePicker from '@/components/DateTimePicker.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
@@ -1912,9 +1912,7 @@ const inputTypeOptions = [
 
 
 const stagePlotStore = useStagePlotStore()
-const stageByChannel = computed(() =>
-  buildStageByChannel(store.channels, stagePlotStore.elements, (id) => deviceNameOf(id)),
-)
+const stageByChannel = computed(() => performersByChannel(store.channels, stagePlotStore.elements))
 
 const columns = [
   { name: 'channel_number', label: t('channels.fieldChannelNumber'), field: 'channel_number', align: 'left', style: 'width: 60px' },
@@ -3132,6 +3130,13 @@ onMounted(async () => {
     jobError.value = t('common.errorOccurred') || 'Job not found'
   }
   await store.fetchLists(route.params.jobId)
+  const channelId = route.query.channel
+  const list = channelId && store.lists.find((l) => (l.channels || []).some((c) => c.id === channelId))
+  if (list) {
+    await store.selectList(route.params.jobId, list.id)
+    const channel = store.channels.find((c) => c.id === channelId)
+    if (channel) openChannelDialog(channel)
+  }
   connectWs()
 })
 

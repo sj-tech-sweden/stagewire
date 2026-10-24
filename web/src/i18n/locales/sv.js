@@ -431,6 +431,8 @@ export default {
     stageUnitsHint: 'Storlek i verkliga centimeter.',
     onStage: 'På scen',
     linkDevice: 'Länkad enhet',
+    openChannel: 'Öppna kanal',
+    openDevice: 'Öppna enhet',
     viewOnStagePlot: 'Visa på scenkarta',
     highlightActive: 'Markerar objekt länkade till {name}',
     highlightClear: 'Rensa',

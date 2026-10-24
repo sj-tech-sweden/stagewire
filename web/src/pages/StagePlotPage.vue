@@ -162,6 +162,27 @@
               class="q-mt-sm"
               @update:model-value="commitDevice"
             />
+            <div
+              v-if="draft.linked_channel_id || draft.linked_device_id"
+              class="row q-gutter-sm q-mt-xs"
+            >
+              <q-btn
+                v-if="draft.linked_channel_id"
+                flat
+                dense
+                icon="open_in_new"
+                :label="t('stagePlot.openChannel')"
+                @click="openLinkedChannel"
+              />
+              <q-btn
+                v-if="draft.linked_device_id"
+                flat
+                dense
+                icon="open_in_new"
+                :label="t('stagePlot.openDevice')"
+                @click="openLinkedDevice"
+              />
+            </div>
             <div class="row q-gutter-sm q-mt-sm">
               <q-input
                 v-model.number="draft.width_cm"
@@ -1030,6 +1051,12 @@ function commitDraft() {
 function commitLink(val) {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { linked_channel_id: val || null });
+}
+function openLinkedChannel() {
+  router.push({ path: `/jobs/${jobId}`, query: { channel: draft.value.linked_channel_id } });
+}
+function openLinkedDevice() {
+  router.push({ path: `/jobs/${jobId}/devices`, query: { device: draft.value.linked_device_id } });
 }
 function commitDevice(val) {
   if (!selected.value) return;

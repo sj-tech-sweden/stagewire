@@ -431,6 +431,8 @@ export default {
     stageUnitsHint: 'Canvas size in real-world centimetres.',
     onStage: 'On stage',
     linkDevice: 'Linked device',
+    openChannel: 'Open channel',
+    openDevice: 'Open device',
     viewOnStagePlot: 'View on stage plot',
     highlightActive: 'Highlighting items linked to {name}',
     highlightClear: 'Clear',

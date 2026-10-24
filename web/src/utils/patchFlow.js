@@ -11,6 +11,18 @@ export function chainNodes(tree) {
   return nodes;
 }
 
+// Map channel id -> labels of performers and instruments linked directly to it.
+export function performersByChannel(channels, elements) {
+  const out = new Map();
+  for (const el of elements || []) {
+    if (!el.linked_channel_id) continue;
+    if (el.element_type !== 'performer' && el.element_type !== 'instrument') continue;
+    if (!out.has(el.linked_channel_id)) out.set(el.linked_channel_id, []);
+    out.get(el.linked_channel_id).push(el.label || el.element_type);
+  }
+  return out;
+}
+
 // Map channel id -> labels of stage-plot elements that sit on that channel,
 // either directly, through one of its patch points, or through a device.
 export function buildStageByChannel(channels, elements, deviceName) {

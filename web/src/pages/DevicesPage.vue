@@ -558,5 +558,10 @@ async function doDelete() {
   pendingDelete.value = null;
 }
 
-onMounted(refresh);
+onMounted(async () => {
+  await refresh();
+  const deviceId = route.query.device;
+  const device = deviceId && devicesStore.devices.find((d) => d.id === deviceId);
+  if (device) openEdit(device);
+});
 </script>
