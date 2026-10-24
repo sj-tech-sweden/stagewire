@@ -30,6 +30,12 @@ class ProductionJobUpdate(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str | None = None
+    stage_width_cm: float | None = Field(None, ge=0)
+    stage_height_cm: float | None = Field(None, ge=0)
+    stage_x_cm: float | None = Field(None, ge=0)
+    stage_y_cm: float | None = Field(None, ge=0)
+    venue_width_cm: float | None = Field(None, ge=0)
+    venue_height_cm: float | None = Field(None, ge=0)
     cable_plan: dict | None = None
 
 
@@ -236,6 +242,9 @@ class StagePlotElementBase(BaseModel):
     height_cm: float = 60.0
     label: str = ""
     image_url: str = ""
+    linked_output_point_id: UUID | None = None
+    coverage_angle_h: float = 0.0
+    coverage_distance_m: float = 0.0
 
 
 class StagePlotElementCreate(StagePlotElementBase):

@@ -39,6 +39,13 @@ async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
     return await db.get(ProductionJob, job_id)
 
 
+PLOT_CLEARABLE_KEYS = {
+    "linked_channel_id",
+    "linked_patch_point_id",
+    "linked_device_id",
+    "linked_output_point_id",
+}
+
 # Stockwire link fields may be explicitly cleared (set to null) by the client.
 CLEARABLE_KEYS = {
     "stockwire_product_id",
@@ -288,7 +295,7 @@ async def update_plot_element(
     if element is None:
         return None
     for key, value in data.items():
-        if value is not None:
+        if value is not None or key in PLOT_CLEARABLE_KEYS:
             setattr(element, key, value)
     await db.commit()
     await db.refresh(element)

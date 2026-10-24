@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.domains.audio import schemas, service
+from app.domains.audio.coverage import coverage_grid, sector_for
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
@@ -24,6 +25,8 @@ from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 
 router = APIRouter(prefix="/jobs", tags=["audio:jobs"], dependencies=[Depends(get_current_user)])
+
+MAX_COVERAGE_CELLS_PER_AXIS = 500
 
 
 @router.post("", response_model=schemas.ProductionJobRead, status_code=201)
@@ -622,6 +625,27 @@ async def list_plot_elements(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     elements = await service.list_plot_elements(db, job_id)
     return [schemas.StagePlotElementRead.model_validate(e) for e in elements]
+
+
+@router.get("/{job_id}/coverage")
+async def get_coverage(
+    job_id: UUID,
+    cell_cm: float = Query(25, ge=5, le=1000),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    job = await service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    elements = await service.list_plot_elements(db, job_id)
+    sectors = []
+    for element in elements:
+        data = schemas.StagePlotElementRead.model_validate(element).model_dump()
+        sector = sector_for(data, job.stage_x_cm, job.stage_y_cm)
+        if sector is not None:
+            sectors.append(sector)
+    longest = max(job.venue_width_cm, job.venue_height_cm)
+    cell = max(cell_cm, longest / MAX_COVERAGE_CELLS_PER_AXIS)
+    return coverage_grid(job.venue_width_cm, job.venue_height_cm, sectors, cell)
 
 
 @router.patch(
