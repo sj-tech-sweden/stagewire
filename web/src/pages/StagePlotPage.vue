@@ -383,7 +383,7 @@
                     v-if="imageFor(el)"
                     :config="imageConfig(el)"
                   />
-                  <v-text :config="textConfig(el)" />
+                  <v-text :config="labelConfig(el)" />
                   <v-text
                     v-if="linkedSummary(el)"
                     :config="linkedTextConfig(el)"
@@ -920,22 +920,42 @@ function groupConfig(el) {
 function rectConfig(el) {
   const def = defFor(el.element_type);
   const hi = highlightIds.value.includes(el.id);
+  const selected = selectedId.value === el.id;
+  const hasImage = !!imageFor(el);
   return {
     width: el.width_cm * pxPerCm.value,
     height: el.height_cm * pxPerCm.value,
-    fill: def.color,
+    // When an image is present it fills the box, so hide the coloured fill
+    // (the picture shows instead of the box). Keep a transparent fill so the
+    // shape still catches clicks/drag.
+    fill: hasImage && !hi ? 'transparent' : def.color,
     cornerRadius: 4,
-    opacity: hi ? 1 : selectedId.value === el.id ? 1 : 0.85,
-    stroke: hi ? '#35A853' : 'transparent',
-    strokeWidth: hi ? 4 : 0,
+    opacity: hi || selected ? 1 : hasImage ? 1 : 0.85,
+    stroke: hi ? '#35A853' : selected ? '#ffb300' : 'transparent',
+    strokeWidth: hi ? 4 : selected ? 3 : 0,
     shadowColor: hi ? '#35A853' : 'transparent',
     shadowBlur: hi ? 14 : 0,
   };
 }
-function textConfig(el) {
+function labelConfig(el) {
   const s = pxPerCm.value;
+  const def = defFor(el.element_type);
+  if (imageFor(el)) {
+    // Photo fills the box; show the label below it so it stays readable.
+    const labelFont = Math.max(9, 10 * s);
+    return {
+      text: el.label || def.label,
+      x: 0,
+      y: el.height_cm * s + 2,
+      width: el.width_cm * s,
+      align: 'center',
+      fontSize: labelFont,
+      fill: '#e0e0e0',
+      listening: false,
+    };
+  }
   return {
-    text: el.label || defFor(el.element_type).label,
+    text: el.label || def.label,
     x: 0,
     y: 0,
     width: el.width_cm * s,
@@ -972,10 +992,12 @@ function linkedSummary(el) {
 }
 function linkedTextConfig(el) {
   const s = pxPerCm.value;
+  const labelFont = Math.max(9, 10 * s);
+  const offset = imageFor(el) ? labelFont + 2 : 0;
   return {
     text: linkedSummary(el),
     x: 0,
-    y: el.height_cm * s + 2,
+    y: el.height_cm * s + 2 + offset,
     width: el.width_cm * s,
     align: 'center',
     fontSize: Math.max(9, 10 * s),
