@@ -8,6 +8,10 @@
         :config="groupConfig(el)"
       >
         <v-rect :config="rectConfig(el)" />
+        <v-image
+          v-if="imageFor(el)"
+          :config="imageConfig(el)"
+        />
         <v-text :config="textConfig(el)" />
       </v-group>
     </v-layer>
@@ -15,7 +19,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { getApiBaseUrl } from '@/utils/runtime-config';
 
 const props = defineProps({
   elements: { type: Array, default: () => [] },
@@ -24,6 +29,46 @@ const props = defineProps({
   highlightIds: { type: Array, default: () => [] },
   maxWidth: { type: Number, default: 360 },
 });
+
+const imageCache = ref({});
+
+function fullImageUrl(value) {
+  if (!value) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  return getApiBaseUrl() + value;
+}
+function imageFor(el) {
+  return el.image_url ? imageCache.value[el.id] || null : null;
+}
+function loadImages(els) {
+  for (const el of els || []) {
+    if (!el.image_url) continue;
+    const src = fullImageUrl(el.image_url);
+    const cached = imageCache.value[el.id];
+    if (cached && cached.src === src) continue;
+    const img = new Image();
+    img.onload = () => {
+      imageCache.value = { ...imageCache.value, [el.id]: img };
+    };
+    img.src = src;
+  }
+}
+watch(
+  () => (props.elements || []).map((e) => `${e.id}:${e.image_url}`).join('|'),
+  () => loadImages(props.elements || []),
+  { immediate: true },
+);
+function imageConfig(el) {
+  const s = scale.value;
+  return {
+    image: imageFor(el),
+    x: 0,
+    y: 0,
+    width: (el.width_cm || 60) * s,
+    height: (el.height_cm || 60) * s,
+    listening: false,
+  };
+}
 
 const PALETTE = {
   performer: '#35A853',
@@ -73,12 +118,13 @@ function groupConfig(el) {
 }
 function rectConfig(el) {
   const hi = isHi(el);
+  const hasImage = !!imageFor(el);
   return {
     width: (el.width_cm || 60) * scale.value,
     height: (el.height_cm || 60) * scale.value,
-    fill: colorFor(el.element_type),
+    fill: hasImage && !hi ? 'transparent' : colorFor(el.element_type),
     cornerRadius: 2,
-    opacity: hi ? 1 : 0.4,
+    opacity: hi ? 1 : hasImage ? 1 : 0.4,
     stroke: hi ? '#35A853' : 'transparent',
     strokeWidth: hi ? 3 : 0,
     shadowColor: hi ? '#35A853' : 'transparent',
@@ -86,8 +132,23 @@ function rectConfig(el) {
   };
 }
 function textConfig(el) {
+  const s = scale.value;
+  const text = el.label || '';
+  if (imageFor(el) && text) {
+    const labelFont = Math.max(7, 9 * s);
+    return {
+      text,
+      x: 0,
+      y: (el.height_cm || 60) * s + 1,
+      width: (el.width_cm || 60) * s,
+      align: 'center',
+      fontSize: labelFont,
+      fill: '#e0e0e0',
+      listening: false,
+    };
+  }
   return {
-    text: el.label || '',
+    text,
     x: 0,
     y: 0,
     width: (el.width_cm || 60) * scale.value,
