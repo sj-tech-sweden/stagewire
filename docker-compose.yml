@@ -51,8 +51,11 @@ services:
       REDIS_URL: "redis://valkey:6379/0"
       CORS_ORIGINS: "http://localhost:9010"
       STOCKWIRE_API_BASE_URL: "https://rental-api.sj-tech.se"
+      UPLOAD_DIR: "/app/uploads"
     ports:
       - "8010:8010"
+    volumes:
+      - stagewire-uploads:/app/uploads
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/api/v1/health/live').status==200 else 1)"]
       interval: 15s
@@ -77,3 +80,4 @@ services:
 volumes:
   stagewire-db-data:
   stagewire-valkey-data:
+  stagewire-uploads:

@@ -129,6 +129,8 @@
           flat
           bordered
           class="q-mt-md"
+          @drop="onEditorDrop"
+          @dragover.prevent
         >
           <q-card-section>
             <div class="text-subtitle1 q-mb-sm">
@@ -201,13 +203,55 @@
                 @update:model-value="commitSize"
               />
             </div>
-            <q-input
-              v-model="draft.image_url"
-              :label="t('stagePlot.imageUrl')"
-              dense
-              class="q-mt-sm"
-              @change="commitImage"
-            />
+            <div class="q-mt-sm">
+              <q-file
+                :model-value="null"
+                accept="image/*"
+                :label="t('stagePlot.imageUpload')"
+                dense
+                clearable
+                :loading="uploading"
+                @update:model-value="onImageFilePicked"
+              >
+                <template #append>
+                  <q-icon name="image" />
+                </template>
+              </q-file>
+              <div
+                v-if="draft.image_url"
+                class="row items-center q-gutter-sm q-mt-xs"
+              >
+                <img
+                  :src="fullImageUrl(draft.image_url)"
+                  alt=""
+                  style="max-width: 160px; max-height: 110px; border-radius: 4px"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="delete"
+                  color="negative"
+                  :aria-label="t('stagePlot.removeImage')"
+                  @click="clearImage"
+                />
+                <q-btn
+                  flat
+                  dense
+                  icon="open_in_new"
+                  type="a"
+                  :href="fullImageUrl(draft.image_url)"
+                  target="_blank"
+                  rel="noopener"
+                />
+              </div>
+              <div
+                v-else
+                class="text-caption text-grey-7 q-mt-xs"
+              >
+                {{ t('stagePlot.imageDropHint') }}
+              </div>
+            </div>
             <q-input
               v-model.number="draft.rotation"
               type="number"
@@ -277,7 +321,10 @@
           flat
           bordered
         >
-          <q-card-section>
+          <q-card-section
+            @drop="onStageDrop"
+            @dragover.prevent
+          >
             <div class="text-caption text-grey-7">
               {{ t('stagePlot.addHint') }}
             </div>
@@ -588,6 +635,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
+import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useDevicesStore } from '@/stores/devices';
 import {
@@ -669,8 +717,15 @@ const stageH = ref(DEFAULT_H);
 const job = ref(null);
 const channelLists = ref([]);
 const imageCache = ref({});
+const uploading = ref(false);
 
 const pxPerCm = computed(() => scale.value);
+
+function fullImageUrl(value) {
+  if (!value) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  return getApiBaseUrl() + value;
+}
 const selected = computed(
   () => store.elements.find((e) => e.id === selectedId.value) || null,
 );
@@ -947,7 +1002,7 @@ function loadImages(els) {
     img.onload = () => {
       imageCache.value = { ...imageCache.value, [el.id]: img };
     };
-    img.src = el.image_url;
+    img.src = fullImageUrl(el.image_url);
   }
 }
 
@@ -1072,6 +1127,75 @@ function commitSize() {
 function commitImage() {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { image_url: draft.value.image_url || '' });
+}
+async function uploadImageFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post('/uploads', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.url;
+}
+async function applyDroppedImage(file, el) {
+  if (!el) return;
+  uploading.value = true;
+  try {
+    const url = await uploadImageFile(file);
+    await store.updateElement(jobId, el.id, { image_url: url });
+    if (selectedId.value === el.id) draft.value.image_url = url;
+  } finally {
+    uploading.value = false;
+  }
+}
+function onImageFilePicked(file) {
+  if (!file) return;
+  applyDroppedImage(file, selected.value);
+}
+function clearImage() {
+  draft.value.image_url = '';
+  commitImage();
+}
+function onEditorDragOver(e) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+}
+function onEditorDrop(e) {
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0];
+  if (!file || !/^image\//.test(file.type)) return;
+  if (selected.value) applyDroppedImage(file, selected.value);
+}
+function onStageDragOver(e) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+}
+function onStageDrop(e) {
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0];
+  if (!file || !/^image\//.test(file.type)) return;
+  const stage = stageRef.value?.getStage?.();
+  let cmx = null;
+  let cmy = null;
+  if (stage) {
+    const rect = stage.container().getBoundingClientRect();
+    cmx = (e.clientX - rect.left) / pxPerCm.value;
+    cmy = (e.clientY - rect.top) / pxPerCm.value;
+  }
+  let targetId = null;
+  if (cmx !== null) {
+    for (const el of store.elements) {
+      const w = el.width_cm || 0;
+      const h = el.height_cm || 0;
+      if (cmx >= el.position_x && cmx <= el.position_x + w && cmy >= el.position_y && cmy <= el.position_y + h) {
+        targetId = el.id;
+        break;
+      }
+    }
+  }
+  if (!targetId) targetId = selectedId.value;
+  if (!targetId) return;
+  const el = store.elements.find((x) => x.id === targetId);
+  if (el) applyDroppedImage(file, el);
 }
 function commitRotation() {
   if (!selected.value) return;
