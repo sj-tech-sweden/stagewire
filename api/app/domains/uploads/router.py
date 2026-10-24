@@ -31,9 +31,7 @@ async def upload_image(
     settings = get_settings()
     content_type = (file.content_type or "").lower()
     if not content_type.startswith("image/"):
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Only image files are accepted"
-        )
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Only image files are accepted")
 
     data = await file.read()
     if len(data) > settings.max_upload_bytes:
