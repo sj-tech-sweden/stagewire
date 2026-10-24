@@ -88,6 +88,24 @@ entrypoint runs `alembic upgrade head`, so migrations are applied automatically
 when you redeploy. `Base.metadata.create_all` is only used as a fallback by the
 SQLite test suite.
 
+## Uploaded images & data persistence
+
+- **Stage plot element images** are uploaded through `POST /api/v1/uploads` (auth
+  required, image types only, max `MAX_UPLOAD_BYTES` which defaults to 5 MB). The
+  API writes each file to `UPLOAD_DIR` and serves it from `/static/...`; the
+  `image_url` column on stage plot elements stores only that URL.
+- In the bundled `docker-compose.yml`, `UPLOAD_DIR` is `/app/uploads` and that path
+  is a **persistent volume** (`stagewire-uploads`), so uploaded images survive
+  container rebuilds and restarts.
+- For local (non-Docker) development, set `UPLOAD_DIR` to a writable directory; the
+  API auto-creates it and mounts `/static` over it. If the directory is not writable,
+  the upload endpoint still validates input and reports the failure when used.
+- Uploaded files live on the API's local filesystem (not in the database). For
+  multi-node deployments you would swap this for object storage (S3-compatible) and
+  serve via its URL; nothing else in the data model would change.
+- Application data (**PostgreSQL**) and cache/sessions (**Valkey**) are likewise
+  persisted through the `stagewire-db-data` and `stagewire-valkey-data` volumes.
+
 ## Feature phases
 
 - **Phase 1 (this scaffold)**: Audio engine — input list / patch sheet, stage-plot
