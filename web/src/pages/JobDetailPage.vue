@@ -2087,13 +2087,26 @@ function onCreateDevicePoint(pt, val, done) {
   deviceDialog.value = true
 }
 
-function ensureDefaultMixerPoint() {
+async function ensureMixerDevice() {
+  await devicesStore.fetchDevices(route.params.jobId)
+  let mixer = devicesStore.devices.find((d) => d.device_type === 'mixer')
+  if (!mixer) {
+    mixer = await devicesStore.createDevice(route.params.jobId, {
+      name: store.selectedList?.mixer_product_name || t('devices.types.mixer'),
+      device_type: 'mixer',
+    })
+  }
+  return mixer
+}
+
+async function ensureDefaultMixerPoint() {
   if (patchPoints.value.length === 0) {
+    const mixer = await ensureMixerDevice()
     patchPoints.value.push({
       connector: form.connector || '',
       patch_label: form.channel_number ? String(form.channel_number) : '',
       notes: '',
-      device_id: null,
+      device_id: mixer ? mixer.id : null,
     })
   }
 }
@@ -2103,6 +2116,15 @@ watch(
   (val) => {
     const mixer = patchPoints.value.find((p) => !p.id && !p.connector && !p.device_id)
     if (mixer && val) mixer.connector = val
+  },
+)
+
+// The default mixer point is patched to the same input as the channel number.
+watch(
+  () => form.channel_number,
+  (val) => {
+    const mixer = patchPoints.value.find((p) => !p.id && p.device_id)
+    if (mixer) mixer.patch_label = val ? String(val) : ''
   },
 )
 
@@ -2119,7 +2141,7 @@ function movePatchPoint(idx, dir) {
   arr[target] = tmp
 }
 
-function openChannelDialog(channel = null) {
+async function openChannelDialog(channel = null) {
   editingChannel.value = channel
   Object.assign(form, emptyForm())
   if (channel) {
@@ -2147,8 +2169,8 @@ function openChannelDialog(channel = null) {
   } else {
     patchPoints.value = []
   }
-  devicesStore.fetchDevices(route.params.jobId)
-  ensureDefaultMixerPoint()
+  await devicesStore.fetchDevices(route.params.jobId)
+  await ensureDefaultMixerPoint()
   patchOriginalIds.value = new Set(
     patchPoints.value.filter((p) => p.id).map((p) => p.id),
   )

@@ -38,4 +38,12 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   // Save is async; wait for the dialog to close, then the row appears.
   await expect(page.locator('.q-dialog')).toHaveCount(0);
   await expect(page.locator('table').first().getByRole('textbox')).toHaveValue('Kick In');
+
+  // A new channel's default patch point must auto-link to a Mixer device, so the
+  // mandatory device-linking validation does not block the save (regression test).
+  const devicesRes = await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const devices = (await devicesRes.json()) as Array<{ device_type?: string }>;
+  expect(devices.some((d) => d.device_type === 'mixer')).toBe(true);
 });
