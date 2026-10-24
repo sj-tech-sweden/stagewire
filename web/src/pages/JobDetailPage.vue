@@ -39,6 +39,20 @@
               class="q-ml-sm"
               @click="router.push(`/jobs/${route.params.jobId}/patch-sheets`)"
             />
+            <q-btn
+              flat
+              icon="map"
+              :label="t('stagePlot.nav')"
+              class="q-ml-sm"
+              @click="router.push(`/jobs/${route.params.jobId}/stage-plot`)"
+            />
+            <q-btn
+              flat
+              icon="developer_board"
+              :label="t('devices.nav')"
+              class="q-ml-sm"
+              @click="router.push(`/jobs/${route.params.jobId}/devices`)"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip
@@ -917,6 +931,12 @@
             />
           </div>
           <div class="text-subtitle2 q-mt-sm q-mb-xs">
+            {{ t('stagePlot.onStage') }}
+          </div>
+          <div class="text-body2 q-mb-sm">
+            {{ editingStageLabel || t('devices.none') }}
+          </div>
+          <div class="text-subtitle2 q-mt-sm q-mb-xs">
             {{ t('channels.patchPoints') }}
           </div>
           <div class="text-caption text-grey-7 q-mb-xs">
@@ -936,24 +956,20 @@
               <q-item-section>
                 <div class="row q-gutter-sm items-center">
                   <q-select
-                    v-model="pt.point_type"
-                    :options="patchPointTypeOptions"
-                    :label="t('channels.patchPoint.type')"
+                    :model-value="pt.device_id"
+                    :options="deviceOptions"
+                    :label="t('channels.patchPoint.device')"
+                    :hint="t('channels.patchPoint.deviceHint')"
+                    :error="!pt.device_id"
+                    :error-message="t('channels.patchPoint.deviceRequired')"
                     emit-value
                     map-options
-                    dense
-                    style="width: 160px"
-                  />
-                  <q-select
-                    v-model="pt.name"
-                    :options="patchNameOptions"
-                    :label="t('channels.patchPoint.name')"
-                    :hint="t('channels.patchPoint.nameHint')"
-                    dense
                     use-input
-                    new-value-mode="add-unique"
-                    clearable
+                    dense
                     class="col"
+                    style="min-width: 160px"
+                    @update:model-value="(v) => setPointDevice(pt, v)"
+                    @new-value="(val, done) => onCreateDevicePoint(pt, val, done)"
                   />
                   <q-select
                     v-model="pt.connector"
@@ -973,11 +989,13 @@
                   />
                 </div>
                 <StockwireProductPicker
-                  v-model="pt.stockwire_product"
+                  :model-value="pointProduct(pt)"
+                  :disable="!pt.device_id"
                   :gear-type="pointGearType(pt.point_type)"
                   :label="t('stockwire.selectPatch')"
-                  :hint="pt.stockwire_product ? pt.stockwire_product.sku : ''"
+                  :hint="t('stockwire.deviceProductHint')"
                   class="q-mt-xs"
+                  @update:model-value="(v) => setPointProduct(pt, v)"
                 />
                 <q-input
                   v-model="pt.notes"
@@ -1098,6 +1116,15 @@
               clearable
               class="col"
             />
+            <q-select
+              v-model="bulkOut.deviceId"
+              :options="deviceOptions"
+              :label="t('channels.patchPoint.device')"
+              :hint="t('channels.patchPoint.deviceHint')"
+              emit-value
+              map-options
+              class="col"
+            />
           </div>
           <div class="text-caption text-grey-7">
             {{ t('channels.bulkOutputsHint', { count: Math.max(0, Number(bulkOut.quantity) || 0) }) }}
@@ -1114,7 +1141,7 @@
             flat
             :label="t('app.actions.save')"
             color="primary"
-            :disable="!(Number(bulkOut.quantity) > 0)"
+            :disable="!(Number(bulkOut.quantity) > 0) || !bulkOut.deviceId"
             @click="saveBulkOutputs"
           />
         </q-card-actions>
@@ -1164,6 +1191,15 @@
               :label="t('channels.bulk.device')"
               class="col"
             />
+            <q-select
+              v-model="bulk.patchDeviceId"
+              :options="deviceOptions"
+              :label="t('channels.patchPoint.device')"
+              :hint="t('channels.patchPoint.deviceHint')"
+              emit-value
+              map-options
+              class="col"
+            />
           </div>
           <div class="row q-gutter-sm items-center">
             <q-toggle
@@ -1187,6 +1223,7 @@
             flat
             :label="t('app.actions.save')"
             color="primary"
+            :disable="!bulk.patchDeviceId"
             @click="saveBulk"
           />
         </q-card-actions>
@@ -1604,24 +1641,20 @@
               <q-item-section>
                 <div class="row q-gutter-sm items-center">
                   <q-select
-                    v-model="pt.point_type"
-                    :options="patchPointTypeOptions"
-                    :label="t('channels.patchPoint.type')"
+                    :model-value="pt.device_id"
+                    :options="deviceOptions"
+                    :label="t('channels.patchPoint.device')"
+                    :hint="t('channels.patchPoint.deviceHint')"
+                    :error="!pt.device_id"
+                    :error-message="t('channels.patchPoint.deviceRequired')"
                     emit-value
                     map-options
-                    dense
-                    style="width: 150px"
-                  />
-                  <q-select
-                    v-model="pt.name"
-                    :options="patchNameOptions"
-                    :label="t('channels.patchPoint.name')"
-                    :hint="t('channels.patchPoint.nameHint')"
-                    dense
                     use-input
-                    new-value-mode="add-unique"
-                    clearable
+                    dense
                     class="col"
+                    style="min-width: 160px"
+                    @update:model-value="(v) => setPointDevice(pt, v)"
+                    @new-value="(val, done) => onCreateDevicePoint(pt, val, done)"
                   />
                   <q-select
                     v-model="pt.connector"
@@ -1641,11 +1674,13 @@
                   />
                 </div>
                 <StockwireProductPicker
-                  v-model="pt.stockwire_product"
+                  :model-value="pointProduct(pt)"
+                  :disable="!pt.device_id"
                   :gear-type="pointGearType(pt.point_type)"
                   :label="t('stockwire.selectPatch')"
-                  :hint="pt.stockwire_product ? pt.stockwire_product.sku : ''"
+                  :hint="t('stockwire.deviceProductHint')"
                   class="q-mt-xs"
+                  @update:model-value="(v) => setPointProduct(pt, v)"
                 />
                 <q-input
                   v-model="pt.notes"
@@ -1737,6 +1772,43 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="deviceDialog">
+      <q-card style="min-width: 320px">
+        <q-card-section class="text-h6">
+          {{ t('devices.add') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <q-input
+            v-model="deviceDraft.name"
+            :label="t('devices.name')"
+            dense
+            autofocus
+          />
+          <q-select
+            v-model="deviceDraft.device_type"
+            :options="deviceTypeChoices"
+            :label="t('devices.type')"
+            emit-value
+            map-options
+            dense
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+            color="primary"
+          />
+          <q-btn
+            color="primary"
+            :label="t('devices.createDevice')"
+            :disable="!deviceDraft.name.trim()"
+            @click="confirmCreateDevice"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
     <!-- Signal flow dialog -->
     <q-dialog
       v-model="flowDialog"
@@ -1745,6 +1817,15 @@
       <q-card>
         <q-card-section class="text-h6">
           {{ t('channels.signalFlow') }}
+          <q-btn
+            v-if="flowKind === 'input' && flowSource?.obj?.id"
+            flat
+            dense
+            icon="map"
+            class="q-ml-sm"
+            :label="t('stagePlot.highlightChannel')"
+            @click="highlightFlowOnStage"
+          />
         </q-card-section>
         <q-card-section>
           <div
@@ -1771,6 +1852,12 @@
                 </div>
                 <div class="text-caption text-grey-7">
                   {{ [n.connector, n.patch_label].filter(Boolean).join(' · ') || '—' }}
+                </div>
+                <div
+                  v-if="n.device"
+                  class="text-caption text-primary"
+                >
+                  ⬡ {{ n.device }}
                 </div>
                 <div
                   v-if="n.connectorTag"
@@ -1825,6 +1912,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { api } from '@/boot/api'
 import { useChannelsStore } from '@/stores/channels'
 import { useAuthStore } from '@/stores/auth'
+import { useDevicesStore } from '@/stores/devices'
+import { useStagePlotStore } from '@/stores/stageplot'
+import { chainNodes, performersByChannel } from '@/utils/patchFlow'
 import { useStockwireStore } from '@/stores/stockwire'
 import DateTimePicker from '@/components/DateTimePicker.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
@@ -1832,6 +1922,7 @@ import FlowTree from '@/components/FlowTree.vue'
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue'
 import ColumnChooser from '@/components/ColumnChooser.vue'
 import { useColumnPrefs } from '../composables/useColumnPrefs'
+import { CONNECTOR_OPTIONS } from '@/constants/connectors'
 
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
@@ -1891,11 +1982,15 @@ const inputTypeOptions = [
 ]
 
 
+const stagePlotStore = useStagePlotStore()
+const stageByChannel = computed(() => performersByChannel(store.channels, stagePlotStore.elements))
+
 const columns = [
   { name: 'channel_number', label: t('channels.fieldChannelNumber'), field: 'channel_number', align: 'left', style: 'width: 60px' },
   { name: 'source_label', label: t('channels.fieldSource'), field: 'source_label', align: 'left' },
   { name: 'input_type', label: t('channels.type.label'), field: 'input_type', align: 'left', format: (v) => (v ? t(`channels.type.${v}`) : '') },
   { name: 'device', label: t('channels.fieldDevice'), field: 'device', align: 'left' },
+  { name: 'on_stage', label: t('stagePlot.onStage'), field: (row) => (stageByChannel.value.get(row.id) || []).join(', '), align: 'left' },
   { name: 'phantom', label: t('channels.fieldPhantom'), field: 'phantom_power', align: 'center', style: 'width: 70px' },
   { name: 'stereo', label: t('channels.fieldStereo'), field: 'stereo', align: 'center', style: 'width: 60px' },
   { name: 'notes', label: t('channels.fieldNotes'), field: 'notes', align: 'left' },
@@ -1931,27 +2026,54 @@ function outputCellDisplay(col, point) {
   return value == null ? '' : String(value)
 }
 
-const connectorOptions = [
-  'XLR',
-  'TRS',
-  'TS',
-  'Jack',
-  'AES/EBU',
-  'Dante',
-  'Analog',
-  'Optical',
-  'Speakon',
-  'BNC',
-  'Ethernet',
-  'Cat5e',
-  'Cat6',
-  'dsnake',
-  'AES50',
-  'MADI',
-  'AVB',
-  'Optocore',
-  'Network',
-]
+const connectorOptions = CONNECTOR_OPTIONS
+
+const devicesStore = useDevicesStore()
+const deviceOptions = computed(() => devicesStore.options)
+const deviceTypeChoices = ['digital_stagebox', 'analog_stagebox', 'mixer', 'split', 'network', 'direct', 'other'].map((v) => ({
+  value: v,
+  label: t(`devices.types.${v}`),
+}))
+const editingStageLabel = computed(() =>
+  editingChannel.value ? (stageByChannel.value.get(editingChannel.value.id) || []).join(', ') : '',
+)
+const deviceDialog = ref(false)
+const deviceDraft = reactive({ pt: null, name: '', device_type: 'digital_stagebox' })
+
+function deviceNameOf(id) {
+  return id ? devicesStore.byId(id)?.name || '' : ''
+}
+
+function pointProduct(pt) {
+  const dev = pt.device_id ? devicesStore.byId(pt.device_id) : null
+  return dev?.stockwire_product_name
+    ? { id: dev.stockwire_product_id || null, name: dev.stockwire_product_name }
+    : null
+}
+
+async function setPointProduct(pt, product) {
+  if (!pt.device_id) return
+  await devicesStore.updateDevice(route.params.jobId, pt.device_id, {
+    stockwire_product_id: product?.id || null,
+    stockwire_product_name: product?.name || null,
+  })
+}
+
+function setPointDevice(pt, id) {
+  pt.device_id = id || null
+  const dev = id ? devicesStore.byId(id) : null
+  if (dev) pt.point_type = dev.device_type
+}
+
+async function confirmCreateDevice() {
+  const dev = await devicesStore.createDevice(route.params.jobId, {
+    name: deviceDraft.name.trim(),
+    device_type: deviceDraft.device_type,
+  })
+  await devicesStore.fetchDevices(route.params.jobId)
+  setPointDevice(deviceDraft.pt, dev.id)
+  deviceDialog.value = false
+}
 
 const listOptions = computed(() =>
   store.lists.map((l) => ({ label: l.name, value: l.id })),
@@ -2001,6 +2123,7 @@ const bulk = reactive({
   prefix: '',
   type: null,
   device: '',
+  patchDeviceId: null,
   phantom: false,
   stereo: false,
 })
@@ -2022,42 +2145,30 @@ const patchPointTypeOptions = [
 const patchPoints = ref([])
 const patchOriginalIds = ref(new Set())
 
-const patchNameOptions = computed(() => {
-  const names = new Set()
-  for (const list of store.lists) {
-    for (const ch of list.channels || []) {
-      for (const p of ch.patch_points || []) {
-        if (p.name) names.add(p.name)
-      }
-    }
-    for (const out of list.outputs || []) {
-      for (const p of out.points || []) {
-        if (p.name) names.add(p.name)
-      }
-    }
-  }
-  return Array.from(names).sort()
-})
-
 function addPatchPoint() {
   patchPoints.value.push({
-    point_type: 'mixer',
-    name: '',
     connector: form.connector || '',
     patch_label: form.channel_number ? String(form.channel_number) : '',
     notes: '',
-    stockwire_product: null,
+    device_id: null,
   })
+}
+
+function onCreateDevicePoint(pt, val, done) {
+  done()
+  const name = (val || '').trim()
+  if (!name) return
+  Object.assign(deviceDraft, { pt, name, device_type: 'digital_stagebox' })
+  deviceDialog.value = true
 }
 
 function ensureDefaultMixerPoint() {
   if (patchPoints.value.length === 0) {
     patchPoints.value.push({
-      point_type: 'mixer',
-      name: 'Mixer',
       connector: form.connector || '',
       patch_label: form.channel_number ? String(form.channel_number) : '',
       notes: '',
+      device_id: null,
     })
   }
 }
@@ -2065,7 +2176,7 @@ function ensureDefaultMixerPoint() {
 watch(
   () => form.connector,
   (val) => {
-    const mixer = patchPoints.value.find((p) => p.name === 'Mixer' && !p.id && !p.connector)
+    const mixer = patchPoints.value.find((p) => !p.id && !p.connector && !p.device_id)
     if (mixer && val) mixer.connector = val
   },
 )
@@ -2107,15 +2218,11 @@ function openChannelDialog(channel = null) {
         ? { id: channel.stand_product_id || null, name: channel.stand_product_name }
         : null,
     })
-    patchPoints.value = (channel.patch_points || []).map((p) => ({
-      ...p,
-      stockwire_product: p.stockwire_product_name
-        ? { id: p.stockwire_product_id || null, name: p.stockwire_product_name }
-        : null,
-    }))
+    patchPoints.value = (channel.patch_points || []).map((p) => ({ ...p }))
   } else {
     patchPoints.value = []
   }
+  devicesStore.fetchDevices(route.params.jobId)
   ensureDefaultMixerPoint()
   patchOriginalIds.value = new Set(
     patchPoints.value.filter((p) => p.id).map((p) => p.id),
@@ -2155,6 +2262,10 @@ function stereoTitle(row) {
 }
 
 async function saveChannel() {
+  if (patchPoints.value.some((p) => !p.device_id)) {
+    window.alert(t('channels.patchPoint.deviceRequired'))
+    return
+  }
   const payload = {
     ...form,
     device: form.stockwire_product?.name || null,
@@ -2178,13 +2289,10 @@ async function saveChannel() {
   for (const p of patchPoints.value) {
     const body = {
       position: patchPoints.value.indexOf(p),
-      point_type: p.point_type,
-      name: p.name,
       connector: p.connector,
       patch_label: p.patch_label,
       notes: p.notes,
-      stockwire_product_id: p.stockwire_product?.id || null,
-      stockwire_product_name: p.stockwire_product?.name || null,
+      device_id: p.device_id || null,
     }
     if (p.id && patchOriginalIds.value.has(p.id)) {
       await store.updatePatchPoint(route.params.jobId, channelId, p.id, body)
@@ -2218,14 +2326,14 @@ async function saveChannel() {
       })
       partner = created
     }
-    if (!partner.patch_points || partner.patch_points.length === 0) {
+    if ((!partner.patch_points || partner.patch_points.length === 0) && patchPoints.value[0]?.device_id) {
       await store.createPatchPoint(route.params.jobId, partner.id, {
         position: 0,
-        point_type: 'mixer',
         name: 'Mixer',
         connector: form.connector || '',
         patch_label: '',
         notes: '',
+        device_id: patchPoints.value[0]?.device_id,
       })
     }
     const lowerIsMain = mainNum < partnerNum
@@ -2268,6 +2376,7 @@ const bulkOut = reactive({
   prefix: 'Out',
   mode: 'stereo',
   connector: null,
+  deviceId: null,
 })
 
 function openBulkOutputs() {
@@ -2292,13 +2401,12 @@ async function saveBulkOutputs() {
     for (const [pos, c] of connectors.entries()) {
       await store.createOutputPoint(jobId, listId, created.id, {
         position: pos,
-        point_type: 'mixer',
-        name: '',
         connector: bulkOut.connector || '',
         patch_label: '',
         notes: '',
         parallel: false,
         parent_id: null,
+        device_id: bulkOut.deviceId,
         bus_connector: c,
       })
     }
@@ -2322,11 +2430,10 @@ async function saveBulk() {
     const created = await store.createChannel(route.params.jobId, store.selectedListId, payload)
     await store.createPatchPoint(route.params.jobId, created.id, {
       position: 0,
-      point_type: 'mixer',
-      name: 'Mixer',
       connector: '',
       patch_label: '',
       notes: '',
+      device_id: bulk.patchDeviceId,
     })
   }
   bulkDialog.value = false
@@ -2812,7 +2919,8 @@ function connectFromOptions(idx) {
   for (let i = 0; i < idx; i++) {
     const p = outputPoints.value[i]
     const port = [p.connector, p.patch_label, p.bus_connector].filter(Boolean).join(' ')
-    opts.push({ label: port ? `${p.name || `#${i + 1}`} — ${port}` : p.name || `#${i + 1}`, value: p.localId })
+    const label = deviceNameOf(p.device_id) || `#${i + 1}`
+    opts.push({ label: port ? `${label} — ${port}` : label, value: p.localId })
   }
   return opts
 }
@@ -2841,9 +2949,6 @@ function openOutputDialog(listId, bus = null) {
       ...p,
       localId: p.id,
       parentLocalId: p.parent_id || null,
-      stockwire_product: p.stockwire_product_name
-        ? { id: p.stockwire_product_id || null, name: p.stockwire_product_name }
-        : null,
     }))
   } else {
     outputPoints.value = []
@@ -2858,13 +2963,11 @@ function addOutputPoint() {
   outputPoints.value.push({
     localId: crypto.randomUUID(),
     parentLocalId: null,
-    point_type: 'mixer',
-    name: '',
     connector: outputForm.connector || '',
     patch_label: '',
     notes: '',
     bus_connector: null,
-    stockwire_product: null,
+    device_id: null,
   })
 }
 
@@ -2873,8 +2976,7 @@ function addPointsForConnectors() {
     outputPoints.value.push({
       localId: crypto.randomUUID(),
       parentLocalId: null,
-      point_type: 'mixer',
-      name: '',
+      device_id: null,
       connector: outputForm.connector || '',
       patch_label: '',
       notes: '',
@@ -2897,6 +2999,10 @@ function moveOutputPoint(idx, dir) {
 }
 
 async function saveOutput() {
+  if (outputPoints.value.some((p) => !p.device_id)) {
+    window.alert(t('channels.patchPoint.deviceRequired'))
+    return
+  }
   const jobId = route.params.jobId
   const listId = outputListId.value
   let outputId = outputEditing.value?.id
@@ -2922,16 +3028,13 @@ async function saveOutput() {
     const parentId = p.parentLocalId ? idMap[p.parentLocalId] || null : null
     const body = {
       position: i,
-      point_type: p.point_type,
-      name: p.name,
       connector: p.connector,
       patch_label: p.patch_label,
       notes: p.notes,
       parallel: !!p.parallel,
       parent_id: parentId,
       bus_connector: p.bus_connector || null,
-      stockwire_product_id: p.stockwire_product?.id || null,
-      stockwire_product_name: p.stockwire_product?.name || null,
+      device_id: p.device_id || null,
     }
     if (p.id && outputOriginalIds.value.has(p.id)) {
       await store.updateOutputPoint(jobId, listId, outputId, p.id, body)
@@ -2962,11 +3065,13 @@ function openFlow(kind, obj) {
 
 const flowKind = computed(() => flowSource.value?.kind || 'output')
 
-const flowLinear = computed(() => {
-  const t = flowTree.value
-  if (!t) return []
-  return [t, ...(t.children || [])]
-})
+const flowLinear = computed(() => chainNodes(flowTree.value))
+
+function highlightFlowOnStage() {
+  const id = flowSource.value?.obj?.id
+  if (!id) return
+  router.push(`/jobs/${route.params.jobId}/stage-plot?highlight=channel:${id}`)
+}
 
 const flowTree = computed(() => {
   const src = flowSource.value
@@ -2989,14 +3094,16 @@ const flowTree = computed(() => {
     }
     let prev = root
     for (const p of obj.patch_points || []) {
-      if (!p.name) continue
+      const device = deviceNameOf(p.device_id)
+      if (!device) continue
       const node = {
         id: p.id,
-        name: p.name,
+        name: device,
         connector: p.connector,
         patch_label: p.patch_label,
         notes: p.notes,
         ptype: pointTypeLabel(p.point_type),
+        device,
         children: [],
       }
       prev.children.push(node)
@@ -3014,12 +3121,13 @@ const flowTree = computed(() => {
     meta: obj.mode && obj.mode !== 'mono' ? modeLabel(obj.mode) : '',
     children: [],
   }
-  const points = (obj.points || []).filter((p) => p.name).slice().sort((a, b) => a.position - b.position)
+  const points = (obj.points || []).filter((p) => p.device_id).slice().sort((a, b) => a.position - b.position)
   const byId = new Map()
   for (const p of points) {
     byId.set(p.id, {
       id: p.id,
-      name: p.name,
+      name: deviceNameOf(p.device_id),
+      device: deviceNameOf(p.device_id),
       connector: p.connector,
       patch_label: p.patch_label,
       notes: p.notes,
@@ -3089,6 +3197,7 @@ function disconnectWs() {
 }
 
 onMounted(async () => {
+  stagePlotStore.fetchElements(route.params.jobId)
   try {
     const { data } = await api.get(`/jobs/${route.params.jobId}`)
     job.value = data
@@ -3096,6 +3205,13 @@ onMounted(async () => {
     jobError.value = t('common.errorOccurred') || 'Job not found'
   }
   await store.fetchLists(route.params.jobId)
+  const channelId = route.query.channel
+  const list = channelId && store.lists.find((l) => (l.channels || []).some((c) => c.id === channelId))
+  if (list) {
+    await store.selectList(route.params.jobId, list.id)
+    const channel = store.channels.find((c) => c.id === channelId)
+    if (channel) openChannelDialog(channel)
+  }
   connectWs()
 })
 

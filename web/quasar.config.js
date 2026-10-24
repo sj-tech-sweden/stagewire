@@ -1,6 +1,6 @@
 module.exports = function (/* ctx */) {
   return {
-    boot: ['api', 'theme', 'icons', 'i18n'],
+    boot: ['api', 'theme', 'icons', 'i18n', 'vue-konva'],
 
     css: ['app.css'],
 

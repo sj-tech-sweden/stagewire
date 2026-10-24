@@ -10,6 +10,9 @@ class ProductionJobBase(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str = ""
+    stage_width_cm: float = 0.0
+    stage_height_cm: float = 0.0
+    cable_plan: dict = Field(default_factory=dict)
 
 
 class ProductionJobCreate(ProductionJobBase):
@@ -22,6 +25,7 @@ class ProductionJobUpdate(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str | None = None
+    cable_plan: dict | None = None
 
 
 class ProductionJobRead(ProductionJobBase):
@@ -70,12 +74,10 @@ class AudioChannelPatchRead(AudioChannelPatchBase):
 class ChannelPatchPointBase(BaseModel):
     position: int = 0
     point_type: str | None = None
-    name: str | None = None
     connector: str | None = None
     patch_label: str | None = None
     notes: str | None = None
-    stockwire_product_id: str | None = None
-    stockwire_product_name: str | None = None
+    device_id: UUID | None = None
 
 
 class ChannelPatchPointCreate(ChannelPatchPointBase):
@@ -85,7 +87,6 @@ class ChannelPatchPointCreate(ChannelPatchPointBase):
 class ChannelPatchPointUpdate(ChannelPatchPointBase):
     position: int | None = None
     point_type: str | None = None
-    name: str | None = None
 
 
 class ChannelPatchPointRead(ChannelPatchPointBase):
@@ -98,15 +99,13 @@ class ChannelPatchPointRead(ChannelPatchPointBase):
 class OutputPatchPointBase(BaseModel):
     position: int = 0
     point_type: str | None = None
-    name: str | None = None
     connector: str | None = None
     patch_label: str | None = None
     notes: str | None = None
     parallel: bool = False
     parent_id: UUID | None = None
     bus_connector: str | None = None
-    stockwire_product_id: str | None = None
-    stockwire_product_name: str | None = None
+    device_id: UUID | None = None
 
 
 class OutputPatchPointCreate(OutputPatchPointBase):
@@ -116,7 +115,6 @@ class OutputPatchPointCreate(OutputPatchPointBase):
 class OutputPatchPointUpdate(OutputPatchPointBase):
     position: int | None = None
     point_type: str | None = None
-    name: str | None = None
 
 
 class OutputPatchPointRead(OutputPatchPointBase):
@@ -223,10 +221,15 @@ class ExportPluginInfo(BaseModel):
 class StagePlotElementBase(BaseModel):
     element_type: str
     linked_channel_id: UUID | None = None
+    linked_patch_point_id: UUID | None = None
+    linked_device_id: UUID | None = None
     position_x: float = 0.0
     position_y: float = 0.0
     rotation: float = 0.0
+    width_cm: float = 60.0
+    height_cm: float = 60.0
     label: str = ""
+    image_url: str = ""
 
 
 class StagePlotElementCreate(StagePlotElementBase):
@@ -242,6 +245,41 @@ class StagePlotElementRead(StagePlotElementBase):
 
     id: UUID
     job_id: UUID
+
+
+class AudioDevicePort(BaseModel):
+    direction: str = "in"  # 'in' | 'out'
+    connector: str = ""
+    count: int = 0
+
+
+class AudioDeviceBase(BaseModel):
+    name: str = ""
+    device_type: str = "other"
+    position: int = 0
+    notes: str = ""
+    ports: list[AudioDevicePort] | None = []
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
+
+
+class AudioDeviceCreate(AudioDeviceBase):
+    pass
+
+
+class AudioDeviceUpdate(AudioDeviceBase):
+    name: str | None = None
+    device_type: str | None = None
+    position: int | None = None
+    notes: str | None = None
+
+
+class AudioDeviceRead(AudioDeviceBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID
+    patch_point_count: int = 0
 
 
 __all__ = [
@@ -272,6 +310,10 @@ __all__ = [
     "StagePlotElementCreate",
     "StagePlotElementUpdate",
     "StagePlotElementRead",
+    "AudioDeviceBase",
+    "AudioDeviceCreate",
+    "AudioDeviceUpdate",
+    "AudioDeviceRead",
 ]
 
 AudioChannelPatchRead.model_rebuild()
