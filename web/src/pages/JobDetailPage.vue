@@ -2254,7 +2254,6 @@ async function saveChannel() {
     if ((!partner.patch_points || partner.patch_points.length === 0) && patchPoints.value[0]?.device_id) {
       await store.createPatchPoint(route.params.jobId, partner.id, {
         position: 0,
-        name: 'Mixer',
         connector: form.connector || '',
         patch_label: '',
         notes: '',
