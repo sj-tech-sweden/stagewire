@@ -28,6 +28,14 @@
         :disable="!selected"
         @click="printSheet"
       />
+      <q-btn
+        flat
+        icon="map"
+        :label="t('stagePlot.viewOnStagePlot')"
+        :disable="!current"
+        class="q-ml-sm"
+        @click="openStagePlot"
+      />
     </div>
 
     <div
@@ -67,6 +75,29 @@
       id="print-area"
       class="patch-sheet"
     >
+      <q-card
+        flat
+        bordered
+        class="q-mb-md no-print"
+      >
+        <q-card-section>
+          <div class="text-subtitle2 q-mb-xs">
+            {{ t('stagePlot.title') }} ·
+            <span class="text-primary">{{ current.name }}</span>
+          </div>
+          <div class="text-caption text-grey-7 q-mb-sm">
+            {{ t('stagePlot.highlightActive', { name: current.name }) }}
+          </div>
+          <StagePlotMini
+            :elements="plotElements"
+            :stage-width="job?.stage_width_cm || 1200"
+            :stage-height="job?.stage_height_cm || 700"
+            :highlight-ids="currentHighlightIds"
+            :max-width="560"
+          />
+        </q-card-section>
+      </q-card>
+
       <div class="text-h6 q-mb-xs">
         {{ current.name }}
       </div>
@@ -98,6 +129,16 @@
               class="q-mr-sm"
             />
             <span class="text-subtitle2">{{ chain.label }}</span>
+            <q-btn
+              dense
+              flat
+              round
+              size="sm"
+              icon="map"
+              class="q-ml-sm"
+              :aria-label="t('stagePlot.highlightChannel')"
+              @click="highlightChannelOnStage(chain.channelId)"
+            />
           </div>
           <div class="flow-tree-wrap q-mt-xs">
             <div
@@ -105,7 +146,7 @@
               class="row items-center flow-linear-row wrap"
             >
               <template
-                v-for="(n, i) in [chain.tree, ...(chain.tree.children || [])]"
+                v-for="(n, i) in chain.nodes"
                 :key="n.id || i"
               >
                 <q-card
@@ -122,9 +163,15 @@
                   <div class="text-caption text-grey-7">
                     {{ [n.connector, n.patch_label].filter(Boolean).join(' · ') || '—' }}
                   </div>
+                  <div
+                    v-if="n.device"
+                    class="text-caption text-primary"
+                  >
+                    ⬡ {{ n.device }}
+                  </div>
                 </q-card>
                 <q-icon
-                  v-if="i < [chain.tree, ...(chain.tree.children || [])].length - 1"
+                  v-if="i < chain.nodes.length - 1"
                   name="arrow_forward"
                   class="q-mx-xs flow-linear-arrow"
                 />
@@ -192,7 +239,9 @@
               </div>
             </div>
             <div class="row q-gutter-sm items-center">
-              <div class="text-caption text-grey-7 col-4">48V</div>
+              <div class="text-caption text-grey-7 col-4">
+                48V
+              </div>
               <div class="col">
                 {{ ch.phantom_power ? '✓' : '' }}
               </div>
@@ -231,6 +280,17 @@
               </div>
             </div>
             <div
+              v-if="stageByChannel.get(ch.channel_id)?.length"
+              class="row q-gutter-sm items-center"
+            >
+              <div class="text-caption text-grey-7 col-4">
+                {{ t('stagePlot.onStage') }}
+              </div>
+              <div class="col">
+                {{ (stageByChannel.get(ch.channel_id) || []).join(', ') }}
+              </div>
+            </div>
+            <div
               v-if="ch.notes"
               class="text-caption"
             >
@@ -247,13 +307,14 @@
       </q-list>
       <q-table
         v-else
-        :rows="current.channels"
+        :rows="tableRows"
         :columns="columns"
         row-key="channel_id"
         dense
         flat
         bordered
         :pagination="{ rowsPerPage: 100 }"
+        @row-click="(_, row) => openChannel(row)"
       >
         <template #body-cell-notes="cell">
           <q-td :props="cell">
@@ -300,6 +361,165 @@
         </template>
       </q-table>
     </div>
+
+    <q-dialog v-model="channelDialog">
+      <q-card style="min-width: 320px; max-width: 520px">
+        <q-card-section class="row items-center">
+          <div class="col text-h6">
+            <span v-if="activeChannel?.kind === 'output'">OUT</span>
+            <span v-else>{{ activeChannel?.channel_number }}</span>
+          </div>
+          <q-btn
+            v-close-popup
+            flat
+            round
+            dense
+            icon="close"
+          />
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <div class="row items-center">
+            <div class="text-caption text-grey-7 col-4">
+              {{ t('channels.fieldSource') }}
+            </div>
+            <div class="col">
+              {{ activeChannel?.output_name || activeChannel?.source_label || '—' }}
+            </div>
+          </div>
+          <div
+            v-if="activeChannel?.device"
+            class="row items-center"
+          >
+            <div class="text-caption text-grey-7 col-4">
+              {{ t('channels.fieldDevice') }}
+            </div>
+            <div class="col">
+              {{ activeChannel.device }}
+            </div>
+          </div>
+          <div
+            v-if="activeChannel?.input_type"
+            class="row items-center"
+          >
+            <div class="text-caption text-grey-7 col-4">
+              {{ t('channels.type.label') }}
+            </div>
+            <div class="col">
+              {{ t(`channels.type.${activeChannel.input_type}`) }}
+            </div>
+          </div>
+          <div class="row items-center">
+            <div class="text-caption text-grey-7 col-4">
+              48V
+            </div>
+            <div class="col">
+              {{ activeChannel?.phantom_power ? '✓' : '' }}
+            </div>
+          </div>
+          <div
+            v-if="activeChannel?.connector || activeChannel?.point?.connector"
+            class="row items-center"
+          >
+            <div class="text-caption text-grey-7 col-4">
+              {{ t('channels.patchPoint.connector') }}
+            </div>
+            <div class="col">
+              {{ activeChannel?.connector || activeChannel?.point?.connector }}
+            </div>
+          </div>
+          <div
+            v-if="activeChannel?.patch_label || activeChannel?.point?.patch_label"
+            class="row items-center"
+          >
+            <div class="text-caption text-grey-7 col-4">
+              {{ t('channels.patchPoint.label') }}
+            </div>
+            <div class="col">
+              {{ activeChannel?.patch_label || activeChannel?.point?.patch_label }}
+            </div>
+          </div>
+          <q-separator class="q-my-sm" />
+          <div class="row items-center justify-between">
+            <div class="text-subtitle2">
+              {{ t('devices.title') }}
+            </div>
+            <q-btn
+              v-close-popup
+              flat
+              dense
+              icon="add"
+              :label="t('devices.add')"
+              @click="showCreateDevice = !showCreateDevice"
+            />
+          </div>
+          <q-card
+            v-if="showCreateDevice"
+            flat
+            bordered
+            class="q-pa-xs q-mt-xs"
+          >
+            <div class="row q-gutter-sm items-end">
+              <q-input
+                v-model="newDevName"
+                :label="t('devices.name')"
+                dense
+                class="col"
+              />
+              <q-select
+                v-model="newDevType"
+                :options="deviceTypeOptions"
+                :label="t('devices.type')"
+                emit-value
+                map-options
+                dense
+                class="col"
+              />
+              <q-btn
+                color="primary"
+                dense
+                :label="t('devices.createDevice')"
+                :disable="!newDevName.trim()"
+                @click="createDeviceInline"
+              />
+            </div>
+          </q-card>
+          <div
+            v-for="p in activeChannelFull?.patch_points || []"
+            :key="p.id"
+            class="row q-gutter-xs items-center q-mt-xs"
+          >
+            <div class="col-5 text-caption ellipsis">
+              {{ devicesStore.byId(p.device_id)?.name || t('devices.none') }}
+            </div>
+            <q-select
+              :model-value="p.device_id"
+              :options="deviceOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              @update:model-value="(v) => assignPoint(p, v)"
+            />
+          </div>
+          <q-separator class="q-my-sm" />
+          <div class="text-subtitle2">
+            {{ t('stagePlot.onStage') }}
+          </div>
+          <div
+            v-if="activeChannelStage"
+            class="text-body2"
+          >
+            {{ activeChannelStage }}
+          </div>
+          <div
+            v-else
+            class="text-caption text-grey-7"
+          >
+            {{ t('devices.none') }}
+          </div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -311,17 +531,43 @@ import { api } from '@/boot/api'
 import MarkdownText from '@/components/MarkdownText.vue'
 import TruncateText from '@/components/TruncateText.vue'
 import FlowTree from '@/components/FlowTree.vue'
+import StagePlotMini from '@/components/StagePlotMini.vue'
+import { useDevicesStore } from '@/stores/devices'
+import { chainNodes } from '@/utils/patchFlow'
 
 const { t } = useI18n({ useScope: 'global' })
 const route = useRoute()
 const router = useRouter()
 const jobId = route.params.jobId
+const devicesStore = useDevicesStore()
 
 const job = ref(null)
 const sheets = ref([])
 const lists = ref([])
 const selected = ref(null)
 const error = ref(null)
+const plotElements = ref([])
+const channelDialog = ref(false)
+const activeChannel = ref(null)
+const activeChannelId = ref(null)
+const showCreateDevice = ref(false)
+const newDevName = ref('')
+const newDevType = ref('digital_stagebox')
+
+const DEVICE_TYPES = [
+  'digital_stagebox',
+  'analog_stagebox',
+  'mixer',
+  'split',
+  'network',
+  'direct',
+  'other',
+]
+const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
+  value: v,
+  label: t(`devices.types.${v}`),
+}))
+const deviceOptions = computed(() => devicesStore.options)
 
 const typeKey = {
   mixer: 'typeMixer',
@@ -351,6 +597,96 @@ const current = computed(
   () => sheets.value.find((s) => s.name === selected.value) || null,
 )
 
+const pointChannelMap = computed(() => {
+  const m = {}
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) m[p.id] = ch.id
+    }
+  }
+  return m
+})
+const pointNameMap = computed(() => {
+  const m = {}
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) m[p.id] = devicesStore.byId(p.device_id)?.name || ''
+    }
+  }
+  return m
+})
+const deviceChannelMap = computed(() => {
+  const m = {}
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      for (const p of ch.patch_points || []) {
+        if (p.device_id) (m[p.device_id] = m[p.device_id] || new Set()).add(ch.id)
+      }
+    }
+  }
+  return m
+})
+
+const currentHighlightIds = computed(() => {
+  if (!current.value) return []
+  const deviceSet = new Set()
+  const channelSet = new Set()
+  const pointSet = new Set()
+  // Drive everything off the device assignments on the sheet's patch points —
+  // no name matching.
+  for (const row of current.value.channels || []) {
+    const pid = row.point?.device_id
+    if (pid) deviceSet.add(pid)
+    if (row.channel_id) channelSet.add(row.channel_id)
+    if (row.point?.id) pointSet.add(row.point.id)
+  }
+  const ids = []
+  for (const el of plotElements.value) {
+    if (
+      (el.linked_device_id && deviceSet.has(el.linked_device_id)) ||
+      (el.linked_channel_id && channelSet.has(el.linked_channel_id)) ||
+      (el.linked_patch_point_id && pointSet.has(el.linked_patch_point_id))
+    ) {
+      ids.push(el.id)
+    }
+  }
+  return ids
+})
+
+const stageByChannel = computed(() => {
+  const m = new Map()
+  const add = (channelId, text) => {
+    const arr = m.get(channelId) || []
+    arr.push(text)
+    m.set(channelId, arr)
+  }
+  for (const el of plotElements.value) {
+    const channelIds = new Set()
+    if (el.linked_channel_id) channelIds.add(el.linked_channel_id)
+    if (el.linked_patch_point_id && pointChannelMap.value[el.linked_patch_point_id]) {
+      channelIds.add(pointChannelMap.value[el.linked_patch_point_id])
+    }
+    if (el.linked_device_id) {
+      for (const c of deviceChannelMap.value[el.linked_device_id] || []) channelIds.add(c)
+    }
+    if (!channelIds.size) continue
+    const ppName = el.linked_patch_point_id ? pointNameMap.value[el.linked_patch_point_id] : ''
+    const text =
+      ppName && el.linked_patch_point_id
+        ? `${el.label || el.element_type} (${ppName})`
+        : el.label || el.element_type
+    for (const cid of channelIds) add(cid, text)
+  }
+  return m
+})
+
+const tableRows = computed(() =>
+  (current.value?.channels || []).map((ch) => ({
+    ...ch,
+    stageLabel: (stageByChannel.value.get(ch.channel_id) || []).join(', '),
+  })),
+)
+
 const modeLabel = (mode) =>
   mode === 'stereo'
     ? t('channels.outputModeStereo')
@@ -360,27 +696,77 @@ const modeLabel = (mode) =>
 
 const flowChains = computed(() => {
   if (!current.value) return []
-  const name = current.value.name
-  const chains = []
+  const deviceName = (id) => (id ? devicesStore.byId(id)?.name || '' : '')
+  const fullById = (cid) => {
+    for (const list of lists.value) {
+      const c = (list.channels || []).find((x) => x.id === cid)
+      if (c) return c
+      const o = (list.outputs || []).find((x) => x.id === cid)
+      if (o) return o
+    }
+    return null
+  }
   const buildInputTree = (ch) => {
     const srcLabel = ch.source_label || `${t('channels.fieldChannelNumber')} ${ch.channel_number}`
-    const srcMeta = [ch.device, ch.input_type ? t(`channels.type.${ch.input_type}`) : ''].filter(Boolean).join(' · ')
-    const root = { id: 'src', name: srcLabel, connector: ch.connector, patch_label: '', notes: ch.notes || '', meta: srcMeta, children: [] }
+    const srcMeta = [ch.device, ch.input_type ? t(`channels.type.${ch.input_type}`) : '']
+      .filter(Boolean)
+      .join(' · ')
+    const root = {
+      id: 'src',
+      name: srcLabel,
+      connector: ch.connector,
+      patch_label: '',
+      notes: ch.notes || '',
+      meta: srcMeta,
+      children: [],
+    }
     let prev = root
     for (const p of ch.patch_points || []) {
-      if (!p.name) continue
-      const node = { id: p.id, name: p.name, connector: p.connector, patch_label: p.patch_label, notes: p.notes, ptype: pointTypeLabel(p.point_type), children: [] }
+      if (!p.device_id) continue
+      const isDevice = !!p.device_id
+      const node = {
+        id: p.id,
+        name: isDevice ? deviceName(p.device_id) : '',
+        connector: p.connector,
+        patch_label: p.patch_label,
+        notes: p.notes,
+        ptype: pointTypeLabel(p.point_type),
+        device: isDevice ? deviceName(p.device_id) : '',
+        children: [],
+      }
       prev.children.push(node)
       prev = node
     }
     return root
   }
   const buildOutputTree = (out) => {
-    const root = { id: 'bus', name: out.name, connector: out.connector, patch_label: '', notes: out.notes || '', meta: out.mode && out.mode !== 'mono' ? modeLabel(out.mode) : '', children: [] }
-    const pts = (out.points || []).filter((p) => p.name).slice().sort((a, b) => a.position - b.position)
+    const root = {
+      id: 'bus',
+      name: out.name,
+      connector: out.connector,
+      patch_label: '',
+      notes: out.notes || '',
+      meta: out.mode && out.mode !== 'mono' ? modeLabel(out.mode) : '',
+      children: [],
+    }
+    const pts = (out.points || [])
+      .filter((p) => p.device_id)
+      .slice()
+      .sort((a, b) => a.position - b.position)
     const byId = new Map()
     for (const p of pts) {
-      byId.set(p.id, { id: p.id, name: p.name, connector: p.connector, patch_label: p.patch_label, notes: p.notes, ptype: pointTypeLabel(p.point_type), connectorTag: p.bus_connector || '', children: [] })
+      const isDevice = !!p.device_id
+      byId.set(p.id, {
+        id: p.id,
+        name: isDevice ? deviceName(p.device_id) : '',
+        connector: p.connector,
+        patch_label: p.patch_label,
+        notes: p.notes,
+        ptype: pointTypeLabel(p.point_type),
+        connectorTag: p.bus_connector || '',
+        device: isDevice ? deviceName(p.device_id) : '',
+        children: [],
+      })
     }
     for (const p of pts) {
       const node = byId.get(p.id)
@@ -397,16 +783,29 @@ const flowChains = computed(() => {
     }
     return root
   }
-  for (const list of lists.value) {
-    for (const ch of list.channels || []) {
-      if ((ch.source_label && ch.source_label === name) || (ch.patch_points || []).some((p) => p.name === name)) {
-        chains.push({ label: ch.source_label || `${t('channels.fieldChannelNumber')} ${ch.channel_number}`, kind: 'input', tree: buildInputTree(ch) })
-      }
-    }
-    for (const out of list.outputs || []) {
-      if (out.name === name || (out.points || []).some((p) => p.name === name)) {
-        chains.push({ label: out.name, kind: 'output', tree: buildOutputTree(out) })
-      }
+  const seen = new Set()
+  const chains = []
+  for (const row of current.value.channels || []) {
+    if (seen.has(row.channel_id)) continue
+    seen.add(row.channel_id)
+    const full = fullById(row.channel_id)
+    if (!full) continue
+    if (row.kind === 'channel') {
+      const tree = buildInputTree(full)
+      chains.push({
+        label: row.source_label || `${t('channels.fieldChannelNumber')} ${row.channel_number}`,
+        kind: 'input',
+        channelId: row.channel_id,
+        tree,
+        nodes: chainNodes(tree),
+      })
+    } else {
+      chains.push({
+        label: row.output_name || full.name,
+        kind: 'output',
+        channelId: row.channel_id,
+        tree: buildOutputTree(full),
+      })
     }
   }
   return chains
@@ -436,21 +835,95 @@ const columns = [
   { name: 'patch_label', label: t('channels.patchPoint.label'), field: (row) => row.point.patch_label, align: 'left' },
   { name: 'notes', label: t('channels.fieldNotes'), field: 'notes', align: 'left' },
   { name: 'point_notes', label: t('channels.patchPoint.notes'), field: (row) => row.point.notes, align: 'left' },
+  { name: 'stageLabel', label: t('stagePlot.onStage'), field: 'stageLabel', align: 'left' },
 ]
 
 function printSheet() {
   window.print()
 }
 
+function openStagePlot() {
+  if (!current.value) return
+  router.push(
+    `/jobs/${jobId}/stage-plot?highlight=sheet:${encodeURIComponent(current.value.name)}`,
+  )
+}
+
+function highlightChannelOnStage(channelId) {
+  if (!channelId) return
+  router.push(`/jobs/${jobId}/stage-plot?highlight=channel:${channelId}`)
+}
+
+const activeChannelFull = computed(() => {
+  if (!activeChannelId.value) return null
+  for (const list of lists.value) {
+    for (const ch of list.channels || []) {
+      if (ch.id === activeChannelId.value) return ch
+    }
+  }
+  return null
+})
+
+async function reloadData() {
+  const [listsRes, plotRes, sheetsRes] = await Promise.all([
+    api.get(`/jobs/${jobId}/channel-lists`),
+    api.get(`/jobs/${jobId}/plot-elements`),
+    api.get(`/jobs/${jobId}/patch-sheets`),
+  ])
+  lists.value = listsRes.data
+  plotElements.value = plotRes.data
+  sheets.value = sheetsRes.data
+  await devicesStore.fetchDevices(jobId)
+  if (!selected.value && sheets.value.length) {
+    selected.value = sheets.value[0].name
+  }
+}
+
+function openChannel(row) {
+  activeChannel.value = row
+  activeChannelId.value = row.channel_id
+  channelDialog.value = true
+}
+
+async function assignPoint(p, deviceId) {
+  await devicesStore.assignPatchPoint(jobId, p, deviceId)
+  await reloadData()
+}
+
+async function createDeviceInline() {
+  if (!newDevName.value.trim()) return
+  await devicesStore.createDevice(jobId, {
+    name: newDevName.value.trim(),
+    device_type: newDevType.value,
+  })
+  newDevName.value = ''
+  showCreateDevice.value = false
+  await reloadData()
+}
+
+const activeChannelStage = computed(() =>
+  activeChannel.value
+    ? (stageByChannel.value.get(activeChannel.value.channel_id) || []).join(', ')
+    : '',
+)
+
 onMounted(async () => {
   try {
     const jobReq = api.get(`/jobs/${jobId}`)
     const sheetsReq = api.get(`/jobs/${jobId}/patch-sheets`)
     const listsReq = api.get(`/jobs/${jobId}/channel-lists`)
-    const [jobRes, sheetsRes, listsRes] = await Promise.all([jobReq, sheetsReq, listsReq])
+    const plotReq = api.get(`/jobs/${jobId}/plot-elements`)
+    const [jobRes, sheetsRes, listsRes, plotRes] = await Promise.all([
+      jobReq,
+      sheetsReq,
+      listsReq,
+      plotReq,
+    ])
     job.value = jobRes.data
     sheets.value = sheetsRes.data
     lists.value = listsRes.data
+    plotElements.value = plotRes.data || []
+    devicesStore.fetchDevices(jobId)
     if (sheets.value.length) selected.value = sheets.value[0].name
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred')
@@ -473,5 +946,10 @@ onMounted(async () => {
 .flow-node-active {
   background: rgba(63, 135, 63, 0.18);
   border-color: var(--ec-accent, #35a853);
+}
+@media print {
+  .no-print {
+    display: none !important;
+  }
 }
 </style>

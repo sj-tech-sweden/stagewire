@@ -28,6 +28,18 @@ async def _stockwire_client(db) -> client.StockwireClient:
     return client.StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
 
 
+async def _catalog_client(db):
+    """Return a Stockwire client, or ``None`` when the integration is not configured.
+
+    Catalog browsing (categories / product search) degrades gracefully to empty
+    results so the UI works without the stockwire-rental integration set up.
+    """
+    cfg = await load_integration_config(db)
+    if not cfg.get("api_key"):
+        return None
+    return client.StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str, db=Depends(get_db)) -> dict:
     try:
@@ -52,8 +64,10 @@ async def search_products(
     limit: int = 50,
     db=Depends(get_db),
 ) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": []}
     try:
-        sw = await _stockwire_client(db)
         return await sw.search_products(
             search=search,
             category=category,
@@ -83,8 +97,10 @@ async def get_product(product_id: int | str, db=Depends(get_db)) -> dict:
 
 @router.get("/categories")
 async def list_categories(db=Depends(get_db)) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"categories": []}
     try:
-        sw = await _stockwire_client(db)
         return {"categories": await sw.list_categories()}
     except Exception as exc:  # noqa: BLE001
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"

@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import (
     AudioChannelPatch,
+    AudioDevice,
     ChannelList,
     ChannelListOutput,
     ChannelPatchPoint,
@@ -14,7 +15,7 @@ from app.domains.audio.models import (
     StagePlotElement,
 )
 
-_POINT_STRING_FIELDS = {"name", "connector", "patch_label", "notes", "point_type"}
+_POINT_STRING_FIELDS = {"connector", "patch_label", "notes", "point_type"}
 
 
 def _clean_point_data(data: dict) -> dict:
@@ -273,3 +274,70 @@ async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict) -> Sta
 async def list_plot_elements(db: AsyncSession, job_id: UUID) -> list[StagePlotElement]:
     result = await db.execute(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
     return list(result.scalars().all())
+
+
+async def update_plot_element(
+    db: AsyncSession, job_id: UUID, element_id: UUID, data: dict
+) -> StagePlotElement | None:
+    result = await db.execute(
+        select(StagePlotElement).where(
+            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
+        )
+    )
+    element = result.scalar_one_or_none()
+    if element is None:
+        return None
+    for key, value in data.items():
+        if value is not None:
+            setattr(element, key, value)
+    await db.commit()
+    await db.refresh(element)
+    return element
+
+
+async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID) -> bool:
+    result = await db.execute(
+        select(StagePlotElement).where(
+            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
+        )
+    )
+    element = result.scalar_one_or_none()
+    if element is None:
+        return False
+    await db.delete(element)
+    await db.commit()
+    return True
+
+
+async def create_device(db: AsyncSession, job_id: UUID, data: dict) -> AudioDevice:
+    device = AudioDevice(job_id=job_id, **data)
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def list_devices(db: AsyncSession, job_id: UUID) -> list[AudioDevice]:
+    result = await db.execute(
+        select(AudioDevice).where(AudioDevice.job_id == job_id).order_by(AudioDevice.position)
+    )
+    return list(result.scalars().all())
+
+
+async def get_device(db: AsyncSession, device_id: UUID) -> AudioDevice | None:
+    result = await db.execute(select(AudioDevice).where(AudioDevice.id == device_id))
+    return result.scalars().first()
+
+
+async def update_device(db: AsyncSession, device: AudioDevice, data: dict) -> AudioDevice:
+    for key, value in data.items():
+        if value is not None or key in {"stockwire_product_id", "stockwire_product_name"}:
+            setattr(device, key, value)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+async def delete_device(db: AsyncSession, device: AudioDevice) -> None:
+    await db.delete(device)
+    await db.commit()

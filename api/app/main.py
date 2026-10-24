@@ -1,7 +1,9 @@
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.db import init_db
@@ -12,6 +14,7 @@ from app.domains.auth.router import router as auth_router
 from app.domains.settings.router import router as settings_router
 from app.domains.stockwire.router import public_router as stockwire_public_router
 from app.domains.stockwire.router import router as stockwire_router
+from app.domains.uploads.router import router as uploads_router
 
 
 @asynccontextmanager
@@ -35,6 +38,17 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix="/api/v1")
     app.include_router(stockwire_router, prefix="/api/v1")
     app.include_router(stockwire_public_router, prefix="/api/v1")
+    app.include_router(uploads_router, prefix="/api/v1")
+
+    settings = get_settings()
+    try:
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        app.mount("/static", StaticFiles(directory=settings.upload_dir), name="static")
+    except OSError:
+        # Non-fatal: the upload directory is not writable (e.g. a read-only
+        # filesystem in some environments). The upload endpoint still validates
+        # and writes, and will report the error if it is actually used.
+        pass
 
     @app.get("/api/v1/health/live")
     async def health_live() -> dict:

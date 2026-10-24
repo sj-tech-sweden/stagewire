@@ -25,6 +25,12 @@
         {{ [node.connector, node.patch_label].filter(Boolean).join(' · ') || '—' }}
       </div>
       <div
+        v-if="node.device"
+        class="text-caption text-primary"
+      >
+        ⬡ {{ node.device }}
+      </div>
+      <div
         v-if="!compact && node.connectorTag"
         class="text-caption text-grey-7"
       >

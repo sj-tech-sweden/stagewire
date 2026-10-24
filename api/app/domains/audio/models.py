@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
@@ -26,6 +27,9 @@ class ProductionJob(Base):
     venue_name: Mapped[str] = mapped_column(String(255), default="")
     event_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -37,6 +41,9 @@ class ProductionJob(Base):
     )
     plot_elements: Mapped[list["StagePlotElement"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
+    )
+    devices: Mapped[list["AudioDevice"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan", order_by="AudioDevice.position"
     )
 
 
@@ -106,6 +113,42 @@ class AudioChannelPatch(Base):
     )
 
 
+class AudioDevice(Base):
+    """A physical box in the signal chain (stagebox, mixer, split, etc.).
+
+    Groups all the patch points that belong to one physical unit so a stage-plot
+    element can be linked to the whole box instead of a single connector.
+    """
+
+    __tablename__ = "audio_devices"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), default="")
+    device_type: Mapped[str] = mapped_column(String(64), default="other")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    ports: Mapped[list] = mapped_column(JSON, default=list)
+    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now()
+    )
+
+    job: Mapped[ProductionJob] = relationship(back_populates="devices")
+    patch_points: Mapped[list["ChannelPatchPoint"]] = relationship(
+        back_populates="device",
+        order_by="ChannelPatchPoint.position",
+        lazy="selectin",
+    )
+    output_points: Mapped[list["OutputPatchPoint"]] = relationship(
+        back_populates="device",
+        lazy="selectin",
+    )
+
+
 class StagePlotElement(Base):
     __tablename__ = "stage_plot_elements"
 
@@ -116,11 +159,20 @@ class StagePlotElement(Base):
     linked_channel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_channel_patches.id", ondelete="SET NULL"), nullable=True
     )
+    linked_patch_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("channel_patch_points.id", ondelete="SET NULL"), nullable=True
+    )
+    linked_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
+    )
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)
     rotation: Mapped[float] = mapped_column(Float, default=0.0)
+    width_cm: Mapped[float] = mapped_column(Float, default=60.0)
+    height_cm: Mapped[float] = mapped_column(Float, default=60.0)
     label: Mapped[str] = mapped_column(String(255), default="")
+    image_url: Mapped[str] = mapped_column(String(1024), default="")
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 
@@ -134,14 +186,15 @@ class ChannelPatchPoint(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     point_type: Mapped[str] = mapped_column(String(64), nullable=False, default="mixer")
-    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
-    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     channel: Mapped[AudioChannelPatch] = relationship(back_populates="patch_points")
+    device: Mapped["AudioDevice"] = relationship(back_populates="patch_points")
 
 
 class ChannelListOutput(Base):
@@ -176,7 +229,6 @@ class OutputPatchPoint(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     point_type: Mapped[str] = mapped_column(String(64), nullable=False, default="mixer")
-    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
@@ -185,10 +237,12 @@ class OutputPatchPoint(Base):
         ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
     )
     bus_connector: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     output: Mapped[ChannelListOutput] = relationship(back_populates="points")
+    device: Mapped["AudioDevice"] = relationship(back_populates="output_points")
 
 
 class StockwireRequirementLink(Base):

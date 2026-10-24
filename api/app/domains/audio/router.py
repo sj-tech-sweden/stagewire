@@ -279,6 +279,13 @@ async def _publish_channel(db: AsyncSession, channel: AudioChannelPatch) -> None
     await publish_job_event(channel_list.job_id, "channel.upsert", read)
 
 
+async def _linked_device_type(db: AsyncSession, job_id: UUID, device_id: UUID) -> str:
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
+    return device.device_type
+
+
 @router.post(
     "/{job_id}/channels/{channel_id}/patch-points",
     response_model=schemas.ChannelPatchPointRead,
@@ -295,7 +302,13 @@ async def create_patch_point(
     channel = await service.get_channel(db, channel_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
-    point = await service.create_patch_point(db, channel_id, payload.model_dump(exclude_unset=True))
+    if payload.device_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A patch point must be linked to a device"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    data["point_type"] = await _linked_device_type(db, job_id, payload.device_id)
+    point = await service.create_patch_point(db, channel_id, data)
     await _publish_channel(db, channel)
     return schemas.ChannelPatchPointRead.model_validate(point)
 
@@ -316,7 +329,14 @@ async def update_patch_point(
     point = await service.get_patch_point(db, point_id)
     if point is None or point.channel_id != channel_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
-    point = await service.update_patch_point(db, point, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "device_id" in data:
+        if data["device_id"] is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "A patch point must be linked to a device"
+            )
+        data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
+    point = await service.update_patch_point(db, point, data)
     channel = await service.get_channel(db, channel_id)
     await _publish_channel(db, channel)
     return schemas.ChannelPatchPointRead.model_validate(point)
@@ -427,7 +447,13 @@ async def create_output_point(
     output = await service.get_output(db, output_id)
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
-    point = await service.create_output_point(db, output_id, payload.model_dump(exclude_unset=True))
+    if payload.device_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Every output point must be linked to a device"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    data["point_type"] = await _linked_device_type(db, job_id, payload.device_id)
+    point = await service.create_output_point(db, output_id, data)
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
 
@@ -449,7 +475,15 @@ async def update_output_point(
     point = await service.get_output_point(db, point_id)
     if point is None or point.output_id != output_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
-    point = await service.update_output_point(db, point, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "device_id" in data:
+        if data["device_id"] is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Every output point must be linked to a device",
+            )
+        data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
+    point = await service.update_output_point(db, point, data)
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
 
@@ -484,22 +518,34 @@ async def list_patch_sheets(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     lists = await service.list_channel_lists(db, job_id)
-    sheets: dict[str, dict] = {}
+    devices = {d.id: d for d in await service.list_devices(db, job_id)}
+    sheets: dict[UUID, dict] = {}
+
+    def _add(device_id, point_type, kind, owner, p, direction):
+        if not device_id:
+            return
+        device = devices.get(device_id)
+        if device is None:
+            return
+        sheet = sheets.setdefault(
+            device_id,
+            {
+                "name": device.name or str(device.id),
+                "point_type": point_type or "mixer",
+                "rows": [],
+            },
+        )
+        sheet["rows"].append((kind, owner, p, direction, None))
+
     for lst in lists:
         for ch in lst.channels:
             for pt in ch.patch_points:
-                if not pt.name:
-                    continue
-                sheet = sheets.setdefault(pt.name, {"point_type": pt.point_type, "rows": []})
-                sheet["rows"].append(("channel", ch, pt, "in", None))
+                _add(pt.device_id, pt.point_type, "channel", ch, pt, "in")
         for output in lst.outputs:
             for op in output.points:
-                if not op.name:
-                    continue
-                sheet = sheets.setdefault(op.name, {"point_type": op.point_type, "rows": []})
-                sheet["rows"].append(("output", output, op, "out", None))
+                _add(op.device_id, op.point_type, "output", output, op, "out")
     out: list[schemas.PatchSheetRead] = []
-    for name, data in sheets.items():
+    for _device_id, data in sheets.items():
         rows = []
         for kind, owner, p, direction, chain_label in data["rows"]:
             if kind == "channel":
@@ -534,7 +580,7 @@ async def list_patch_sheets(
                             channel_id=owner.id,
                             position=p.position,
                             point_type=p.point_type,
-                            name=p.name,
+                            device_id=p.device_id,
                             connector=p.connector,
                             patch_label=p.patch_label,
                             notes=p.notes,
@@ -543,9 +589,7 @@ async def list_patch_sheets(
                 )
         rows.sort(key=lambda r: (r.direction != "in", r.channel_number))
         out.append(
-            schemas.PatchSheetRead(
-                name=name, point_type=data["point_type"] or "mixer", channels=rows
-            )
+            schemas.PatchSheetRead(name=data["name"], point_type=data["point_type"], channels=rows)
         )
     out.sort(key=lambda s: s.name)
     return out
@@ -580,6 +624,115 @@ async def list_plot_elements(
     return [schemas.StagePlotElementRead.model_validate(e) for e in elements]
 
 
+@router.patch(
+    "/{job_id}/plot-elements/{element_id}",
+    response_model=schemas.StagePlotElementRead,
+)
+async def update_plot_element(
+    job_id: UUID,
+    element_id: UUID,
+    payload: schemas.StagePlotElementUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.StagePlotElementRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    element = await service.update_plot_element(
+        db, job_id, element_id, payload.model_dump(exclude_unset=True)
+    )
+    if element is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+    return schemas.StagePlotElementRead.model_validate(element)
+
+
+@router.delete(
+    "/{job_id}/plot-elements/{element_id}",
+    status_code=204,
+)
+async def delete_plot_element(
+    job_id: UUID,
+    element_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    deleted = await service.delete_plot_element(db, job_id, element_id)
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+
+
+@router.post(
+    "/{job_id}/devices",
+    response_model=schemas.AudioDeviceRead,
+    status_code=201,
+)
+async def create_device(
+    job_id: UUID,
+    payload: schemas.AudioDeviceCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.AudioDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
+    read = schemas.AudioDeviceRead.model_validate(device)
+    read.patch_point_count = len(device.patch_points)
+    await publish_job_event(job_id, "device.upsert", read)
+    return read
+
+
+@router.get("/{job_id}/devices", response_model=list[schemas.AudioDeviceRead])
+async def list_devices(
+    job_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.AudioDeviceRead]:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    devices = await service.list_devices(db, job_id)
+    return [
+        schemas.AudioDeviceRead.model_validate(d).model_copy(
+            update={"patch_point_count": len(d.patch_points)}
+        )
+        for d in devices
+    ]
+
+
+@router.patch("/{job_id}/devices/{device_id}", response_model=schemas.AudioDeviceRead)
+async def update_device(
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AudioDeviceUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.AudioDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    device = await service.update_device(db, device, payload.model_dump(exclude_unset=True))
+    read = schemas.AudioDeviceRead.model_validate(device)
+    read.patch_point_count = len(device.patch_points)
+    await publish_job_event(job_id, "device.upsert", read)
+    return read
+
+
+@router.delete("/{job_id}/devices/{device_id}", status_code=204)
+async def delete_device(
+    job_id: UUID,
+    device_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    device = await service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    if device.patch_points or device.output_points:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Move or delete the patch points on this device before removing it",
+        )
+    await service.delete_device(db, device)
+    await publish_job_event(job_id, "device.delete", {"id": str(device_id)})
+
+
 class StockwireSyncResult(BaseModel):
     stockwire_job_id: str | None = None
     item_count: int = 0
@@ -595,7 +748,7 @@ class StockwireSyncResult(BaseModel):
 def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[str]]:
     """Catalog products used in the job, one entry per product with its total quantity.
 
-    Each patch slot that holds a product adds one unit. Freetext entries (no catalog
+    Each device that holds a product adds one unit. Freetext entries (no catalog
     product) cannot be pushed and are returned separately.
     """
     desired: dict[int, dict] = {}
@@ -634,21 +787,13 @@ def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[
                 f"{slot} stand",
                 freetext_name=ch.stand_product_name,
             )
-            for pp in ch.patch_points:
-                put(
-                    pp.stockwire_product_id,
-                    pp.stockwire_product_name or pp.name,
-                    f"{slot} {pp.name or 'patch'}".strip(),
-                    freetext_name=pp.stockwire_product_name,
-                )
-        for out in clist.outputs:
-            for op in out.points:
-                put(
-                    op.stockwire_product_id,
-                    op.stockwire_product_name or op.name,
-                    f"{out.name} {op.name or ''}".strip(),
-                    freetext_name=op.stockwire_product_name,
-                )
+    for device in job.devices:
+        put(
+            device.stockwire_product_id,
+            device.stockwire_product_name or device.name,
+            device.name or "device",
+            freetext_name=device.stockwire_product_name,
+        )
     return desired, freetext
 
 
@@ -672,6 +817,7 @@ async def sync_job_to_stockwire(
     result = await db.execute(
         select(ProductionJob)
         .options(
+            selectinload(ProductionJob.devices),
             selectinload(ProductionJob.channel_lists)
             .selectinload(ChannelList.channels)
             .selectinload(AudioChannelPatch.patch_points),

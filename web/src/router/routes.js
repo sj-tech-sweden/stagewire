@@ -6,6 +6,8 @@ const routes = [
       { path: '', component: () => import('@/pages/IndexPage.vue') },
       { path: 'jobs/:jobId', component: () => import('@/pages/JobDetailPage.vue') },
       { path: 'jobs/:jobId/patch-sheets', component: () => import('@/pages/PatchSheetsPage.vue') },
+      { path: 'jobs/:jobId/stage-plot', component: () => import('@/pages/StagePlotPage.vue') },
+      { path: 'jobs/:jobId/devices', component: () => import('@/pages/DevicesPage.vue') },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     ],
   },

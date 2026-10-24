@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8010
 
+    # Echo SQL to the logs. Off by default; enable for local debugging only
+    # (it is very noisy in the container logs otherwise).
+    sql_echo: bool = False
+
     database_url: str = "postgresql+asyncpg://stagewire:stagewire@localhost:5433/stagewire"
     redis_url: str = "redis://localhost:6380/0"
 
@@ -24,6 +28,15 @@ class Settings(BaseSettings):
 
     stockwire_api_base_url: str = "https://rental-api.sj-tech.se"
     stockwire_api_token: str | None = None
+
+    # --- Uploaded files (stage plot element images) ---
+    # Directory the API stores uploaded files in. Serve it at /static via a
+    # StaticFiles mount. In the container this is backed by a persistent volume.
+    upload_dir: str = "/app/uploads"
+    # Max upload size in bytes (default 5 MB).
+    max_upload_bytes: int = 5 * 1024 * 1024
+    # Allowed image extensions (used for the generated filename only).
+    upload_extensions: list[str] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
 
     # --- Auth / JWT ---
     jwt_secret_key: str = "dev-insecure-jwt-secret-change-me-please-rotate-in-prod-8f3a"

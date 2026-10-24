@@ -66,12 +66,42 @@ stockwire-rental (8000 / 9000 / 5432 / 6379).
   versions and changelogs from them.
 - Do not commit secrets, `.env`, or generated lockfile diffs that leak credentials.
 
+### 5a. Always run the linters before finishing
+
+Before declaring any backend change done (and before committing), an LLM agent MUST
+run the linters and fix every issue it reports — do not leave the tree red:
+
+- Backend: `cd api && ./.venv/bin/ruff check app tests` and
+  `./.venv/bin/ruff format --check app tests` (auto-fix with
+  `./.venv/bin/ruff format app tests` and `./.venv/bin/ruff check --fix app tests`).
+- Frontend: `cd web && ./node_modules/.bin/eslint .` (and the Quasar build for
+  type/template errors).
+- Treat `ruff format --check` failures as errors: a file "would be reformatted" means
+  you must reformat it. CI fails on any lint/format error, so a clean local run is the
+  bar for "done".
+
 ## 6. Testing
 
 - Backend: `pytest` under `api/tests/`. Each domain router gets at least one happy-path
   test using `httpx.AsyncClient` + the FastAPI `app` (or `ASGITransport`).
 - Frontend: component tests where practical.
 - CI runs lint + tests + image build on every PR (see `.github/workflows/ci.yml`).
+
+### 6a. Tests are mandatory for every edit
+
+An LLM agent MUST update or create a test for every behaviour-changing edit it makes —
+this is not optional. The tests are the regression guard for the agentic workflow
+itself: if a later change breaks something, the suite is what catches it.
+
+- If a test already covers the changed code path, extend it (add an assertion, a new
+  case) so the new behaviour is actually pinned down.
+- If no test exists for the area you touched, create one: a `pytest` case for backend
+  router/service changes, or a Playwright spec under `web/e2e/` for frontend flows.
+- For bug fixes, add a test that fails before the fix and passes after (a regression
+  test), so the bug cannot silently return.
+- Do not mark a task done until the relevant test exists and passes locally. If the
+  full e2e/Docker stack cannot run in the current environment, say so explicitly and
+  still land the test so CI exercises it.
 
 ## 6b. Database migrations (Alembic)
 
@@ -113,8 +143,9 @@ When implementing a later phase, create its `models.py`/`schemas.py`/`router.py`
 1. Read this file and the relevant domain before changing anything.
 2. If scope/behaviour is ambiguous → ask (see rule 0).
 3. Make the minimal change that satisfies the request; match existing patterns.
-4. Run the project's lint/test commands before declaring done.
-5. Never expand scope beyond what was asked without checking first.
+4. Update or create a test for the change (see rule 6a) — tests are mandatory, not optional.
+5. Run the project's lint/test commands before declaring done.
+6. Never expand scope beyond what was asked without checking first.
 
 ## 9. Shared design system (with stockwire-rental)
 
