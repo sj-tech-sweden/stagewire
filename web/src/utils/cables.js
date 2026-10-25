@@ -272,7 +272,16 @@ export function buildCableRows({ lists, devices, elements, plan }) {
       requestedMode: route.mode || 'auto',
     };
     if (!from || !to) {
-      return { ...base, placed: false, mode: null, points: [], pathM: null, requiredM: null, assignedM: null };
+      return {
+        ...base,
+        placed: false,
+        missingName: !from ? base.fromName : base.toName,
+        mode: null,
+        points: [],
+        pathM: null,
+        requiredM: null,
+        assignedM: null,
+      };
     }
     const routed = routeCable(from, to, p.cableways, route);
     const pathM = routed.lengthCm / 100;

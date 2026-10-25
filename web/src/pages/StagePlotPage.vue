@@ -689,7 +689,11 @@
                   </q-item-label>
                   <q-item-label caption>
                     {{ row.label }} · {{ row.connector || '—' }} ·
-                    {{ row.placed ? t(`cables.route.${row.mode}`) : t('cables.notPlaced') }}
+                    {{
+                      row.placed
+                        ? t(`cables.route.${row.mode}`)
+                        : t('cables.missingOn', { name: row.missingName })
+                    }}
                   </q-item-label>
                 </q-item-section>
                 <q-item-section side>

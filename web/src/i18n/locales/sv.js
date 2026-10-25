@@ -502,6 +502,7 @@ export default {
     assignHint: 'Kopierar den sparade lokalens storlek och scenposition till jobbet.',
   },
   cables: {
+    missingOn: '{name} finns inte på scenkartan',
     title: 'Kablar',
     show: 'Visa kablar',
     drawWay: 'Rita kabelväg',

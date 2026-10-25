@@ -121,3 +121,15 @@ test('a speaker linked to a device does not move that device on the plot', () =>
   // The amp's position is its rack element's centre (0,200 with 40 cm sides).
   expect(main?.points[0]).toEqual([20, 220]);
 });
+
+test('an unplaced end names the device that needs placing', () => {
+  const rows = buildCableRows({
+    lists,
+    devices,
+    elements: elements.filter((e) => e.id !== 'rack'),
+    plan: null,
+  });
+  const main = rows.find((r) => r.key === 'spk:spk');
+  expect(main?.placed).toBe(false);
+  expect(main?.missingName).toBe('Amp rack');
+});

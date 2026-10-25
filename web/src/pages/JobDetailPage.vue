@@ -2109,6 +2109,10 @@ const outputModeOptions = [
   { label: t('channels.outputModeOther'), value: 'other' },
 ]
 
+function modeLabel(mode) {
+  return outputModeOptions.find((o) => o.value === mode)?.label || mode
+}
+
 const emptyForm = () => ({
   channel_number: store.channels.length ? Math.max(...store.channels.map((c) => c.channel_number || 0)) + 1 : 1,
   source_label: '',
@@ -3247,6 +3251,7 @@ function disconnectWs() {
 
 onMounted(async () => {
   stagePlotStore.fetchElements(route.params.jobId)
+  devicesStore.fetchDevices(route.params.jobId)
   try {
     const { data } = await api.get(`/jobs/${route.params.jobId}`)
     job.value = data

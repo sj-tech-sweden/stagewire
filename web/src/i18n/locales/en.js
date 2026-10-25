@@ -502,6 +502,7 @@ export default {
     assignHint: 'Copies the saved venue size and stage position into this job.',
   },
   cables: {
+    missingOn: '{name} is not on the stage plot',
     title: 'Cables',
     show: 'Show cables',
     drawWay: 'Draw cableway',
