@@ -782,6 +782,7 @@ const palette = {
     h: 72,
     coverageAngle: 90,
     coverageDistance: 30,
+    defaultRotation: 180,
   },
   speaker_sub: {
     labelKey: 'stagePlot.types.speakerSub',
@@ -791,6 +792,7 @@ const palette = {
     h: 60,
     coverageAngle: 360,
     coverageDistance: 15,
+    defaultRotation: 180,
   },
   speaker_delay: {
     labelKey: 'stagePlot.types.speakerDelay',
@@ -800,6 +802,7 @@ const palette = {
     h: 60,
     coverageAngle: 60,
     coverageDistance: 40,
+    defaultRotation: 180,
   },
   monitor: {
     label: 'Monitor',
@@ -1358,7 +1361,7 @@ function addElement(type) {
     element_type: type,
     position_x: stageW.value / 2 - def.w / 2,
     position_y: stageH.value / 2 - def.h / 2,
-    rotation: 0,
+    rotation: def.defaultRotation ?? 0,
     label: paletteLabel(def),
     width_cm: def.w,
     height_cm: def.h,
