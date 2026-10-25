@@ -287,6 +287,8 @@ class AudioDeviceUpdate(AudioDeviceBase):
     device_type: str | None = None
     position: int | None = None
     notes: str | None = None
+    input_override: int | None = Field(None, ge=0)
+    output_override: int | None = Field(None, ge=0)
 
 
 class AudioDeviceRead(AudioDeviceBase):
@@ -295,6 +297,12 @@ class AudioDeviceRead(AudioDeviceBase):
     id: UUID
     job_id: UUID
     patch_point_count: int = 0
+    input_override: int | None = None
+    output_override: int | None = None
+    input_default: int | None = None
+    output_default: int | None = None
+    input_count: int | None = None
+    output_count: int | None = None
 
 
 __all__ = [

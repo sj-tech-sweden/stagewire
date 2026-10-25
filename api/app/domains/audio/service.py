@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,6 +38,13 @@ async def list_jobs(db: AsyncSession) -> list[ProductionJob]:
 async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
     return await db.get(ProductionJob, job_id)
 
+
+DEVICE_CLEARABLE_KEYS = {
+    "stockwire_product_id",
+    "stockwire_product_name",
+    "input_override",
+    "output_override",
+}
 
 PLOT_CLEARABLE_KEYS = {
     "linked_channel_id",
@@ -338,11 +345,25 @@ async def get_device(db: AsyncSession, device_id: UUID) -> AudioDevice | None:
 
 async def update_device(db: AsyncSession, device: AudioDevice, data: dict) -> AudioDevice:
     for key, value in data.items():
-        if value is not None or key in {"stockwire_product_id", "stockwire_product_name"}:
+        if value is not None or key in DEVICE_CLEARABLE_KEYS:
             setattr(device, key, value)
     await db.commit()
     await db.refresh(device)
     return device
+
+
+async def job_io_totals(db: AsyncSession, job_id: UUID) -> tuple[int, int]:
+    channels = await db.scalar(
+        select(func.count(AudioChannelPatch.id))
+        .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
+        .where(ChannelList.job_id == job_id)
+    )
+    outputs = await db.scalar(
+        select(func.count(ChannelListOutput.id))
+        .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
+        .where(ChannelList.job_id == job_id)
+    )
+    return int(channels or 0), int(outputs or 0)
 
 
 async def delete_device(db: AsyncSession, device: AudioDevice) -> None:

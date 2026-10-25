@@ -141,6 +141,8 @@ class AudioDevice(Base):
     ports: Mapped[list] = mapped_column(JSON, default=list)
     stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
