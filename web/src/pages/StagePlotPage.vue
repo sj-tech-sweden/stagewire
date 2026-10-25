@@ -270,7 +270,7 @@
                   :src="fullImageUrl(draft.image_url)"
                   alt=""
                   style="max-width: 160px; max-height: 110px; border-radius: 4px"
-                />
+                >
                 <q-btn
                   flat
                   dense

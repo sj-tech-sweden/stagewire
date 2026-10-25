@@ -29,6 +29,8 @@ export function sourceElementsFor(channelId, elements) {
   return mics.length ? mics : linked.filter((e) => e.element_type === 'performer');
 }
 
+const SPEAKER_TYPES = new Set(['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay', 'monitor']);
+
 export function deriveCables(lists, elements) {
   const cables = [];
   for (const list of lists || []) {
@@ -90,6 +92,30 @@ export function deriveCables(lists, elements) {
         });
       }
     }
+  }
+  const outputPoints = new Map();
+  for (const list of lists || []) {
+    for (const out of list.outputs || []) {
+      for (const pt of out.points || []) outputPoints.set(pt.id, { pt, out });
+    }
+  }
+  for (const el of elements || []) {
+    if (!SPEAKER_TYPES.has(el.element_type) || !el.linked_output_point_id) continue;
+    const hit = outputPoints.get(el.linked_output_point_id);
+    if (!hit || !hit.pt.device_id) continue;
+    cables.push({
+      key: `spk:${el.id}`,
+      kind: 'speaker',
+      label: hit.out.name,
+      channelId: hit.out.id,
+      fromElementId: null,
+      fromPointId: hit.pt.id,
+      fromDeviceId: hit.pt.device_id,
+      toDeviceId: null,
+      toElementId: el.id,
+      toPointId: null,
+      connector: hit.pt.connector || '',
+    });
   }
   return cables;
 }
@@ -225,14 +251,18 @@ export function buildCableRows({ lists, devices, elements, plan }) {
     const from = cable.fromElementId
       ? centerOfElement.get(cable.fromElementId)
       : centerOfDevice.get(cable.fromDeviceId);
-    const to = centerOfDevice.get(cable.toDeviceId);
+    const to = cable.toElementId
+      ? centerOfElement.get(cable.toElementId)
+      : centerOfDevice.get(cable.toDeviceId);
     const base = {
       ...cable,
       index: i + 1,
       fromName: cable.fromElementId
         ? elementName.get(cable.fromElementId) || '—'
         : deviceName.get(cable.fromDeviceId) || '—',
-      toName: deviceName.get(cable.toDeviceId) || '—',
+      toName: cable.toElementId
+        ? elementName.get(cable.toElementId) || '—'
+        : deviceName.get(cable.toDeviceId) || '—',
       hidden: !!route.hidden,
       waypoints: route.waypoints || [],
       requestedMode: route.mode || 'auto',
