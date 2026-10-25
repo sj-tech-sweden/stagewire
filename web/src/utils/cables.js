@@ -241,7 +241,11 @@ export function buildCableRows({ lists, devices, elements, plan }) {
   for (const el of elements || []) {
     const c = [el.position_x + (el.width_cm || 0) / 2, el.position_y + (el.height_cm || 0) / 2];
     centerOfElement.set(el.id, c);
-    if (el.linked_device_id && !centerOfDevice.has(el.linked_device_id)) {
+    if (
+      el.linked_device_id &&
+      !SPEAKER_TYPES.has(el.element_type) &&
+      !centerOfDevice.has(el.linked_device_id)
+    ) {
       centerOfDevice.set(el.linked_device_id, c);
     }
   }

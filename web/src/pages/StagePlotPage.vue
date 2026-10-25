@@ -158,6 +158,16 @@
               <q-item
                 v-ripple
                 clickable
+                @click="openSpeakerDialog"
+              >
+                <q-item-section avatar>
+                  <q-icon name="speaker_group" />
+                </q-item-section>
+                <q-item-section>{{ t('stagePlot.addSpeakers') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-ripple
+                clickable
                 @click="addCustom"
               >
                 <q-item-section avatar>
@@ -199,6 +209,7 @@
               @update:model-value="commitLink"
             />
             <q-select
+              v-if="!isSpeakerElement(selected)"
               v-model="draft.linked_device_id"
               :label="t('stagePlot.linkDevice')"
               :options="deviceOptions"
@@ -222,7 +233,7 @@
                 @click="openLinkedChannel"
               />
               <q-btn
-                v-if="draft.linked_device_id"
+                v-if="draft.linked_device_id && !isSpeakerElement(selected)"
                 flat
                 dense
                 icon="open_in_new"
@@ -305,6 +316,17 @@
               class="q-mt-sm"
               @update:model-value="commitRotation"
             />
+            <div class="row q-gutter-xs q-mt-xs">
+              <q-btn
+                v-for="step in ROTATE_STEPS"
+                :key="step"
+                dense
+                outline
+                no-caps
+                :label="rotateLabel(step)"
+                @click="rotateBy(step)"
+              />
+            </div>
             <div
               v-if="isSpeakerElement(selected)"
               class="q-mt-sm"
@@ -341,6 +363,18 @@
                 class="q-mt-sm"
                 @update:model-value="commitOutputPoint"
               />
+              <div
+                v-if="speakerSpecs[selected.id]"
+                class="text-caption text-grey-7 q-mt-xs"
+              >
+                {{
+                  speakerSpecs[selected.id].source === 'stockwire'
+                    ? t('stagePlot.specsFromStockwire', {
+                      name: speakerSpecs[selected.id].product_name || '—',
+                    })
+                    : t('stagePlot.specsManual')
+                }}
+              </div>
             </div>
             <div class="row q-gutter-sm q-mt-sm">
               <q-input
@@ -740,11 +774,83 @@
         </q-card>
       </div>
     </div>
+    <q-dialog v-model="speakerDialog">
+      <q-card style="min-width: 360px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('stagePlot.addSpeakers') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-select
+            v-model="speakerForm.type"
+            :options="speakerTypeOptions"
+            :label="t('stagePlot.speakerType')"
+            emit-value
+            map-options
+            dense
+            @update:model-value="applySpeakerDefaults"
+          />
+          <q-input
+            v-model="speakerForm.label"
+            :label="t('stagePlot.speakerLabel')"
+            dense
+          />
+          <q-input
+            v-model.number="speakerForm.count"
+            type="number"
+            :label="t('stagePlot.speakerCount')"
+            :min="1"
+            :max="16"
+            dense
+          />
+          <div class="row q-gutter-sm">
+            <q-input
+              v-model.number="speakerForm.coverage_angle_h"
+              type="number"
+              :label="t('stagePlot.coverageAngle')"
+              dense
+              class="col"
+            />
+            <q-input
+              v-model.number="speakerForm.coverage_distance_m"
+              type="number"
+              :label="t('stagePlot.coverageDistance')"
+              dense
+              class="col"
+            />
+          </div>
+          <q-select
+            v-model="speakerForm.linked_output_point_id"
+            :options="outputPointOptions"
+            :label="t('stagePlot.linkOutput')"
+            emit-value
+            map-options
+            clearable
+            dense
+          />
+          <div class="text-caption text-grey-7">
+            {{ t('stagePlot.speakerPlacementHint') }}
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            color="primary"
+            :label="t('stagePlot.addSpeakerConfirm')"
+            :loading="addingSpeakers"
+            @click="addSpeakers"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
@@ -887,6 +993,20 @@ const uploading = ref(false);
 const showCoverage = ref(false);
 const coverage = ref(null);
 const coverageImage = ref(null);
+const speakerSpecs = ref({});
+const speakerDialog = ref(false);
+const addingSpeakers = ref(false);
+const ROTATE_STEPS = [-90, -15, 15, 90];
+const SPEAKER_ROW_Y = 20;
+const SPEAKER_CHOICES = ['speaker_main', 'speaker_sub', 'speaker_delay', 'monitor'];
+const speakerForm = reactive({
+  type: 'speaker_main',
+  label: '',
+  count: 1,
+  coverage_angle_h: 90,
+  coverage_distance_m: 30,
+  linked_output_point_id: null,
+});
 let coverageTimer = null;
 
 const hasVenue = computed(() => venueW.value > 0 && venueH.value > 0);
@@ -1100,7 +1220,7 @@ const gridLines = computed(() => {
 const transformerConfig = {
   rotateEnabled: true,
   enabledAnchors: [],
-  rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
+  rotationSnaps: Array.from({ length: 24 }, (_, i) => i * 15),
   borderEnabled: false,
 };
 
@@ -1119,6 +1239,15 @@ function groupConfig(el) {
     ondragend: (e) => onDragEnd(el, e),
     ontransformend: (e) => onTransformEnd(el, e),
   };
+}
+function rotateLabel(step) {
+  return `${step > 0 ? '+' : ''}${step}°`;
+}
+function rotateBy(step) {
+  if (!selected.value) return;
+  const current = Number(draft.value.rotation) || 0;
+  draft.value.rotation = ((((current + step) % 360) + 360) % 360);
+  commitRotation();
 }
 function rectConfig(el) {
   const def = defFor(el.element_type);
@@ -1140,17 +1269,26 @@ function rectConfig(el) {
     shadowBlur: hi ? 14 : 0,
   };
 }
+// Labels live inside the element's rotated group, so each one counter-rotates by
+// the element's rotation to stay upright and readable. Its pivot is the anchor
+// point (the centre of the box, or the bottom-centre when a photo sits above it).
+function uprightTextProps(el, width) {
+  return { rotation: -(el.rotation || 0), offsetX: width / 2 };
+}
 function labelConfig(el) {
   const s = pxPerCm.value;
   const def = defFor(el.element_type);
+  const w = el.width_cm * s;
+  const h = el.height_cm * s;
   if (imageFor(el)) {
     // Photo fills the box; show the label below it so it stays readable.
     const labelFont = Math.max(9, 10 * s);
     return {
       text: el.label || paletteLabel(def),
-      x: 0,
-      y: el.height_cm * s + 2,
-      width: el.width_cm * s,
+      ...uprightTextProps(el, w),
+      x: w / 2,
+      y: h + 2,
+      width: w,
       align: 'center',
       fontSize: labelFont,
       fill: '#e0e0e0',
@@ -1159,10 +1297,12 @@ function labelConfig(el) {
   }
   return {
     text: el.label || paletteLabel(def),
-    x: 0,
-    y: 0,
-    width: el.width_cm * s,
-    height: el.height_cm * s,
+    ...uprightTextProps(el, w),
+    x: w / 2,
+    y: h / 2,
+    offsetY: h / 2,
+    width: w,
+    height: h,
     align: 'center',
     verticalAlign: 'middle',
     fontSize: Math.max(10, 12 * s),
@@ -1173,16 +1313,27 @@ function labelConfig(el) {
 function imageFor(el) {
   return el.image_url ? imageCache.value[el.id] || null : null;
 }
+function effectiveSpeaker(el) {
+  const spec = speakerSpecs.value[el.id];
+  if (!spec) return el;
+  return {
+    ...el,
+    coverage_angle_h: spec.coverage_angle_h,
+    coverage_distance_m: spec.coverage_distance_m,
+  };
+}
 function sectorFor(el) {
-  return isSpeakerElement(el) && el.coverage_angle_h > 0 && el.coverage_distance_m > 0;
+  const sp = effectiveSpeaker(el);
+  return isSpeakerElement(sp) && sp.coverage_angle_h > 0 && sp.coverage_distance_m > 0;
 }
 function wedgeConfig(el) {
   const s = pxPerCm.value;
-  const angle = Math.min(el.coverage_angle_h, 360);
+  const sp = effectiveSpeaker(el);
+  const angle = Math.min(sp.coverage_angle_h, 360);
   return {
     x: (el.width_cm / 2) * s,
     y: (el.height_cm / 2) * s,
-    radius: el.coverage_distance_m * 100 * s,
+    radius: sp.coverage_distance_m * 100 * s,
     angle,
     // Konva starts a wedge at its rotation and sweeps clockwise; face the wedge up
     // (-90°, the element's front at rotation 0) and centre it on that heading.
@@ -1216,10 +1367,23 @@ function findChannel(channelId) {
   }
   return null;
 }
+function outputPointDeviceId(pointId) {
+  for (const list of channelLists.value) {
+    for (const out of list.outputs || []) {
+      for (const pt of out.points || []) {
+        if (pt.id === pointId) return pt.device_id || null;
+      }
+    }
+  }
+  return null;
+}
 function linkedSummary(el) {
   const parts = [];
-  if (el.linked_device_id) {
-    const name = deviceNameMap.value[el.linked_device_id];
+  const deviceId = isSpeakerElement(el)
+    ? outputPointDeviceId(el.linked_output_point_id)
+    : el.linked_device_id;
+  if (deviceId) {
+    const name = deviceNameMap.value[deviceId];
     if (name) parts.push(name);
   }
   if (el.linked_channel_id) {
@@ -1232,11 +1396,13 @@ function linkedTextConfig(el) {
   const s = pxPerCm.value;
   const labelFont = Math.max(9, 10 * s);
   const offset = imageFor(el) ? labelFont + 2 : 0;
+  const w = el.width_cm * s;
   return {
     text: linkedSummary(el),
-    x: 0,
+    ...uprightTextProps(el, w),
+    x: w / 2,
     y: el.height_cm * s + 2 + offset,
-    width: el.width_cm * s,
+    width: w,
     align: 'center',
     fontSize: Math.max(9, 10 * s),
     fill: '#9ccc9c',
@@ -1580,9 +1746,67 @@ async function fetchCoverage() {
   }
 }
 
+async function fetchSpeakerSpecs() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/speaker-specs`);
+    speakerSpecs.value = data || {};
+  } catch (err) {
+    console.error('Failed to load speaker specs', err);
+  }
+}
+
 function scheduleCoverage() {
   clearTimeout(coverageTimer);
-  coverageTimer = setTimeout(fetchCoverage, 250);
+  coverageTimer = setTimeout(() => {
+    fetchCoverage();
+    fetchSpeakerSpecs();
+  }, 250);
+}
+
+function applySpeakerDefaults(type) {
+  const def = palette[type];
+  speakerForm.label = paletteLabel(def);
+  speakerForm.coverage_angle_h = def.coverageAngle;
+  speakerForm.coverage_distance_m = def.coverageDistance;
+}
+const speakerTypeOptions = computed(() =>
+  SPEAKER_CHOICES.map((type) => ({ value: type, label: paletteLabel(palette[type]) })),
+);
+function openSpeakerDialog() {
+  speakerForm.count = 1;
+  speakerForm.linked_output_point_id = null;
+  speakerForm.type = 'speaker_main';
+  applySpeakerDefaults('speaker_main');
+  speakerDialog.value = true;
+}
+async function addSpeakers() {
+  const def = palette[speakerForm.type];
+  const n = Math.min(16, Math.max(1, Math.round(Number(speakerForm.count) || 1)));
+  const baseLabel = speakerForm.label.trim() || paletteLabel(def);
+  const spacing = stageW.value / (n + 1);
+  addingSpeakers.value = true;
+  try {
+    const created = await Promise.all(
+      Array.from({ length: n }, (_, i) =>
+        store.createElement(jobId, {
+          element_type: speakerForm.type,
+          label: n > 1 ? `${baseLabel} ${i + 1}` : baseLabel,
+          position_x: round1(spacing * (i + 1) - def.w / 2),
+          position_y: SPEAKER_ROW_Y,
+          rotation: def.defaultRotation ?? 0,
+          width_cm: def.w,
+          height_cm: def.h,
+          coverage_angle_h: Number(speakerForm.coverage_angle_h) || 0,
+          coverage_distance_m: Number(speakerForm.coverage_distance_m) || 0,
+          linked_output_point_id: speakerForm.linked_output_point_id || null,
+        }),
+      ),
+    );
+    speakerDialog.value = false;
+    if (created.length) select(created[0].id);
+  } finally {
+    addingSpeakers.value = false;
+  }
 }
 
 function buildCoverageCanvas(data) {
@@ -1837,6 +2061,7 @@ watch(
           el.element_type,
           el.coverage_angle_h,
           el.coverage_distance_m,
+          el.linked_output_point_id,
         ].join(','),
       )
       .join('|'),
@@ -1847,6 +2072,7 @@ watch(coverage, (data) => {
 });
 
 onMounted(() => {
+  fetchSpeakerSpecs();
   loadJob();
   loadChannels();
   devicesStore.fetchDevices(jobId);

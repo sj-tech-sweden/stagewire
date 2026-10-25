@@ -111,3 +111,13 @@ test('speaker cables are placed on the plot and named after the speaker', () => 
   expect(wedge?.fromName).toBe('Mixer');
   expect(wedge?.placed).toBe(true);
 });
+
+test('a speaker linked to a device does not move that device on the plot', () => {
+  const withStrayLink = elements.map((e) =>
+    e.id === 'spk' ? { ...e, linked_device_id: 'amp' } : e,
+  );
+  const rows = buildCableRows({ lists, devices, elements: withStrayLink, plan: null });
+  const main = rows.find((r) => r.key === 'spk:spk');
+  // The amp's position is its rack element's centre (0,200 with 40 cm sides).
+  expect(main?.points[0]).toEqual([20, 220]);
+});

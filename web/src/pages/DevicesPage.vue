@@ -267,6 +267,36 @@
             map-options
             dense
           />
+          <div
+            v-if="editForm.device_type === 'mixer'"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.ioHint') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.input_override"
+                type="number"
+                min="0"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.inputs')"
+                :hint="t('devices.ioDefault', { n: editTarget?.input_default ?? 0 })"
+              />
+              <q-input
+                v-model.number="editForm.output_override"
+                type="number"
+                min="0"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.outputs')"
+                :hint="t('devices.ioDefault', { n: editTarget?.output_default ?? 0 })"
+              />
+            </div>
+          </div>
           <div class="text-caption q-mt-sm">
             {{ t('devices.ports') }}
           </div>
@@ -386,6 +416,8 @@ const editForm = reactive({
   device_type: 'other',
   ports: [],
   notes: '',
+  input_override: null,
+  output_override: null,
 });
 const directionOptions = [
   { value: 'in', label: t('devices.directionIn') },
@@ -485,6 +517,8 @@ function openEdit(device) {
     count: p.count || 0,
   }));
   editForm.notes = device.notes || '';
+  editForm.input_override = device.input_override ?? null;
+  editForm.output_override = device.output_override ?? null;
   editDialog.value = true;
 }
 async function saveEdit() {
