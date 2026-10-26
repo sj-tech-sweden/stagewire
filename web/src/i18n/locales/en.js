@@ -746,6 +746,7 @@ export default {
     resetRoute: 'Back to auto route',
     doneReroute: 'Done',
     slackPct: 'Slack (%)',
+    cablewayFactor: 'Cableway preference (lower favours cableways)',
     slackM: 'Extra per cable (m)',
     standardLengths: 'Standard lengths (m, comma separated)',
     order: 'Cables needed by length',

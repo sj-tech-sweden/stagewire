@@ -281,3 +281,16 @@ test('cables are counted per type and length class', () => {
   expect(groups.find((g) => g.type === 'speakon')?.lengths).toEqual([{ length: 'over', count: 1 }]);
   expect(cableTypeCsv(rows).split('\n')[0]).toBe('Cable type,Length class (m),Count');
 });
+
+test('the cableway preference decides when a tray is used', () => {
+  const tray = [{ id: 'tray', points: [[0, 0], [1000, 0]] }];
+  const elements = [
+    { id: 'rack', element_type: 'custom', position_x: 0, position_y: 300, width_cm: 0, height_cm: 0, rotation: 0, linked_device_id: 'amp' },
+    { id: 'spk', element_type: 'speaker_main', linked_output_point_id: 'p3', position_x: 1000, position_y: 300, width_cm: 0, height_cm: 0, rotation: 0 },
+  ];
+  const plan = (factor: number) => ({ cableways: tray, routes: {}, settings: { cableway_factor: factor } });
+  const strong = buildCableRows({ lists, devices, elements, plan: plan(0.2) }).find((r) => r.key === 'spk:spk');
+  expect(strong?.mode).toBe('auto');
+  const weak = buildCableRows({ lists, devices, elements, plan: plan(0.5) }).find((r) => r.key === 'spk:spk');
+  expect(weak?.mode).toBe('direct');
+});

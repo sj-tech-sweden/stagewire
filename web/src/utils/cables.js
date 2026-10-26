@@ -7,6 +7,8 @@ export const DEFAULT_CABLE_SETTINGS = {
   slack_pct: 10,
   slack_m: 1,
   standard_lengths_m: [1, 2, 3, 5, 7.5, 10, 15, 20, 30, 50],
+  // Lower values favour cableways more: a cable on a tray costs this share of its length.
+  cableway_factor: 0.5,
 };
 
 export function emptyCablePlan(plan) {
@@ -262,7 +264,7 @@ function openCost(a, b, poly) {
 // where trays meet, and where each end drops onto a tray), the corners of the audience
 // area, and the two ends. Trays cost CABLEWAY_TRAVEL per metre; open runs cost
 // openCost. Returns null when the straight run is best.
-function autoRoute(from, to, cableways, audience = []) {
+function autoRoute(from, to, cableways, audience = [], trayFactor = CABLEWAY_TRAVEL) {
   const lines = (cableways || []).map((c) => c.points || []).filter((p) => p.length >= 2);
   const poly = audience && audience.length >= 3 ? audience : [];
   if (!lines.length && !poly.length) return null;
@@ -306,7 +308,7 @@ function autoRoute(from, to, cableways, audience = []) {
       addEdge(
         nodeKey(unique[k - 1]),
         nodeKey(unique[k]),
-        openCost(unique[k - 1], unique[k], poly) * CABLEWAY_TRAVEL,
+        openCost(unique[k - 1], unique[k], poly) * trayFactor,
       );
     }
   }
@@ -373,12 +375,12 @@ export function elementCentre(el) {
   ];
 }
 
-export function routeCable(from, to, cableways, route, audience = []) {
+export function routeCable(from, to, cableways, route, audience = [], trayFactor = CABLEWAY_TRAVEL) {
   if (route?.mode === 'manual') {
     const points = [from, ...(route.waypoints || []), to];
     return { points, lengthCm: pathLength(points), mode: 'manual', crossesAudience: crosses(points, audience) };
   }
-  const routed = autoRoute(from, to, cableways, audience);
+  const routed = autoRoute(from, to, cableways, audience, trayFactor);
   if (routed) {
     return { points: routed, lengthCm: pathLength(routed), mode: 'auto', crossesAudience: crosses(routed, audience) };
   }
@@ -459,7 +461,7 @@ export function buildCableRows({
         assignedM: null,
       };
     }
-    const routed = routeCable(from, to, p.cableways, route, audienceLocal);
+    const routed = routeCable(from, to, p.cableways, route, audienceLocal, Number(settings.cableway_factor) || CABLEWAY_TRAVEL);
     const pathM = routed.lengthCm / 100;
     const requiredM = pathM * (1 + settings.slack_pct / 100) + settings.slack_m;
     const assignedM = assignStandardLength(requiredM, settings.standard_lengths_m);

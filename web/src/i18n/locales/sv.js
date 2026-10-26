@@ -746,6 +746,7 @@ export default {
     resetRoute: 'Tillbaka till auto-väg',
     doneReroute: 'Klar',
     slackPct: 'Marginal (%)',
+    cablewayFactor: 'Kabelbanepreferens (lägre föredrar kabelbanor)',
     slackM: 'Extra per kabel (m)',
     standardLengths: 'Standardlängder (m, kommaseparerade)',
     order: 'Kablar per längd',

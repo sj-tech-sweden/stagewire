@@ -454,7 +454,7 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-md-9">
+      <div class="col-12 col-md-9 order-first order-md-last">
         <q-card
           flat
           bordered
@@ -747,6 +747,20 @@
                 class="col-12 col-sm-3"
                 @update:model-value="(v) => saveCableSettings({ slack_m: Number(v) || 0 })"
               />
+              <div class="col-12 col-sm-6">
+                <div class="text-caption text-grey-7">
+                  {{ t('cables.cablewayFactor') }}: {{ Number(cablePlan.settings.cableway_factor).toFixed(2) }}
+                </div>
+                <q-slider
+                  :model-value="Number(cablePlan.settings.cableway_factor)"
+                  :min="0.1"
+                  :max="1"
+                  :step="0.05"
+                  label
+                  color="primary"
+                  @change="(v) => saveCableSettings({ cableway_factor: Number(v) })"
+                />
+              </div>
               <q-input
                 :model-value="standardLengthsText"
                 dense
@@ -1020,6 +1034,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
@@ -1164,7 +1179,14 @@ function defFor(type) {
   return palette[type] || palette[LEGACY_TYPE[type]] || CUSTOM_DEF;
 }
 
+const $q = useQuasar();
 const scale = ref(0.7);
+// On a phone the whole plot should fit the screen width when it is first shown.
+function fitPlotToScreen() {
+  if (!$q.screen.lt.sm) return;
+  const usable = Math.max(200, window.innerWidth - 64);
+  scale.value = Math.max(0.15, Math.min(0.7, usable / (canvasW.value || 1200)));
+}
 const unit = ref('cm');
 const unitOptions = [
   { label: 'cm', value: 'cm' },
@@ -2041,6 +2063,7 @@ async function loadJob() {
     venueW.value = data.venue_width_cm || 0;
     venueH.value = data.venue_height_cm || 0;
     loadBgImage(data.venue_background_image_url);
+    fitPlotToScreen();
   } catch (err) {
     console.error('Failed to load job', err);
   }
@@ -2518,6 +2541,7 @@ watch(coverage, (data) => {
 });
 
 onMounted(() => {
+  fitPlotToScreen();
   fetchSpeakerSpecs();
   loadVideoLists();
   loadJob();
