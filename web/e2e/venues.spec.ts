@@ -89,8 +89,29 @@ test('speaker coverage can be shown on the stage plot', async ({ page, request }
   expect(body.covered_pct).toBeGreaterThan(0);
 
   await page.goto(`/jobs/${jobId}/stage-plot`);
-  await page.getByText('Show coverage', { exact: true }).click();
+  await page.getByText('Sound coverage', { exact: true }).click();
   await expect(page.getByText(/Covered: \d+(\.\d+)?% of venue/)).toBeVisible();
+});
+
+test('sound and camera coverage have separate toggles', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = await createJob(request, headers, {
+    venue_width_cm: 1000,
+    venue_height_cm: 1000,
+    stage_x_cm: 0,
+    stage_y_cm: 0,
+    stage_width_cm: 500,
+    stage_height_cm: 400,
+  });
+  await page.goto(`/jobs/${jobId}/stage-plot`);
+  const sound = page.getByRole('switch', { name: 'Sound coverage' });
+  const camera = page.getByRole('switch', { name: 'Camera coverage' });
+  await expect(sound).toBeVisible();
+  await expect(camera).toBeVisible();
+  await camera.click();
+  await expect(camera).toHaveAttribute('aria-checked', 'true');
+  await expect(sound).toHaveAttribute('aria-checked', 'false');
 });
 
 test('the venues page lists saved venues', async ({ page, request }) => {

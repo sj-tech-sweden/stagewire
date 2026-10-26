@@ -230,6 +230,38 @@
               class="q-mt-sm"
               @update:model-value="commitVideoInput"
             />
+            <template v-if="selected && selected.element_type === 'camera'">
+              <q-select
+                v-model="draft.linked_lens_device_id"
+                :label="t('stagePlot.linkLens')"
+                :options="lensOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="q-mt-sm"
+                @update:model-value="commitLens"
+              />
+              <div
+                v-if="cameraSpec(selected) && cameraSpec(selected).focal_min_mm && cameraSpec(selected).focal_max_mm > cameraSpec(selected).focal_min_mm"
+                class="q-mt-sm"
+              >
+                <div class="text-caption">
+                  {{ t('stagePlot.focalLength') }}: {{ Math.round(cameraSpec(selected).focal_mm) }} mm
+                </div>
+                <q-slider
+                  :model-value="cameraSpec(selected).focal_mm"
+                  :min="cameraSpec(selected).focal_min_mm"
+                  :max="cameraSpec(selected).focal_max_mm"
+                  label
+                  color="primary"
+                  @change="commitFocal"
+                />
+              </div>
+              <div class="text-caption text-grey-7 q-mt-xs">
+                {{ cameraCaption(selected) }}
+              </div>
+            </template>
             <q-select
               v-if="!isSpeakerElement(selected)"
               v-model="draft.linked_device_id"
@@ -468,8 +500,12 @@
             </div>
             <div class="row items-center q-gutter-sm q-mt-xs">
               <q-toggle
-                v-model="showCoverage"
-                :label="t('stagePlot.showCoverage')"
+                v-model="showSoundCoverage"
+                :label="t('stagePlot.showSoundCoverage')"
+              />
+              <q-toggle
+                v-model="showCameraCoverage"
+                :label="t('stagePlot.showCameraCoverage')"
               />
               <q-btn
                 v-for="c in categoryOptions"
@@ -483,13 +519,13 @@
                 @click="toggleCategory(c.value)"
               />
               <div
-                v-if="showCoverage && !hasVenue"
+                v-if="showSoundCoverage && !hasVenue"
                 class="text-caption text-warning"
               >
                 {{ t('stagePlot.coverageNoVenue') }}
               </div>
               <div
-                v-else-if="showCoverage && coverageLabel"
+                v-else-if="showSoundCoverage && coverageLabel"
                 class="text-caption"
               >
                 {{ coverageLabel }}
@@ -573,6 +609,11 @@
                   v-if="coverageImage"
                   :config="coverageConfig"
                 />
+                <v-line
+                  v-for="cv in cameraViews"
+                  :key="'cam' + cv.id"
+                  :config="cv.config"
+                />
                 <v-rect :config="stageBg" />
                 <v-line
                   v-if="audienceShown.length >= 3"
@@ -616,7 +657,7 @@
                   :config="groupConfig(el)"
                 >
                   <v-wedge
-                    v-if="showCoverage && sectorFor(el)"
+                    v-if="showSoundCoverage && sectorFor(el)"
                     :config="wedgeConfig(el)"
                   />
                   <v-rect :config="rectConfig(el)" />
@@ -1042,8 +1083,10 @@ import { useStagePlotStore } from '@/stores/stageplot';
 import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
+import { horizontalFovDeg, viewPolygon } from '@/utils/camera';
 import {
   buildCableRows,
+  elementCentre,
   cablesToCsv,
   DEFAULT_CABLE_SETTINGS,
   emptyCablePlan,
@@ -1120,6 +1163,8 @@ const palette = {
     color: '#42A5F5',
     w: 40,
     h: 30,
+    deviceType: 'camera',
+    createDevice: true,
   },
   mixer: {
     labelKey: 'stagePlot.types.mixer',
@@ -1204,6 +1249,8 @@ const draft = ref({
   linked_device_id: null,
   linked_output_point_id: null,
   linked_video_input_id: null,
+  linked_lens_device_id: null,
+  focal_mm: null,
   width_cm: 60,
   height_cm: 60,
   image_url: '',
@@ -1223,7 +1270,8 @@ const channelLists = ref([]);
 const imageCache = ref({});
 const bgImage = ref(null);
 const uploading = ref(false);
-const showCoverage = ref(false);
+const showSoundCoverage = ref(false);
+const showCameraCoverage = ref(false);
 const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
 const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
 const visibleCategories = ref([...CATEGORIES]);
@@ -1751,6 +1799,8 @@ function select(id) {
       linked_device_id: el.linked_device_id || null,
       linked_output_point_id: el.linked_output_point_id || null,
       linked_video_input_id: el.linked_video_input_id || null,
+      linked_lens_device_id: el.linked_lens_device_id || null,
+      focal_mm: el.focal_mm ?? null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
       image_url: el.image_url || '',
@@ -1828,9 +1878,16 @@ function unplacedDeviceOf(deviceType) {
   return devicesStore.devices.find((d) => d.device_type === deviceType && !placed.has(d.id)) || null;
 }
 
-function addElement(type) {
+async function addElement(type) {
   const def = palette[type];
-  const device = def.deviceType ? unplacedDeviceOf(def.deviceType) : null;
+  let device = def.deviceType ? unplacedDeviceOf(def.deviceType) : null;
+  if (!device && def.createDevice) {
+    const count = devicesStore.devices.filter((d) => d.device_type === def.deviceType).length;
+    device = await devicesStore.createDevice(jobId, {
+      name: `${paletteLabel(def)} ${count + 1}`,
+      device_type: def.deviceType,
+    });
+  }
   const payload = {
     element_type: type,
     position_x: stageW.value / 2 - def.w / 2,
@@ -1845,7 +1902,8 @@ function addElement(type) {
     payload.coverage_angle_h = def.coverageAngle;
     payload.coverage_distance_m = def.coverageDistance;
   }
-  store.createElement(jobId, payload).then((created) => select(created.id));
+  const created = await store.createElement(jobId, payload);
+  select(created.id);
 }
 
 function addCustom() {
@@ -2070,7 +2128,7 @@ async function loadJob() {
 }
 
 async function fetchCoverage() {
-  if (!showCoverage.value || !hasVenue.value) {
+  if (!showSoundCoverage.value || !hasVenue.value) {
     coverage.value = null;
     return;
   }
@@ -2079,6 +2137,16 @@ async function fetchCoverage() {
     coverage.value = data;
   } catch (err) {
     console.error('Failed to load coverage', err);
+  }
+}
+
+const cameraSpecs = ref({});
+async function fetchCameraSpecs() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/camera-specs`);
+    cameraSpecs.value = data || {};
+  } catch (err) {
+    console.error('Failed to load camera specs', err);
   }
 }
 
@@ -2096,6 +2164,7 @@ function scheduleCoverage() {
   coverageTimer = setTimeout(() => {
     fetchCoverage();
     fetchSpeakerSpecs();
+    fetchCameraSpecs();
   }, 250);
 }
 
@@ -2165,6 +2234,64 @@ function buildCoverageCanvas(data) {
   return canvas;
 }
 
+const lensOptions = computed(() =>
+  devicesStore.devices
+    .filter((d) => d.device_type === 'lens')
+    .map((d) => ({ value: d.id, label: d.name || '—' })),
+);
+function cameraSpec(el) {
+  return cameraSpecs.value[el.id] || null;
+}
+function cameraCaption(el) {
+  const spec = cameraSpec(el);
+  if (!spec || !spec.sensor_width_mm || !spec.focal_mm) return t('stagePlot.cameraNeedsValues');
+  const fov = horizontalFovDeg(spec.sensor_width_mm, spec.focal_mm).toFixed(1);
+  const source = spec.source === 'stockwire' ? t('stagePlot.specsFromStockwireShort') : t('stagePlot.specsManualShort');
+  return `${t('stagePlot.fovCaption', { deg: fov })} · ${source}`;
+}
+const cameraViews = computed(() => {
+  if (!showCameraCoverage.value) return [];
+  const s = pxPerCm.value;
+  const box = {
+    minX: -stageX.value,
+    minY: -stageY.value,
+    maxX: canvasW.value - stageX.value,
+    maxY: canvasH.value - stageY.value,
+  };
+  const views = [];
+  for (const el of visibleElements.value) {
+    const spec = cameraSpecs.value[el.id];
+    if (!spec || !spec.sensor_width_mm || !spec.focal_mm) continue;
+    const [cx, cy] = elementCentre(el);
+    const points = viewPolygon({
+      apex: { x: cx, y: cy },
+      rotationDeg: el.rotation || 0,
+      fovDeg: horizontalFovDeg(spec.sensor_width_mm, spec.focal_mm),
+      maxDistanceCm: spec.max_distance_m ? spec.max_distance_m * 100 : null,
+      box,
+    });
+    views.push({
+      id: el.id,
+      config: {
+        points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
+        closed: true,
+        fill: 'rgba(66, 165, 245, 0.16)',
+        stroke: 'rgba(66, 165, 245, 0.6)',
+        strokeWidth: 1,
+        listening: false,
+      },
+    });
+  }
+  return views;
+});
+function commitLens(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_lens_device_id: val || null });
+}
+function commitFocal(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { focal_mm: Number(val) });
+}
 const coverageLabel = computed(() =>
   coverage.value ? t('stagePlot.coveragePct', { pct: coverage.value.covered_pct }) : '',
 );
@@ -2524,7 +2651,7 @@ watch(
   (els) => loadImages(els),
   { deep: false },
 );
-watch(showCoverage, fetchCoverage);
+watch(showSoundCoverage, fetchCoverage);
 watch(() => [venueW.value, venueH.value, stageX.value, stageY.value], scheduleCoverage);
 watch(
   () =>
@@ -2540,6 +2667,9 @@ watch(
           el.coverage_angle_h,
           el.coverage_distance_m,
           el.linked_output_point_id,
+          el.linked_device_id,
+          el.linked_lens_device_id,
+          el.focal_mm,
         ].join(','),
       )
       .join('|'),
@@ -2552,6 +2682,7 @@ watch(coverage, (data) => {
 onMounted(() => {
   fitPlotToScreen();
   fetchSpeakerSpecs();
+  fetchCameraSpecs();
   loadVideoLists();
   loadJob();
   loadChannels();
