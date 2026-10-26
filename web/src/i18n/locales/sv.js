@@ -701,6 +701,9 @@ export default {
     assignHint: 'Kopierar den sparade lokalens storlek och scenposition till jobbet.',
   },
   cables: {
+    byType: 'Kablar per typ',
+    unspecified: 'Ingen typ angiven',
+    total: 'totalt',
     crossesAudience: 'korsar publikområdet',
     editWay: 'Redigera',
     editWayTip: 'Ändra punkterna på kabelbanan utan att ta bort den.',

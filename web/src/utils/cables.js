@@ -493,6 +493,41 @@ export function lengthOrder(rows) {
     .map(([length, count]) => ({ length, count }));
 }
 
+// Cable type is the connector at the cable's destination. Cables without one are
+// counted under "unspecified" so none are dropped from the shopping list.
+export function cableTypeOrder(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!r.placed) continue;
+    const type = r.connector || 'unspecified';
+    if (!groups.has(type)) groups.set(type, new Map());
+    const lengths = groups.get(type);
+    const key = r.assignedM === null ? 'over' : r.assignedM;
+    lengths.set(key, (lengths.get(key) || 0) + 1);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => (a[0] === 'unspecified' ? 1 : b[0] === 'unspecified' ? -1 : a[0].localeCompare(b[0])))
+    .map(([type, lengths]) => {
+      const sorted = [...lengths.entries()]
+        .sort((a, b) => (a[0] === 'over' ? 1 : b[0] === 'over' ? -1 : a[0] - b[0]))
+        .map(([length, count]) => ({ length, count }));
+      return { type, lengths: sorted, total: sorted.reduce((sum, l) => sum + l.count, 0) };
+    });
+}
+
+export function cableTypeCsv(rows) {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [];
+  for (const group of cableTypeOrder(rows)) {
+    for (const l of group.lengths) {
+      lines.push(
+        [group.type, l.length === 'over' ? 'over max' : l.length, l.count].map(esc).join(','),
+      );
+    }
+  }
+  return ['Cable type,Length class (m),Count', ...lines].join('\n');
+}
+
 export function cablesToCsv(rows) {
   const head = ['Cable', 'From', 'To', 'Connector', 'Route', 'Path (m)', 'Needed (m)', 'Length class (m)'];
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;

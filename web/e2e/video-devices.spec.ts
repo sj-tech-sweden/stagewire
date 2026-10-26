@@ -26,6 +26,7 @@ test('a device can be created from the video patch list and the signal flow show
   const loaded = page.waitForResponse((res) => res.url().includes('/video-lists') && res.ok());
   await page.goto(`/jobs/${jobId}?view=video`);
   await loaded;
+  await page.waitForLoadState('networkidle');
   const picker = page.getByPlaceholder('Pick a device').first();
   await picker.click();
   await picker.fill('Atem Mini');

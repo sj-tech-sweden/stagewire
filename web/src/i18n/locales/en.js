@@ -701,6 +701,9 @@ export default {
     assignHint: 'Copies the saved venue size and stage position into this job.',
   },
   cables: {
+    byType: 'Cables by type',
+    unspecified: 'No type set',
+    total: 'in total',
     crossesAudience: 'crosses the audience',
     editWay: 'Edit',
     editWayTip: 'Change the points of this cableway without deleting it.',

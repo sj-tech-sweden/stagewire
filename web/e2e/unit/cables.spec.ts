@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { buildCableRows, deriveCables } from '../../src/utils/cables';
+import { buildCableRows, cableTypeCsv, cableTypeOrder, deriveCables } from '../../src/utils/cables';
 
 const lists = [
   {
@@ -257,4 +257,27 @@ test('a cable crosses a thin strip of audience when going around is far longer',
   expect(row?.mode).toBe('direct');
   expect(row?.crossesAudience).toBe(true);
   expect(row?.pathM).toBeCloseTo(10, 1);
+});
+
+test('cables are counted per type and length class', () => {
+  const rows = [
+    { placed: true, connector: 'xlr', assignedM: 5 },
+    { placed: true, connector: 'xlr', assignedM: 5 },
+    { placed: true, connector: 'xlr', assignedM: 10 },
+    { placed: true, connector: 'sdi', assignedM: 20 },
+    { placed: true, connector: '', assignedM: 3 },
+    { placed: true, connector: 'speakon', assignedM: null },
+    { placed: false, connector: 'xlr', assignedM: null },
+  ];
+  const groups = cableTypeOrder(rows);
+  expect(groups.map((g) => g.type)).toEqual(['sdi', 'speakon', 'xlr', 'unspecified']);
+  expect(groups.find((g) => g.type === 'xlr')).toMatchObject({
+    total: 3,
+    lengths: [
+      { length: 5, count: 2 },
+      { length: 10, count: 1 },
+    ],
+  });
+  expect(groups.find((g) => g.type === 'speakon')?.lengths).toEqual([{ length: 'over', count: 1 }]);
+  expect(cableTypeCsv(rows).split('\n')[0]).toBe('Cable type,Length class (m),Count');
 });

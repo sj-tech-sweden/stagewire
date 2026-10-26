@@ -758,6 +758,29 @@
               </q-chip>
             </div>
 
+            <div
+              v-if="cableTypes.length"
+              class="q-mt-md"
+            >
+              <div class="text-subtitle2 q-mb-xs">
+                {{ t('cables.byType') }}
+              </div>
+              <div
+                v-for="g in cableTypes"
+                :key="g.type"
+                class="text-body2"
+              >
+                <b>{{ g.type === 'unspecified' ? t('cables.unspecified') : g.type.toUpperCase() }}</b>
+                · {{ g.total }} {{ t('cables.total') }}:
+                <span
+                  v-for="(l, li) in g.lengths"
+                  :key="String(l.length)"
+                >
+                  {{ l.count }} × {{ l.length === 'over' ? t('cables.overMax') : `${l.length} m` }}<span v-if="li < g.lengths.length - 1">, </span>
+                </span>
+              </div>
+            </div>
+
             <div class="text-caption text-grey-7 q-mt-md">
               {{ t('cables.actionsHint') }}
             </div>
@@ -991,6 +1014,8 @@ import {
   cablesToCsv,
   DEFAULT_CABLE_SETTINGS,
   emptyCablePlan,
+  cableTypeCsv,
+  cableTypeOrder,
   lengthOrder,
 } from '@/utils/cables';
 
@@ -2176,6 +2201,7 @@ const visibleCableRows = computed(() =>
   ),
 );
 const cableOrder = computed(() => lengthOrder(cableRows.value));
+const cableTypes = computed(() => cableTypeOrder(cableRows.value));
 const rerouteRow = computed(() => cableRows.value.find((r) => r.key === rerouteKey.value) || null);
 const rerouteWaypoints = computed(
   () => cablePlan.value.routes[rerouteKey.value]?.waypoints || [],
@@ -2308,7 +2334,7 @@ function saveStandardLengths(text) {
   saveCableSettings({ standard_lengths_m: lengths });
 }
 function exportCables() {
-  const blob = new Blob([cablesToCsv(cableRows.value)], { type: 'text/csv' });
+  const blob = new Blob([`${cablesToCsv(cableRows.value)}\n\n${cableTypeCsv(cableRows.value)}`], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
