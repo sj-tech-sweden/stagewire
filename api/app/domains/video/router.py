@@ -178,6 +178,15 @@ async def bulk_create_video_outputs(
     return [schemas.VideoOutputRead.model_validate(o) for o in created]
 
 
+@router.post("/jobs/{job_id}/video-lists/{list_id}/fill-from-switcher")
+async def fill_video_list_from_switcher(
+    job_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
+    lst = await _list_or_404(db, job_id, list_id)
+    result = await service.fill_from_switcher(db, lst)
+    return {k: (str(v) if k == "device_id" else v) for k, v in result.items()}
+
+
 async def _output_or_404(db: AsyncSession, job_id: UUID, output_id: UUID) -> VideoOutput:
     await _job_or_404(db, job_id)
     obj = await service.get_output(db, job_id, output_id)
@@ -201,6 +210,8 @@ async def update_video_output(
     for key in ("name", "destination_label", "connector", "notes"):
         if key in data and data[key] is None:
             data[key] = ""
+    if data.get("output_number") is None:
+        data.pop("output_number", None)
     obj = await service.apply(db, obj, data)
     return schemas.VideoOutputRead.model_validate(obj)
 

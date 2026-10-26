@@ -169,7 +169,15 @@
                 @remove="(point) => removePoint('input', input, point)"
               />
             </td>
-            <td>
+            <td class="text-no-wrap">
+              <q-btn
+                flat
+                dense
+                round
+                icon="edit"
+                :aria-label="t('video.editInput')"
+                @click="openEdit('input', input)"
+              />
               <q-btn
                 flat
                 dense
@@ -294,7 +302,15 @@
                 @remove="(point) => removePoint('output', output, point)"
               />
             </td>
-            <td>
+            <td class="text-no-wrap">
+              <q-btn
+                flat
+                dense
+                round
+                icon="edit"
+                :aria-label="t('video.editOutput')"
+                @click="openEdit('output', output)"
+              />
               <q-btn
                 flat
                 dense
@@ -508,6 +524,98 @@
       </q-card>
     </q-dialog>
 
+    <q-dialog v-model="editDialog">
+      <q-card style="min-width: 420px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ editKind === 'input' ? t('video.editInput') : t('video.editOutput') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <div class="row q-gutter-sm">
+            <q-input
+              v-model.number="editDraft.number"
+              type="number"
+              :label="t('video.colNumber')"
+              style="width: 100px"
+            />
+            <q-input
+              v-if="editKind === 'input'"
+              v-model="editDraft.label"
+              :label="t('video.colSource')"
+              class="col"
+            />
+            <q-input
+              v-else
+              v-model="editDraft.label"
+              :label="t('video.colOutputName')"
+              class="col"
+            />
+          </div>
+          <q-input
+            v-if="editKind === 'output'"
+            v-model="editDraft.destination"
+            :label="t('video.colDestination')"
+          />
+          <div class="row q-gutter-sm">
+            <q-select
+              v-if="editKind === 'input'"
+              v-model="editDraft.source_type"
+              :options="typeOptions"
+              :label="t('video.colType')"
+              emit-value
+              map-options
+              class="col"
+            />
+            <q-select
+              v-model="editDraft.connector"
+              :options="connectorOptions"
+              :label="t('video.colConnector')"
+              emit-value
+              map-options
+              class="col"
+            />
+          </div>
+          <q-select
+            v-model="editDraft.device_id"
+            :options="deviceOptions"
+            :label="t('video.colDevice')"
+            emit-value
+            map-options
+            clearable
+          />
+          <div>
+            <div class="text-caption text-grey-7">
+              {{ t('video.colChain') }}
+            </div>
+            <PatchChain
+              :points="editTarget?.patch_points || []"
+              :can-add="!!editDraft.device_id"
+              :device-name="deviceName"
+              @add="openChain(editKind, editTarget)"
+              @remove="(point) => removePoint(editKind, editTarget, point)"
+            />
+          </div>
+          <q-input
+            v-model="editDraft.notes"
+            type="textarea"
+            autogrow
+            :label="t('video.notes')"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            color="primary"
+            :label="t('app.actions.save')"
+            @click="saveEdit"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-dialog v-model="chainDialog">
       <q-card style="min-width: 360px">
         <q-card-section class="text-h6">
@@ -644,6 +752,53 @@ function setFirstDevice(kind, obj, deviceId) {
   });
 }
 
+const editDialog = ref(false);
+const editKind = ref('input');
+const editTarget = ref(null);
+const editDraft = ref({});
+function openEdit(kind, obj) {
+  editKind.value = kind;
+  editTarget.value = obj;
+  const isInput = kind === 'input';
+  editDraft.value = {
+    number: isInput ? obj.input_number : obj.output_number,
+    label: isInput ? obj.source_label : obj.name,
+    destination: isInput ? '' : obj.destination_label,
+    source_type: isInput ? obj.source_type : null,
+    connector: obj.connector,
+    device_id: firstDeviceId(obj),
+    notes: obj.notes || '',
+  };
+  editDialog.value = true;
+}
+function saveEdit() {
+  const kind = editKind.value;
+  const obj = editTarget.value;
+  const d = editDraft.value;
+  run(async () => {
+    const number = Number(d.number) || 1;
+    if (kind === 'input') {
+      await store.updateInput(jobId, obj.id, {
+        input_number: number,
+        source_label: d.label,
+        source_type: d.source_type,
+        connector: d.connector,
+        notes: d.notes,
+      });
+    } else {
+      await store.updateOutput(jobId, obj.id, {
+        output_number: number,
+        name: d.label,
+        destination_label: d.destination,
+        connector: d.connector,
+        notes: d.notes,
+      });
+    }
+    if (d.device_id !== firstDeviceId(obj)) setFirstDevice(kind, obj, d.device_id);
+    editDialog.value = false;
+  });
+}
+
 const chainDialog = ref(false);
 const chainTarget = ref(null);
 const chainDevice = ref(null);
@@ -767,14 +922,22 @@ async function chooseSwitcher(product) {
 }
 function saveSwitcher() {
   const product = switcherProduct.value;
-  run(() =>
-    store.updateList(jobId, props.list.id, {
+  run(async () => {
+    await store.updateList(jobId, props.list.id, {
       switcher_product_id: product?.id ? String(product.id) : null,
       switcher_product_name: product?.name || null,
       switcher_inputs: switcherIn.value === '' ? null : switcherIn.value,
       switcher_outputs: switcherOut.value === '' ? null : switcherOut.value,
-    }),
-  ).then(() => {
+    });
+    const result = await store.fillFromSwitcher(jobId, props.list.id);
+    $q.notify({
+      type: 'positive',
+      message: t('video.switcherFilled', {
+        inputs: result.inputs_added,
+        outputs: result.outputs_added,
+        patched: result.inputs_patched + result.outputs_patched,
+      }),
+    });
     switcherDialog.value = false;
   });
 }

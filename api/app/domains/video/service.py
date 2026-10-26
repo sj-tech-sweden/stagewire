@@ -193,3 +193,77 @@ async def bulk_create_outputs(db: AsyncSession, lst: VideoInputList, payload) ->
     for out in created:
         await db.refresh(out)
     return created
+
+
+async def _switcher_device(db: AsyncSession, lst: VideoInputList) -> AudioDevice:
+    devices = (
+        (
+            await db.execute(
+                select(AudioDevice)
+                .where(AudioDevice.job_id == lst.job_id)
+                .order_by(AudioDevice.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if lst.switcher_product_id:
+        for dev in devices:
+            if dev.stockwire_product_id == lst.switcher_product_id:
+                return dev
+    for dev in devices:
+        if dev.device_type == "switcher":
+            return dev
+    device = AudioDevice(
+        job_id=lst.job_id,
+        name=lst.switcher_product_name or "Switcher",
+        device_type="switcher",
+        stockwire_product_id=lst.switcher_product_id,
+        stockwire_product_name=lst.switcher_product_name,
+    )
+    db.add(device)
+    await db.flush()
+    return device
+
+
+async def fill_from_switcher(db: AsyncSession, lst: VideoInputList) -> dict:
+    """Make the list match its switcher, the way a sound list follows its mixer."""
+    device = await _switcher_device(db, lst)
+    added_inputs = 0
+    patched_inputs = 0
+    wanted_inputs = int(lst.switcher_inputs or 0)
+    for inp in list(lst.inputs):
+        if not inp.patch_points:
+            db.add(VideoPatchPoint(input_id=inp.id, position=0, device_id=device.id))
+            patched_inputs += 1
+    current = len(lst.inputs)
+    next_number = max([i.input_number for i in lst.inputs] or [0]) + 1
+    for n in range(max(0, wanted_inputs - current)):
+        inp = VideoInput(list_id=lst.id, input_number=next_number + n, source_label="")
+        inp.patch_points.append(VideoPatchPoint(position=0, device_id=device.id))
+        db.add(inp)
+        added_inputs += 1
+
+    added_outputs = 0
+    patched_outputs = 0
+    wanted_outputs = int(lst.switcher_outputs or 0)
+    for out in list(lst.outputs):
+        if not out.patch_points:
+            db.add(VideoOutputPatchPoint(output_id=out.id, position=0, device_id=device.id))
+            patched_outputs += 1
+    current_out = len(lst.outputs)
+    next_out = max([o.output_number for o in lst.outputs] or [0]) + 1
+    for n in range(max(0, wanted_outputs - current_out)):
+        out = VideoOutput(list_id=lst.id, output_number=next_out + n, name="")
+        out.patch_points.append(VideoOutputPatchPoint(position=0, device_id=device.id))
+        db.add(out)
+        added_outputs += 1
+
+    await db.commit()
+    return {
+        "device_id": device.id,
+        "inputs_added": added_inputs,
+        "inputs_patched": patched_inputs,
+        "outputs_added": added_outputs,
+        "outputs_patched": patched_outputs,
+    }

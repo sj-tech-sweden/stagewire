@@ -39,6 +39,11 @@ export const useVideoStore = defineStore('video', {
       });
       return data;
     },
+    async fillFromSwitcher(jobId, listId) {
+      const { data } = await api.post(`/jobs/${jobId}/video-lists/${listId}/fill-from-switcher`);
+      await this.fetchLists(jobId);
+      return data;
+    },
     async bulkCreateInputs(jobId, listId, payload) {
       const { data } = await api.post(`/jobs/${jobId}/video-lists/${listId}/inputs/bulk`, payload);
       const list = this.lists.find((l) => l.id === listId);
