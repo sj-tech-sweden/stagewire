@@ -100,6 +100,7 @@
             :stage-width="job?.stage_width_cm || 1200"
             :stage-height="job?.stage_height_cm || 700"
             :highlight-ids="currentHighlightIds"
+            :channel-colors="channelColors"
             :max-width="560"
           />
         </q-card-section>
@@ -549,6 +550,7 @@ import StagePlotMini from '@/components/StagePlotMini.vue'
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue'
 import { useDevicesStore } from '@/stores/devices'
 import { chainNodes } from '@/utils/patchFlow'
+import { channelColor } from '@/utils/instrumentGroups'
 
 const { t } = useI18n({ useScope: 'global' })
 const route = useRoute()
@@ -584,6 +586,13 @@ const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
   label: t(`devices.types.${v}`),
 }))
 const deviceOptions = computed(() => devicesStore.options)
+const channelColors = computed(() =>
+  Object.fromEntries(
+    lists.value.flatMap((list) =>
+      (list.channels || []).map((channel) => [channel.id, channelColor(channel)]),
+    ),
+  ),
+)
 
 const typeKey = {
   mixer: 'typeMixer',

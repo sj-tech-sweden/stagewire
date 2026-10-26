@@ -186,12 +186,12 @@
 
           <div
             v-if="editingId"
-            class="q-pa-sm rounded-borders bg-grey-2"
+            class="q-pa-sm rounded-borders bg-grey-2 text-grey-10"
           >
             <div class="text-subtitle2">
               {{ t('venues.propagateTitle') }}
             </div>
-            <div class="text-caption text-grey-7 q-mb-sm">
+            <div class="text-body2 q-mb-sm">
               {{ t('venues.propagateHint') }}
             </div>
             <div class="row q-gutter-sm">
@@ -210,9 +210,20 @@
                 @click="propagate('newer')"
               />
             </div>
-            <div class="text-caption text-grey-7 q-mt-xs">
+            <q-banner
+              dense
+              rounded
+              role="status"
+              class="bg-blue-grey-2 text-blue-grey-10 text-weight-medium q-mt-sm"
+            >
+              <template #avatar>
+                <q-icon
+                  name="update"
+                  color="blue-grey-10"
+                />
+              </template>
               {{ lastPropagatedText }}
-            </div>
+            </q-banner>
           </div>
         </q-card-section>
 

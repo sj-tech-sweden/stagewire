@@ -99,8 +99,13 @@ class AudioChannelPatch(Base):
     input_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     connector: Mapped[str | None] = mapped_column(String(64), nullable=True)
     device: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    transducer: Mapped[str] = mapped_column(String(255), default="")
     stand_type: Mapped[str] = mapped_column(String(255), default="")
+    instrument_group: Mapped[str] = mapped_column(
+        String(32), default="other", server_default="other"
+    )
+    performer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    wireless_pack: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    wireless_frequency: Mapped[str | None] = mapped_column(String(64), nullable=True)
     phantom_power: Mapped[bool] = mapped_column(Boolean, default=False)
     stereo: Mapped[bool] = mapped_column(Boolean, default=False)
     stereo_channel: Mapped[int | None] = mapped_column(Integer, nullable=True)

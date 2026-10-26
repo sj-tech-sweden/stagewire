@@ -27,6 +27,7 @@ const props = defineProps({
   stageWidth: { type: Number, default: 1200 },
   stageHeight: { type: Number, default: 700 },
   highlightIds: { type: Array, default: () => [] },
+  channelColors: { type: Object, default: () => ({}) },
   maxWidth: { type: Number, default: 360 },
 });
 
@@ -79,6 +80,8 @@ const PALETTE = {
   di: '#5C6BC0',
   multicore: '#8D6E63',
   dais: '#78909C',
+  riser: '#607D8B',
+  wireless_receiver: '#7E57C2',
   custom: '#90A4AE',
 };
 
@@ -109,6 +112,9 @@ function isHi(el) {
 function colorFor(type) {
   return PALETTE[type] || PALETTE.custom;
 }
+function elementColor(el) {
+  return props.channelColors[el.linked_channel_id] || colorFor(el.element_type);
+}
 function groupConfig(el) {
   return {
     x: el.position_x * scale.value,
@@ -122,7 +128,7 @@ function rectConfig(el) {
   return {
     width: (el.width_cm || 60) * scale.value,
     height: (el.height_cm || 60) * scale.value,
-    fill: hasImage && !hi ? 'transparent' : colorFor(el.element_type),
+    fill: hasImage && !hi ? 'transparent' : elementColor(el),
     cornerRadius: 2,
     opacity: hi ? 1 : hasImage ? 1 : 0.4,
     stroke: hi ? '#35A853' : 'transparent',

@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pypdf import PdfReader, PdfWriter
 from reportlab.graphics.shapes import Polygon, PolyLine
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A5
 from reportlab.pdfgen import canvas
 from reportlab.platypus import PageBreak, SimpleDocTemplate
@@ -78,6 +79,57 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
             for kind in ("job-summary", "channel-list", "patch-sheet", "stage-plot")
             for language in ("en", "sv")
         )
+        assert "{{table:patchpoint_wireless}}" in defaults[("patch-sheet", "en")]["body_html"]
+        assert "{{table:patchpoint_wireless}}" in defaults[("patch-sheet", "sv")]["body_html"]
+        legacy_bodies = {
+            "en": (
+                "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
+                "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+                "<h2>Patch points</h2>{{table:patchpoint_channels}}"
+            ),
+            "sv": (
+                "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
+                "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+                "<h2>Patchpunkter</h2>{{table:patchpoint_channels}}"
+            ),
+        }
+        for locale, legacy_body in legacy_bodies.items():
+            template = defaults[("patch-sheet", locale)]
+            legacy_layout = [
+                {
+                    "id": "body",
+                    "x": 5,
+                    "y": 5,
+                    "width": 90,
+                    "height": 90,
+                    "html": legacy_body,
+                    "stage_plot_scale": "fit",
+                }
+            ]
+            migrated = await client.put(
+                f"{BASE}/reports/templates/{template['id']}",
+                json={
+                    "name": template["name"],
+                    "body_html": legacy_body,
+                    "layout_json": legacy_layout,
+                    "page_count": 1,
+                    "stage_plot_options": None,
+                    "letterhead_id": None,
+                    "is_default": True,
+                },
+                headers=auth_headers,
+            )
+            assert migrated.status_code == 200, migrated.text
+        refreshed_templates = await client.get(f"{BASE}/reports/templates", headers=auth_headers)
+        refreshed_patch_templates = {
+            template["locale"]: template
+            for template in refreshed_templates.json()
+            if template["report_type"] == "patch-sheet"
+        }
+        assert all(
+            "{{table:patchpoint_wireless}}" in template["body_html"]
+            for template in refreshed_patch_templates.values()
+        )
 
         summary = await client.get(
             f"{BASE}/reports/jobs/{job_id}/audio/job-summary/preview",
@@ -105,10 +157,27 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
         list_id = list_response.json()["id"]
         channel_response = await client.post(
             f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels",
-            json={"channel_number": 1, "source_label": "Lead vocal", "connector": "XLR"},
+            json={
+                "channel_number": 1,
+                "source_label": "Lead vocal",
+                "connector": "XLR",
+                "performer_name": "Alex Presenter",
+                "wireless_pack": "Beltpack 2",
+                "wireless_frequency": "518.125 MHz",
+            },
             headers=auth_headers,
         )
         assert channel_response.status_code == 201, channel_response.text
+        linked_performer = await client.post(
+            f"{BASE}/jobs/{job_id}/plot-elements",
+            json={
+                "element_type": "performer",
+                "label": "Alex on stage",
+                "linked_channel_id": channel_response.json()["id"],
+            },
+            headers=auth_headers,
+        )
+        assert linked_performer.status_code == 201, linked_performer.text
         channel_pdf = await client.get(
             f"{BASE}/reports/jobs/{job_id}/audio/channel-list/preview",
             params={"template_id": defaults[("channel-list", "en")]["id"]},
@@ -116,8 +185,13 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
         )
         assert channel_pdf.status_code == 200, channel_pdf.text
         channel_text = PdfReader(BytesIO(channel_pdf.content)).pages[0].extract_text()
-        assert "Lead vocal" in channel_text
-        assert "Input List" in channel_text
+        normalized_channel_text = " ".join(channel_text.split())
+        compact_channel_text = "".join(channel_text.split())
+        assert "Lead vocal" in normalized_channel_text
+        assert "Input List" in normalized_channel_text
+        assert "Alexonstage" in compact_channel_text
+        assert "Beltpack2" in compact_channel_text
+        assert "518.125MHz" in compact_channel_text
         swedish_channel_pdf = await client.get(
             f"{BASE}/reports/jobs/{job_id}/audio/channel-list/preview",
             params={"locale": "sv"},
@@ -419,6 +493,41 @@ def test_stage_plot_venue_options_include_offstage_elements_and_optional_layers(
     assert "FOH mixer" in labels
 
 
+def test_stage_plot_colors_linked_channels_by_instrument_group():
+    channel = SimpleNamespace(
+        id=UUID(int=1),
+        color_code=None,
+        instrument_group="vocals",
+    )
+    channel_list = SimpleNamespace(channels=[channel])
+    job = SimpleNamespace(
+        stage_width_cm=800,
+        stage_height_cm=500,
+        venue_width_cm=0,
+        venue_height_cm=0,
+        stage_x_cm=0,
+        stage_y_cm=0,
+        cable_plan={},
+        channel_lists=[channel_list],
+    )
+    element = SimpleNamespace(
+        id=UUID(int=2),
+        linked_channel_id=UUID(int=1),
+        element_type="microphone",
+        position_x=100,
+        position_y=100,
+        width_cm=60,
+        height_cm=60,
+        rotation=0,
+        label="Lead vocal",
+    )
+
+    drawing = _stage_plot_drawing({"job": job, "elements": [element]}, 400, 250)
+
+    element_shape = next(shape for shape in drawing.contents if isinstance(shape, Polygon))
+    assert element_shape.fillColor == colors.HexColor("#D81B60")
+
+
 async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_headers):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -440,6 +549,12 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
                 "channel_number": 1,
                 "source_label": "Lead vocal",
                 "input_type": "microphone",
+                "instrument_group": "vocals",
+                "device": "SM58",
+                "stand_type": "Tall boom",
+                "performer_name": "Alex",
+                "wireless_pack": "Beltpack 2",
+                "wireless_frequency": "518.125 MHz",
                 "phantom_power": True,
                 "notes": "Channel notes",
             },
@@ -450,6 +565,22 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
             json={"name": "Stagebox A", "device_type": "digital_stagebox"},
             headers=auth_headers,
         )
+        mixer = await client.post(
+            f"{BASE}/jobs/{job_id}/devices",
+            json={"name": "FOH Mixer", "device_type": "mixer"},
+            headers=auth_headers,
+        )
+        mixer_point = await client.post(
+            f"{BASE}/jobs/{job_id}/channels/{channel.json()['id']}/patch-points",
+            json={
+                "position": 1,
+                "device_id": mixer.json()["id"],
+                "connector": "XLR",
+                "patch_label": "Console input 7",
+            },
+            headers=auth_headers,
+        )
+        assert mixer_point.status_code == 201, mixer_point.text
         point = await client.post(
             f"{BASE}/jobs/{job_id}/channels/{channel.json()['id']}/patch-points",
             json={
@@ -535,12 +666,22 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
             headers=auth_headers,
         )
         assert patch_sheet.status_code == 200, patch_sheet.text
-        text = PdfReader(BytesIO(patch_sheet.content)).pages[0].extract_text()
+        text = "\n".join(
+            page.extract_text() or "" for page in PdfReader(BytesIO(patch_sheet.content)).pages
+        )
         normalized_text = " ".join(text.split())
         assert "Stagebox A" in normalized_text
         assert "Lead vocal" in normalized_text
         assert "Input 1" in normalized_text
-        assert "microphone" in normalized_text
+        assert "Group" in normalized_text
+        assert "SM58" in normalized_text
+        assert "Tall boom" in normalized_text
+        assert "Stagebox A" in normalized_text
+        assert "Console input 7" in normalized_text
+        assert "Alex" in normalized_text
+        assert "Beltpack 2" in normalized_text
+        assert "518.125 MHz" in normalized_text
+        assert "vocals" in normalized_text
         assert "Yes" in normalized_text
         assert "Main PA" in normalized_text
         assert "Bus" in normalized_text
@@ -564,8 +705,10 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
             headers=auth_headers,
         )
         assert swedish_sheet.status_code == 200, swedish_sheet.text
-        swedish_text = PdfReader(BytesIO(swedish_sheet.content)).pages[0].extract_text()
-        assert "Riktning" in swedish_text
+        swedish_text = "\n".join(
+            page.extract_text() or "" for page in PdfReader(BytesIO(swedish_sheet.content)).pages
+        )
+        assert "Kanal" in swedish_text
         assert "Buss" in swedish_text
         assert "Main PA" in swedish_text
         assert "L" in swedish_text
@@ -599,7 +742,6 @@ def test_positioned_tables_continue_on_following_pages():
             "source_label": f"Channel {index + 1}",
             "input_type": "",
             "device": "",
-            "transducer": "",
             "connector": "XLR",
             "phantom_power": False,
             "notes": "",

@@ -906,6 +906,7 @@ import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useStagePlotStore } from '@/stores/stageplot';
+import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import {
   buildCableRows,
@@ -927,9 +928,10 @@ const DEFAULT_H = 700;
 const GRID_CM = 50;
 
 const palette = {
-  performer: { label: 'Performer', icon: 'person', color: '#35A853', w: 60, h: 60 },
-  instrument: { label: 'Instrument', icon: 'music_note', color: '#26A69A', w: 90, h: 60 },
-  microphone: { label: 'Microphone', icon: 'mic', color: '#AB47BC', w: 26, h: 26 },
+  performer: { labelKey: 'stagePlot.types.performer', icon: 'person', color: '#35A853', w: 60, h: 60 },
+  instrument: { labelKey: 'stagePlot.types.instrument', icon: 'music_note', color: '#26A69A', w: 90, h: 60 },
+  microphone: { labelKey: 'stagePlot.types.microphone', icon: 'mic', color: '#AB47BC', w: 26, h: 26 },
+  wireless_receiver: { labelKey: 'stagePlot.types.wirelessReceiver', icon: 'settings_input_antenna', color: '#7E57C2', w: 48, h: 48 },
   speaker_main: {
     labelKey: 'stagePlot.types.speakerMain',
     icon: 'volume_up',
@@ -971,13 +973,19 @@ const palette = {
   },
   di: { label: 'DI', icon: 'crop_square', color: '#5C6BC0', w: 24, h: 18 },
   multicore: { label: 'Multicore', icon: 'cable', color: '#8D6E63', w: 32, h: 120 },
-  dais: { label: 'Dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
+  dais: { labelKey: 'stagePlot.types.dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
+  riser: { labelKey: 'stagePlot.types.riser', icon: 'layers', color: '#607D8B', w: 180, h: 90 },
 };
 const CUSTOM_DEF = { label: 'Custom', icon: 'add', color: '#90A4AE', w: 60, h: 60 };
 const SPEAKER_TYPES = new Set(['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay', 'monitor']);
 const LEGACY_TYPE = { speaker: 'speaker_main' };
 function paletteLabel(def) {
   return def.labelKey ? t(def.labelKey) : def.label;
+}
+function elementColor(el, fallback) {
+  if (!el.linked_channel_id) return fallback;
+  const channel = findChannel(el.linked_channel_id);
+  return channel ? channelColor(channel) : fallback;
 }
 function isSpeakerElement(el) {
   return !!el && SPEAKER_TYPES.has(el.element_type);
@@ -1311,7 +1319,7 @@ function rectConfig(el) {
     // When an image is present it fills the box, so hide the coloured fill
     // (the picture shows instead of the box). Keep a transparent fill so the
     // shape still catches clicks/drag.
-    fill: hasImage && !hi ? 'transparent' : def.color,
+    fill: hasImage && !hi ? 'transparent' : elementColor(el, def.color),
     cornerRadius: 4,
     opacity: hi || selected ? 1 : hasImage ? 1 : 0.85,
     stroke: hi ? '#35A853' : selected ? '#ffb300' : 'transparent',
@@ -1622,13 +1630,25 @@ function addCustom() {
   store.createElement(jobId, payload).then((created) => select(created.id));
 }
 
-function commitDraft() {
+async function commitDraft() {
   if (!selected.value) return;
-  store.updateElement(jobId, selected.value.id, { label: draft.value.label });
+  const element = await store.updateElement(jobId, selected.value.id, {
+    label: draft.value.label,
+  });
+  if (element.element_type === 'performer' && element.linked_channel_id) {
+    const channel = findChannel(element.linked_channel_id);
+    if (channel) channel.performer_name = element.label;
+  }
 }
-function commitLink(val) {
+async function commitLink(val) {
   if (!selected.value) return;
-  store.updateElement(jobId, selected.value.id, { linked_channel_id: val || null });
+  const element = await store.updateElement(jobId, selected.value.id, {
+    linked_channel_id: val || null,
+  });
+  if (element.element_type === 'performer' && element.linked_channel_id) {
+    const channel = findChannel(element.linked_channel_id);
+    if (channel) channel.performer_name = element.label;
+  }
 }
 function openLinkedChannel() {
   router.push({ path: `/jobs/${jobId}`, query: { channel: draft.value.linked_channel_id } });
