@@ -693,7 +693,11 @@ export default {
   devices: {
     inputs: 'Ingångar',
     outputs: 'Utgångar',
-    ioHint: 'Mixerns ingångar och utgångar följer patchlistan. Ange ett tal för att överskriva; töm fältet för att använda standardvärdet igen.',
+    ioHint: 'Ingångar och utgångar följer patchlistan, eller Stockwire när enheten har en produkt. Ange ett tal för att överskriva; töm fältet för att använda standardvärdet igen.',
+    ioStockwire: 'Från Stockwire: {n}',
+    ioOverridden: 'Angivet manuellt',
+    ioUnset: 'Ej känt ännu',
+    stockwireConnectors: 'Kontakter från Stockwire: {list}',
     ioDefault: 'Från patchlistan: {n}',
     title: 'Enheter',
     nav: 'Enheter',

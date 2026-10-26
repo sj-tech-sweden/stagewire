@@ -693,7 +693,11 @@ export default {
   devices: {
     inputs: 'Inputs',
     outputs: 'Outputs',
-    ioHint: 'Mixer inputs and outputs default to the patch list. Enter a number to override; clear it to use the default again.',
+    ioHint: 'Inputs and outputs follow the patch list, or Stockwire when the device has a product. Enter a number to override; clear it to use the default again.',
+    ioStockwire: 'From Stockwire: {n}',
+    ioOverridden: 'Set manually',
+    ioUnset: 'Not known yet',
+    stockwireConnectors: 'Connectors from Stockwire: {list}',
     ioDefault: 'From patch list: {n}',
     title: 'Devices',
     nav: 'Devices',

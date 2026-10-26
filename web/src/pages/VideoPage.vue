@@ -173,6 +173,12 @@
                 :placeholder="t('video.pickDevice')"
                 @update:model-value="(v) => setFirstDevice(input, v)"
               />
+              <div
+                v-if="deviceConnectors(input).length"
+                class="text-caption text-grey-7"
+              >
+                {{ deviceConnectors(input).join(' · ') }}
+              </div>
             </td>
             <td>
               <div class="row items-center q-gutter-xs">
@@ -296,6 +302,9 @@ function deviceName(id) {
 }
 function firstDeviceId(input) {
   return (input.patch_points || [])[0]?.device_id || null;
+}
+function deviceConnectors(input) {
+  return devicesStore.byId(firstDeviceId(input))?.stockwire_connectors || [];
 }
 function chainPoints(input) {
   return (input.patch_points || []).slice(1);

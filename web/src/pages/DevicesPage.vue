@@ -148,6 +148,7 @@
             round
             icon="edit"
             class="q-ml-sm"
+            :aria-label="t('app.actions.edit')"
             @click="openEdit(device)"
           />
         </div>
@@ -268,11 +269,17 @@
             dense
           />
           <div
-            v-if="editForm.device_type === 'mixer'"
+            v-if="ioDeviceTypes.includes(editForm.device_type)"
             class="q-gutter-sm"
           >
             <div class="text-caption">
               {{ t('devices.ioHint') }}
+            </div>
+            <div
+              v-if="(editTarget?.stockwire_connectors || []).length"
+              class="text-caption"
+            >
+              {{ t('devices.stockwireConnectors', { list: editTarget.stockwire_connectors.join(', ') }) }}
             </div>
             <div class="row q-gutter-sm">
               <q-input
@@ -283,7 +290,7 @@
                 dense
                 class="col"
                 :label="t('devices.inputs')"
-                :hint="t('devices.ioDefault', { n: editTarget?.input_default ?? 0 })"
+                :hint="ioSourceHint(editTarget, 'input')"
               />
               <q-input
                 v-model.number="editForm.output_override"
@@ -293,7 +300,7 @@
                 dense
                 class="col"
                 :label="t('devices.outputs')"
-                :hint="t('devices.ioDefault', { n: editTarget?.output_default ?? 0 })"
+                :hint="ioSourceHint(editTarget, 'output')"
               />
             </div>
           </div>
@@ -400,6 +407,16 @@ const DEVICE_TYPES = [
   'multiviewer',
   'other',
 ];
+const ioDeviceTypes = ['mixer', 'switcher', 'router', 'multiviewer'];
+function ioSourceHint(device, side) {
+  const source = side === 'input' ? device?.input_source : device?.output_source;
+  const count = side === 'input' ? device?.input_default : device?.output_default;
+  const stockwire = side === 'input' ? device?.stockwire_inputs : device?.stockwire_outputs;
+  if (source === 'override') return t('devices.ioOverridden');
+  if (source === 'stockwire') return t('devices.ioStockwire', { n: stockwire });
+  if (source === 'patch') return t('devices.ioDefault', { n: count ?? 0 });
+  return t('devices.ioUnset');
+}
 const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
   value: v,
   label: t(`devices.types.${v}`),
