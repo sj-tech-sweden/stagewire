@@ -461,6 +461,17 @@
                 v-model="showCoverage"
                 :label="t('stagePlot.showCoverage')"
               />
+              <q-btn
+                v-for="c in categoryOptions"
+                :key="c.value"
+                dense
+                no-caps
+                :outline="!visibleCategories.includes(c.value)"
+                :color="visibleCategories.includes(c.value) ? 'primary' : 'grey-7'"
+                :label="c.label"
+                :aria-pressed="visibleCategories.includes(c.value) ? 'true' : 'false'"
+                @click="toggleCategory(c.value)"
+              />
               <div
                 v-if="showCoverage && !hasVenue"
                 class="text-caption text-warning"
@@ -542,7 +553,7 @@
                   :config="waypointConfig(wp)"
                 />
                 <v-group
-                  v-for="el in store.elements"
+                  v-for="el in visibleElements"
                   :key="el.id"
                   :config="groupConfig(el)"
                 >
@@ -1009,6 +1020,7 @@ import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
+import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
 import {
   buildCableRows,
   cablesToCsv,
@@ -1184,6 +1196,44 @@ const imageCache = ref({});
 const bgImage = ref(null);
 const uploading = ref(false);
 const showCoverage = ref(false);
+const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
+const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
+const visibleCategories = ref([...CATEGORIES]);
+watch(categoryStorageKey, (key) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    visibleCategories.value = Array.isArray(saved) ? saved : [...CATEGORIES];
+  } catch {
+    visibleCategories.value = [...CATEGORIES];
+  }
+}, { immediate: true });
+watch(visibleCategories, (value) => {
+  localStorage.setItem(categoryStorageKey.value, JSON.stringify(value));
+});
+function toggleCategory(category) {
+  visibleCategories.value = visibleCategories.value.includes(category)
+    ? visibleCategories.value.filter((c) => c !== category)
+    : [...visibleCategories.value, category];
+}
+function deviceTypeOf(deviceId) {
+  return deviceId ? devicesStore.byId(deviceId)?.device_type || null : null;
+}
+function elementCategory(el) {
+  return categoryOfElement(el, deviceTypeOf(el.linked_device_id));
+}
+const visibleElements = computed(() =>
+  store.elements.filter((el) => visibleCategories.value.includes(elementCategory(el))),
+);
+function endpointVisible(elementId, deviceId) {
+  if (elementId) {
+    const el = store.elements.find((e) => e.id === elementId);
+    return !!el && visibleCategories.value.includes(elementCategory(el));
+  }
+  if (deviceId) {
+    return visibleCategories.value.includes(categoryOfDeviceType(deviceTypeOf(deviceId)));
+  }
+  return true;
+}
 const coverage = ref(null);
 const coverageImage = ref(null);
 const speakerSpecs = ref({});
@@ -2222,6 +2272,8 @@ const visibleCableRows = computed(() =>
   cableRows.value.filter(
     (r) =>
       r.placed &&
+      endpointVisible(r.fromElementId, r.fromDeviceId) &&
+      endpointVisible(r.toElementId, r.toDeviceId) &&
       (highlightCableKeys.value.has(r.key) || (cablesVisible.value && !r.hidden)),
   ),
 );

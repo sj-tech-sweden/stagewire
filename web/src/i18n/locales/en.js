@@ -580,6 +580,7 @@ export default {
     linkVideo: 'Linked video input',
     linkCamera: 'Linked camera',
     linkOutput: 'Linked output',
+    categories: { sound: 'Sound', video: 'Video', stage: 'Stage', other: 'Other' },
     showCoverage: 'Show coverage',
     coverageNoVenue: 'Set the venue size to see coverage.',
     coveragePct: 'Covered: {pct}% of venue',

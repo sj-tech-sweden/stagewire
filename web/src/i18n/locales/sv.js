@@ -580,6 +580,7 @@ export default {
     linkVideo: 'Kopplad videoingång',
     linkCamera: 'Kopplad kamera',
     linkOutput: 'Kopplad utgång',
+    categories: { sound: 'Ljud', video: 'Video', stage: 'Scen', other: 'Övrigt' },
     showCoverage: 'Visa täckning',
     coverageNoVenue: 'Ange lokalens storlek för att se täckningen.',
     coveragePct: 'Täckt: {pct} % av lokalen',
