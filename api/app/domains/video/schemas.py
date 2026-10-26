@@ -58,6 +58,78 @@ class VideoInputRead(BaseModel):
     patch_points: list[VideoPatchPointRead] = []
 
 
+class VideoOutputPatchPointBase(BaseModel):
+    position: int = 0
+    connector: str | None = None
+    patch_label: str | None = None
+    notes: str | None = None
+    device_id: UUID | None = None
+
+
+class VideoOutputPatchPointCreate(VideoOutputPatchPointBase):
+    pass
+
+
+class VideoOutputPatchPointUpdate(VideoOutputPatchPointBase):
+    position: int | None = None
+
+
+class VideoOutputPatchPointRead(VideoOutputPatchPointBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    output_id: UUID
+
+
+class VideoOutputBase(BaseModel):
+    output_number: int | None = Field(None, ge=1)
+    name: str = ""
+    destination_label: str = ""
+    connector: str = "sdi"
+    notes: str = ""
+
+
+class VideoOutputCreate(VideoOutputBase):
+    pass
+
+
+class VideoOutputUpdate(VideoOutputBase):
+    name: str | None = None
+    destination_label: str | None = None
+    connector: str | None = None
+    notes: str | None = None
+
+
+class VideoOutputRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    list_id: UUID
+    output_number: int
+    name: str
+    destination_label: str
+    connector: str
+    notes: str
+    patch_points: list[VideoOutputPatchPointRead] = []
+
+
+class VideoBulkInputs(BaseModel):
+    quantity: int = Field(4, ge=1, le=200)
+    start_number: int = Field(1, ge=1)
+    prefix: str = Field("Cam", max_length=255)
+    source_type: str = "camera"
+    connector: str = "sdi"
+    device_id: UUID | None = None
+
+
+class VideoBulkOutputs(BaseModel):
+    quantity: int = Field(4, ge=1, le=200)
+    start_number: int = Field(1, ge=1)
+    prefix: str = Field("Out", max_length=255)
+    connector: str = "sdi"
+    device_id: UUID | None = None
+
+
 class VideoInputListBase(BaseModel):
     name: str = Field("Camera inputs", max_length=255)
 
@@ -68,6 +140,10 @@ class VideoInputListCreate(VideoInputListBase):
 
 class VideoInputListUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
+    switcher_product_id: str | None = None
+    switcher_product_name: str | None = None
+    switcher_inputs: int | None = Field(None, ge=0)
+    switcher_outputs: int | None = Field(None, ge=0)
 
 
 class VideoInputListRead(VideoInputListBase):
@@ -76,4 +152,9 @@ class VideoInputListRead(VideoInputListBase):
     id: UUID
     job_id: UUID
     position: int
+    switcher_product_id: str | None = None
+    switcher_product_name: str | None = None
+    switcher_inputs: int | None = None
+    switcher_outputs: int | None = None
     inputs: list[VideoInputRead] = []
+    outputs: list[VideoOutputRead] = []

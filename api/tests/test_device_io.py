@@ -139,7 +139,8 @@ async def test_switcher_io_comes_from_video_inputs_then_stockwire_then_override(
         assert patch_only["input_default"] == 2
         assert patch_only["input_count"] == 2
         assert patch_only["input_source"] == "patch"
-        assert patch_only["output_count"] is None
+        assert patch_only["output_count"] == 0
+        assert patch_only["output_source"] == "patch"
 
         linked = await client.patch(
             f"{BASE}/jobs/{job_id}/devices/{switcher['id']}",

@@ -772,6 +772,7 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
         "channels": channels,
         "outputs": outputs,
         "video_inputs": video_inputs,
+        "video_outputs": await video_service.video_outputs_per_device(db, job_id),
         "specs": specs,
     }
 
@@ -785,7 +786,7 @@ def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
     sw = ctx["specs"].get(key, {})
     if device.device_type in VIDEO_DEVICE_TYPES:
         input_default = ctx["video_inputs"].get(key, 0)
-        output_default = None
+        output_default = ctx["video_outputs"].get(key, 0)
     else:
         input_default = ctx["channels"]
         output_default = ctx["outputs"]

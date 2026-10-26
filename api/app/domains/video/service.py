@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import AudioDevice
-from app.domains.video.models import VideoInput, VideoInputList, VideoPatchPoint
+from app.domains.video.models import (
+    VideoInput,
+    VideoInputList,
+    VideoOutput,
+    VideoOutputPatchPoint,
+    VideoPatchPoint,
+)
 
 
 async def list_input_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputList]:
@@ -60,6 +66,20 @@ async def video_inputs_per_device(db: AsyncSession, job_id: UUID) -> dict[str, i
     return {str(device_id): int(count) for device_id, count in result.all()}
 
 
+async def video_outputs_per_device(db: AsyncSession, job_id: UUID) -> dict[str, int]:
+    result = await db.execute(
+        select(
+            VideoOutputPatchPoint.device_id,
+            func.count(func.distinct(VideoOutputPatchPoint.output_id)),
+        )
+        .join(VideoOutput, VideoOutputPatchPoint.output_id == VideoOutput.id)
+        .join(VideoInputList, VideoOutput.list_id == VideoInputList.id)
+        .where(VideoInputList.job_id == job_id, VideoOutputPatchPoint.device_id.is_not(None))
+        .group_by(VideoOutputPatchPoint.device_id)
+    )
+    return {str(device_id): int(count) for device_id, count in result.all()}
+
+
 async def device_has_patch_points(db: AsyncSession, device_id: UUID) -> bool:
     count = await db.scalar(
         select(func.count(VideoPatchPoint.id)).where(VideoPatchPoint.device_id == device_id)
@@ -92,3 +112,84 @@ async def apply(db: AsyncSession, obj, data: dict):
 async def delete(db: AsyncSession, obj) -> None:
     await db.delete(obj)
     await db.commit()
+
+
+async def get_output(db: AsyncSession, job_id: UUID, output_id: UUID) -> VideoOutput | None:
+    result = await db.execute(
+        select(VideoOutput)
+        .join(VideoInputList, VideoOutput.list_id == VideoInputList.id)
+        .where(VideoOutput.id == output_id, VideoInputList.job_id == job_id)
+    )
+    return result.scalars().first()
+
+
+async def get_output_point(
+    db: AsyncSession, job_id: UUID, point_id: UUID
+) -> VideoOutputPatchPoint | None:
+    result = await db.execute(
+        select(VideoOutputPatchPoint)
+        .join(VideoOutput, VideoOutputPatchPoint.output_id == VideoOutput.id)
+        .join(VideoInputList, VideoOutput.list_id == VideoInputList.id)
+        .where(VideoOutputPatchPoint.id == point_id, VideoInputList.job_id == job_id)
+    )
+    return result.scalars().first()
+
+
+async def next_output_number(db: AsyncSession, list_id: UUID) -> int:
+    current = await db.scalar(
+        select(func.max(VideoOutput.output_number)).where(VideoOutput.list_id == list_id)
+    )
+    return int(current or 0) + 1
+
+
+async def bulk_create_inputs(db: AsyncSession, lst: VideoInputList, payload) -> list[VideoInput]:
+    created: list[VideoInput] = []
+    for i in range(payload.quantity):
+        number = payload.start_number + i
+        label = f"{payload.prefix} {number}".strip()
+        inp = VideoInput(
+            list_id=lst.id,
+            input_number=number,
+            source_label=label,
+            source_type=payload.source_type,
+            connector=payload.connector,
+            notes="",
+        )
+        db.add(inp)
+        if payload.device_id is not None:
+            inp.patch_points.append(
+                VideoPatchPoint(
+                    position=0, connector=payload.connector, device_id=payload.device_id
+                )
+            )
+        created.append(inp)
+    await db.commit()
+    for inp in created:
+        await db.refresh(inp)
+    return created
+
+
+async def bulk_create_outputs(db: AsyncSession, lst: VideoInputList, payload) -> list[VideoOutput]:
+    created: list[VideoOutput] = []
+    for i in range(payload.quantity):
+        number = payload.start_number + i
+        out = VideoOutput(
+            list_id=lst.id,
+            output_number=number,
+            name=f"{payload.prefix} {number}".strip(),
+            destination_label="",
+            connector=payload.connector,
+            notes="",
+        )
+        db.add(out)
+        if payload.device_id is not None:
+            out.patch_points.append(
+                VideoOutputPatchPoint(
+                    position=0, connector=payload.connector, device_id=payload.device_id
+                )
+            )
+        created.append(out)
+    await db.commit()
+    for out in created:
+        await db.refresh(out)
+    return created

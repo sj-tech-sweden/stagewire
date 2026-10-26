@@ -7,7 +7,13 @@ from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.auth.deps import get_current_user
 from app.domains.video import schemas, service
-from app.domains.video.models import VideoInput, VideoInputList, VideoPatchPoint
+from app.domains.video.models import (
+    VideoInput,
+    VideoInputList,
+    VideoOutput,
+    VideoOutputPatchPoint,
+    VideoPatchPoint,
+)
 
 router = APIRouter(tags=["video"], dependencies=[Depends(get_current_user)])
 
@@ -81,7 +87,10 @@ async def update_video_list(
     db: AsyncSession = Depends(get_db),
 ) -> schemas.VideoInputListRead:
     obj = await _list_or_404(db, job_id, list_id)
-    obj = await service.apply(db, obj, payload.model_dump(exclude_unset=True, exclude_none=True))
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("name") is None:
+        data.pop("name", None)
+    obj = await service.apply(db, obj, data)
     return schemas.VideoInputListRead.model_validate(obj)
 
 
@@ -111,6 +120,151 @@ async def create_video_input(
     obj = VideoInput(list_id=lst.id, **data)
     obj = await service.save(db, obj)
     return schemas.VideoInputRead.model_validate(obj)
+
+
+@router.post(
+    "/jobs/{job_id}/video-lists/{list_id}/inputs/bulk",
+    response_model=list[schemas.VideoInputRead],
+    status_code=201,
+)
+async def bulk_create_video_inputs(
+    job_id: UUID,
+    list_id: UUID,
+    payload: schemas.VideoBulkInputs,
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.VideoInputRead]:
+    lst = await _list_or_404(db, job_id, list_id)
+    if payload.device_id is not None:
+        await _check_device(db, job_id, payload.device_id)
+    created = await service.bulk_create_inputs(db, lst, payload)
+    return [schemas.VideoInputRead.model_validate(i) for i in created]
+
+
+@router.post(
+    "/jobs/{job_id}/video-lists/{list_id}/outputs",
+    response_model=schemas.VideoOutputRead,
+    status_code=201,
+)
+async def create_video_output(
+    job_id: UUID,
+    list_id: UUID,
+    payload: schemas.VideoOutputCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoOutputRead:
+    lst = await _list_or_404(db, job_id, list_id)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("output_number") is None:
+        data["output_number"] = await service.next_output_number(db, lst.id)
+    obj = VideoOutput(list_id=lst.id, **data)
+    obj = await service.save(db, obj)
+    return schemas.VideoOutputRead.model_validate(obj)
+
+
+@router.post(
+    "/jobs/{job_id}/video-lists/{list_id}/outputs/bulk",
+    response_model=list[schemas.VideoOutputRead],
+    status_code=201,
+)
+async def bulk_create_video_outputs(
+    job_id: UUID,
+    list_id: UUID,
+    payload: schemas.VideoBulkOutputs,
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.VideoOutputRead]:
+    lst = await _list_or_404(db, job_id, list_id)
+    if payload.device_id is not None:
+        await _check_device(db, job_id, payload.device_id)
+    created = await service.bulk_create_outputs(db, lst, payload)
+    return [schemas.VideoOutputRead.model_validate(o) for o in created]
+
+
+async def _output_or_404(db: AsyncSession, job_id: UUID, output_id: UUID) -> VideoOutput:
+    await _job_or_404(db, job_id)
+    obj = await service.get_output(db, job_id, output_id)
+    if obj is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
+    return obj
+
+
+@router.patch(
+    "/jobs/{job_id}/video-outputs/{output_id}",
+    response_model=schemas.VideoOutputRead,
+)
+async def update_video_output(
+    job_id: UUID,
+    output_id: UUID,
+    payload: schemas.VideoOutputUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoOutputRead:
+    obj = await _output_or_404(db, job_id, output_id)
+    data = payload.model_dump(exclude_unset=True)
+    for key in ("name", "destination_label", "connector", "notes"):
+        if key in data and data[key] is None:
+            data[key] = ""
+    obj = await service.apply(db, obj, data)
+    return schemas.VideoOutputRead.model_validate(obj)
+
+
+@router.delete("/jobs/{job_id}/video-outputs/{output_id}", status_code=204)
+async def delete_video_output(
+    job_id: UUID, output_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    obj = await _output_or_404(db, job_id, output_id)
+    await service.delete(db, obj)
+
+
+@router.post(
+    "/jobs/{job_id}/video-outputs/{output_id}/patch-points",
+    response_model=schemas.VideoOutputPatchPointRead,
+    status_code=201,
+)
+async def create_video_output_point(
+    job_id: UUID,
+    output_id: UUID,
+    payload: schemas.VideoOutputPatchPointCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoOutputPatchPointRead:
+    out = await _output_or_404(db, job_id, output_id)
+    await _check_device(db, job_id, payload.device_id)
+    obj = VideoOutputPatchPoint(output_id=out.id, **payload.model_dump(exclude_unset=True))
+    obj = await service.save(db, obj)
+    return schemas.VideoOutputPatchPointRead.model_validate(obj)
+
+
+@router.patch(
+    "/jobs/{job_id}/video-outputs/{output_id}/patch-points/{point_id}",
+    response_model=schemas.VideoOutputPatchPointRead,
+)
+async def update_video_output_point(
+    job_id: UUID,
+    output_id: UUID,
+    point_id: UUID,
+    payload: schemas.VideoOutputPatchPointUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoOutputPatchPointRead:
+    await _output_or_404(db, job_id, output_id)
+    obj = await service.get_output_point(db, job_id, point_id)
+    if obj is None or obj.output_id != output_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "device_id" in data:
+        await _check_device(db, job_id, data["device_id"])
+    obj = await service.apply(db, obj, data)
+    return schemas.VideoOutputPatchPointRead.model_validate(obj)
+
+
+@router.delete(
+    "/jobs/{job_id}/video-outputs/{output_id}/patch-points/{point_id}",
+    status_code=204,
+)
+async def delete_video_output_point(
+    job_id: UUID, output_id: UUID, point_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    await _output_or_404(db, job_id, output_id)
+    obj = await service.get_output_point(db, job_id, point_id)
+    if obj is None or obj.output_id != output_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
+    await service.delete(db, obj)
 
 
 @router.patch(
