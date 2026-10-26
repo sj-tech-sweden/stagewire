@@ -23,7 +23,9 @@ test('a device can be created from the video patch list and the signal flow show
   const list = await post(request, headers, `/jobs/${jobId}/video-lists`, { name: 'Cameras' });
   await post(request, headers, `/jobs/${jobId}/video-lists/${list.id}/inputs`, { source_label: 'Cam 1 FOH' });
 
+  const loaded = page.waitForResponse((res) => res.url().includes('/video-lists') && res.ok());
   await page.goto(`/jobs/${jobId}?view=video`);
+  await loaded;
   const picker = page.getByPlaceholder('Pick a device').first();
   await picker.click();
   await picker.fill('Atem Mini');
