@@ -712,6 +712,48 @@
                         : t('cables.missingOn', { name: row.missingName })
                     }}
                   </q-item-label>
+                  <div class="row wrap q-mt-xs">
+                    <q-btn
+                      class="q-mr-sm q-mb-xs cable-action"
+                      outline
+                      dense
+                      no-caps
+                      color="primary"
+                      :label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
+                      :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
+                      @click.stop="toggleCableHidden(row)"
+                    >
+                      <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
+                    </q-btn>
+                    <q-btn
+                      class="q-mr-sm q-mb-xs cable-action"
+                      outline
+                      dense
+                      no-caps
+                      color="primary"
+                      :label="t('cables.rerouteAction')"
+                      :aria-label="t('cables.rerouteAction')"
+                      :disable="!row.placed || !!drawingWay"
+                      @click.stop="startReroute(row)"
+                    >
+                      <q-tooltip>
+                        {{ row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}
+                      </q-tooltip>
+                    </q-btn>
+                    <q-btn
+                      v-if="row.requestedMode === 'manual'"
+                      class="q-mr-sm q-mb-xs cable-action"
+                      outline
+                      dense
+                      no-caps
+                      color="primary"
+                      :label="t('cables.autoRouteAction')"
+                      :aria-label="t('cables.autoRouteAction')"
+                      @click.stop="resetRoute(row)"
+                    >
+                      <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
+                    </q-btn>
+                  </div>
                 </q-item-section>
                 <q-item-section side>
                   <q-item-label v-if="row.placed">
@@ -725,50 +767,7 @@
                     {{ row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m` }}
                   </q-item-label>
                 </q-item-section>
-                <q-item-section side>
-                  <div class="row no-wrap q-gutter-xs">
-                    <q-btn
-                      outline
-                      dense
-                      no-caps
-                      color="primary"
-                      :icon="row.hidden ? 'visibility_off' : 'visibility'"
-                      :label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
-                      :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
-                      @click.stop="toggleCableHidden(row)"
-                    >
-                      <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
-                    </q-btn>
-                    <q-btn
-                      outline
-                      dense
-                      no-caps
-                      color="primary"
-                      icon="edit_route"
-                      :label="t('cables.rerouteAction')"
-                      :aria-label="t('cables.rerouteAction')"
-                      :disable="!row.placed || !!drawingWay"
-                      @click.stop="startReroute(row)"
-                    >
-                      <q-tooltip>
-                        {{ row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}
-                      </q-tooltip>
-                    </q-btn>
-                    <q-btn
-                      v-if="row.requestedMode === 'manual'"
-                      outline
-                      dense
-                      no-caps
-                      color="primary"
-                      icon="undo"
-                      :label="t('cables.autoRouteAction')"
-                      :aria-label="t('cables.autoRouteAction')"
-                      @click.stop="resetRoute(row)"
-                    >
-                      <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
-                    </q-btn>
-                  </div>
-                </q-item-section>
+
               </q-item>
             </q-list>
             <div
@@ -2189,3 +2188,9 @@ onMounted(() => {
   store.fetchElements(jobId);
 });
 </script>
+
+<style scoped>
+.cable-action {
+  min-width: 104px;
+}
+</style>
