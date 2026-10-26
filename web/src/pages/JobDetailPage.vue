@@ -34,6 +34,13 @@
             <q-space />
             <q-btn
               flat
+              icon="picture_as_pdf"
+              :label="t('reports.openReports')"
+              class="q-ml-sm"
+              @click="reportDialog = true"
+            />
+            <q-btn
+              flat
               icon="description"
               :label="t('channels.patchSheets')"
               class="q-ml-sm"
@@ -1910,6 +1917,10 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <ReportGenerationDialog
+      v-model="reportDialog"
+      :job-id="String(route.params.jobId)"
+    />
   </q-page>
 </template>
 
@@ -1933,6 +1944,7 @@ import StockwireProductPicker from '@/components/StockwireProductPicker.vue'
 import ColumnChooser from '@/components/ColumnChooser.vue'
 import { useColumnPrefs } from '../composables/useColumnPrefs'
 import { CONNECTOR_OPTIONS } from '@/constants/connectors'
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue'
 
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
@@ -1943,6 +1955,7 @@ const stockwire = useStockwireStore()
 
 const job = ref(null)
 const jobError = ref(null)
+const reportDialog = ref(false)
 const split = ref(28)
 const channelDialog = ref(false)
 const bulkDialog = ref(false)

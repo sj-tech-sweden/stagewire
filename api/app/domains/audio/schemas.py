@@ -186,6 +186,7 @@ class PatchSheetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
+    device_id: UUID
     point_type: str
     channels: list[PatchSheetChannel] = []
 

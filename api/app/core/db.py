@@ -33,6 +33,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     import app.domains.audio.models  # noqa: F401  (register models on metadata)
     import app.domains.auth.models  # noqa: F401
+    import app.domains.reports.models  # noqa: F401
     import app.domains.venues.models  # noqa: F401
 
     # Only create tables directly for the sqlite test suite. In every other
@@ -41,3 +42,7 @@ async def init_db() -> None:
     if settings.database_url.startswith("sqlite"):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    from app.domains.reports.registry import ensure_default_templates
+
+    async with SessionLocal() as session:
+        await ensure_default_templates(session)
