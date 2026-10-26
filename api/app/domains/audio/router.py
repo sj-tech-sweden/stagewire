@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.db import get_db
 from app.domains.audio import schemas, service
 from app.domains.audio.coverage import coverage_grid, sector_for
+from app.domains.audio.device_specs import resolve_device_io
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
@@ -743,22 +744,68 @@ async def delete_plot_element(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
 
 
-def _to_device_read(device, channels: int, outputs: int) -> schemas.AudioDeviceRead:
+IO_DEVICE_TYPES = {"mixer", "switcher", "router", "multiviewer"}
+VIDEO_DEVICE_TYPES = {"switcher", "router", "multiviewer"}
+
+
+def _effective_count(override, stockwire, default) -> tuple[int | None, str | None]:
+    if override is not None:
+        return override, "override"
+    if stockwire is not None:
+        return stockwire, "stockwire"
+    if default is not None:
+        return default, "patch"
+    return None, None
+
+
+async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
+    channels, outputs = await service.job_io_totals(db, job_id)
+    video_inputs = await video_service.video_inputs_per_device(db, job_id)
+    device_product = {
+        str(d.id): d.stockwire_product_id
+        for d in devices
+        if d.stockwire_product_id and d.device_type in IO_DEVICE_TYPES
+    }
+    fetch = await stockwire_product_fetcher(db) if device_product else None
+    specs = await resolve_device_io(device_product, fetch)
+    return {
+        "channels": channels,
+        "outputs": outputs,
+        "video_inputs": video_inputs,
+        "specs": specs,
+    }
+
+
+def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
     read = schemas.AudioDeviceRead.model_validate(device)
     read.patch_point_count = len(device.patch_points)
-    if device.device_type == "mixer":
-        read.input_default = channels
-        read.output_default = outputs
-        read.input_count = device.input_override if device.input_override is not None else channels
-        read.output_count = (
-            device.output_override if device.output_override is not None else outputs
-        )
+    if device.device_type not in IO_DEVICE_TYPES:
+        return read
+    key = str(device.id)
+    sw = ctx["specs"].get(key, {})
+    if device.device_type in VIDEO_DEVICE_TYPES:
+        input_default = ctx["video_inputs"].get(key, 0)
+        output_default = None
+    else:
+        input_default = ctx["channels"]
+        output_default = ctx["outputs"]
+    read.input_default = input_default
+    read.output_default = output_default
+    read.input_count, read.input_source = _effective_count(
+        device.input_override, sw.get("inputs"), input_default
+    )
+    read.output_count, read.output_source = _effective_count(
+        device.output_override, sw.get("outputs"), output_default
+    )
+    read.stockwire_inputs = sw.get("inputs")
+    read.stockwire_outputs = sw.get("outputs")
+    read.stockwire_connectors = sw.get("connectors", [])
     return read
 
 
 async def _device_read(db: AsyncSession, device) -> schemas.AudioDeviceRead:
-    channels, outputs = await service.job_io_totals(db, device.job_id)
-    return _to_device_read(device, channels, outputs)
+    ctx = await _device_io_context(db, device.job_id, [device])
+    return _to_device_read(device, ctx)
 
 
 @router.post(
@@ -786,8 +833,8 @@ async def list_devices(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     devices = await service.list_devices(db, job_id)
-    channels, outputs = await service.job_io_totals(db, job_id)
-    return [_to_device_read(d, channels, outputs) for d in devices]
+    ctx = await _device_io_context(db, job_id, devices)
+    return [_to_device_read(d, ctx) for d in devices]
 
 
 @router.patch("/{job_id}/devices/{device_id}", response_model=schemas.AudioDeviceRead)

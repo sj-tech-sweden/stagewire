@@ -311,6 +311,11 @@ class AudioDeviceRead(AudioDeviceBase):
     output_default: int | None = None
     input_count: int | None = None
     output_count: int | None = None
+    input_source: str | None = None
+    output_source: str | None = None
+    stockwire_inputs: int | None = None
+    stockwire_outputs: int | None = None
+    stockwire_connectors: list[str] = []
 
 
 __all__ = [

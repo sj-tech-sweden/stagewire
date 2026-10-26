@@ -49,6 +49,17 @@ async def device_in_job(db: AsyncSession, job_id: UUID, device_id: UUID) -> bool
     return device is not None and device.job_id == job_id
 
 
+async def video_inputs_per_device(db: AsyncSession, job_id: UUID) -> dict[str, int]:
+    result = await db.execute(
+        select(VideoPatchPoint.device_id, func.count(func.distinct(VideoPatchPoint.input_id)))
+        .join(VideoInput, VideoPatchPoint.input_id == VideoInput.id)
+        .join(VideoInputList, VideoInput.list_id == VideoInputList.id)
+        .where(VideoInputList.job_id == job_id, VideoPatchPoint.device_id.is_not(None))
+        .group_by(VideoPatchPoint.device_id)
+    )
+    return {str(device_id): int(count) for device_id, count in result.all()}
+
+
 async def device_has_patch_points(db: AsyncSession, device_id: UUID) -> bool:
     count = await db.scalar(
         select(func.count(VideoPatchPoint.id)).where(VideoPatchPoint.device_id == device_id)
