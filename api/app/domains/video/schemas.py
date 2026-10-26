@@ -158,3 +158,14 @@ class VideoInputListRead(VideoInputListBase):
     switcher_outputs: int | None = None
     inputs: list[VideoInputRead] = []
     outputs: list[VideoOutputRead] = []
+
+
+class VideoChainStep(BaseModel):
+    device_id: UUID
+    connector: str | None = ""
+    patch_label: str | None = ""
+    notes: str | None = ""
+
+
+class VideoChain(BaseModel):
+    steps: list[VideoChainStep] = []

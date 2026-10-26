@@ -179,6 +179,14 @@
                 flat
                 dense
                 round
+                icon="device_hub"
+                :aria-label="t('video.patchFlow')"
+                @click="openPatchFlow('input', input)"
+              />
+              <q-btn
+                flat
+                dense
+                round
                 icon="account_tree"
                 :aria-label="t('channels.signalFlow')"
                 @click="openFlow('input', input)"
@@ -321,6 +329,14 @@
               />
             </td>
             <td class="text-no-wrap">
+              <q-btn
+                flat
+                dense
+                round
+                icon="device_hub"
+                :aria-label="t('video.patchFlow')"
+                @click="openPatchFlow('output', output)"
+              />
               <q-btn
                 flat
                 dense
@@ -682,6 +698,14 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <PatchFlowDialog
+      v-model="patchFlowOpen"
+      :title="patchFlowTitle"
+      :job-id="jobId"
+      :points="patchFlowTarget?.obj?.patch_points || []"
+      :on-save="savePatchFlow"
+    />
+
     <q-dialog v-model="createDialog">
       <q-card style="min-width: 320px">
         <q-card-section class="text-h6">
@@ -768,6 +792,8 @@ import { useDevicesStore } from '@/stores/devices';
 import { useStockwireStore } from '@/stores/stockwire';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import PatchChain from '@/components/PatchChain.vue';
+import PatchFlowDialog from '@/components/PatchFlowDialog.vue';
+import { VIDEO_DEVICE_KINDS } from '@/constants/videoDevices';
 
 const props = defineProps({
   list: { type: Object, required: true },
@@ -862,18 +888,7 @@ function setFirstDevice(kind, obj, deviceId) {
   });
 }
 
-const deviceTypeChoices = [
-  'switcher',
-  'router',
-  'multiviewer',
-  'mixer',
-  'digital_stagebox',
-  'analog_stagebox',
-  'split',
-  'network',
-  'direct',
-  'other',
-].map((v) => ({ value: v, label: t(`devices.types.${v}`) }));
+const deviceTypeChoices = VIDEO_DEVICE_KINDS.map((v) => ({ value: v, label: t(`devices.types.${v}`) }));
 const createDialog = ref(false);
 const createDraft = ref({ name: '', device_type: 'switcher', mode: null, kind: null, obj: null });
 function onNewDevice(mode, kind, obj, val, done) {
@@ -895,6 +910,26 @@ function confirmCreateDevice() {
     else if (draft.mode === 'chain') chainDevice.value = device.id;
     createDialog.value = false;
   });
+}
+
+const patchFlowOpen = ref(false);
+const patchFlowTarget = ref(null);
+const patchFlowTitle = computed(() => {
+  const target = patchFlowTarget.value;
+  if (!target) return '';
+  const obj = target.obj;
+  const name = target.kind === 'input' ? obj.source_label : obj.name;
+  return `${t('video.patchFlow')}: ${name || (target.kind === 'input' ? obj.input_number : obj.output_number)}`;
+});
+function openPatchFlow(kind, obj) {
+  patchFlowTarget.value = { kind, obj };
+  patchFlowOpen.value = true;
+}
+function savePatchFlow(steps) {
+  const target = patchFlowTarget.value;
+  return target.kind === 'input'
+    ? store.replaceInputChain(jobId, target.obj.id, steps)
+    : store.replaceOutputChain(jobId, target.obj.id, steps);
 }
 
 const flowDialog = ref(false);

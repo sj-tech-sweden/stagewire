@@ -39,6 +39,16 @@ export const useVideoStore = defineStore('video', {
       });
       return data;
     },
+    async replaceInputChain(jobId, inputId, steps) {
+      const { data } = await api.put(`/jobs/${jobId}/video-inputs/${inputId}/patch-chain`, { steps });
+      this.patchInput(inputId, () => data);
+      return data;
+    },
+    async replaceOutputChain(jobId, outputId, steps) {
+      const { data } = await api.put(`/jobs/${jobId}/video-outputs/${outputId}/patch-chain`, { steps });
+      this.patchOutput(outputId, () => data);
+      return data;
+    },
     async fillFromSwitcher(jobId, listId) {
       const { data } = await api.post(`/jobs/${jobId}/video-lists/${listId}/fill-from-switcher`);
       await this.fetchLists(jobId);

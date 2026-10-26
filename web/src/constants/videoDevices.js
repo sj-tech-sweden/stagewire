@@ -1,0 +1,15 @@
+export const VIDEO_DEVICE_KINDS = [
+  'camera',
+  'ptz_camera',
+  'computer',
+  'patchbay',
+  'converter',
+  'switcher',
+  'router',
+  'multiviewer',
+  'encoder',
+  'recorder',
+  'screen',
+  'projector',
+  'other',
+];

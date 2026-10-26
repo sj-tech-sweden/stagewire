@@ -412,6 +412,15 @@ const DEVICE_TYPES = [
   'switcher',
   'router',
   'multiviewer',
+  'camera',
+  'ptz_camera',
+  'computer',
+  'patchbay',
+  'converter',
+  'encoder',
+  'recorder',
+  'screen',
+  'projector',
   'other',
 ];
 const ioDeviceTypes = ['mixer', 'switcher', 'router', 'multiviewer'];

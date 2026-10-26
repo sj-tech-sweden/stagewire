@@ -178,6 +178,72 @@ async def bulk_create_video_outputs(
     return [schemas.VideoOutputRead.model_validate(o) for o in created]
 
 
+@router.put(
+    "/jobs/{job_id}/video-inputs/{input_id}/patch-chain",
+    response_model=schemas.VideoInputRead,
+)
+async def replace_input_chain(
+    job_id: UUID,
+    input_id: UUID,
+    payload: schemas.VideoChain,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoInputRead:
+    inp = await _input_or_404(db, job_id, input_id)
+    for step in payload.steps:
+        await _check_device(db, job_id, step.device_id)
+    for point in list(inp.patch_points):
+        await db.delete(point)
+    await db.flush()
+    for position, step in enumerate(payload.steps):
+        db.add(
+            VideoPatchPoint(
+                input_id=inp.id,
+                position=position,
+                device_id=step.device_id,
+                connector=step.connector or "",
+                patch_label=step.patch_label or "",
+                notes=step.notes or "",
+            )
+        )
+    await db.commit()
+    db.expire_all()
+    updated = await service.get_input(db, job_id, input_id)
+    return schemas.VideoInputRead.model_validate(updated)
+
+
+@router.put(
+    "/jobs/{job_id}/video-outputs/{output_id}/patch-chain",
+    response_model=schemas.VideoOutputRead,
+)
+async def replace_output_chain(
+    job_id: UUID,
+    output_id: UUID,
+    payload: schemas.VideoChain,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.VideoOutputRead:
+    out = await _output_or_404(db, job_id, output_id)
+    for step in payload.steps:
+        await _check_device(db, job_id, step.device_id)
+    for point in list(out.patch_points):
+        await db.delete(point)
+    await db.flush()
+    for position, step in enumerate(payload.steps):
+        db.add(
+            VideoOutputPatchPoint(
+                output_id=out.id,
+                position=position,
+                device_id=step.device_id,
+                connector=step.connector or "",
+                patch_label=step.patch_label or "",
+                notes=step.notes or "",
+            )
+        )
+    await db.commit()
+    db.expire_all()
+    updated = await service.get_output(db, job_id, output_id)
+    return schemas.VideoOutputRead.model_validate(updated)
+
+
 @router.post("/jobs/{job_id}/video-lists/{list_id}/fill-from-switcher")
 async def fill_video_list_from_switcher(
     job_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)
