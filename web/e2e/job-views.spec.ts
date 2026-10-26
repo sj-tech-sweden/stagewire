@@ -34,7 +34,7 @@ test('on a computer the channel lists sit to the left of the content', async ({ 
   await expect(splitter).not.toHaveClass(/q-splitter--horizontal/);
 });
 
-test('on a phone the lists stay visible above the content, as tabs', async ({ page, request }) => {
+test('on a phone the lists stay visible above the content, as a dropdown', async ({ page, request }) => {
   const jobId = await seedJob(page, request, `E2E Layout Phone ${Date.now()}`);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/jobs/${jobId}`);

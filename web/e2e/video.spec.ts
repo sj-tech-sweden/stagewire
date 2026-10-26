@@ -28,7 +28,9 @@ test('add a camera input and patch it through a switcher on the video page', asy
   await page.goto(`/jobs/${jobId}/video`);
   await page.getByLabel('New input list (e.g. Cameras)').fill('Cameras');
   await page.getByRole('button', { name: 'Add list' }).click();
-  await page.getByRole('button', { name: 'Add input' }).click();
+  await page.getByRole('button', { name: 'Bulk add inputs' }).click();
+  await page.getByLabel('How many').fill('1');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
   await page.getByPlaceholder('e.g. Cam 1 FOH').fill('Cam 1 FOH');
   await page.getByPlaceholder('e.g. Cam 1 FOH').press('Tab');
 
