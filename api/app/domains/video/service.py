@@ -196,28 +196,16 @@ async def bulk_create_outputs(db: AsyncSession, lst: VideoInputList, payload) ->
 
 
 async def _switcher_device(db: AsyncSession, lst: VideoInputList) -> AudioDevice:
-    devices = (
-        (
-            await db.execute(
-                select(AudioDevice)
-                .where(AudioDevice.job_id == lst.job_id)
-                .order_by(AudioDevice.position)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if lst.switcher_product_id:
-        for dev in devices:
-            if dev.stockwire_product_id == lst.switcher_product_id:
-                return dev
-    for dev in devices:
-        if dev.device_type == "switcher":
-            return dev
+    result = await db.execute(select(AudioDevice).where(AudioDevice.video_list_id == lst.id))
+    device = result.scalars().first()
+    if device is not None:
+        return device
+    product = lst.switcher_product_name or "Switcher"
     device = AudioDevice(
         job_id=lst.job_id,
-        name=lst.switcher_product_name or "Switcher",
+        name=f"{lst.name} · {product}",
         device_type="switcher",
+        video_list_id=lst.id,
         stockwire_product_id=lst.switcher_product_id,
         stockwire_product_name=lst.switcher_product_name,
     )

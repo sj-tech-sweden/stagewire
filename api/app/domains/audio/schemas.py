@@ -284,6 +284,8 @@ class AudioDeviceBase(BaseModel):
     ports: list[AudioDevicePort] | None = []
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
+    sound_list_id: UUID | None = None
+    video_list_id: UUID | None = None
 
 
 class AudioDeviceCreate(AudioDeviceBase):

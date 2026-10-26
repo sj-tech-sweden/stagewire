@@ -760,6 +760,12 @@ def _effective_count(override, stockwire, default) -> tuple[int | None, str | No
 
 async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
     channels, outputs = await service.job_io_totals(db, job_id)
+    lists = {}
+    for device in devices:
+        if device.sound_list_id is not None and str(device.sound_list_id) not in lists:
+            lists[str(device.sound_list_id)] = await service.list_io_totals(
+                db, device.sound_list_id
+            )
     video_inputs = await video_service.video_inputs_per_device(db, job_id)
     device_product = {
         str(d.id): d.stockwire_product_id
@@ -771,10 +777,28 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
     return {
         "channels": channels,
         "outputs": outputs,
+        "lists": lists,
         "video_inputs": video_inputs,
         "video_outputs": await video_service.video_outputs_per_device(db, job_id),
         "specs": specs,
     }
+
+
+async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> None:
+    from app.domains.video.models import VideoInputList
+
+    if data.get("sound_list_id") is not None:
+        found = await service.get_channel_list(db, data["sound_list_id"])
+        if found is None or found.job_id != job_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Channel list not found for this job"
+            )
+    if data.get("video_list_id") is not None:
+        found = await db.get(VideoInputList, data["video_list_id"])
+        if found is None or found.job_id != job_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Video list not found for this job"
+            )
 
 
 def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
@@ -788,8 +812,13 @@ def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
         input_default = ctx["video_inputs"].get(key, 0)
         output_default = ctx["video_outputs"].get(key, 0)
     else:
-        input_default = ctx["channels"]
-        output_default = ctx["outputs"]
+        if device.sound_list_id is not None:
+            input_default, output_default = ctx["lists"].get(
+                str(device.sound_list_id), (ctx["channels"], ctx["outputs"])
+            )
+        else:
+            input_default = ctx["channels"]
+            output_default = ctx["outputs"]
     read.input_default = input_default
     read.output_default = output_default
     read.input_count, read.input_source = _effective_count(
@@ -821,7 +850,9 @@ async def create_device(
 ) -> schemas.AudioDeviceRead:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
-    device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    await _check_device_lists(db, job_id, data)
+    device = await service.create_device(db, job_id, data)
     read = await _device_read(db, device)
     await publish_job_event(job_id, "device.upsert", read)
     return read
@@ -850,7 +881,9 @@ async def update_device(
     device = await service.get_device(db, device_id)
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
-    device = await service.update_device(db, device, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    await _check_device_lists(db, job_id, data)
+    device = await service.update_device(db, device, data)
     read = await _device_read(db, device)
     await publish_job_event(job_id, "device.upsert", read)
     return read

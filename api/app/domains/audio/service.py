@@ -40,6 +40,8 @@ async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
 
 
 DEVICE_CLEARABLE_KEYS = {
+    "sound_list_id",
+    "video_list_id",
     "stockwire_product_id",
     "stockwire_product_name",
     "input_override",
@@ -394,6 +396,16 @@ async def job_io_totals(db: AsyncSession, job_id: UUID) -> tuple[int, int]:
         select(func.count(ChannelListOutput.id))
         .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
         .where(ChannelList.job_id == job_id)
+    )
+    return int(channels or 0), int(outputs or 0)
+
+
+async def list_io_totals(db: AsyncSession, list_id: UUID) -> tuple[int, int]:
+    channels = await db.scalar(
+        select(func.count(AudioChannelPatch.id)).where(AudioChannelPatch.channel_list_id == list_id)
+    )
+    outputs = await db.scalar(
+        select(func.count(ChannelListOutput.id)).where(ChannelListOutput.channel_list_id == list_id)
     )
     return int(channels or 0), int(outputs or 0)
 
