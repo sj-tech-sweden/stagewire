@@ -5,7 +5,7 @@
 - [x] Add wiremaps with easy ways to follow a wire
 - [x] Add a way to export console patch and naming and such to a console using different kinds of plugins for each mixer and a additional csv/excel default plugin.
   - We want to start with files for Allen & Heath QU, CQ and GLD after the generic.
-- [ ] Add PDF reports simliar to the stockwire-rental reporteditor
+- [x] Add generic PDF reports with registry-seeded English and Swedish templates for the audio job summary, channel list, and stage plot. Admins can edit/duplicate templates in a freeform drag-and-resize WYSIWYG editor, insert registered data fields/tables, preview PDFs, and upload/calibrate PDF letterheads. Future report definitions must provide complete English and Swedish names, descriptions, fields, tables, and default content in `api/app/domains/reports/registry.py`; both language defaults are seeded at startup.
 - [x] Truncate notes with a readmore toggle if more than two rows
 - [x] Stockwire integration both for adding products to a job from selecting a microphone with/without stand, DI and so on. But also to select the mixer and get the correct number of inputs and busses, it should also be possible to suggest a mixer based on a channellist with a certain number of inputs and outputs.
   - The stockwire integration should also make it possible to deeplink both from stagewire to stockwire and stockwire to stagewire and create a job in the other platfrom after it is created in one.

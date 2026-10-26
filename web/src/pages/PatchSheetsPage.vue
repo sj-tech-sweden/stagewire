@@ -23,6 +23,13 @@
       </div>
       <q-btn
         flat
+        icon="picture_as_pdf"
+        :label="t('reports.generatePatchSheet')"
+        :disable="!current"
+        @click="showPatchpointReport = true"
+      />
+      <q-btn
+        flat
         icon="print"
         :label="t('app.actions.print')"
         :disable="!selected"
@@ -520,6 +527,13 @@
         </q-card-section>
       </q-card>
     </q-dialog>
+    <ReportGenerationDialog
+      v-model="showPatchpointReport"
+      :job-id="jobId"
+      initial-type-key="audio.patch-sheet"
+      :initial-patchpoint-id="current?.device_id || ''"
+      patchpoint-locked
+    />
   </q-page>
 </template>
 
@@ -532,6 +546,7 @@ import MarkdownText from '@/components/MarkdownText.vue'
 import TruncateText from '@/components/TruncateText.vue'
 import FlowTree from '@/components/FlowTree.vue'
 import StagePlotMini from '@/components/StagePlotMini.vue'
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue'
 import { useDevicesStore } from '@/stores/devices'
 import { chainNodes } from '@/utils/patchFlow'
 
@@ -548,6 +563,7 @@ const selected = ref(null)
 const error = ref(null)
 const plotElements = ref([])
 const channelDialog = ref(false)
+const showPatchpointReport = ref(false)
 const activeChannel = ref(null)
 const activeChannelId = ref(null)
 const showCreateDevice = ref(false)
@@ -589,12 +605,12 @@ const pointTypeLabel = (pt) => t(`channels.patchPoint.${typeKey[pt] || 'typeDire
 const sheetOptions = computed(() =>
   sheets.value.map((s) => ({
     label: `${s.name} · ${pointTypeLabel(s.point_type)}`,
-    value: s.name,
+    value: s.device_id,
   })),
 )
 
 const current = computed(
-  () => sheets.value.find((s) => s.name === selected.value) || null,
+  () => sheets.value.find((s) => s.device_id === selected.value) || null,
 )
 
 const pointChannelMap = computed(() => {
@@ -875,7 +891,7 @@ async function reloadData() {
   sheets.value = sheetsRes.data
   await devicesStore.fetchDevices(jobId)
   if (!selected.value && sheets.value.length) {
-    selected.value = sheets.value[0].name
+    selected.value = sheets.value[0].device_id
   }
 }
 
@@ -924,7 +940,7 @@ onMounted(async () => {
     lists.value = listsRes.data
     plotElements.value = plotRes.data || []
     devicesStore.fetchDevices(jobId)
-    if (sheets.value.length) selected.value = sheets.value[0].name
+    if (sheets.value.length) selected.value = sheets.value[0].device_id
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred')
   }

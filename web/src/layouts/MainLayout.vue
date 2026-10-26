@@ -77,6 +77,18 @@
             <q-list>
               <q-item
                 v-if="isAdmin"
+                v-ripple
+                clickable
+                to="/reports"
+                @click="leftDrawerOpen = false"
+              >
+                <q-item-section avatar>
+                  <q-icon name="description" />
+                </q-item-section>
+                <q-item-section>{{ t('reports.title') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-if="isAdmin"
                 v-close-popup
                 clickable
                 @click="goSettings"
@@ -149,6 +161,18 @@
             <q-icon name="meeting_room" />
           </q-item-section>
           <q-item-section>{{ t('app.nav.venues') }}</q-item-section>
+        </q-item>
+        <q-item
+          v-if="isAdmin"
+          v-ripple
+          clickable
+          to="/reports"
+          @click="leftDrawerOpen = false"
+        >
+          <q-item-section avatar>
+            <q-icon name="description" />
+          </q-item-section>
+          <q-item-section>{{ t('reports.title') }}</q-item-section>
         </q-item>
         <q-item
           v-if="isAdmin"

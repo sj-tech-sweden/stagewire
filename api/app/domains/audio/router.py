@@ -593,7 +593,12 @@ async def list_patch_sheets(
                 )
         rows.sort(key=lambda r: (r.direction != "in", r.channel_number))
         out.append(
-            schemas.PatchSheetRead(name=data["name"], point_type=data["point_type"], channels=rows)
+            schemas.PatchSheetRead(
+                name=data["name"],
+                device_id=_device_id,
+                point_type=data["point_type"],
+                channels=rows,
+            )
         )
     out.sort(key=lambda s: s.name)
     return out

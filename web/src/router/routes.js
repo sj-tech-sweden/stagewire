@@ -8,6 +8,7 @@ const routes = [
       { path: 'jobs/:jobId/patch-sheets', component: () => import('@/pages/PatchSheetsPage.vue') },
       { path: 'jobs/:jobId/stage-plot', component: () => import('@/pages/StagePlotPage.vue') },
       { path: 'jobs/:jobId/devices', component: () => import('@/pages/DevicesPage.vue') },
+      { path: 'reports', component: () => import('@/pages/ReportsPage.vue') },
       { path: 'venues', component: () => import('@/pages/VenuesPage.vue') },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     ],
