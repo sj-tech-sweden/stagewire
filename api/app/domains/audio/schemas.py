@@ -265,6 +265,8 @@ class StagePlotElementBase(BaseModel):
     image_url: str = ""
     linked_output_point_id: UUID | None = None
     linked_video_input_id: UUID | None = None
+    linked_lens_device_id: UUID | None = None
+    focal_mm: float | None = None
     coverage_angle_h: float = 0.0
     coverage_distance_m: float = 0.0
 
@@ -300,6 +302,10 @@ class AudioDeviceBase(BaseModel):
     stockwire_product_name: str | None = None
     sound_list_id: UUID | None = None
     video_list_id: UUID | None = None
+    sensor_width_mm: float | None = Field(None, gt=0)
+    focal_min_mm: float | None = Field(None, gt=0)
+    focal_max_mm: float | None = Field(None, gt=0)
+    max_distance_m: float | None = Field(None, gt=0)
 
 
 class AudioDeviceCreate(AudioDeviceBase):

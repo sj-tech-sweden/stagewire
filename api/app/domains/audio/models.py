@@ -155,6 +155,10 @@ class AudioDevice(Base):
     video_list_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("video_input_lists.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    sensor_width_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    focal_min_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    focal_max_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -193,6 +197,10 @@ class StagePlotElement(Base):
     linked_video_input_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("video_inputs.id", ondelete="SET NULL"), nullable=True
     )
+    linked_lens_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
+    )
+    focal_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)

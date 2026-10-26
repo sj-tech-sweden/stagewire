@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.domains.audio import schemas, service
+from app.domains.audio.camera_specs import resolve_camera_specs
 from app.domains.audio.coverage import coverage_grid, sector_for
 from app.domains.audio.device_specs import resolve_device_io
 from app.domains.audio.exports import get_exporter, list_exporters
@@ -672,6 +673,39 @@ async def _speaker_spec_map(db: AsyncSession, job_id: UUID, elements) -> dict[st
         )
     fetch = await stockwire_product_fetcher(db)
     return await resolve_speaker_specs(rows, point_device, device_product, fetch)
+
+
+@router.get("/{job_id}/camera-specs")
+async def get_camera_specs(job_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    elements = await service.list_plot_elements(db, job_id)
+    devices = await service.list_devices(db, job_id)
+    device_rows = {
+        str(d.id): {
+            "id": str(d.id),
+            "device_type": d.device_type,
+            "stockwire_product_id": d.stockwire_product_id,
+            "sensor_width_mm": d.sensor_width_mm,
+            "focal_min_mm": d.focal_min_mm,
+            "focal_max_mm": d.focal_max_mm,
+            "max_distance_m": d.max_distance_m,
+        }
+        for d in devices
+    }
+    rows = [
+        {
+            "id": str(e.id),
+            "linked_device_id": str(e.linked_device_id) if e.linked_device_id else None,
+            "linked_lens_device_id": str(e.linked_lens_device_id)
+            if e.linked_lens_device_id
+            else None,
+            "focal_mm": e.focal_mm,
+        }
+        for e in elements
+    ]
+    fetch = await stockwire_product_fetcher(db)
+    return await resolve_camera_specs(rows, device_rows, fetch)
 
 
 @router.get("/{job_id}/speaker-specs")

@@ -40,6 +40,10 @@ async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
 
 
 DEVICE_CLEARABLE_KEYS = {
+    "sensor_width_mm",
+    "focal_min_mm",
+    "focal_max_mm",
+    "max_distance_m",
     "sound_list_id",
     "video_list_id",
     "stockwire_product_id",
@@ -49,6 +53,8 @@ DEVICE_CLEARABLE_KEYS = {
 }
 
 PLOT_CLEARABLE_KEYS = {
+    "linked_lens_device_id",
+    "focal_mm",
     "linked_channel_id",
     "linked_patch_point_id",
     "linked_device_id",
