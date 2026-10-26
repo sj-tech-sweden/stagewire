@@ -9,12 +9,12 @@ test('admin can open the WYSIWYG report editor with registered data fields', asy
   await login(page);
   await page.goto('/reports');
 
-  await expect(page.getByText('Report templates', { exact: true })).toBeVisible();
-  await page.getByRole('combobox', { name: 'Template' }).click();
+  await expect(page.getByRole('main').getByText('Report templates', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Template', exact: true }).click();
   await page.getByText('Stage plot · Default', { exact: true }).click();
   await expect(page.locator('.q-editor')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Job title' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Audio channels' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stage elements' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stage plot diagram' })).toBeVisible();
   await expect(page.locator('.report-layout-object')).toHaveCount(2);
   await expect(page.getByRole('combobox', { name: 'Plot area' })).toBeVisible();
