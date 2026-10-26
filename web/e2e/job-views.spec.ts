@@ -39,7 +39,8 @@ test('on a phone the lists stay visible above the content, as tabs', async ({ pa
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/jobs/${jobId}`);
   await expect(page.locator('.q-splitter').first()).toHaveClass(/q-splitter--horizontal/);
-  await expect(page.getByRole('tab', { name: 'FOH Inputs' })).toBeVisible();
+  await page.locator('.q-splitter .q-select').first().click();
+  await expect(page.locator('.q-menu .q-item', { hasText: 'FOH Inputs' })).toBeVisible();
 });
 
 test('switching to Video shows the video lists in the same layout', async ({ page, request }) => {

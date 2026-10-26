@@ -30,8 +30,72 @@ export const useVideoStore = defineStore('video', {
     },
     async updateList(jobId, listId, payload) {
       const { data } = await api.patch(`/jobs/${jobId}/video-lists/${listId}`, payload);
-      this.patchList(listId, { name: data.name });
+      this.patchList(listId, {
+        name: data.name,
+        switcher_product_id: data.switcher_product_id,
+        switcher_product_name: data.switcher_product_name,
+        switcher_inputs: data.switcher_inputs,
+        switcher_outputs: data.switcher_outputs,
+      });
       return data;
+    },
+    async bulkCreateInputs(jobId, listId, payload) {
+      const { data } = await api.post(`/jobs/${jobId}/video-lists/${listId}/inputs/bulk`, payload);
+      const list = this.lists.find((l) => l.id === listId);
+      if (list) list.inputs = [...(list.inputs || []), ...data];
+      return data;
+    },
+    async bulkCreateOutputs(jobId, listId, payload) {
+      const { data } = await api.post(`/jobs/${jobId}/video-lists/${listId}/outputs/bulk`, payload);
+      const list = this.lists.find((l) => l.id === listId);
+      if (list) list.outputs = [...(list.outputs || []), ...data];
+      return data;
+    },
+    async updateOutput(jobId, outputId, payload) {
+      const { data } = await api.patch(`/jobs/${jobId}/video-outputs/${outputId}`, payload);
+      this.patchOutput(outputId, (out) => ({ ...out, ...data, patch_points: out.patch_points }));
+      return data;
+    },
+    async deleteOutput(jobId, outputId) {
+      await api.delete(`/jobs/${jobId}/video-outputs/${outputId}`);
+      for (const list of this.lists) {
+        list.outputs = (list.outputs || []).filter((o) => o.id !== outputId);
+      }
+    },
+    async createOutputPatchPoint(jobId, outputId, payload) {
+      const { data } = await api.post(`/jobs/${jobId}/video-outputs/${outputId}/patch-points`, payload);
+      this.patchOutput(outputId, (out) => ({
+        ...out,
+        patch_points: [...(out.patch_points || []), data],
+      }));
+      return data;
+    },
+    async updateOutputPatchPoint(jobId, outputId, pointId, payload) {
+      const { data } = await api.patch(
+        `/jobs/${jobId}/video-outputs/${outputId}/patch-points/${pointId}`,
+        payload,
+      );
+      this.patchOutput(outputId, (out) => ({
+        ...out,
+        patch_points: (out.patch_points || []).map((p) => (p.id === pointId ? data : p)),
+      }));
+      return data;
+    },
+    async deleteOutputPatchPoint(jobId, outputId, pointId) {
+      await api.delete(`/jobs/${jobId}/video-outputs/${outputId}/patch-points/${pointId}`);
+      this.patchOutput(outputId, (out) => ({
+        ...out,
+        patch_points: (out.patch_points || []).filter((p) => p.id !== pointId),
+      }));
+    },
+    patchOutput(outputId, update) {
+      for (const list of this.lists) {
+        const i = (list.outputs || []).findIndex((x) => x.id === outputId);
+        if (i !== -1) {
+          list.outputs[i] = update(list.outputs[i]);
+          return;
+        }
+      }
     },
     async deleteList(jobId, listId) {
       await api.delete(`/jobs/${jobId}/video-lists/${listId}`);

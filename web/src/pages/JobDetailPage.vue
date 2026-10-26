@@ -242,21 +242,15 @@
             class="q-pa-sm"
           >
             <div class="row items-center q-gutter-sm">
-              <q-tabs
+              <q-select
                 :model-value="store.selectedListId"
-                dense
-                no-caps
-                scrollable
+                :options="listOptions"
+                emit-value
+                map-options
+                :label="t('channels.lists')"
                 class="col"
                 @update:model-value="selectList"
-              >
-                <q-tab
-                  v-for="list in store.lists"
-                  :key="list.id"
-                  :name="list.id"
-                  :label="list.name"
-                />
-              </q-tabs>
+              />
               <q-btn
                 dense
                 flat
@@ -333,21 +327,15 @@
                 <q-item-section>{{ vl.name }}</q-item-section>
               </q-item>
             </q-list>
-            <q-tabs
+            <q-select
               v-else-if="videoStore.lists.length"
               :model-value="selectedVideoList?.id"
-              dense
-              no-caps
-              scrollable
+              :options="videoListOptions"
+              emit-value
+              map-options
+              :label="t('video.lists')"
               @update:model-value="(v) => (selectedVideoListId = v)"
-            >
-              <q-tab
-                v-for="vl in videoStore.lists"
-                :key="vl.id"
-                :name="vl.id"
-                :label="vl.name"
-              />
-            </q-tabs>
+            />
             <div
               v-else
               class="text-grey q-pa-sm"
@@ -2189,6 +2177,9 @@ const viewOptions = [
   { label: t('video.views.video'), value: 'video', icon: 'videocam' },
 ]
 const selectedVideoListId = ref(null)
+const videoListOptions = computed(() =>
+  videoStore.lists.map((l) => ({ value: l.id, label: l.name })),
+)
 const newVideoListName = ref('')
 const selectedVideoList = computed(
   () => videoStore.lists.find((l) => l.id === selectedVideoListId.value) || videoStore.lists[0] || null,
