@@ -767,7 +767,6 @@
                     {{ row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m` }}
                   </q-item-label>
                 </q-item-section>
-
               </q-item>
             </q-list>
             <div
