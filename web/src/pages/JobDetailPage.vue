@@ -1519,6 +1519,15 @@
             v-model="jobForm.venue_name"
             :label="t('jobs.fieldVenue')"
           />
+          <q-select
+            v-model="jobForm.venue_id"
+            :options="savedVenueOptions"
+            :label="t('venues.assignLabel')"
+            :hint="t('venues.assignHint')"
+            emit-value
+            map-options
+            clearable
+          />
           <DateTimePicker
             v-model="jobForm.event_date"
             :label="t('jobs.fieldEventDate')"
@@ -1914,6 +1923,7 @@ import { useChannelsStore } from '@/stores/channels'
 import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useStagePlotStore } from '@/stores/stageplot'
+import { useVenuesStore } from '@/stores/venues'
 import { chainNodes, performersByChannel } from '@/utils/patchFlow'
 import { useStockwireStore } from '@/stores/stockwire'
 import DateTimePicker from '@/components/DateTimePicker.vue'
@@ -1963,7 +1973,17 @@ const outputOriginalIds = ref(new Set())
 const flowDialog = ref(false)
 const flowSource = ref(null)
 const jobDialog = ref(false)
-const jobForm = reactive({ title: '', venue_name: '', event_date: '', notes: '', stockwire_job_id: '' })
+const jobForm = reactive({
+  title: '',
+  venue_name: '',
+  venue_id: null,
+  event_date: '',
+  notes: '',
+  stockwire_job_id: '',
+})
+const savedVenueOptions = computed(() =>
+  venuesStore.venues.map((v) => ({ value: v.id, label: v.name })),
+)
 const pushing = ref(false)
 const linking = ref(false)
 const pushMessage = ref('')
@@ -1983,6 +2003,7 @@ const inputTypeOptions = [
 
 
 const stagePlotStore = useStagePlotStore()
+const venuesStore = useVenuesStore()
 const stageByChannel = computed(() => performersByChannel(store.channels, stagePlotStore.elements))
 
 const columns = [
@@ -2087,6 +2108,10 @@ const outputModeOptions = [
   { label: t('channels.outputMode712'), value: '7.1.2' },
   { label: t('channels.outputModeOther'), value: 'other' },
 ]
+
+function modeLabel(mode) {
+  return outputModeOptions.find((o) => o.value === mode)?.label || mode
+}
 
 const emptyForm = () => ({
   channel_number: store.channels.length ? Math.max(...store.channels.map((c) => c.channel_number || 0)) + 1 : 1,
@@ -2767,9 +2792,11 @@ async function saveList() {
 function openJobDialog() {
   jobForm.title = job.value?.title || ''
   jobForm.venue_name = job.value?.venue_name || ''
+  jobForm.venue_id = job.value?.venue_id || null
   jobForm.event_date = job.value?.event_date || ''
   jobForm.notes = job.value?.notes || ''
   jobForm.stockwire_job_id = job.value?.stockwire_job_id || ''
+  venuesStore.fetchVenues()
   jobDialog.value = true
 }
 
@@ -2781,8 +2808,13 @@ async function saveJob() {
     notes: jobForm.notes,
     stockwire_job_id: jobForm.stockwire_job_id || null,
   }
+  const previousVenueId = job.value?.venue_id || null
   const { data } = await api.patch(`/jobs/${route.params.jobId}`, payload)
   job.value = data
+  const nextVenueId = jobForm.venue_id || null
+  if (nextVenueId !== previousVenueId) {
+    job.value = await venuesStore.assignJobVenue(route.params.jobId, nextVenueId)
+  }
   jobDialog.value = false
 }
 
@@ -3219,6 +3251,7 @@ function disconnectWs() {
 
 onMounted(async () => {
   stagePlotStore.fetchElements(route.params.jobId)
+  devicesStore.fetchDevices(route.params.jobId)
   try {
     const { data } = await api.get(`/jobs/${route.params.jobId}`)
     job.value = data

@@ -29,6 +29,14 @@ class ProductionJob(Base):
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    venue_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    venue_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    stage_x_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    stage_y_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    venue_background_image_url: Mapped[str] = mapped_column(String(1024), default="")
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
@@ -133,6 +141,8 @@ class AudioDevice(Base):
     ports: Mapped[list] = mapped_column(JSON, default=list)
     stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -165,6 +175,9 @@ class StagePlotElement(Base):
     linked_device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
     )
+    linked_output_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
+    )
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)
@@ -173,6 +186,8 @@ class StagePlotElement(Base):
     height_cm: Mapped[float] = mapped_column(Float, default=60.0)
     label: Mapped[str] = mapped_column(String(255), default="")
     image_url: Mapped[str] = mapped_column(String(1024), default="")
+    coverage_angle_h: Mapped[float] = mapped_column(Float, default=0.0)
+    coverage_distance_m: Mapped[float] = mapped_column(Float, default=0.0)
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 

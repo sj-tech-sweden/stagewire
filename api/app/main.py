@@ -15,6 +15,7 @@ from app.domains.settings.router import router as settings_router
 from app.domains.stockwire.router import public_router as stockwire_public_router
 from app.domains.stockwire.router import router as stockwire_router
 from app.domains.uploads.router import router as uploads_router
+from app.domains.venues.router import router as venues_router
 
 
 @asynccontextmanager
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(stockwire_router, prefix="/api/v1")
     app.include_router(stockwire_public_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")
+    app.include_router(venues_router, prefix="/api/v1")
 
     settings = get_settings()
     try:

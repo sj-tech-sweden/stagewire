@@ -72,6 +72,15 @@ catalog, push gear "requirements" onto a rental job, and create/link jobs in bot
   `GET /inventory/products/{id}` and filterable in the products list. If not present today, add it
   as a product custom field / search facet.
 
+### 3.5 Speaker coverage data
+
+- Stagewire reads optional speaker fields from a product's `specs` object, for the product
+  linked to the speaker's output device (`GET /inventory/products/{id}`):
+  - `specs.dispersion_h_deg`: horizontal coverage angle, degrees.
+  - `specs.throw_m`: throw distance, metres.
+- When a product provides either field it overrides the manual value on the speaker.
+  Missing fields or an unreachable product fall back to the manual values.
+
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
 stockwire-rental will call these (key from §3.2):

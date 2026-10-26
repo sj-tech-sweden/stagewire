@@ -140,6 +140,17 @@
           <q-item-section>{{ t('app.nav.jobs') }}</q-item-section>
         </q-item>
         <q-item
+          v-ripple
+          clickable
+          to="/venues"
+          @click="leftDrawerOpen = false"
+        >
+          <q-item-section avatar>
+            <q-icon name="meeting_room" />
+          </q-item-section>
+          <q-item-section>{{ t('app.nav.venues') }}</q-item-section>
+        </q-item>
+        <q-item
           v-if="isAdmin"
           v-ripple
           clickable

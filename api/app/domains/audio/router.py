@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.domains.audio import schemas, service
+from app.domains.audio.coverage import coverage_grid, sector_for
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
@@ -18,12 +19,15 @@ from app.domains.audio.models import (
     ProductionJob,
     StockwireRequirementLink,
 )
+from app.domains.audio.speaker_specs import resolve_speaker_specs
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 
 router = APIRouter(prefix="/jobs", tags=["audio:jobs"], dependencies=[Depends(get_current_user)])
+
+MAX_COVERAGE_CELLS_PER_AXIS = 500
 
 
 @router.post("", response_model=schemas.ProductionJobRead, status_code=201)
@@ -624,6 +628,79 @@ async def list_plot_elements(
     return [schemas.StagePlotElementRead.model_validate(e) for e in elements]
 
 
+async def stockwire_product_fetcher(db: AsyncSession):
+    """Return an async product lookup, or None when the Stockwire integration is off."""
+    cfg = await load_integration_config(db)
+    if not cfg.get("api_key"):
+        return None
+    sw = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+
+    async def fetch(product_id: str) -> dict | None:
+        return await sw.get_product(product_id)
+
+    return fetch
+
+
+async def _speaker_spec_map(db: AsyncSession, job_id: UUID, elements) -> dict[str, dict]:
+    lists = await service.list_channel_lists(db, job_id)
+    point_device = {
+        str(pt.id): str(pt.device_id)
+        for lst in lists
+        for out in lst.outputs
+        for pt in out.points
+        if pt.device_id
+    }
+    devices = await service.list_devices(db, job_id)
+    device_product = {str(d.id): d.stockwire_product_id for d in devices if d.stockwire_product_id}
+    rows = [
+        {
+            **schemas.StagePlotElementRead.model_validate(e).model_dump(mode="json"),
+            "id": str(e.id),
+        }
+        for e in elements
+    ]
+    for row in rows:
+        row["linked_output_point_id"] = (
+            str(row["linked_output_point_id"]) if row.get("linked_output_point_id") else None
+        )
+    fetch = await stockwire_product_fetcher(db)
+    return await resolve_speaker_specs(rows, point_device, device_product, fetch)
+
+
+@router.get("/{job_id}/speaker-specs")
+async def get_speaker_specs(job_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    elements = await service.list_plot_elements(db, job_id)
+    return await _speaker_spec_map(db, job_id, elements)
+
+
+@router.get("/{job_id}/coverage")
+async def get_coverage(
+    job_id: UUID,
+    cell_cm: float = Query(25, ge=5, le=1000),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    job = await service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    elements = await service.list_plot_elements(db, job_id)
+    specs = await _speaker_spec_map(db, job_id, elements)
+    sectors = []
+    for element in elements:
+        data = schemas.StagePlotElementRead.model_validate(element).model_dump()
+        if str(element.id) in specs:
+            data.update(
+                {k: specs[str(element.id)][k] for k in ("coverage_angle_h", "coverage_distance_m")}
+            )
+        sector = sector_for(data, job.stage_x_cm, job.stage_y_cm)
+        if sector is not None:
+            sectors.append(sector)
+    longest = max(job.venue_width_cm, job.venue_height_cm)
+    cell = max(cell_cm, longest / MAX_COVERAGE_CELLS_PER_AXIS)
+    return coverage_grid(job.venue_width_cm, job.venue_height_cm, sectors, cell)
+
+
 @router.patch(
     "/{job_id}/plot-elements/{element_id}",
     response_model=schemas.StagePlotElementRead,
@@ -660,6 +737,24 @@ async def delete_plot_element(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
 
 
+def _to_device_read(device, channels: int, outputs: int) -> schemas.AudioDeviceRead:
+    read = schemas.AudioDeviceRead.model_validate(device)
+    read.patch_point_count = len(device.patch_points)
+    if device.device_type == "mixer":
+        read.input_default = channels
+        read.output_default = outputs
+        read.input_count = device.input_override if device.input_override is not None else channels
+        read.output_count = (
+            device.output_override if device.output_override is not None else outputs
+        )
+    return read
+
+
+async def _device_read(db: AsyncSession, device) -> schemas.AudioDeviceRead:
+    channels, outputs = await service.job_io_totals(db, device.job_id)
+    return _to_device_read(device, channels, outputs)
+
+
 @router.post(
     "/{job_id}/devices",
     response_model=schemas.AudioDeviceRead,
@@ -673,8 +768,7 @@ async def create_device(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
-    read = schemas.AudioDeviceRead.model_validate(device)
-    read.patch_point_count = len(device.patch_points)
+    read = await _device_read(db, device)
     await publish_job_event(job_id, "device.upsert", read)
     return read
 
@@ -686,12 +780,8 @@ async def list_devices(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     devices = await service.list_devices(db, job_id)
-    return [
-        schemas.AudioDeviceRead.model_validate(d).model_copy(
-            update={"patch_point_count": len(d.patch_points)}
-        )
-        for d in devices
-    ]
+    channels, outputs = await service.job_io_totals(db, job_id)
+    return [_to_device_read(d, channels, outputs) for d in devices]
 
 
 @router.patch("/{job_id}/devices/{device_id}", response_model=schemas.AudioDeviceRead)
@@ -707,8 +797,7 @@ async def update_device(
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
     device = await service.update_device(db, device, payload.model_dump(exclude_unset=True))
-    read = schemas.AudioDeviceRead.model_validate(device)
-    read.patch_point_count = len(device.patch_points)
+    read = await _device_read(db, device)
     await publish_job_event(job_id, "device.upsert", read)
     return read
 

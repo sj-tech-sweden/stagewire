@@ -12,6 +12,11 @@ class ProductionJobBase(BaseModel):
     notes: str = ""
     stage_width_cm: float = 0.0
     stage_height_cm: float = 0.0
+    venue_width_cm: float = 0.0
+    venue_height_cm: float = 0.0
+    stage_x_cm: float = 0.0
+    stage_y_cm: float = 0.0
+    venue_background_image_url: str = ""
     cable_plan: dict = Field(default_factory=dict)
 
 
@@ -25,6 +30,12 @@ class ProductionJobUpdate(BaseModel):
     event_date: datetime | None = None
     stockwire_job_id: str | None = None
     notes: str | None = None
+    stage_width_cm: float | None = Field(None, ge=0)
+    stage_height_cm: float | None = Field(None, ge=0)
+    stage_x_cm: float | None = Field(None, ge=0)
+    stage_y_cm: float | None = Field(None, ge=0)
+    venue_width_cm: float | None = Field(None, ge=0)
+    venue_height_cm: float | None = Field(None, ge=0)
     cable_plan: dict | None = None
 
 
@@ -32,6 +43,7 @@ class ProductionJobRead(ProductionJobBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    venue_id: UUID | None = None
     created_at: datetime
 
 
@@ -230,6 +242,9 @@ class StagePlotElementBase(BaseModel):
     height_cm: float = 60.0
     label: str = ""
     image_url: str = ""
+    linked_output_point_id: UUID | None = None
+    coverage_angle_h: float = 0.0
+    coverage_distance_m: float = 0.0
 
 
 class StagePlotElementCreate(StagePlotElementBase):
@@ -272,6 +287,8 @@ class AudioDeviceUpdate(AudioDeviceBase):
     device_type: str | None = None
     position: int | None = None
     notes: str | None = None
+    input_override: int | None = Field(None, ge=0)
+    output_override: int | None = Field(None, ge=0)
 
 
 class AudioDeviceRead(AudioDeviceBase):
@@ -280,6 +297,12 @@ class AudioDeviceRead(AudioDeviceBase):
     id: UUID
     job_id: UUID
     patch_point_count: int = 0
+    input_override: int | None = None
+    output_override: int | None = None
+    input_default: int | None = None
+    output_default: int | None = None
+    input_count: int | None = None
+    output_count: int | None = None
 
 
 __all__ = [
