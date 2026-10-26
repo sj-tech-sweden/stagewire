@@ -9,14 +9,15 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await login(page);
 
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
+  const authHeaders = { Authorization: `Bearer ${token}` };
   const title = `E2E Show ${Date.now()}`;
   const created = await request.post(`${API_BASE}/api/v1/jobs`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders,
     data: { title, venue_name: 'E2E Hall' },
   });
   const jobId = (await created.json()).id;
   const performerPlotElement = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, {
-    headers: { Authorization: `****** },
+    headers: authHeaders,
     data: {
       element_type: 'performer',
       label: 'Alex Singer',
@@ -66,7 +67,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await expect(page.getByText('Alex Updated · Beltpack 2 · 518.125 MHz')).toBeVisible();
 
   const listsRes = await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, {
-    headers: { Authorization: `****** },
+    headers: authHeaders,
   });
   const channels = (await listsRes.json())[0].channels;
   const channel = channels[0];
@@ -75,7 +76,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   expect(channel.wireless_pack).toBe('Beltpack 2');
   expect(channel.wireless_frequency).toBe('518.125 MHz');
   const plotElementsRes = await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, {
-    headers: { Authorization: `****** },
+    headers: authHeaders,
   });
   const plotElements = await plotElementsRes.json();
   expect(
@@ -86,7 +87,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   ).toBe('Alex Updated');
 
   const linkedElement = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, {
-    headers: { Authorization: `****** },
+    headers: authHeaders,
     data: {
       element_type: 'wireless_receiver',
       label: 'Wireless RX',
@@ -100,7 +101,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   // A new channel's default patch point must auto-link to a Mixer device, so the
   // mandatory device-linking validation does not block the save (regression test).
   const devicesRes = await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders,
   });
   const devices = (await devicesRes.json()) as Array<{ device_type?: string }>;
   expect(devices.some((d) => d.device_type === 'mixer')).toBe(true);
