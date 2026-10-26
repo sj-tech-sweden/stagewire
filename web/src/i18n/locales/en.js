@@ -534,6 +534,7 @@ export default {
     empty: 'No elements on the stage plot yet.',
     units: 'Units',
     zoom: 'Zoom',
+    audienceLabel: 'Audience',
     audienceDraw: 'Audience area',
     audienceHint: 'Click the venue to outline the audience area. Finish needs at least three corners.',
     audienceFinish: 'Finish area',

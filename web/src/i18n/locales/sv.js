@@ -534,6 +534,7 @@ export default {
     empty: 'Inga objekt på scenkartan ännu.',
     units: 'Enheter',
     zoom: 'Zoom',
+    audienceLabel: 'Publik',
     audienceDraw: 'Publikområde',
     audienceHint: 'Klicka på lokalen för att rita publikområdet. Avsluta kräver minst tre hörn.',
     audienceFinish: 'Avsluta område',

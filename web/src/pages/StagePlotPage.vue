@@ -158,6 +158,16 @@
               <q-item
                 v-ripple
                 clickable
+                @click="startAudience"
+              >
+                <q-item-section avatar>
+                  <q-icon name="groups" />
+                </q-item-section>
+                <q-item-section>{{ t('stagePlot.audienceDraw') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-ripple
+                clickable
                 @click="openSpeakerDialog"
               >
                 <q-item-section avatar>
@@ -486,6 +496,50 @@
               </div>
             </div>
             <div
+              v-if="drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceHint') }}
+              </div>
+              <q-btn
+                dense
+                color="primary"
+                :label="t('stagePlot.audienceFinish')"
+                :disable="audiencePoints.length < 3"
+                @click="finishAudience"
+              />
+              <q-btn
+                dense
+                flat
+                :label="t('app.actions.cancel')"
+                @click="cancelAudience"
+              />
+            </div>
+            <div
+              v-if="audienceShown.length >= 3 && !drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceShown') }}
+              </div>
+              <q-btn
+                flat
+                dense
+                icon="delete"
+                :label="t('stagePlot.audienceClear')"
+                @click="clearAudience"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                flat
+                dense
+                icon="save"
+                :label="t('stagePlot.audienceSaveVenue')"
+                @click="saveAudienceToVenue"
+              />
+            </div>
+            <div
               v-if="store.loading"
               class="q-my-md"
             >
@@ -523,6 +577,10 @@
                 <v-line
                   v-if="audienceShown.length >= 3"
                   :config="audienceConfig"
+                />
+                <v-text
+                  v-if="audienceShown.length >= 3"
+                  :config="audienceLabelConfig"
                 />
                 <v-line
                   v-if="drawingAudience && audiencePoints.length"
@@ -606,62 +664,10 @@
               <q-btn
                 flat
                 dense
-                icon="groups"
-                :label="t('stagePlot.audienceDraw')"
-                :disable="drawingWay || drawingAudience || !!rerouteKey"
-                @click="startAudience"
-              />
-              <q-btn
-                flat
-                dense
                 icon="download"
                 :label="t('cables.exportCsv')"
                 :disable="!cableRows.length"
                 @click="exportCables"
-              />
-            </div>
-            <div
-              v-if="drawingAudience"
-              class="row items-center q-gutter-sm q-mt-sm"
-            >
-              <div class="text-caption">
-                {{ t('stagePlot.audienceHint') }}
-              </div>
-              <q-btn
-                dense
-                color="primary"
-                :label="t('stagePlot.audienceFinish')"
-                :disable="audiencePoints.length < 3"
-                @click="finishAudience"
-              />
-              <q-btn
-                dense
-                flat
-                :label="t('app.actions.cancel')"
-                @click="cancelAudience"
-              />
-            </div>
-            <div
-              v-if="audienceShown.length >= 3 && !drawingAudience"
-              class="row items-center q-gutter-sm q-mt-sm"
-            >
-              <div class="text-caption">
-                {{ t('stagePlot.audienceShown') }}
-              </div>
-              <q-btn
-                flat
-                dense
-                icon="delete"
-                :label="t('stagePlot.audienceClear')"
-                @click="clearAudience"
-              />
-              <q-btn
-                v-if="job?.venue_id"
-                flat
-                dense
-                icon="save"
-                :label="t('stagePlot.audienceSaveVenue')"
-                @click="saveAudienceToVenue"
               />
             </div>
             <div
@@ -2175,6 +2181,18 @@ const audienceConfig = computed(() => {
     stroke: '#e53935',
     strokeWidth: 2,
     dash: [10, 6],
+    listening: false,
+  };
+});
+const audienceLabelConfig = computed(() => {
+  const s = pxPerCm.value;
+  const [x, y] = audienceShown.value[0] || [0, 0];
+  return {
+    x: x * s + 6,
+    y: y * s + 4,
+    text: t('stagePlot.audienceLabel'),
+    fontSize: Math.max(11, 12 * s),
+    fill: '#ef9a9a',
     listening: false,
   };
 });

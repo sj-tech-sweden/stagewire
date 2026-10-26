@@ -25,7 +25,6 @@ const DEVICE_CATEGORY = {
   analog_stagebox: 'sound',
   mixer: 'sound',
   split: 'sound',
-  network: 'sound',
   direct: 'sound',
   amp: 'sound',
   speaker: 'sound',
@@ -41,9 +40,9 @@ const DEVICE_CATEGORY = {
   computer: 'video',
   screen: 'video',
   projector: 'video',
-  patchbay: 'video',
 };
 
+// Network equipment and patchbays can carry any of the signals, so they sit under Other.
 export function categoryOfDeviceType(deviceType) {
   return DEVICE_CATEGORY[deviceType] || 'other';
 }

@@ -10,5 +10,7 @@ test('elements and devices sort into sound, video, stage and other', () => {
   expect(categoryOfElement({ element_type: 'custom' })).toBe('other');
   expect(categoryOfDeviceType('switcher')).toBe('video');
   expect(categoryOfDeviceType('digital_stagebox')).toBe('sound');
+  expect(categoryOfDeviceType('network')).toBe('other');
+  expect(categoryOfDeviceType('patchbay')).toBe('other');
   expect(categoryOfDeviceType('something_new')).toBe('other');
 });
