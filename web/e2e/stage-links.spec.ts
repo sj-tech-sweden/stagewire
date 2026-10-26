@@ -37,6 +37,14 @@ test('any stage element can link to a channel and a video input, and the names s
   await expect(page.locator('.q-menu .q-item', { hasText: 'FOH · Ch 1: Kick' })).toBeVisible();
   await page.keyboard.press('Escape');
 
+  const channelBox = await page.getByLabel('Linked channel').boundingBox();
+  const videoBox = await page.getByLabel('Linked video input').boundingBox();
+  const deviceBox = await page.getByLabel('Linked device').boundingBox();
+  expect(channelBox && videoBox && deviceBox).toBeTruthy();
+  expect(videoBox!.y).toBeGreaterThan(channelBox!.y);
+  expect(videoBox!.y).toBeLessThan(deviceBox!.y);
+  expect(videoBox!.y - channelBox!.y).toBeLessThan(120);
+
   await page.getByLabel('Linked video input').click();
   await page.locator('.q-menu .q-item', { hasText: 'Cameras · 1: Cam 1' }).click();
   await expect

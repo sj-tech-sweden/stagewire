@@ -209,6 +209,18 @@
               @update:model-value="commitLink"
             />
             <q-select
+              v-if="selected"
+              v-model="draft.linked_video_input_id"
+              :label="t('stagePlot.linkVideo')"
+              :options="videoInputOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitVideoInput"
+            />
+            <q-select
               v-if="!isSpeakerElement(selected)"
               v-model="draft.linked_device_id"
               :label="t('stagePlot.linkDevice')"
@@ -315,18 +327,6 @@
               dense
               class="q-mt-sm"
               @update:model-value="commitRotation"
-            />
-            <q-select
-              v-if="selected"
-              v-model="draft.linked_video_input_id"
-              :label="t('stagePlot.linkVideo')"
-              :options="videoInputOptions"
-              emit-value
-              map-options
-              clearable
-              dense
-              class="q-mt-sm"
-              @update:model-value="commitVideoInput"
             />
             <div class="row q-gutter-xs q-mt-xs">
               <q-btn
