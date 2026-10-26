@@ -416,6 +416,13 @@
                       />
                     </div>
                     <div class="row q-gutter-sm">
+                      <q-chip
+                        dense
+                        :text-color="channelTextColor(row)"
+                        :style="{ backgroundColor: channelColor(row) }"
+                      >
+                        {{ t(`channels.instrumentGroups.${row.instrument_group || 'other'}`) }}
+                      </q-chip>
                       <q-select
                         :model-value="row.input_type"
                         :options="inputTypeOptions"
@@ -437,6 +444,32 @@
                         @update:model-value="(v) => saveInline(row, 'connector', v)"
                       />
                     </div>
+                    <div class="text-subtitle2 q-mt-sm">
+                      {{ t('channels.wirelessDetails') }}
+                    </div>
+                    <q-input
+                      :model-value="performerName(row)"
+                      dense
+                      :label="t('channels.fieldPerformer')"
+                      :disable="Boolean(linkedPerformerElement(row))"
+                      @change="(v) => saveInline(row, 'performer_name', v)"
+                    />
+                    <div class="row q-gutter-sm">
+                      <q-input
+                        :model-value="row.wireless_pack"
+                        dense
+                        :label="t('channels.fieldWirelessPack')"
+                        class="col"
+                        @change="(v) => saveInline(row, 'wireless_pack', v)"
+                      />
+                      <q-input
+                        :model-value="row.wireless_frequency"
+                        dense
+                        :label="t('channels.fieldWirelessFrequency')"
+                        class="col"
+                        @change="(v) => saveInline(row, 'wireless_frequency', v)"
+                      />
+                    </div>
                     <StockwireProductPicker
                       :model-value="standModel(row)"
                       gear-type="stand"
@@ -451,6 +484,15 @@
                       hint=""
                       @update:model-value="(v) => saveDevice(row, v)"
                     />
+                    <div class="row q-gutter-sm">
+                      <q-input
+                        :model-value="row.stand_type"
+                        dense
+                        :label="t('channels.fieldStandType')"
+                        class="col"
+                        @change="(v) => saveInline(row, 'stand_type', v)"
+                      />
+                    </div>
                     <div class="row items-center justify-between">
                       <q-toggle
                         :model-value="row.phantom_power"
@@ -472,6 +514,13 @@
                       >{{ t('channels.mono') }}</span>
                     </div>
                     <div
+                      v-if="wirelessDetails(row)"
+                      class="text-caption"
+                    >
+                      <strong>{{ t('channels.wirelessDetails') }}:</strong>
+                      {{ wirelessDetails(row) }}
+                    </div>
+                    <div
                       v-if="row.notes"
                       class="text-caption"
                     >
@@ -485,6 +534,7 @@
                       round
                       size="sm"
                       icon="edit"
+                      :aria-label="t('channels.editChannel')"
                       @click="openChannelDialog(row)"
                     />
                     <q-btn
@@ -555,6 +605,27 @@
                       map-options
                       clearable
                       @update:model-value="(v) => saveInline(cell.row, 'input_type', v)"
+                    />
+                  </q-td>
+                </template>
+                <template #body-cell-instrument_group="cell">
+                  <q-td :props="cell">
+                    <q-chip
+                      dense
+                      :text-color="channelTextColor(cell.row)"
+                      :style="{ backgroundColor: channelColor(cell.row) }"
+                    >
+                      {{ t(`channels.instrumentGroups.${cell.value || 'other'}`) }}
+                    </q-chip>
+                  </q-td>
+                </template>
+                <template #body-cell-stand_type="cell">
+                  <q-td :props="cell">
+                    <q-input
+                      :model-value="cell.value"
+                      dense
+                      borderless
+                      @change="(v) => saveInline(cell.row, 'stand_type', v)"
                     />
                   </q-td>
                 </template>
@@ -696,6 +767,7 @@
                       round
                       size="sm"
                       icon="edit"
+                      :aria-label="t('channels.editChannel')"
                       @click="openChannelDialog(cell.row)"
                     />
                     <q-btn
@@ -900,6 +972,57 @@
               :options="connectorOptions"
               :label="t('channels.fieldConnector')"
               clearable
+              class="col"
+            />
+          </div>
+          <q-select
+            v-model="form.instrument_group"
+            :options="instrumentGroupOptions"
+            :label="t('channels.instrumentGroup')"
+            emit-value
+            map-options
+            dense
+          >
+            <template #prepend>
+              <span
+                class="group-color-swatch"
+                :style="{ backgroundColor: channelColor(form) }"
+              />
+            </template>
+          </q-select>
+          <div class="row q-gutter-sm">
+            <q-input
+              v-model="form.stand_type"
+              :label="t('channels.fieldStandType')"
+              class="col"
+            />
+          </div>
+          <div class="text-subtitle2 q-mt-sm">
+            {{ t('channels.wirelessDetails') }}
+          </div>
+          <q-input
+            v-model="form.performer_name"
+            :label="t('channels.fieldPerformer')"
+          />
+          <q-select
+            v-model="form.performer_plot_element_id"
+            :label="t('channels.linkStagePlotPerformer')"
+            :hint="t('channels.linkStagePlotPerformerHint')"
+            :options="performerPlotOptions"
+            emit-value
+            map-options
+            clearable
+            @update:model-value="onStagePlotPerformerSelected"
+          />
+          <div class="row q-gutter-sm">
+            <q-input
+              v-model="form.wireless_pack"
+              :label="t('channels.fieldWirelessPack')"
+              class="col"
+            />
+            <q-input
+              v-model="form.wireless_frequency"
+              :label="t('channels.fieldWirelessFrequency')"
               class="col"
             />
           </div>
@@ -1935,7 +2058,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useStagePlotStore } from '@/stores/stageplot'
 import { useVenuesStore } from '@/stores/venues'
-import { chainNodes, performersByChannel } from '@/utils/patchFlow'
+import { chainNodes, elementsByChannel } from '@/utils/patchFlow'
+import { channelColor, channelTextColor, INSTRUMENT_GROUP_KEYS } from '@/utils/instrumentGroups'
 import { useStockwireStore } from '@/stores/stockwire'
 import DateTimePicker from '@/components/DateTimePicker.vue'
 import MarkdownText from '@/components/MarkdownText.vue'
@@ -2013,17 +2137,40 @@ const inputTypeOptions = [
   { label: t('channels.type.wireless'), value: 'wireless' },
   { label: t('channels.type.fxReturn'), value: 'fxReturn' },
 ]
+const instrumentGroupOptions = INSTRUMENT_GROUP_KEYS.map((value) => ({
+  label: t(`channels.instrumentGroups.${value}`),
+  value,
+}))
 
 
 const stagePlotStore = useStagePlotStore()
 const venuesStore = useVenuesStore()
-const stageByChannel = computed(() => performersByChannel(store.channels, stagePlotStore.elements))
+const stageByChannel = computed(() => elementsByChannel(store.channels, stagePlotStore.elements))
+const performerPlotOptions = computed(() =>
+  stagePlotStore.elements
+    .filter((element) => element.element_type === 'performer')
+    .map((element) => {
+      const linkedChannel = store.channels.find((channel) => channel.id === element.linked_channel_id)
+      const assignedElsewhere =
+        element.linked_channel_id && element.linked_channel_id !== editingChannel.value?.id
+      return {
+        label: assignedElsewhere
+          ? `${element.label || t('stagePlot.types.performer')} · ${t('channels.linkedToChannel', { channel: linkedChannel?.channel_number || '' })}`
+          : element.label || t('stagePlot.types.performer'),
+        value: element.id,
+        disable: Boolean(assignedElsewhere),
+      }
+    }),
+)
 
 const columns = [
   { name: 'channel_number', label: t('channels.fieldChannelNumber'), field: 'channel_number', align: 'left', style: 'width: 60px' },
   { name: 'source_label', label: t('channels.fieldSource'), field: 'source_label', align: 'left' },
+  { name: 'instrument_group', label: t('channels.instrumentGroup'), field: 'instrument_group', align: 'left' },
+  { name: 'stand_type', label: t('channels.fieldStandType'), field: 'stand_type', align: 'left', defaultHidden: true },
   { name: 'input_type', label: t('channels.type.label'), field: 'input_type', align: 'left', format: (v) => (v ? t(`channels.type.${v}`) : '') },
   { name: 'device', label: t('channels.fieldDevice'), field: 'device', align: 'left' },
+  { name: 'wireless_details', label: t('channels.wirelessDetails'), field: wirelessDetails, align: 'left' },
   { name: 'on_stage', label: t('stagePlot.onStage'), field: (row) => (stageByChannel.value.get(row.id) || []).join(', '), align: 'left' },
   { name: 'phantom', label: t('channels.fieldPhantom'), field: 'phantom_power', align: 'center', style: 'width: 70px' },
   { name: 'stereo', label: t('channels.fieldStereo'), field: 'stereo', align: 'center', style: 'width: 60px' },
@@ -2036,6 +2183,28 @@ const columns = [
 
 const channelPrefs = useColumnPrefs('stagewire.cols.inputs', columns)
 const channelColumns = channelPrefs.visible
+
+function wirelessDetails(row) {
+  return [performerName(row), row.wireless_pack, row.wireless_frequency]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function performerName(channel) {
+  return linkedPerformerElement(channel)?.label || channel.performer_name || ''
+}
+
+function linkedPerformerElement(channel) {
+  return stagePlotStore.elements.find(
+    (element) =>
+      element.element_type === 'performer' && element.linked_channel_id === channel.id,
+  )
+}
+
+function onStagePlotPerformerSelected(elementId) {
+  const element = stagePlotStore.elements.find((candidate) => candidate.id === elementId)
+  if (element?.label) form.performer_name = element.label
+}
 
 const outputColumns = [
   { name: 'name', label: t('columns.out.name'), field: 'name', align: 'left' },
@@ -2130,8 +2299,14 @@ const emptyForm = () => ({
   channel_number: store.channels.length ? Math.max(...store.channels.map((c) => c.channel_number || 0)) + 1 : 1,
   source_label: '',
   input_type: null,
+  instrument_group: 'other',
   connector: null,
   device: '',
+  performer_plot_element_id: null,
+  stand_type: '',
+  performer_name: '',
+  wireless_pack: '',
+  wireless_frequency: '',
   phantom_power: false,
   stereo: false,
   stereo_channel: null,
@@ -2262,8 +2437,18 @@ async function openChannelDialog(channel = null) {
       channel_number: channel.channel_number,
       source_label: channel.source_label,
       input_type: channel.input_type,
+      instrument_group: channel.instrument_group || 'other',
       connector: channel.connector,
       device: channel.device,
+      performer_plot_element_id:
+        stagePlotStore.elements.find(
+          (element) =>
+            element.element_type === 'performer' && element.linked_channel_id === channel.id,
+        )?.id || null,
+      stand_type: channel.stand_type || '',
+      performer_name: performerName(channel),
+      wireless_pack: channel.wireless_pack || '',
+      wireless_frequency: channel.wireless_frequency || '',
       phantom_power: channel.phantom_power,
       stereo: channel.stereo,
       stereo_channel: channel.stereo_channel,
@@ -2321,20 +2506,52 @@ function stereoTitle(row) {
   return t('channels.stereoLinkedTo', { ch: row.stereo_channel })
 }
 
+async function linkStagePlotPerformer(channelId, elementId) {
+  const linkedPerformers = stagePlotStore.elements.filter(
+    (element) =>
+      element.element_type === 'performer' && element.linked_channel_id === channelId,
+  )
+  for (const element of linkedPerformers) {
+    if (element.id !== elementId) {
+      await stagePlotStore.updateElement(route.params.jobId, element.id, {
+        linked_channel_id: null,
+      })
+    }
+  }
+  if (elementId) {
+    const element = stagePlotStore.elements.find((candidate) => candidate.id === elementId)
+    if (element) {
+      if (
+        element.linked_channel_id !== channelId ||
+        element.label !== form.performer_name
+      ) {
+        await stagePlotStore.updateElement(route.params.jobId, elementId, {
+          linked_channel_id: channelId,
+          label: form.performer_name || '',
+        })
+      }
+    }
+  }
+}
+
 async function saveChannel() {
   if (patchPoints.value.some((p) => !p.device_id)) {
     window.alert(t('channels.patchPoint.deviceRequired'))
     return
   }
+  const { performer_plot_element_id: performerPlotElementId, ...channelForm } = form
   const payload = {
-    ...form,
+    ...channelForm,
     device: form.stockwire_product?.name || null,
     stockwire_product_id: form.stockwire_product?.id || null,
     stockwire_product_name: form.stockwire_product?.name || null,
     stand_product_id: form.stand_product?.id || null,
     stand_product_name: form.stand_product?.name || null,
   }
+  let channelId
   if (editingChannel.value) {
+    channelId = editingChannel.value.id
+    await linkStagePlotPerformer(channelId, performerPlotElementId)
     await store.updateChannel(route.params.jobId, editingChannel.value.id, payload)
   } else {
     const created = await store.createChannel(
@@ -2343,8 +2560,14 @@ async function saveChannel() {
       payload,
     )
     editingChannel.value = created
+    channelId = created.id
+    await linkStagePlotPerformer(channelId, performerPlotElementId)
   }
-  const channelId = editingChannel.value.id
+  const linkedPerformer = stagePlotStore.elements.find(
+    (element) =>
+      element.element_type === 'performer' && element.linked_channel_id === channelId,
+  )
+  if (linkedPerformer) linkedPerformer.label = form.performer_name || ''
   const mainNum = Number(form.channel_number)
   for (const p of patchPoints.value) {
     const body = {
@@ -2549,9 +2772,16 @@ function saveOutputDevice(bus, row, product) {
   })
 }
 
-function saveInline(row, field, value) {
+async function saveInline(row, field, value) {
   if (row[field] === value) return
-  store.updateChannel(route.params.jobId, row.id, { [field]: value })
+  await store.updateChannel(route.params.jobId, row.id, { [field]: value })
+  if (field === 'performer_name') {
+    const linkedPerformer = stagePlotStore.elements.find(
+      (element) =>
+        element.element_type === 'performer' && element.linked_channel_id === row.id,
+    )
+    if (linkedPerformer) linkedPerformer.label = value || ''
+  }
 }
 
 const channelCount = computed(() => {
@@ -3263,7 +3493,7 @@ function disconnectWs() {
 }
 
 onMounted(async () => {
-  stagePlotStore.fetchElements(route.params.jobId)
+  await stagePlotStore.fetchElements(route.params.jobId)
   devicesStore.fetchDevices(route.params.jobId)
   try {
     const { data } = await api.get(`/jobs/${route.params.jobId}`)
@@ -3320,5 +3550,10 @@ onUnmounted(disconnectWs)
   align-items: center;
   justify-content: center;
   color: rgba(150, 150, 150, 0.7);
+}
+.group-color-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
 }
 </style>

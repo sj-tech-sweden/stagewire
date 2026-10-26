@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,8 +54,13 @@ class AudioChannelPatchBase(BaseModel):
     input_type: str | None = None
     connector: str | None = None
     device: str | None = None
-    transducer: str = ""
     stand_type: str = ""
+    instrument_group: Literal[
+        "drums", "percussion", "bass", "guitars", "keys", "brass", "vocals", "playback", "other"
+    ] = "other"
+    performer_name: str | None = None
+    wireless_pack: str | None = None
+    wireless_frequency: str | None = None
     phantom_power: bool = False
     stereo: bool = False
     stereo_channel: int | None = None

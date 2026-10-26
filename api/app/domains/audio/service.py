@@ -116,6 +116,15 @@ async def update_channel(
     for key, value in data.items():
         if value is not None or key in CLEARABLE_KEYS:
             setattr(channel, key, value)
+    if "performer_name" in data and channel.performer_name is not None:
+        result = await db.execute(
+            select(StagePlotElement).where(
+                StagePlotElement.linked_channel_id == channel.id,
+                StagePlotElement.element_type == "performer",
+            )
+        )
+        for element in result.scalars():
+            element.label = channel.performer_name
     await db.commit()
     await db.refresh(channel)
     return channel
@@ -280,6 +289,16 @@ async def delete_channel_list(db: AsyncSession, channel_list: ChannelList) -> No
 async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict) -> StagePlotElement:
     element = StagePlotElement(job_id=job_id, **data)
     db.add(element)
+    channel_id = data.get("linked_channel_id")
+    if data.get("element_type") == "performer" and channel_id:
+        channel_result = await db.execute(
+            select(AudioChannelPatch)
+            .join(ChannelList)
+            .where(AudioChannelPatch.id == channel_id, ChannelList.job_id == job_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel:
+            channel.performer_name = element.label
     await db.commit()
     await db.refresh(element)
     return element
@@ -304,6 +323,18 @@ async def update_plot_element(
     for key, value in data.items():
         if value is not None or key in PLOT_CLEARABLE_KEYS:
             setattr(element, key, value)
+    if element.element_type == "performer" and element.linked_channel_id:
+        channel_result = await db.execute(
+            select(AudioChannelPatch)
+            .join(ChannelList)
+            .where(
+                AudioChannelPatch.id == element.linked_channel_id,
+                ChannelList.job_id == job_id,
+            )
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel:
+            channel.performer_name = element.label
     await db.commit()
     await db.refresh(element)
     return element

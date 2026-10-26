@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domains.audio.models import ChannelList, ProductionJob
+from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
 
@@ -81,13 +81,37 @@ async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
 
 async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
+    performer_names = {
+        str(element.linked_channel_id): element.label
+        for element in job.plot_elements
+        if element.element_type == "performer" and element.linked_channel_id and element.label
+    }
     rows = [
         {
             "channel_number": channel.channel_number,
             "source_label": channel.source_label,
-            "input_type": channel.input_type or "",
             "device": channel.device or "",
-            "transducer": channel.transducer,
+            "input_details": " · ".join(
+                value
+                for value in (
+                    channel.input_type or "",
+                    channel.instrument_group or "",
+                    channel.stand_type or "",
+                )
+                if value
+            ),
+            "performer_name": performer_names.get(str(channel.id)) or channel.performer_name or "",
+            "wireless_pack": channel.wireless_pack or "",
+            "wireless_frequency": channel.wireless_frequency or "",
+            "wireless_details": " · ".join(
+                value
+                for value in (
+                    performer_names.get(str(channel.id)) or channel.performer_name or "",
+                    channel.wireless_pack or "",
+                    channel.wireless_frequency or "",
+                )
+                if value
+            ),
             "connector": channel.connector or "",
             "phantom_power": channel.phantom_power,
             "notes": channel.notes,
@@ -124,7 +148,24 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
 async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     sheets: dict[str, dict] = {}
+    performer_names = {
+        str(element.linked_channel_id): element.label
+        for element in job.plot_elements
+        if element.element_type == "performer" and element.linked_channel_id and element.label
+    }
     device_names = {str(device.id): device.name for device in job.devices}
+    devices_by_id = {str(device.id): device for device in job.devices}
+
+    def console_patch(points: list[ChannelPatchPoint] | list[OutputPatchPoint]) -> str:
+        return next(
+            (
+                point.patch_label
+                for point in points
+                if (device := devices_by_id.get(str(point.device_id)))
+                and device.device_type == "mixer"
+            ),
+            "",
+        )
 
     def add_row(device_id, point_type, row):
         if not device_id:
@@ -151,12 +192,28 @@ async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
                         "direction": "In",
                         "channel_number": channel.channel_number,
                         "source_label": channel.source_label,
-                        "input_type": channel.input_type or "",
+                        "instrument_group": channel.instrument_group,
+                        "device": channel.device or "",
+                        "stand_type": channel.stand_type,
+                        "performer_name": performer_names.get(str(channel.id))
+                        or channel.performer_name
+                        or "",
+                        "wireless_pack": channel.wireless_pack or "",
+                        "wireless_frequency": channel.wireless_frequency or "",
                         "phantom_power": channel.phantom_power,
+                        "patch_assignment": " / ".join(
+                            value
+                            for value in (
+                                device_names.get(str(point.device_id), ""),
+                                console_patch(channel.patch_points),
+                            )
+                            if value
+                        ),
                         "patch_label": point.patch_label,
                         "connector": point.connector,
-                        "notes": channel.notes,
-                        "point_notes": point.notes,
+                        "notes": " · ".join(
+                            value for value in (channel.notes, point.notes) if value
+                        ),
                     },
                 )
         for output in channel_list.outputs:
@@ -168,13 +225,27 @@ async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
                         "direction": "Out",
                         "channel_number": "OUT",
                         "source_label": output.name,
-                        "input_type": "",
+                        "instrument_group": "",
+                        "device": "",
+                        "stand_type": "",
+                        "performer_name": "",
+                        "wireless_pack": "",
+                        "wireless_frequency": "",
                         "phantom_power": False,
                         "bus_connector": point.bus_connector or "",
+                        "patch_assignment": " / ".join(
+                            value
+                            for value in (
+                                device_names.get(str(point.device_id), ""),
+                                console_patch(output.points),
+                            )
+                            if value
+                        ),
                         "patch_label": point.patch_label,
                         "connector": point.connector,
-                        "notes": output.notes,
-                        "point_notes": point.notes,
+                        "notes": " · ".join(
+                            value for value in (output.notes, point.notes) if value
+                        ),
                     },
                 )
     return {
@@ -288,7 +359,8 @@ _CHANNEL_COLUMNS = (
     ReportField(key="source_label", label="Source"),
     ReportField(key="input_type", label="Type"),
     ReportField(key="device", label="Device"),
-    ReportField(key="transducer", label="Transducer"),
+    ReportField(key="input_details", label="Input details"),
+    ReportField(key="wireless_details", label="Wireless details"),
     ReportField(key="connector", label="Connector"),
     ReportField(key="phantom_power", label="48V"),
     ReportField(key="notes", label="Notes"),
@@ -309,7 +381,8 @@ _CHANNEL_COLUMNS_SV = (
     ReportField(key="source_label", label="Källa"),
     ReportField(key="input_type", label="Typ"),
     ReportField(key="device", label="Enhet"),
-    ReportField(key="transducer", label="Mikrofon"),
+    ReportField(key="input_details", label="Ingångsdetaljer"),
+    ReportField(key="wireless_details", label="Trådlös information"),
     ReportField(key="connector", label="Kontakt"),
     ReportField(key="phantom_power", label="48 V"),
     ReportField(key="notes", label="Anteckningar"),
@@ -325,29 +398,45 @@ _STAGE_COLUMNS_SV = (
 )
 
 _PATCH_SHEET_COLUMNS = (
-    ReportField(key="direction", label="Direction"),
-    ReportField(key="channel_number", label="Ch"),
-    ReportField(key="source_label", label="Channel / output"),
-    ReportField(key="input_type", label="Type"),
+    ReportField(key="channel_number", label="Ch / dir."),
+    ReportField(key="source_label", label="Signal"),
+    ReportField(key="instrument_group", label="Group"),
+    ReportField(key="device", label="Microphone / device"),
+    ReportField(key="stand_type", label="Stand"),
     ReportField(key="phantom_power", label="48V"),
     ReportField(key="bus_connector", label="Bus"),
-    ReportField(key="patch_label", label="Patch label"),
+    ReportField(key="patch_assignment", label="Stagebox / console"),
+    ReportField(key="patch_label", label="Patch"),
     ReportField(key="connector", label="Connector"),
     ReportField(key="notes", label="Notes"),
-    ReportField(key="point_notes", label="Point notes"),
 )
 
 _PATCH_SHEET_COLUMNS_SV = (
-    ReportField(key="direction", label="Riktning"),
-    ReportField(key="channel_number", label="Kanal"),
-    ReportField(key="source_label", label="Kanal / utgång"),
-    ReportField(key="input_type", label="Typ"),
+    ReportField(key="channel_number", label="Kanal / riktning"),
+    ReportField(key="source_label", label="Signal"),
+    ReportField(key="instrument_group", label="Grupp"),
+    ReportField(key="device", label="Mikrofon / enhet"),
+    ReportField(key="stand_type", label="Stativ"),
     ReportField(key="phantom_power", label="48 V"),
     ReportField(key="bus_connector", label="Buss"),
-    ReportField(key="patch_label", label="Patchnamn"),
+    ReportField(key="patch_assignment", label="Scenlåda / konsol"),
+    ReportField(key="patch_label", label="Patch"),
     ReportField(key="connector", label="Kontakt"),
     ReportField(key="notes", label="Anteckningar"),
-    ReportField(key="point_notes", label="Punktanteckningar"),
+)
+
+_PATCH_WIRELESS_COLUMNS = (
+    ReportField(key="channel_number", label="Channel #"),
+    ReportField(key="performer_name", label="Actor / presenter"),
+    ReportField(key="wireless_pack", label="Bodypack / beltpack"),
+    ReportField(key="wireless_frequency", label="Frequency"),
+)
+
+_PATCH_WIRELESS_COLUMNS_SV = (
+    ReportField(key="channel_number", label="Kanal #"),
+    ReportField(key="performer_name", label="Artist / presentatör"),
+    ReportField(key="wireless_pack", label="Fick- / bältespaket"),
+    ReportField(key="wireless_frequency", label="Frekvens"),
 )
 
 REPORT_DEFINITIONS = (
@@ -429,6 +518,7 @@ REPORT_DEFINITIONS = (
             "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
             "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
             "<h2>Patch points</h2>{{table:patchpoint_channels}}"
+            "<h2>Wireless assignments</h2>{{table:patchpoint_wireless}}"
         ),
         fields=(
             ReportField(key="job.title", label="Job title"),
@@ -442,6 +532,11 @@ REPORT_DEFINITIONS = (
                 label="Patch points",
                 columns=list(_PATCH_SHEET_COLUMNS),
             ),
+            ReportTable(
+                key="patchpoint_wireless",
+                label="Wireless assignments",
+                columns=list(_PATCH_WIRELESS_COLUMNS),
+            ),
         ),
         context_builder=_patch_sheet_context,
         name_sv="Patchblad",
@@ -450,6 +545,7 @@ REPORT_DEFINITIONS = (
             "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
             "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
             "<h2>Patchpunkter</h2>{{table:patchpoint_channels}}"
+            "<h2>Trådlösa tilldelningar</h2>{{table:patchpoint_wireless}}"
         ),
         fields_sv=(
             ReportField(key="job.title", label="Jobbtitel"),
@@ -462,6 +558,11 @@ REPORT_DEFINITIONS = (
                 key="patchpoint_channels",
                 label="Patchpunkter",
                 columns=list(_PATCH_SHEET_COLUMNS_SV),
+            ),
+            ReportTable(
+                key="patchpoint_wireless",
+                label="Trådlösa tilldelningar",
+                columns=list(_PATCH_WIRELESS_COLUMNS_SV),
             ),
         ),
         requires_patchpoint=True,
@@ -664,6 +765,25 @@ async def ensure_default_templates(db: AsyncSession) -> None:
                 db.add(builtin)
                 templates.append(builtin)
                 has_default = builtin.is_default
+                added = True
+            elif (
+                definition.report_type == "patch-sheet"
+                and builtin.body_html
+                == (
+                    "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
+                    "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+                    "<h2>Patch points</h2>{{table:patchpoint_channels}}"
+                    if not is_swedish
+                    else "<h1>{{job.title}} — {{patchpoint.name}}</h1>"
+                    "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+                    "<h2>Patchpunkter</h2>{{table:patchpoint_channels}}"
+                )
+                and builtin.layout_json == _default_layout(definition, locale, builtin.body_html)
+            ):
+                builtin.body_html = (
+                    definition.default_html_sv if is_swedish else definition.default_html
+                )
+                builtin.layout_json = _default_layout(definition, locale, builtin.body_html)
                 added = True
             elif definition.has_stage_plot:
                 changed = False

@@ -45,6 +45,17 @@ DEFAULT_STAGE_PLOT_OPTIONS = {
     "show_cables": False,
     "show_cableways": False,
 }
+INSTRUMENT_GROUP_COLORS = {
+    "drums": "#E53935",
+    "percussion": "#FB8C00",
+    "bass": "#8E24AA",
+    "guitars": "#3949AB",
+    "keys": "#00897B",
+    "brass": "#F9A825",
+    "vocals": "#D81B60",
+    "playback": "#546E7A",
+    "other": "#78909C",
+}
 
 
 class ReportRenderError(ValueError):
@@ -73,6 +84,8 @@ def _resolve_field(context: dict[str, Any], key: str, allowed_fields: set[str]) 
 
 def _localized_cell_value(row: dict[str, Any], key: str, locale: str) -> Any:
     value = row.get(key)
+    if key == "channel_number" and row.get("direction") == "In":
+        return f"IN {value}"
     if key == "phantom_power":
         return ("Ja" if locale == "sv" else "Yes") if value else ""
     if key == "direction" and locale == "sv":
@@ -139,6 +152,11 @@ def _stage_plot_drawing(
     options: dict[str, Any] | None = None,
 ) -> Drawing:
     job = context["job"]
+    channels_by_id = {
+        str(channel.id): channel
+        for channel_list in getattr(job, "channel_lists", [])
+        for channel in channel_list.channels
+    }
     selected_options = {**DEFAULT_STAGE_PLOT_OPTIONS, **(options or {})}
     stage_width = max(float(job.stage_width_cm or 0), 1)
     stage_height = max(float(job.stage_height_cm or 0), 1)
@@ -329,15 +347,25 @@ def _stage_plot_drawing(
             for point_x, point_y in clipped
             for coordinate in (point_x * scale, drawing_height - point_y * scale)
         ]
+        linked_channel = channels_by_id.get(str(getattr(element, "linked_channel_id", None)))
+        custom_color = getattr(linked_channel, "color_code", None)
+        if isinstance(custom_color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", custom_color):
+            fill_color = colors.HexColor(custom_color)
+        elif element.element_type in {"mixer", "stagebox", "split"}:
+            fill_color = colors.HexColor("#e6ddf1")
+        elif linked_channel:
+            fill_color = colors.HexColor(
+                INSTRUMENT_GROUP_COLORS.get(
+                    linked_channel.instrument_group, INSTRUMENT_GROUP_COLORS["other"]
+                )
+            )
+        else:
+            fill_color = colors.HexColor("#dce9ef")
         drawing.add(
             Polygon(
                 points,
                 strokeColor=colors.HexColor("#1f4b66"),
-                fillColor=(
-                    colors.HexColor("#e6ddf1")
-                    if element.element_type in {"mixer", "stagebox", "split"}
-                    else colors.HexColor("#dce9ef")
-                ),
+                fillColor=fill_color,
                 strokeWidth=0.8,
             )
         )
@@ -537,29 +565,46 @@ class _ReportHTMLParser(HTMLParser):
                     for row_index, row in enumerate(self.table_rows)
                 ]
                 heading_weights = {
-                    "direction": 1.0,
+                    "direction": 1.4,
                     "ch": 0.55,
                     "kanal": 0.55,
+                    "channel #": 0.9,
+                    "kanal #": 0.9,
+                    "ch / dir.": 1.3,
+                    "kanal / riktning": 1.3,
+                    "group": 1.6,
+                    "grupp": 1.6,
+                    "microphone / device": 1.6,
+                    "mikrofon / enhet": 1.6,
+                    "stand": 0.9,
+                    "stativ": 0.9,
                     "list": 1.7,
                     "lista": 1.7,
+                    "signal": 1.8,
                     "source": 1.8,
                     "källa": 1.8,
                     "channel / output": 1.5,
                     "kanal / utgång": 1.5,
+                    "input details": 1.6,
+                    "ingångsdetaljer": 1.6,
+                    "wireless details": 1.2,
+                    "trådlös information": 1.2,
                     "type": 1.5,
                     "typ": 1.5,
-                    "48v": 0.55,
-                    "48 v": 0.55,
+                    "48v": 1.0,
+                    "48 v": 1.0,
                     "patch label": 1.25,
                     "patchnamn": 1.25,
-                    "connector": 1.2,
-                    "kontakt": 1.2,
+                    "patch position": 0.85,
+                    "patchposition": 0.85,
+                    "stagebox / console": 1.5,
+                    "scenlåda / konsol": 1.5,
+                    "connector": 0.7,
+                    "kontakt": 0.7,
                     "point notes": 1.4,
                     "punktanteckningar": 1.4,
-                    "transducer": 1.35,
-                    "mikrofon": 1.35,
-                    "notes": 1.4,
-                    "anteckningar": 1.4,
+                    "notes": 2.0,
+                    "anteckningar": 2.0,
                 }
                 headings = self.table_rows[0] + [""] * (column_count - len(self.table_rows[0]))
                 proportions = [heading_weights.get(heading.lower(), 1.0) for heading in headings]
@@ -571,7 +616,7 @@ class _ReportHTMLParser(HTMLParser):
                             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f873f")),
                             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                            ("FONTSIZE", (0, 0), (-1, 0), 7),
+                            ("FONTSIZE", (0, 0), (-1, 0), 6 if column_count >= 10 else 7),
                             ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#bbc4c7")),
                             ("VALIGN", (0, 0), (-1, -1), "TOP"),
                             ("FONTSIZE", (0, 0), (-1, -1), 8),
@@ -839,6 +884,13 @@ async def render_report_pdf(
             raise LookupError("Patchpoint not found for this production job")
         context["patchpoint"] = {"name": patchpoint["name"], "type": patchpoint["type"]}
         context["patchpoint_channels"] = patchpoint["rows"]
+        context["patchpoint_wireless"] = [
+            row
+            for row in patchpoint["rows"]
+            if row.get("performer_name")
+            or row.get("wireless_pack")
+            or row.get("wireless_frequency")
+        ]
     elif patchpoint_id is not None:
         raise ReportRenderError("This report type cannot be filtered by patchpoint")
     stage_plot_options = {
