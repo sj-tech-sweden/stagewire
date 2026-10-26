@@ -169,3 +169,24 @@ class VideoChainStep(BaseModel):
 
 class VideoChain(BaseModel):
     steps: list[VideoChainStep] = []
+
+
+class VideoSheetRow(BaseModel):
+    key: str
+    list_name: str
+    kind: str
+    number: int
+    label: str
+    detail: str
+    connector: str
+    patch_label: str
+    step: int
+    steps: int
+    notes: str
+
+
+class VideoSheet(BaseModel):
+    device_id: UUID
+    name: str
+    device_type: str
+    rows: list[VideoSheetRow]
