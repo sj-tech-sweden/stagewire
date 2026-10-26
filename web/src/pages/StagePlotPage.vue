@@ -7,7 +7,7 @@
         icon="arrow_back"
         :aria-label="t('stagePlot.back')"
         class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="goBackToJob"
       />
       <div class="col">
         <div class="text-h6">
@@ -931,6 +931,13 @@ import {
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
 const router = useRouter();
+
+function goBackToJob() {
+  router.push({
+    path: `/jobs/${jobId}`,
+    query: route.query.from === 'video' ? { view: 'video' } : {},
+  });
+}
 const jobId = route.params.jobId;
 const store = useStagePlotStore();
 const devicesStore = useDevicesStore();

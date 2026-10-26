@@ -7,7 +7,7 @@
         icon="arrow_back"
         :aria-label="t('channels.backToJobs')"
         class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="goBackToJob"
       />
       <div class="text-h6">
         {{ t('devices.title') }}
@@ -392,6 +392,13 @@ const connectorOptions = CONNECTOR_OPTIONS;
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
 const router = useRouter();
+
+function goBackToJob() {
+  router.push({
+    path: `/jobs/${jobId}`,
+    query: route.query.from === 'video' ? { view: 'video' } : {},
+  });
+}
 const jobId = route.params.jobId;
 const devicesStore = useDevicesStore();
 

@@ -151,6 +151,11 @@
                 map-options
                 clearable
                 :placeholder="t('video.pickDevice')"
+                use-input
+                hide-selected
+                fill-input
+                input-debounce="0"
+                @new-value="(val, done) => onNewDevice('first', 'input', input, val, done)"
                 @update:model-value="(v) => setFirstDevice('input', input, v)"
               />
               <div
@@ -170,6 +175,14 @@
               />
             </td>
             <td class="text-no-wrap">
+              <q-btn
+                flat
+                dense
+                round
+                icon="account_tree"
+                :aria-label="t('channels.signalFlow')"
+                @click="openFlow('input', input)"
+              />
               <q-btn
                 flat
                 dense
@@ -290,6 +303,11 @@
                 map-options
                 clearable
                 :placeholder="t('video.pickDevice')"
+                use-input
+                hide-selected
+                fill-input
+                input-debounce="0"
+                @new-value="(val, done) => onNewDevice('first', 'output', output, val, done)"
                 @update:model-value="(v) => setFirstDevice('output', output, v)"
               />
             </td>
@@ -303,6 +321,14 @@
               />
             </td>
             <td class="text-no-wrap">
+              <q-btn
+                flat
+                dense
+                round
+                icon="account_tree"
+                :aria-label="t('channels.signalFlow')"
+                @click="openFlow('output', output)"
+              />
               <q-btn
                 flat
                 dense
@@ -581,6 +607,11 @@
             emit-value
             map-options
             clearable
+            use-input
+            hide-selected
+            fill-input
+            input-debounce="0"
+            @new-value="(val, done) => onNewDevice('draft', editKind, editTarget, val, done)"
           />
           <div>
             <div class="text-caption text-grey-7">
@@ -629,6 +660,11 @@
             emit-value
             map-options
             dense
+            use-input
+            hide-selected
+            fill-input
+            input-debounce="0"
+            @new-value="(val, done) => onNewDevice('chain', chainTarget?.kind, chainTarget?.obj, val, done)"
           />
         </q-card-section>
         <q-card-actions align="right">
@@ -644,6 +680,80 @@
             @click="addChainPoint"
           />
         </q-card-actions>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="createDialog">
+      <q-card style="min-width: 320px">
+        <q-card-section class="text-h6">
+          {{ t('video.newDevice') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <q-input
+            v-model="createDraft.name"
+            :label="t('devices.name')"
+            dense
+            autofocus
+          />
+          <q-select
+            v-model="createDraft.device_type"
+            :options="deviceTypeChoices"
+            :label="t('devices.type')"
+            emit-value
+            map-options
+            dense
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            color="primary"
+            :label="t('devices.createDevice')"
+            :disable="!createDraft.name.trim()"
+            @click="confirmCreateDevice"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="flowDialog">
+      <q-card style="min-width: 360px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('channels.signalFlow') }}
+        </q-card-section>
+        <q-card-section class="column items-center q-gutter-xs">
+          <template
+            v-for="(item, i) in flowItems"
+            :key="i"
+          >
+            <q-icon
+              v-if="i > 0"
+              name="arrow_downward"
+              color="grey-7"
+            />
+            <q-card
+              flat
+              bordered
+              class="full-width q-pa-sm"
+            >
+              <div class="text-body2">
+                {{ item.title }}
+              </div>
+              <div class="text-caption text-grey-7">
+                {{ item.sub || '—' }}
+              </div>
+            </q-card>
+          </template>
+          <div
+            v-if="flowItems.length <= 1"
+            class="text-grey-7"
+          >
+            {{ t('video.flowEmpty') }}
+          </div>
+        </q-card-section>
       </q-card>
     </q-dialog>
   </div>
@@ -750,6 +860,62 @@ function setFirstDevice(kind, obj, deviceId) {
       await create(jobId, obj.id, { position: 0, device_id: deviceId });
     }
   });
+}
+
+const deviceTypeChoices = [
+  'switcher',
+  'router',
+  'multiviewer',
+  'mixer',
+  'digital_stagebox',
+  'analog_stagebox',
+  'split',
+  'network',
+  'direct',
+  'other',
+].map((v) => ({ value: v, label: t(`devices.types.${v}`) }));
+const createDialog = ref(false);
+const createDraft = ref({ name: '', device_type: 'switcher', mode: null, kind: null, obj: null });
+function onNewDevice(mode, kind, obj, val, done) {
+  done();
+  const name = String(val || '').trim();
+  if (!name) return;
+  createDraft.value = { name, device_type: 'switcher', mode, kind, obj };
+  createDialog.value = true;
+}
+function confirmCreateDevice() {
+  const draft = createDraft.value;
+  run(async () => {
+    const device = await devicesStore.createDevice(jobId, {
+      name: draft.name.trim(),
+      device_type: draft.device_type,
+    });
+    if (draft.mode === 'first') setFirstDevice(draft.kind, draft.obj, device.id);
+    else if (draft.mode === 'draft') editDraft.value.device_id = device.id;
+    else if (draft.mode === 'chain') chainDevice.value = device.id;
+    createDialog.value = false;
+  });
+}
+
+const flowDialog = ref(false);
+const flowItems = ref([]);
+function openFlow(kind, obj) {
+  const root =
+    kind === 'input'
+      ? {
+          title: obj.source_label || t('video.inputNumber', { n: obj.input_number }),
+          sub: [t(`video.types.${obj.source_type}`), obj.connector].filter(Boolean).join(' · '),
+        }
+      : {
+          title: obj.name || t('video.outputNumber', { n: obj.output_number }),
+          sub: [obj.destination_label, obj.connector].filter(Boolean).join(' · '),
+        };
+  const chain = (obj.patch_points || []).map((p) => ({
+    title: deviceName(p.device_id),
+    sub: [p.connector, p.patch_label].filter(Boolean).join(' · '),
+  }));
+  flowItems.value = [root, ...chain];
+  flowDialog.value = true;
 }
 
 const editDialog = ref(false);

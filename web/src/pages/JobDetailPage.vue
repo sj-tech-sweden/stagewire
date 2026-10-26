@@ -44,21 +44,21 @@
               icon="description"
               :label="t('channels.patchSheets')"
               class="q-ml-sm"
-              @click="router.push(`/jobs/${route.params.jobId}/patch-sheets`)"
+              @click="router.push({ path: `/jobs/${route.params.jobId}/patch-sheets`, query: subPageQuery })"
             />
             <q-btn
               flat
               icon="map"
               :label="t('stagePlot.nav')"
               class="q-ml-sm"
-              @click="router.push(`/jobs/${route.params.jobId}/stage-plot`)"
+              @click="router.push({ path: `/jobs/${route.params.jobId}/stage-plot`, query: subPageQuery })"
             />
             <q-btn
               flat
               icon="developer_board"
               :label="t('devices.nav')"
               class="q-ml-sm"
-              @click="router.push(`/jobs/${route.params.jobId}/devices`)"
+              @click="router.push({ path: `/jobs/${route.params.jobId}/devices`, query: subPageQuery })"
             />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
@@ -2176,6 +2176,7 @@ const viewOptions = [
   { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
   { label: t('video.views.video'), value: 'video', icon: 'videocam' },
 ]
+const subPageQuery = computed(() => (view.value === 'video' ? { from: 'video' } : {}))
 const selectedVideoListId = ref(null)
 const videoListOptions = computed(() =>
   videoStore.lists.map((l) => ({ value: l.id, label: l.name })),
