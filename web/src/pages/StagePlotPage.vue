@@ -512,6 +512,11 @@
                   :config="drawConfig"
                 />
                 <v-circle
+                  v-for="(p, i) in drawingWay ? drawPoints : []"
+                  :key="'h' + i"
+                  :config="pointHandleConfig(p, i)"
+                />
+                <v-circle
                   v-for="(wp, i) in rerouteWaypoints"
                   :key="'wp' + i"
                   :config="waypointConfig(wp)"
@@ -581,12 +586,21 @@
               class="row items-center q-gutter-sm q-mt-sm"
             >
               <div class="text-caption">
-                {{ t('cables.drawHint') }}
+                {{ editingWayId ? t('cables.editHint') : t('cables.drawHint') }}
               </div>
               <q-btn
                 dense
+                outline
+                no-caps
+                icon="undo"
+                :label="t('cables.undoPoint')"
+                :disable="!drawPoints.length"
+                @click="undoDrawPoint"
+              />
+              <q-btn
+                dense
                 color="primary"
-                :label="t('cables.finishWay')"
+                :label="editingWayId ? t('cables.saveWay') : t('cables.finishWay')"
                 :disable="drawPoints.length < 2"
                 @click="finishDrawWay"
               />
@@ -672,9 +686,12 @@
               </q-chip>
             </div>
 
+            <div class="text-caption text-grey-7 q-mt-md">
+              {{ t('cables.actionsHint') }}
+            </div>
             <q-list
               separator
-              class="q-mt-md"
+              class="q-mt-xs"
             >
               <q-item
                 v-for="row in cableRows"
@@ -709,33 +726,47 @@
                   </q-item-label>
                 </q-item-section>
                 <q-item-section side>
-                  <div class="row no-wrap">
+                  <div class="row no-wrap q-gutter-xs">
                     <q-btn
-                      flat
+                      outline
                       dense
-                      round
+                      no-caps
+                      color="primary"
                       :icon="row.hidden ? 'visibility_off' : 'visibility'"
-                      :aria-label="t('cables.show')"
+                      :label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
+                      :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
                       @click.stop="toggleCableHidden(row)"
-                    />
+                    >
+                      <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
+                    </q-btn>
                     <q-btn
-                      flat
+                      outline
                       dense
-                      round
+                      no-caps
+                      color="primary"
                       icon="edit_route"
-                      :aria-label="t('cables.reroute')"
+                      :label="t('cables.rerouteAction')"
+                      :aria-label="t('cables.rerouteAction')"
                       :disable="!row.placed || !!drawingWay"
                       @click.stop="startReroute(row)"
-                    />
+                    >
+                      <q-tooltip>
+                        {{ row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}
+                      </q-tooltip>
+                    </q-btn>
                     <q-btn
                       v-if="row.requestedMode === 'manual'"
-                      flat
+                      outline
                       dense
-                      round
+                      no-caps
+                      color="primary"
                       icon="undo"
-                      :aria-label="t('cables.resetRoute')"
+                      :label="t('cables.autoRouteAction')"
+                      :aria-label="t('cables.autoRouteAction')"
                       @click.stop="resetRoute(row)"
-                    />
+                    >
+                      <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
+                    </q-btn>
                   </div>
                 </q-item-section>
               </q-item>
@@ -764,12 +795,26 @@
                   <span class="text-grey-7">({{ w.points.length }} {{ t('cables.points') }})</span>
                 </div>
                 <q-btn
+                  outline
+                  dense
+                  no-caps
+                  color="primary"
+                  icon="edit"
+                  :label="t('cables.editWay')"
+                  :aria-label="t('cables.editWay')"
+                  :disable="drawingWay"
+                  @click="startEditWay(w)"
+                >
+                  <q-tooltip>{{ t('cables.editWayTip') }}</q-tooltip>
+                </q-btn>
+                <q-btn
                   flat
                   dense
                   round
                   icon="delete"
                   color="negative"
                   :aria-label="t('cables.deleteWay')"
+                  :disable="drawingWay"
                   @click="removeCableway(w.id)"
                 />
               </div>
@@ -1871,6 +1916,7 @@ const selectedCableKey = ref(null);
 const rerouteKey = ref(null);
 const drawingWay = ref(false);
 const drawPoints = ref([]);
+const editingWayId = ref(null);
 
 const cablePlan = computed(() => emptyCablePlan(job.value?.cable_plan));
 const cableRows = computed(() =>
@@ -1970,12 +2016,50 @@ function undoWaypoint() {
 }
 function startDrawWay() {
   rerouteKey.value = null;
+  editingWayId.value = null;
   drawPoints.value = [];
   drawingWay.value = true;
+}
+function startEditWay(way) {
+  rerouteKey.value = null;
+  editingWayId.value = way.id;
+  drawPoints.value = way.points.map((p) => [...p]);
+  drawingWay.value = true;
+}
+function undoDrawPoint() {
+  drawPoints.value = drawPoints.value.slice(0, -1);
+}
+function movePoint(index, e) {
+  const node = e.target;
+  const next = drawPoints.value.slice();
+  next[index] = [
+    round1(node.x() / pxPerCm.value - stageX.value),
+    round1(node.y() / pxPerCm.value - stageY.value),
+  ];
+  drawPoints.value = next;
 }
 function cancelDrawWay() {
   drawingWay.value = false;
   drawPoints.value = [];
+  editingWayId.value = null;
+}
+function pointHandleConfig(p, index) {
+  return {
+    x: (p[0] + stageX.value) * pxPerCm.value,
+    y: (p[1] + stageY.value) * pxPerCm.value,
+    radius: 6,
+    fill: '#ffb300',
+    stroke: '#263238',
+    strokeWidth: 1,
+    draggable: true,
+    ondragend: (e) => movePoint(index, e),
+    onclick: (e) => {
+      e.cancelBubble = true;
+    },
+    ontap: (e) => {
+      e.cancelBubble = true;
+    },
+  };
 }
 function addDrawPoint(e) {
   const cm = stagePoint(e);
@@ -1984,10 +2068,12 @@ function addDrawPoint(e) {
 function finishDrawWay() {
   if (drawPoints.value.length < 2) return;
   const plan = cablePlan.value;
-  savePlan({
-    ...plan,
-    cableways: [...plan.cableways, { id: crypto.randomUUID(), points: drawPoints.value }],
-  });
+  const cableways = editingWayId.value
+    ? plan.cableways.map((w) =>
+        w.id === editingWayId.value ? { ...w, points: drawPoints.value } : w,
+      )
+    : [...plan.cableways, { id: crypto.randomUUID(), points: drawPoints.value }];
+  savePlan({ ...plan, cableways });
   cancelDrawWay();
 }
 function removeCableway(id) {
