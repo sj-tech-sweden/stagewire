@@ -60,6 +60,13 @@
               class="q-ml-sm"
               @click="router.push(`/jobs/${route.params.jobId}/devices`)"
             />
+            <q-btn
+              flat
+              icon="videocam"
+              :label="t('video.nav')"
+              class="q-ml-sm"
+              @click="router.push(`/jobs/${route.params.jobId}/video`)"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip

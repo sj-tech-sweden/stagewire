@@ -316,6 +316,18 @@
               class="q-mt-sm"
               @update:model-value="commitRotation"
             />
+            <q-select
+              v-if="selected && selected.element_type === 'camera'"
+              v-model="draft.linked_video_input_id"
+              :label="t('stagePlot.linkCamera')"
+              :options="videoInputOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitVideoInput"
+            />
             <div class="row q-gutter-xs q-mt-xs">
               <q-btn
                 v-for="step in ROTATE_STEPS"
@@ -971,6 +983,13 @@ const palette = {
     coverageAngle: 60,
     coverageDistance: 8,
   },
+  camera: {
+    labelKey: 'stagePlot.types.camera',
+    icon: 'videocam',
+    color: '#42A5F5',
+    w: 40,
+    h: 30,
+  },
   di: { label: 'DI', icon: 'crop_square', color: '#5C6BC0', w: 24, h: 18 },
   multicore: { label: 'Multicore', icon: 'cable', color: '#8D6E63', w: 32, h: 120 },
   dais: { labelKey: 'stagePlot.types.dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
@@ -1030,12 +1049,14 @@ const draft = ref({
   linked_channel_id: null,
   linked_device_id: null,
   linked_output_point_id: null,
+  linked_video_input_id: null,
   width_cm: 60,
   height_cm: 60,
   image_url: '',
   coverage_angle_h: 0,
   coverage_distance_m: 0,
 });
+const videoLists = ref([]);
 
 const stageW = ref(DEFAULT_W);
 const stageH = ref(DEFAULT_H);
@@ -1451,6 +1472,10 @@ function linkedSummary(el) {
     const ch = findChannel(el.linked_channel_id);
     if (ch) parts.push(`Ch ${ch.channel_number}`);
   }
+  if (el.linked_video_input_id) {
+    const opt = videoInputOptions.value.find((o) => o.value === el.linked_video_input_id);
+    if (opt) parts.push(`Cam ${opt.label.split(':')[0]}`);
+  }
   return parts.join(' · ');
 }
 function linkedTextConfig(el) {
@@ -1533,6 +1558,7 @@ function select(id) {
       linked_channel_id: el.linked_channel_id || null,
       linked_device_id: el.linked_device_id || null,
       linked_output_point_id: el.linked_output_point_id || null,
+      linked_video_input_id: el.linked_video_input_id || null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
       image_url: el.image_url || '',
@@ -1673,6 +1699,20 @@ function commitCoverage() {
     coverage_angle_h: Number(draft.value.coverage_angle_h) || 0,
     coverage_distance_m: Number(draft.value.coverage_distance_m) || 0,
   });
+}
+const videoInputOptions = computed(() => {
+  const opts = [];
+  for (const list of videoLists.value) {
+    for (const input of list.inputs || []) {
+      const label = input.source_label || t('video.types.camera');
+      opts.push({ value: input.id, label: `${input.input_number}: ${label} · ${list.name}` });
+    }
+  }
+  return opts;
+});
+function commitVideoInput(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_video_input_id: val || null });
 }
 function commitOutputPoint(val) {
   if (!selected.value) return;
@@ -1923,6 +1963,15 @@ const coverageLabel = computed(() =>
   coverage.value ? t('stagePlot.coveragePct', { pct: coverage.value.covered_pct }) : '',
 );
 
+async function loadVideoLists() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/video-lists`);
+    videoLists.value = data || [];
+  } catch (err) {
+    console.error('Failed to load video inputs', err);
+  }
+}
+
 async function loadChannels() {
   try {
     const { data } = await api.get(`/jobs/${jobId}/channel-lists`);
@@ -1946,6 +1995,7 @@ const cableRows = computed(() =>
     devices: devicesStore.devices,
     elements: store.elements,
     plan: cablePlan.value,
+    videoLists: videoLists.value,
   }),
 );
 const highlightCableKeys = computed(() => {
@@ -2204,6 +2254,7 @@ watch(coverage, (data) => {
 
 onMounted(() => {
   fetchSpeakerSpecs();
+  loadVideoLists();
   loadJob();
   loadChannels();
   devicesStore.fetchDevices(jobId);

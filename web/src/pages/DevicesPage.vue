@@ -395,6 +395,9 @@ const DEVICE_TYPES = [
   'split',
   'network',
   'direct',
+  'switcher',
+  'router',
+  'multiviewer',
   'other',
 ];
 const deviceTypeOptions = DEVICE_TYPES.map((v) => ({

@@ -31,7 +31,7 @@ export function sourceElementsFor(channelId, elements) {
 
 const SPEAKER_TYPES = new Set(['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay', 'monitor']);
 
-export function deriveCables(lists, elements) {
+export function deriveCables(lists, elements, videoLists = []) {
   const cables = [];
   for (const list of lists || []) {
     for (const ch of list.channels || []) {
@@ -116,6 +116,45 @@ export function deriveCables(lists, elements) {
       toPointId: null,
       connector: hit.pt.connector || '',
     });
+  }
+  for (const list of videoLists || []) {
+    for (const input of list.inputs || []) {
+      const pts = orderedPoints(input.patch_points).filter((p) => p.device_id);
+      if (!pts.length) continue;
+      const label = `Cam ${input.input_number}${input.source_label ? ` ${input.source_label}` : ''}`;
+      for (const el of elements || []) {
+        if (el.linked_video_input_id !== input.id) continue;
+        cables.push({
+          key: `src:${el.id}`,
+          kind: 'source',
+          label,
+          channelId: input.id,
+          fromElementId: el.id,
+          fromPointId: null,
+          fromDeviceId: null,
+          toDeviceId: pts[0].device_id,
+          toPointId: pts[0].id,
+          connector: pts[0].connector || '',
+        });
+      }
+      for (let i = 1; i < pts.length; i++) {
+        const from = pts[i - 1];
+        const to = pts[i];
+        if (from.device_id === to.device_id) continue;
+        cables.push({
+          key: to.id,
+          kind: 'link',
+          label,
+          channelId: input.id,
+          fromElementId: null,
+          fromPointId: from.id,
+          fromDeviceId: from.device_id,
+          toDeviceId: to.device_id,
+          toPointId: to.id,
+          connector: to.connector || '',
+        });
+      }
+    }
   }
   return cables;
 }
@@ -268,7 +307,7 @@ export function assignStandardLength(requiredM, standard) {
   return sorted.find((len) => len >= requiredM) ?? null;
 }
 
-export function buildCableRows({ lists, devices, elements, plan }) {
+export function buildCableRows({ lists, devices, elements, plan, videoLists = [] }) {
   const p = emptyCablePlan(plan);
   const settings = { ...DEFAULT_CABLE_SETTINGS, ...(p.settings || {}) };
   const deviceName = new Map((devices || []).map((d) => [d.id, d.name || 'Device']));
@@ -286,7 +325,7 @@ export function buildCableRows({ lists, devices, elements, plan }) {
     }
   }
   const elementName = new Map((elements || []).map((e) => [e.id, e.label || e.element_type]));
-  const rows = deriveCables(lists, elements).map((cable, i) => {
+  const rows = deriveCables(lists, elements, videoLists).map((cable, i) => {
     const route = p.routes?.[cable.key] || { mode: 'auto', waypoints: [], hidden: false };
     const from = cable.fromElementId
       ? centerOfElement.get(cable.fromElementId)

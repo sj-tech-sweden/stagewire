@@ -160,3 +160,41 @@ test('two cableways that meet give one connected route', () => {
   expect(routed?.points).toContainEqual([100, 0]);
   expect(routed?.pathM).toBeCloseTo(4, 1);
 });
+
+test('a camera cable runs from the camera to its switcher, then down the chain', () => {
+  const videoLists = [
+    {
+      id: 'vlist',
+      inputs: [
+        {
+          id: 'cam1',
+          input_number: 1,
+          source_label: 'Cam 1',
+          patch_points: [
+            { id: 'v1', position: 0, device_id: 'mixer', connector: 'sdi' },
+            { id: 'v2', position: 1, device_id: 'amp', connector: 'hdmi' },
+          ],
+        },
+      ],
+    },
+  ];
+  const camera = {
+    id: 'camEl',
+    element_type: 'camera',
+    label: 'Cam 1',
+    position_x: 0,
+    position_y: 0,
+    width_cm: 40,
+    height_cm: 30,
+    rotation: 0,
+    linked_video_input_id: 'cam1',
+  };
+  const cables = deriveCables([], [camera], videoLists);
+  expect(cables.map((c) => [c.kind, c.fromElementId, c.fromDeviceId, c.toDeviceId])).toEqual([
+    ['source', 'camEl', null, 'mixer'],
+    ['link', null, 'mixer', 'amp'],
+  ]);
+  const rows = buildCableRows({ lists: [], devices, elements: [camera], plan: null, videoLists });
+  expect(rows[0]?.fromName).toBe('Cam 1');
+  expect(rows[0]?.toName).toBe('Mixer');
+});
