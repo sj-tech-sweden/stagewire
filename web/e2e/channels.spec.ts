@@ -24,6 +24,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
     },
   });
   expect(performerPlotElement.status()).toBe(201);
+  const performerPlotElementData = await performerPlotElement.json();
 
   // Open the job detail page
   await page.goto(`/jobs/${jobId}`);
@@ -45,7 +46,7 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await expect(channelDialog.getByLabel('Actor / presenter')).toBeVisible();
   await channelDialog.getByLabel('Link to stage-plot person').click();
   await page.getByRole('option', { name: 'Alex Singer', exact: true }).click();
-  await channelDialog.getByLabel('Type').click();
+  await channelDialog.getByRole('combobox', { name: 'Type' }).click();
   await page.getByRole('option', { name: 'Wireless', exact: true }).click();
   await channelDialog.getByLabel('Instrument group').click();
   await page.getByRole('option', { name: 'Vocals', exact: true }).click();
@@ -58,7 +59,9 @@ test('create a job and manage channel lists', async ({ page, request }) => {
   await expect(page.locator('table').first().getByRole('textbox')).toHaveValue('Lead vocal');
   await expect(page.getByText('Alex Singer · Beltpack 2 · 518.125 MHz')).toBeVisible();
 
-  const channelRow = page.getByRole('row').filter({ hasText: 'Lead vocal' });
+  const channelRow = page
+    .getByRole('row')
+    .filter({ hasText: 'Alex Singer · Beltpack 2 · 518.125 MHz' });
   await channelRow.getByRole('button', { name: 'Edit channel' }).click();
   const editChannelDialog = page.locator('.q-dialog');
   await editChannelDialog.getByLabel('Actor / presenter').fill('Alex Updated');
@@ -79,12 +82,13 @@ test('create a job and manage channel lists', async ({ page, request }) => {
     headers: authHeaders,
   });
   const plotElements = await plotElementsRes.json();
-  expect(
-    plotElements.find((element) => element.id === performerPlotElement.json().id).linked_channel_id,
-  ).toBe(channel.id);
-  expect(
-    plotElements.find((element) => element.id === performerPlotElement.json().id).label,
-  ).toBe('Alex Updated');
+  const linkedPerformerElement = plotElements.find(
+    (element) => element.id === performerPlotElementData.id,
+  );
+  expect(linkedPerformerElement).toMatchObject({
+    linked_channel_id: channel.id,
+    label: 'Alex Updated',
+  });
 
   const linkedElement = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, {
     headers: authHeaders,
@@ -95,8 +99,18 @@ test('create a job and manage channel lists', async ({ page, request }) => {
     },
   });
   expect(linkedElement.status()).toBe(201);
-  await page.reload();
-  await expect(page.getByText('Wireless RX', { exact: true })).toBeVisible();
+  const linkedElementData = await linkedElement.json();
+  const updatedPlotElementsRes = await request.get(
+    `${API_BASE}/api/v1/jobs/${jobId}/plot-elements`,
+    { headers: authHeaders },
+  );
+  const updatedPlotElements = await updatedPlotElementsRes.json();
+  expect(
+    updatedPlotElements.find((element) => element.id === linkedElementData.id),
+  ).toMatchObject({
+    label: 'Wireless RX',
+    linked_channel_id: channel.id,
+  });
 
   // A new channel's default patch point must auto-link to a Mixer device, so the
   // mandatory device-linking validation does not block the save (regression test).
