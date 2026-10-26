@@ -37,6 +37,7 @@ class ProductionJob(Base):
     stage_x_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_y_cm: Mapped[float] = mapped_column(Float, default=0.0)
     venue_background_image_url: Mapped[str] = mapped_column(String(1024), default="")
+    audience_polygon: Mapped[list] = mapped_column(JSON, default=list)
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()

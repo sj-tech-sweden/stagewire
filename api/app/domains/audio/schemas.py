@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.domains.audio.polygon import check_polygon
 
 
 class ProductionJobBase(BaseModel):
@@ -18,7 +20,13 @@ class ProductionJobBase(BaseModel):
     stage_x_cm: float = 0.0
     stage_y_cm: float = 0.0
     venue_background_image_url: str = ""
+    audience_polygon: list[list[float]] = Field(default_factory=list)
     cable_plan: dict = Field(default_factory=dict)
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class ProductionJobCreate(ProductionJobBase):
@@ -38,6 +46,12 @@ class ProductionJobUpdate(BaseModel):
     venue_width_cm: float | None = Field(None, ge=0)
     venue_height_cm: float | None = Field(None, ge=0)
     cable_plan: dict | None = None
+    audience_polygon: list[list[float]] | None = None
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class ProductionJobRead(ProductionJobBase):
