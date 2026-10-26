@@ -583,6 +583,8 @@ export default {
     venueHint: 'Dra scenen på kartan för att flytta den i lokalen. Element flyttas med den.',
   },
   video: {
+    lists: 'Ingångslistor',
+    views: { sound: 'Ljud', video: 'Video' },
     nav: 'Video',
     title: 'Videoingångar',
     hint: 'Kameror och andra källor, switchar och routrar de kopplas genom, samt scenkartan.',

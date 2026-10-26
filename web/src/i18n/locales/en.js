@@ -583,6 +583,8 @@ export default {
     venueHint: 'Drag the stage on the plot to move it in the venue. Elements move with it.',
   },
   video: {
+    lists: 'Input lists',
+    views: { sound: 'Sound', video: 'Video' },
     nav: 'Video',
     title: 'Video inputs',
     hint: 'Camera and source inputs, the switchers and routers they patch through, and the stage plot.',

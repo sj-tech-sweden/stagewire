@@ -1,57 +1,6 @@
 <template>
-  <q-page padding>
-    <div class="row items-center q-mb-md">
-      <q-btn
-        flat
-        round
-        icon="arrow_back"
-        :aria-label="t('video.back')"
-        class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
-      />
-      <div class="col">
-        <div class="text-h6">
-          {{ t('video.title') }}
-        </div>
-        <div class="text-caption text-grey-7">
-          {{ t('video.hint') }}
-        </div>
-      </div>
-    </div>
-
+  <div>
     <q-card
-      flat
-      bordered
-      class="q-mb-md"
-    >
-      <q-card-section class="row items-end q-gutter-sm">
-        <q-input
-          v-model="newListName"
-          :label="t('video.newListName')"
-          dense
-          class="col"
-          @keyup.enter="addList"
-        />
-        <q-btn
-          color="primary"
-          icon="add"
-          :label="t('video.addList')"
-          :disable="!newListName.trim()"
-          @click="addList"
-        />
-      </q-card-section>
-    </q-card>
-
-    <div
-      v-if="!store.lists.length && !store.loading"
-      class="text-grey-7"
-    >
-      {{ t('video.empty') }}
-    </div>
-
-    <q-card
-      v-for="list in store.lists"
-      :key="list.id"
       flat
       bordered
       class="q-mb-md"
@@ -224,6 +173,7 @@
       </q-card-section>
     </q-card>
 
+
     <q-dialog v-model="chainDialog">
       <q-card style="min-width: 360px">
         <q-card-section class="text-h6">
@@ -254,26 +204,27 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
-  </q-page>
+  </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useVideoStore } from '@/stores/video';
 import { useDevicesStore } from '@/stores/devices';
 
+const props = defineProps({
+  list: { type: Object, required: true },
+  jobId: { type: String, required: true },
+});
+
 const { t } = useI18n({ useScope: 'global' });
-const route = useRoute();
-const router = useRouter();
 const $q = useQuasar();
 const store = useVideoStore();
 const devicesStore = useDevicesStore();
-const jobId = route.params.jobId;
+const jobId = props.jobId;
 
-const newListName = ref('');
 const chainDialog = ref(false);
 const chainInput = ref(null);
 const chainDevice = ref(null);
@@ -318,14 +269,6 @@ async function run(fn) {
   }
 }
 
-function addList() {
-  const name = newListName.value.trim();
-  if (!name) return;
-  run(async () => {
-    await store.createList(jobId, name);
-    newListName.value = '';
-  });
-}
 function renameList(list, value) {
   const name = String(value || '').trim();
   if (!name || name === list.name) return;
@@ -381,9 +324,4 @@ function addChainPoint() {
 function removePoint(input, point) {
   run(() => store.deletePatchPoint(jobId, input.id, point.id));
 }
-
-onMounted(() => {
-  devicesStore.fetchDevices(jobId);
-  store.fetchLists(jobId);
-});
 </script>

@@ -60,13 +60,6 @@
               class="q-ml-sm"
               @click="router.push(`/jobs/${route.params.jobId}/devices`)"
             />
-            <q-btn
-              flat
-              icon="videocam"
-              :label="t('video.nav')"
-              class="q-ml-sm"
-              @click="router.push(`/jobs/${route.params.jobId}/video`)"
-            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip
@@ -155,16 +148,25 @@
         {{ store.error }}
       </q-banner>
 
+      <q-btn-toggle
+        v-model="view"
+        spread
+        no-caps
+        toggle-color="primary"
+        class="q-mb-md"
+        :options="viewOptions"
+      />
+
       <q-splitter
         v-model="split"
-        :horizontal="!$q.screen.lt.sm"
+        :horizontal="$q.screen.lt.sm"
         :limits="$q.screen.lt.sm ? [18, 18] : [20, 50]"
         class="full-height"
       >
         <!-- Channel lists -->
         <template #before>
           <div
-            v-if="!$q.screen.lt.sm"
+            v-if="!$q.screen.lt.sm && view === 'sound'"
             class="q-pa-sm"
           >
             <div class="row items-center q-mb-sm">
@@ -236,19 +238,25 @@
           </div>
 
           <div
-            v-else
+            v-else-if="view === 'sound'"
             class="q-pa-sm"
           >
             <div class="row items-center q-gutter-sm">
-              <q-select
+              <q-tabs
                 :model-value="store.selectedListId"
-                :options="listOptions"
-                emit-value
-                map-options
-                :label="t('channels.lists')"
+                dense
+                no-caps
+                scrollable
                 class="col"
                 @update:model-value="selectList"
-              />
+              >
+                <q-tab
+                  v-for="list in store.lists"
+                  :key="list.id"
+                  :name="list.id"
+                  :label="list.name"
+                />
+              </q-tabs>
               <q-btn
                 dense
                 flat
@@ -301,11 +309,95 @@
               </q-btn-dropdown>
             </div>
           </div>
+          <div
+            v-else-if="view === 'video'"
+            class="q-pa-sm"
+          >
+            <div class="text-subtitle1 q-mb-sm">
+              {{ t('video.lists') }}
+            </div>
+            <q-list
+              v-if="!$q.screen.lt.sm && videoStore.lists.length"
+              bordered
+              separator
+            >
+              <q-item
+                v-for="vl in videoStore.lists"
+                :key="vl.id"
+                v-ripple
+                clickable
+                :active="vl.id === selectedVideoList?.id"
+                active-class="bg-primary text-white"
+                @click="selectedVideoListId = vl.id"
+              >
+                <q-item-section>{{ vl.name }}</q-item-section>
+              </q-item>
+            </q-list>
+            <q-tabs
+              v-else-if="videoStore.lists.length"
+              :model-value="selectedVideoList?.id"
+              dense
+              no-caps
+              scrollable
+              @update:model-value="(v) => (selectedVideoListId = v)"
+            >
+              <q-tab
+                v-for="vl in videoStore.lists"
+                :key="vl.id"
+                :name="vl.id"
+                :label="vl.name"
+              />
+            </q-tabs>
+            <div
+              v-else
+              class="text-grey q-pa-sm"
+            >
+              {{ t('video.empty') }}
+            </div>
+            <div class="row items-center q-gutter-sm q-mt-sm">
+              <q-input
+                v-model="newVideoListName"
+                dense
+                class="col"
+                :label="t('video.newListName')"
+                @keyup.enter="addVideoList"
+              />
+              <q-btn
+                dense
+                flat
+                round
+                icon="add"
+                :aria-label="t('video.addList')"
+                :disable="!newVideoListName.trim()"
+                @click="addVideoList"
+              />
+            </div>
+          </div>
         </template>
 
         <!-- Channels -->
         <template #after>
-          <div class="q-pa-sm">
+          <div
+            v-if="view === 'video'"
+            class="q-pa-sm"
+          >
+            <div
+              v-if="!selectedVideoList"
+              class="text-grey q-pa-md text-center"
+            >
+              {{ t('video.empty') }}
+            </div>
+            <VideoListEditor
+              v-else
+              :key="selectedVideoList.id"
+              :list="selectedVideoList"
+              :job-id="String(route.params.jobId)"
+            />
+          </div>
+          <div
+            v-else
+            class="q-pa-sm"
+          >
             <div
               v-if="!store.selectedList"
               class="text-grey q-pa-md text-center"
@@ -2065,6 +2157,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useStagePlotStore } from '@/stores/stageplot'
 import { useVenuesStore } from '@/stores/venues'
+import { useVideoStore } from '@/stores/video'
+import VideoListEditor from '@/components/VideoListEditor.vue'
 import { chainNodes, elementsByChannel } from '@/utils/patchFlow'
 import { channelColor, channelTextColor, INSTRUMENT_GROUP_KEYS } from '@/utils/instrumentGroups'
 import { useStockwireStore } from '@/stores/stockwire'
@@ -2088,6 +2182,28 @@ const job = ref(null)
 const jobError = ref(null)
 const reportDialog = ref(false)
 const split = ref(28)
+const videoStore = useVideoStore()
+const view = ref(route.query.view === 'video' ? 'video' : 'sound')
+const viewOptions = [
+  { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
+  { label: t('video.views.video'), value: 'video', icon: 'videocam' },
+]
+const selectedVideoListId = ref(null)
+const newVideoListName = ref('')
+const selectedVideoList = computed(
+  () => videoStore.lists.find((l) => l.id === selectedVideoListId.value) || videoStore.lists[0] || null,
+)
+function addVideoList() {
+  const name = newVideoListName.value.trim()
+  if (!name) return
+  videoStore.createList(route.params.jobId, name).then((created) => {
+    selectedVideoListId.value = created.id
+    newVideoListName.value = ''
+  })
+}
+watch(view, (next) => {
+  router.replace({ query: { ...route.query, view: next === 'video' ? 'video' : undefined } })
+})
 const channelDialog = ref(false)
 const bulkDialog = ref(false)
 const editingChannel = ref(null)
@@ -3502,6 +3618,7 @@ function disconnectWs() {
 onMounted(async () => {
   await stagePlotStore.fetchElements(route.params.jobId)
   devicesStore.fetchDevices(route.params.jobId)
+  videoStore.fetchLists(route.params.jobId)
   try {
     const { data } = await api.get(`/jobs/${route.params.jobId}`)
     job.value = data
