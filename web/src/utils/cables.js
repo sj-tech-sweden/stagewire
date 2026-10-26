@@ -196,9 +196,14 @@ function segmentIntersection(a, b, c, d) {
 
 const nodeKey = (p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
 
-// Shortest path from `from` to `to` that follows the cableways. All cableways form
-// one network: segments are split where they cross or meet, both ends snap onto
-// the nearest point of that network, and Dijkstra runs over the result.
+// Cable on a cableway costs this fraction of the same length in the open. A tray is
+// used when it saves real distance; a cable never goes across the room to reach one.
+const CABLEWAY_TRAVEL = 0.5;
+
+// Shortest route from `from` to `to`. Each end may drop straight onto any cableway
+// (its perpendicular foot on every segment), or the cable may run straight. The
+// cheapest of those wins, so a nearby camera goes straight to a switcher even when a
+// cableway is close by. Returns null when the straight run is best.
 function autoRoute(from, to, cableways) {
   const lines = (cableways || []).map((c) => c.points || []).filter((p) => p.length >= 2);
   if (!lines.length) return null;
@@ -218,42 +223,46 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-
-  const nearest = (p) => {
-    let best = null;
-    for (const seg of segs) {
-      const { point } = projectOnSegment(p, seg.a, seg.b);
-      const d = dist(p, point);
-      if (!best || d < best.d) best = { d, seg, point };
-    }
-    return best;
-  };
-  const sHit = nearest(from);
-  const eHit = nearest(to);
-  sHit.seg.extra.push(sHit.point);
-  eHit.seg.extra.push(eHit.point);
+  const dropsFrom = [];
+  const dropsTo = [];
+  for (const seg of segs) {
+    const f = projectOnSegment(from, seg.a, seg.b).point;
+    const t = projectOnSegment(to, seg.a, seg.b).point;
+    seg.extra.push(f, t);
+    dropsFrom.push(f);
+    dropsTo.push(t);
+  }
 
   const pos = new Map();
   const adj = new Map();
-  const link = (a, b) => {
-    const w = dist(pos.get(a), pos.get(b));
+  const addEdge = (a, b, w) => {
     if (!adj.has(a)) adj.set(a, []);
     if (!adj.has(b)) adj.set(b, []);
     adj.get(a).push({ to: b, w });
     adj.get(b).push({ to: a, w });
   };
   for (const seg of segs) {
-    const pts = [seg.a, seg.b, ...seg.extra];
-    for (const p of pts) pos.set(nodeKey(p), p);
-    const ordered = [...new Set(pts.map(nodeKey))]
-      .map((k) => pos.get(k))
-      .sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
-    for (let k = 1; k < ordered.length; k++) link(nodeKey(ordered[k - 1]), nodeKey(ordered[k]));
+    const unique = [...new Map([seg.a, seg.b, ...seg.extra].map((p) => [nodeKey(p), p])).values()];
+    unique.sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
+    for (const p of unique) pos.set(nodeKey(p), p);
+    for (let k = 1; k < unique.length; k++) {
+      addEdge(
+        nodeKey(unique[k - 1]),
+        nodeKey(unique[k]),
+        dist(unique[k - 1], unique[k]) * CABLEWAY_TRAVEL,
+      );
+    }
   }
 
-  const startKey = nodeKey(sHit.point);
-  const endKey = nodeKey(eHit.point);
-  const best = new Map([[startKey, 0]]);
+  const S = '__from';
+  const T = '__to';
+  pos.set(S, from);
+  pos.set(T, to);
+  for (const p of dropsFrom) addEdge(S, nodeKey(p), dist(from, p));
+  for (const p of dropsTo) addEdge(nodeKey(p), T, dist(p, to));
+  addEdge(S, T, dist(from, to));
+
+  const best = new Map([[S, 0]]);
   const prev = new Map();
   const done = new Set();
   while (true) {
@@ -262,7 +271,7 @@ function autoRoute(from, to, cableways) {
       if (!done.has(k) && (cur === null || d < best.get(cur))) cur = k;
     }
     if (cur === null) return null;
-    if (cur === endKey) break;
+    if (cur === T) break;
     done.add(cur);
     for (const { to: n, w } of adj.get(cur) || []) {
       const nd = best.get(cur) + w;
@@ -272,13 +281,15 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-  const keys = [endKey];
-  while (keys[0] !== startKey) {
+  const keys = [T];
+  while (keys[0] !== S) {
     const p = prev.get(keys[0]);
     if (p === undefined) return null;
     keys.unshift(p);
   }
-  return [from, ...keys.map((k) => pos.get(k)), to];
+  const via = keys.slice(1, -1);
+  if (!via.length) return null;
+  return [from, ...via.map((k) => pos.get(k)), to];
 }
 
 // Elements rotate about their top-left corner, so the drawn centre moves with the angle.

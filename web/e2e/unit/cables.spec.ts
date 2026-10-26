@@ -198,3 +198,34 @@ test('a camera cable runs from the camera to its switcher, then down the chain',
   expect(rows[0]?.fromName).toBe('Cam 1');
   expect(rows[0]?.toName).toBe('Mixer');
 });
+
+function routeBetween(from: [number, number], to: [number, number], cableways: unknown[]) {
+  const elements = [
+    { id: 'rack', element_type: 'custom', position_x: from[0], position_y: from[1], width_cm: 0, height_cm: 0, rotation: 0, linked_device_id: 'amp' },
+    { id: 'spk', element_type: 'speaker_main', linked_output_point_id: 'p3', position_x: to[0], position_y: to[1], width_cm: 0, height_cm: 0, rotation: 0 },
+  ];
+  const plan = { cableways, routes: {}, settings: {} };
+  return buildCableRows({ lists, devices, elements, plan }).find((r) => r.key === 'spk:spk');
+}
+
+test('a cable does not go across the room to a far cableway when the direct run is short', () => {
+  const far = [{ id: 'far', points: [[0, 0], [1000, 0]] }];
+  const row = routeBetween([400, 500], [420, 520], far);
+  expect(row?.mode).toBe('direct');
+  expect(row?.pathM).toBeCloseTo(0.28, 2);
+});
+
+test('a camera next to the switcher goes straight to it, not out to a nearby cableway and back', () => {
+  const tray = [{ id: 'tray', points: [[0, 0], [1000, 0]] }];
+  const row = routeBetween([600, 100], [620, 120], tray);
+  expect(row?.mode).toBe('direct');
+  expect(row?.pathM).toBeCloseTo(0.28, 2);
+});
+
+test('a cableway is used when it saves real distance', () => {
+  const tray = [{ id: 'tray', points: [[0, 0], [1000, 0]] }];
+  const row = routeBetween([0, 50], [1000, 50], tray);
+  expect(row?.mode).toBe('auto');
+  expect(row?.points).toContainEqual([0, 0]);
+  expect(row?.pathM).toBeCloseTo(11, 1);
+});
