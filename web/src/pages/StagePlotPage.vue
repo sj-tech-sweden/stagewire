@@ -510,6 +510,14 @@
                 />
                 <v-rect :config="stageBg" />
                 <v-line
+                  v-if="audienceShown.length >= 3"
+                  :config="audienceConfig"
+                />
+                <v-line
+                  v-if="drawingAudience && audiencePoints.length"
+                  :config="audienceDraftConfig"
+                />
+                <v-line
                   v-for="w in cablePlan.cableways"
                   :key="'w' + w.id"
                   :config="cableWayConfig(w)"
@@ -581,8 +589,16 @@
                 dense
                 icon="alt_route"
                 :label="t('cables.drawWay')"
-                :disable="drawingWay || !!rerouteKey"
+                :disable="drawingWay || drawingAudience || !!rerouteKey"
                 @click="startDrawWay"
+              />
+              <q-btn
+                flat
+                dense
+                icon="groups"
+                :label="t('stagePlot.audienceDraw')"
+                :disable="drawingWay || drawingAudience || !!rerouteKey"
+                @click="startAudience"
               />
               <q-btn
                 flat
@@ -591,6 +607,50 @@
                 :label="t('cables.exportCsv')"
                 :disable="!cableRows.length"
                 @click="exportCables"
+              />
+            </div>
+            <div
+              v-if="drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceHint') }}
+              </div>
+              <q-btn
+                dense
+                color="primary"
+                :label="t('stagePlot.audienceFinish')"
+                :disable="audiencePoints.length < 3"
+                @click="finishAudience"
+              />
+              <q-btn
+                dense
+                flat
+                :label="t('app.actions.cancel')"
+                @click="cancelAudience"
+              />
+            </div>
+            <div
+              v-if="audienceShown.length >= 3 && !drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceShown') }}
+              </div>
+              <q-btn
+                flat
+                dense
+                icon="delete"
+                :label="t('stagePlot.audienceClear')"
+                @click="clearAudience"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                flat
+                dense
+                icon="save"
+                :label="t('stagePlot.audienceSaveVenue')"
+                @click="saveAudienceToVenue"
               />
             </div>
             <div
@@ -723,6 +783,12 @@
                         ? t(`cables.route.${row.mode}`)
                         : t('cables.missingOn', { name: row.missingName })
                     }}
+                    <span
+                      v-if="row.crossesAudience"
+                      class="text-warning"
+                    >
+                      · {{ t('cables.crossesAudience') }}
+                    </span>
                   </q-item-label>
                   <div class="row wrap q-mt-xs">
                     <q-btn
@@ -1577,6 +1643,10 @@ function select(id) {
 }
 
 function onStageClick(e) {
+  if (drawingAudience.value) {
+    addAudiencePoint(e);
+    return;
+  }
   if (drawingWay.value) {
     addDrawPoint(e);
     return;
@@ -1992,6 +2062,71 @@ const cablesVisible = ref(true);
 const selectedCableKey = ref(null);
 const rerouteKey = ref(null);
 const drawingWay = ref(false);
+const drawingAudience = ref(false);
+const audiencePoints = ref([]);
+const audienceShown = computed(() => job.value?.audience_polygon || []);
+const audienceConfig = computed(() => {
+  const s = pxPerCm.value;
+  const flat = audienceShown.value.flatMap(([x, y]) => [x * s, y * s]);
+  return {
+    points: flat,
+    closed: true,
+    fill: 'rgba(229, 57, 53, 0.12)',
+    stroke: '#e53935',
+    strokeWidth: 2,
+    dash: [10, 6],
+    listening: false,
+  };
+});
+const audienceDraftConfig = computed(() => {
+  const s = pxPerCm.value;
+  return {
+    points: audiencePoints.value.flatMap(([x, y]) => [x * s, y * s]),
+    stroke: '#e53935',
+    strokeWidth: 2,
+    dash: [6, 4],
+    listening: false,
+  };
+});
+function startAudience() {
+  rerouteKey.value = null;
+  drawingWay.value = false;
+  audiencePoints.value = [];
+  drawingAudience.value = true;
+}
+function cancelAudience() {
+  drawingAudience.value = false;
+  audiencePoints.value = [];
+}
+function addAudiencePoint(e) {
+  const p = e.target.getStage().getPointerPosition();
+  if (!p) return;
+  audiencePoints.value = [...audiencePoints.value, [round1(p.x / pxPerCm.value), round1(p.y / pxPerCm.value)]];
+}
+async function finishAudience() {
+  if (audiencePoints.value.length < 3) return;
+  await saveJobAudience(audiencePoints.value);
+  cancelAudience();
+}
+async function saveJobAudience(polygon) {
+  try {
+    const { data } = await api.patch(`/jobs/${jobId}`, { audience_polygon: polygon });
+    job.value = data;
+  } catch (err) {
+    console.error('Failed to save the audience area', err);
+  }
+}
+function clearAudience() {
+  saveJobAudience([]);
+}
+async function saveAudienceToVenue() {
+  if (!job.value?.venue_id) return;
+  try {
+    await api.patch(`/venues/${job.value.venue_id}`, { audience_polygon: audienceShown.value });
+  } catch (err) {
+    console.error('Failed to save the audience area to the venue', err);
+  }
+}
 const drawPoints = ref([]);
 const editingWayId = ref(null);
 
@@ -2003,6 +2138,8 @@ const cableRows = computed(() =>
     elements: store.elements,
     plan: cablePlan.value,
     videoLists: videoLists.value,
+    audience: job.value?.audience_polygon || [],
+    stageOffset: [job.value?.stage_x_cm || 0, job.value?.stage_y_cm || 0],
   }),
 );
 const highlightCableKeys = computed(() => {

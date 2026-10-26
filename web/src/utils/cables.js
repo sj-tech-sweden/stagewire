@@ -199,14 +199,73 @@ const nodeKey = (p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
 // Cable on a cableway costs this fraction of the same length in the open. A tray is
 // used when it saves real distance; a cable never goes across the room to reach one.
 const CABLEWAY_TRAVEL = 0.5;
+// Each metre inside the audience area costs this much. Crossing is allowed, so a
+// cable crosses only when the detour around the audience is much longer.
+const AUDIENCE_PENALTY = 3;
 
-// Shortest route from `from` to `to`. Each end may drop straight onto any cableway
-// (its perpendicular foot on every segment), or the cable may run straight. The
-// cheapest of those wins, so a nearby camera goes straight to a switcher even when a
-// cableway is close by. Returns null when the straight run is best.
-function autoRoute(from, to, cableways) {
+function pointInPolygon(p, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Parameters t in [0, 1] where segment a-b crosses the polygon outline.
+function crossingParams(a, b, poly) {
+  const ts = [];
+  for (let i = 0; i < poly.length; i++) {
+    const c = poly[i];
+    const d = poly[(i + 1) % poly.length];
+    const rx = b[0] - a[0];
+    const ry = b[1] - a[1];
+    const sx = d[0] - c[0];
+    const sy = d[1] - c[1];
+    const denom = rx * sy - ry * sx;
+    if (Math.abs(denom) < 1e-9) continue;
+    const qx = c[0] - a[0];
+    const qy = c[1] - a[1];
+    const t = (qx * sy - qy * sx) / denom;
+    const u = (qx * ry - qy * rx) / denom;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  return ts;
+}
+
+// Length of a-b that lies inside the audience area.
+function insideLength(a, b, poly) {
+  if (!poly || poly.length < 3) return 0;
+  const ts = [0, ...crossingParams(a, b, poly), 1].sort((x, y) => x - y);
+  let inside = 0;
+  for (let k = 1; k < ts.length; k++) {
+    const t0 = ts[k - 1];
+    const t1 = ts[k];
+    if (t1 - t0 < 1e-9) continue;
+    const mid = [a[0] + ((t0 + t1) / 2) * (b[0] - a[0]), a[1] + ((t0 + t1) / 2) * (b[1] - a[1])];
+    if (pointInPolygon(mid, poly)) inside += (t1 - t0) * dist(a, b);
+  }
+  return inside;
+}
+
+// Cost of running a straight cable from a to b: metres in the open, with the
+// audience metres counted at the penalty.
+function openCost(a, b, poly) {
+  const length = dist(a, b);
+  return length + insideLength(a, b, poly) * (AUDIENCE_PENALTY - 1);
+}
+
+// Shortest route from `from` to `to`. The graph joins the cableway network (points
+// where trays meet, and where each end drops onto a tray), the corners of the audience
+// area, and the two ends. Trays cost CABLEWAY_TRAVEL per metre; open runs cost
+// openCost. Returns null when the straight run is best.
+function autoRoute(from, to, cableways, audience = []) {
   const lines = (cableways || []).map((c) => c.points || []).filter((p) => p.length >= 2);
-  if (!lines.length) return null;
+  const poly = audience && audience.length >= 3 ? audience : [];
+  if (!lines.length && !poly.length) return null;
 
   const segs = [];
   for (const line of lines) {
@@ -223,14 +282,8 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-  const dropsFrom = [];
-  const dropsTo = [];
   for (const seg of segs) {
-    const f = projectOnSegment(from, seg.a, seg.b).point;
-    const t = projectOnSegment(to, seg.a, seg.b).point;
-    seg.extra.push(f, t);
-    dropsFrom.push(f);
-    dropsTo.push(t);
+    seg.extra.push(projectOnSegment(from, seg.a, seg.b).point, projectOnSegment(to, seg.a, seg.b).point);
   }
 
   const pos = new Map();
@@ -241,15 +294,19 @@ function autoRoute(from, to, cableways) {
     adj.get(a).push({ to: b, w });
     adj.get(b).push({ to: a, w });
   };
+  const trayNodes = [];
   for (const seg of segs) {
     const unique = [...new Map([seg.a, seg.b, ...seg.extra].map((p) => [nodeKey(p), p])).values()];
     unique.sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
-    for (const p of unique) pos.set(nodeKey(p), p);
+    for (const p of unique) {
+      if (!pos.has(nodeKey(p))) trayNodes.push(nodeKey(p));
+      pos.set(nodeKey(p), p);
+    }
     for (let k = 1; k < unique.length; k++) {
       addEdge(
         nodeKey(unique[k - 1]),
         nodeKey(unique[k]),
-        dist(unique[k - 1], unique[k]) * CABLEWAY_TRAVEL,
+        openCost(unique[k - 1], unique[k], poly) * CABLEWAY_TRAVEL,
       );
     }
   }
@@ -258,9 +315,22 @@ function autoRoute(from, to, cableways) {
   const T = '__to';
   pos.set(S, from);
   pos.set(T, to);
-  for (const p of dropsFrom) addEdge(S, nodeKey(p), dist(from, p));
-  for (const p of dropsTo) addEdge(nodeKey(p), T, dist(p, to));
-  addEdge(S, T, dist(from, to));
+  const corners = poly.map((c, i) => {
+    const key = `__corner${i}`;
+    pos.set(key, c);
+    return key;
+  });
+  // Open runs: from each end, from each audience corner, and between the ends and
+  // corners. Trays are only joined to each other along their own segments.
+  const open = [S, T, ...corners];
+  const everyNode = [...trayNodes, ...open];
+  for (const a of open) {
+    for (const b of everyNode) {
+      if (a === b) continue;
+      if (adj.has(a) && (adj.get(a) || []).some((e) => e.to === b)) continue;
+      addEdge(a, b, openCost(pos.get(a), pos.get(b), poly));
+    }
+  }
 
   const best = new Map([[S, 0]]);
   const prev = new Map();
@@ -303,14 +373,24 @@ export function elementCentre(el) {
   ];
 }
 
-export function routeCable(from, to, cableways, route) {
+export function routeCable(from, to, cableways, route, audience = []) {
   if (route?.mode === 'manual') {
     const points = [from, ...(route.waypoints || []), to];
-    return { points, lengthCm: pathLength(points), mode: 'manual' };
+    return { points, lengthCm: pathLength(points), mode: 'manual', crossesAudience: crosses(points, audience) };
   }
-  const routed = autoRoute(from, to, cableways);
-  if (routed) return { points: routed, lengthCm: pathLength(routed), mode: 'auto' };
-  return { points: [from, to], lengthCm: pathLength([from, to]), mode: 'direct' };
+  const routed = autoRoute(from, to, cableways, audience);
+  if (routed) {
+    return { points: routed, lengthCm: pathLength(routed), mode: 'auto', crossesAudience: crosses(routed, audience) };
+  }
+  const direct = [from, to];
+  return { points: direct, lengthCm: pathLength(direct), mode: 'direct', crossesAudience: crosses(direct, audience) };
+}
+
+function crosses(points, audience) {
+  for (let i = 1; i < points.length; i++) {
+    if (insideLength(points[i - 1], points[i], audience) > 0) return true;
+  }
+  return false;
 }
 
 export function assignStandardLength(requiredM, standard) {
@@ -318,7 +398,17 @@ export function assignStandardLength(requiredM, standard) {
   return sorted.find((len) => len >= requiredM) ?? null;
 }
 
-export function buildCableRows({ lists, devices, elements, plan, videoLists = [] }) {
+export function buildCableRows({
+  lists,
+  devices,
+  elements,
+  plan,
+  videoLists = [],
+  audience = [],
+  stageOffset = [0, 0],
+}) {
+  // The audience area is drawn in venue coordinates; cables work in stage coordinates.
+  const audienceLocal = (audience || []).map(([x, y]) => [x - stageOffset[0], y - stageOffset[1]]);
   const p = emptyCablePlan(plan);
   const settings = { ...DEFAULT_CABLE_SETTINGS, ...(p.settings || {}) };
   const deviceName = new Map((devices || []).map((d) => [d.id, d.name || 'Device']));
@@ -369,7 +459,7 @@ export function buildCableRows({ lists, devices, elements, plan, videoLists = []
         assignedM: null,
       };
     }
-    const routed = routeCable(from, to, p.cableways, route);
+    const routed = routeCable(from, to, p.cableways, route, audienceLocal);
     const pathM = routed.lengthCm / 100;
     const requiredM = pathM * (1 + settings.slack_pct / 100) + settings.slack_m;
     const assignedM = assignStandardLength(requiredM, settings.standard_lengths_m);
@@ -378,6 +468,7 @@ export function buildCableRows({ lists, devices, elements, plan, videoLists = []
       placed: true,
       mode: routed.mode,
       points: routed.points,
+      crossesAudience: routed.crossesAudience,
       pathM: round2(pathM),
       requiredM: round2(requiredM),
       assignedM,

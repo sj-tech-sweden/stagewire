@@ -229,3 +229,32 @@ test('a cableway is used when it saves real distance', () => {
   expect(row?.points).toContainEqual([0, 0]);
   expect(row?.pathM).toBeCloseTo(11, 1);
 });
+
+function routeWithAudience(from: [number, number], to: [number, number], audience: number[][]) {
+  const elements = [
+    { id: 'rack', element_type: 'custom', position_x: from[0], position_y: from[1], width_cm: 0, height_cm: 0, rotation: 0, linked_device_id: 'amp' },
+    { id: 'spk', element_type: 'speaker_main', linked_output_point_id: 'p3', position_x: to[0], position_y: to[1], width_cm: 0, height_cm: 0, rotation: 0 },
+  ];
+  return buildCableRows({ lists, devices, elements, plan: null, audience, stageOffset: [0, 0] }).find(
+    (r) => r.key === 'spk:spk',
+  );
+}
+
+test('a cable goes around a block of audience when the detour is reasonable', () => {
+  const block = [[400, -300], [600, -300], [600, 300], [400, 300]];
+  const row = routeWithAudience([0, 0], [1000, 0], block);
+  // Either side is the same length; the route must use both corners of one side.
+  const sideY = row?.points.find((p) => p[0] === 400)?.[1];
+  expect(Math.abs(sideY ?? 0)).toBe(300);
+  expect(row?.points).toContainEqual([600, sideY]);
+  expect(row?.crossesAudience).toBe(false);
+  expect(row?.pathM).toBeCloseTo(12, 1);
+});
+
+test('a cable crosses a thin strip of audience when going around is far longer', () => {
+  const strip = [[480, -5000], [520, -5000], [520, 5000], [480, 5000]];
+  const row = routeWithAudience([0, 0], [1000, 0], strip);
+  expect(row?.mode).toBe('direct');
+  expect(row?.crossesAudience).toBe(true);
+  expect(row?.pathM).toBeCloseTo(10, 1);
+});
