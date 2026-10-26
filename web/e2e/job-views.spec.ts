@@ -28,7 +28,9 @@ async function seedJob(page: Page, request: APIRequestContext, title: string) {
 test('on a computer the channel lists sit to the left of the content', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const jobId = await seedJob(page, request, `E2E Layout Desk ${Date.now()}`);
+  const listsLoaded = page.waitForResponse((res) => res.url().includes('/channel-lists') && res.ok());
   await page.goto(`/jobs/${jobId}`);
+  await listsLoaded;
   await expect(page.getByText('FOH Inputs').first()).toBeVisible();
   const splitter = page.locator('.q-splitter').first();
   await expect(splitter).not.toHaveClass(/q-splitter--horizontal/);
