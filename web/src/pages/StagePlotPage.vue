@@ -1088,6 +1088,22 @@ const palette = {
     w: 40,
     h: 30,
   },
+  mixer: {
+    labelKey: 'stagePlot.types.mixer',
+    icon: 'tune',
+    color: '#7E57C2',
+    w: 90,
+    h: 45,
+    deviceType: 'mixer',
+  },
+  switcher: {
+    labelKey: 'stagePlot.types.switcher',
+    icon: 'memory',
+    color: '#26A69A',
+    w: 80,
+    h: 45,
+    deviceType: 'switcher',
+  },
   di: { label: 'DI', icon: 'crop_square', color: '#5C6BC0', w: 24, h: 18 },
   multicore: { label: 'Multicore', icon: 'cable', color: '#8D6E63', w: 32, h: 120 },
   dais: { labelKey: 'stagePlot.types.dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
@@ -1727,16 +1743,25 @@ function onTransformEnd(el, e) {
   }
 }
 
+// A mixer or switcher on the plot links to a job device of its type that is not on
+// the plot yet, so the cables from it and to it are drawn.
+function unplacedDeviceOf(deviceType) {
+  const placed = new Set(store.elements.map((e) => e.linked_device_id).filter(Boolean));
+  return devicesStore.devices.find((d) => d.device_type === deviceType && !placed.has(d.id)) || null;
+}
+
 function addElement(type) {
   const def = palette[type];
+  const device = def.deviceType ? unplacedDeviceOf(def.deviceType) : null;
   const payload = {
     element_type: type,
     position_x: stageW.value / 2 - def.w / 2,
     position_y: stageH.value / 2 - def.h / 2,
     rotation: def.defaultRotation ?? 0,
-    label: paletteLabel(def),
+    label: device?.name || paletteLabel(def),
     width_cm: def.w,
     height_cm: def.h,
+    linked_device_id: device?.id || null,
   };
   if (def.coverageAngle) {
     payload.coverage_angle_h = def.coverageAngle;

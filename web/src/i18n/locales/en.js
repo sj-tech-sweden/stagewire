@@ -568,6 +568,8 @@ export default {
       dais: 'Dais',
       riser: 'Riser',
       camera: 'Camera',
+      mixer: 'Mixer',
+      switcher: 'Switcher',
       speakerMain: 'Main speaker',
       speakerSub: 'Sub',
       speakerDelay: 'Delay speaker',

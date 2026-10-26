@@ -568,6 +568,8 @@ export default {
       dais: 'Podium',
       riser: 'Podie',
       camera: 'Kamera',
+      mixer: 'Mixer',
+      switcher: 'Switch',
       speakerMain: 'Huvudhögtalare',
       speakerSub: 'Sub',
       speakerDelay: 'Fördröjningshögtalare',
