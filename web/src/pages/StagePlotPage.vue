@@ -719,6 +719,7 @@
                       dense
                       no-caps
                       color="primary"
+                      :icon="row.hidden ? 'visibility_off' : 'visibility'"
                       :label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
                       :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
                       @click.stop="toggleCableHidden(row)"
@@ -731,6 +732,7 @@
                       dense
                       no-caps
                       color="primary"
+                      icon="alt_route"
                       :label="t('cables.rerouteAction')"
                       :aria-label="t('cables.rerouteAction')"
                       :disable="!row.placed || !!drawingWay"
@@ -747,6 +749,7 @@
                       dense
                       no-caps
                       color="primary"
+                      icon="undo"
                       :label="t('cables.autoRouteAction')"
                       :aria-label="t('cables.autoRouteAction')"
                       @click.stop="resetRoute(row)"
