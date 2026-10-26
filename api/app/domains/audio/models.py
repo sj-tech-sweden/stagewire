@@ -183,6 +183,9 @@ class StagePlotElement(Base):
     linked_output_point_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
     )
+    linked_video_input_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video_inputs.id", ondelete="SET NULL"), nullable=True
+    )
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)

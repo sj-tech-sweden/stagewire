@@ -51,6 +51,7 @@ PLOT_CLEARABLE_KEYS = {
     "linked_patch_point_id",
     "linked_device_id",
     "linked_output_point_id",
+    "linked_video_input_id",
 }
 
 # Stockwire link fields may be explicitly cleared (set to null) by the client.

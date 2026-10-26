@@ -250,6 +250,7 @@ class StagePlotElementBase(BaseModel):
     label: str = ""
     image_url: str = ""
     linked_output_point_id: UUID | None = None
+    linked_video_input_id: UUID | None = None
     coverage_angle_h: float = 0.0
     coverage_distance_m: float = 0.0
 

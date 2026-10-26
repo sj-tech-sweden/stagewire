@@ -24,6 +24,7 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
+from app.domains.video import service as video_service
 
 router = APIRouter(prefix="/jobs", tags=["audio:jobs"], dependencies=[Depends(get_current_user)])
 
@@ -818,7 +819,11 @@ async def delete_device(
     device = await service.get_device(db, device_id)
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
-    if device.patch_points or device.output_points:
+    if (
+        device.patch_points
+        or device.output_points
+        or await video_service.device_has_patch_points(db, device_id)
+    ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Move or delete the patch points on this device before removing it",
