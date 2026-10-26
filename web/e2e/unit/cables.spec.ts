@@ -133,3 +133,30 @@ test('an unplaced end names the device that needs placing', () => {
   expect(main?.placed).toBe(false);
   expect(main?.missingName).toBe('Amp rack');
 });
+
+test('a rotated speaker is connected at its drawn centre', () => {
+  const rotated = elements.map((e) =>
+    e.id === 'spk' ? { ...e, rotation: 180, position_x: 100, position_y: 100 } : e,
+  );
+  const rows = buildCableRows({ lists, devices, elements: rotated, plan: null });
+  const main = rows.find((r) => r.key === 'spk:spk');
+  // Rotated 180 degrees about the top-left corner, the 42 x 72 box centre is at (100 - 21, 100 - 36).
+  expect(main?.points[main.points.length - 1]).toEqual([79, 64]);
+});
+
+test('two cableways that meet give one connected route', () => {
+  const plan = {
+    cableways: [
+      { id: 'a', points: [[0, 0], [100, 0]] },
+      { id: 'b', points: [[100, 0], [100, 300]] },
+    ],
+    routes: {},
+  };
+  const amp = { id: 'rack', element_type: 'custom', position_x: 0, position_y: 0, width_cm: 0, height_cm: 0, rotation: 0, linked_device_id: 'amp' };
+  const spk = { id: 'spk', element_type: 'speaker_main', linked_output_point_id: 'p3', position_x: 100, position_y: 300, width_cm: 0, height_cm: 0, rotation: 0 };
+  const routed = buildCableRows({ lists, devices, elements: [amp, spk], plan }).find((r) => r.key === 'spk:spk');
+  expect(routed?.placed).toBe(true);
+  expect(routed?.mode).toBe('auto');
+  expect(routed?.points).toContainEqual([100, 0]);
+  expect(routed?.pathM).toBeCloseTo(4, 1);
+});

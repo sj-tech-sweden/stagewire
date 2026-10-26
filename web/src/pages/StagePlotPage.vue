@@ -1241,6 +1241,7 @@ function groupConfig(el) {
     onclick: () => select(el.id),
     ontap: () => select(el.id),
     ondragend: (e) => onDragEnd(el, e),
+    ontransform: (e) => keepLabelsUpright(e.target),
     ontransformend: (e) => onTransformEnd(el, e),
   };
 }
@@ -1288,6 +1289,7 @@ function labelConfig(el) {
     // Photo fills the box; show the label below it so it stays readable.
     const labelFont = Math.max(9, 10 * s);
     return {
+      name: 'element-label',
       text: el.label || paletteLabel(def),
       ...uprightTextProps(el, w),
       x: w / 2,
@@ -1300,6 +1302,7 @@ function labelConfig(el) {
     };
   }
   return {
+    name: 'element-label',
     text: el.label || paletteLabel(def),
     ...uprightTextProps(el, w),
     x: w / 2,
@@ -1402,6 +1405,7 @@ function linkedTextConfig(el) {
   const offset = imageFor(el) ? labelFont + 2 : 0;
   const w = el.width_cm * s;
   return {
+    name: 'element-label',
     text: linkedSummary(el),
     ...uprightTextProps(el, w),
     x: w / 2,
@@ -1455,7 +1459,9 @@ function updateTransformer() {
     return;
   }
   const stage = stageRef.value && stageRef.value.getStage ? stageRef.value.getStage() : null;
-  const node = stage ? stage.findOne('#' + selectedId.value) : null;
+  // Element ids are UUIDs, which can start with a digit and so are not valid
+  // CSS selectors. Match on the id directly instead.
+  const node = stage ? stage.findOne((n) => n.id() === selectedId.value) : null;
   tr.nodes(node ? [node] : []);
   const layer = tr.getLayer();
   if (layer) layer.batchDraw();
@@ -1519,10 +1525,24 @@ function onStageDragEnd(e) {
   saveStagePosition();
 }
 
+function keepLabelsUpright(group) {
+  const rotation = group.rotation();
+  group.find('.element-label').forEach((node) => node.rotation(-rotation));
+  group.getLayer()?.batchDraw();
+}
 function onTransformEnd(el, e) {
-  const rotation = Math.round(e.target.rotation());
-  store.updateElement(jobId, el.id, { rotation });
-  if (selectedId.value === el.id) draft.value.rotation = rotation;
+  // The transformer rotates about the box centre, which moves the group origin,
+  // so the position is saved along with the rotation.
+  const node = e.target;
+  const rotation = ((Math.round(node.rotation()) % 360) + 360) % 360;
+  const position_x = round1(node.x() / pxPerCm.value - stageX.value);
+  const position_y = round1(node.y() / pxPerCm.value - stageY.value);
+  store.updateElement(jobId, el.id, { rotation, position_x, position_y });
+  if (selectedId.value === el.id) {
+    draft.value.rotation = rotation;
+    draft.value.position_x = position_x;
+    draft.value.position_y = position_y;
+  }
 }
 
 function addElement(type) {

@@ -139,57 +139,82 @@ function projectOnSegment(p, a, b) {
   return { point: [a[0] + t * dx, a[1] + t * dy], t };
 }
 
-// Shortest path from `from` to `to` that follows the cableways. Each end is joined
-// to the nearest point on a cableway, then Dijkstra runs over the cableway graph.
+function segmentIntersection(a, b, c, d) {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const denom = rx * sy - ry * sx;
+  if (Math.abs(denom) < 1e-9) return null;
+  const qx = c[0] - a[0];
+  const qy = c[1] - a[1];
+  const t = (qx * sy - qy * sx) / denom;
+  const u = (qx * ry - qy * rx) / denom;
+  const eps = 1e-9;
+  if (t < -eps || t > 1 + eps || u < -eps || u > 1 + eps) return null;
+  return [a[0] + t * rx, a[1] + t * ry];
+}
+
+const nodeKey = (p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
+
+// Shortest path from `from` to `to` that follows the cableways. All cableways form
+// one network: segments are split where they cross or meet, both ends snap onto
+// the nearest point of that network, and Dijkstra runs over the result.
 function autoRoute(from, to, cableways) {
   const lines = (cableways || []).map((c) => c.points || []).filter((p) => p.length >= 2);
   if (!lines.length) return null;
 
+  const segs = [];
+  for (const line of lines) {
+    for (let j = 0; j < line.length - 1; j++) {
+      segs.push({ a: line[j], b: line[j + 1], extra: [] });
+    }
+  }
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const p = segmentIntersection(segs[i].a, segs[i].b, segs[j].a, segs[j].b);
+      if (p) {
+        segs[i].extra.push(p);
+        segs[j].extra.push(p);
+      }
+    }
+  }
+
+  const nearest = (p) => {
+    let best = null;
+    for (const seg of segs) {
+      const { point } = projectOnSegment(p, seg.a, seg.b);
+      const d = dist(p, point);
+      if (!best || d < best.d) best = { d, seg, point };
+    }
+    return best;
+  };
+  const sHit = nearest(from);
+  const eHit = nearest(to);
+  sHit.seg.extra.push(sHit.point);
+  eHit.seg.extra.push(eHit.point);
+
   const pos = new Map();
   const adj = new Map();
-  const link = (a, b, w) => {
+  const link = (a, b) => {
+    const w = dist(pos.get(a), pos.get(b));
     if (!adj.has(a)) adj.set(a, []);
     if (!adj.has(b)) adj.set(b, []);
     adj.get(a).push({ to: b, w });
     adj.get(b).push({ to: a, w });
   };
-  lines.forEach((line, i) => {
-    line.forEach((p, j) => {
-      pos.set(`v${i}_${j}`, p);
-      if (j > 0) link(`v${i}_${j - 1}`, `v${i}_${j}`, dist(line[j - 1], p));
-    });
-  });
+  for (const seg of segs) {
+    const pts = [seg.a, seg.b, ...seg.extra];
+    for (const p of pts) pos.set(nodeKey(p), p);
+    const ordered = [...new Set(pts.map(nodeKey))]
+      .map((k) => pos.get(k))
+      .sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
+    for (let k = 1; k < ordered.length; k++) link(nodeKey(ordered[k - 1]), nodeKey(ordered[k]));
+  }
 
-  const nearest = (p) => {
-    let best = null;
-    lines.forEach((line, i) => {
-      for (let j = 0; j < line.length - 1; j++) {
-        const { point } = projectOnSegment(p, line[j], line[j + 1]);
-        const d = dist(p, point);
-        if (!best || d < best.d) best = { d, i, j, point };
-      }
-    });
-    return best;
-  };
-
-  const attach = (tag, p) => {
-    const hit = nearest(p);
-    const key = `p${tag}`;
-    pos.set(tag, p);
-    pos.set(key, hit.point);
-    link(tag, key, hit.d);
-    const a = lines[hit.i][hit.j];
-    const b = lines[hit.i][hit.j + 1];
-    link(key, `v${hit.i}_${hit.j}`, dist(hit.point, a));
-    link(key, `v${hit.i}_${hit.j + 1}`, dist(hit.point, b));
-    return hit;
-  };
-
-  const s = attach('S', from);
-  const e = attach('E', to);
-  if (s.i === e.i && s.j === e.j) link('pS', 'pE', dist(pos.get('pS'), pos.get('pE')));
-
-  const best = new Map([['S', 0]]);
+  const startKey = nodeKey(sHit.point);
+  const endKey = nodeKey(eHit.point);
+  const best = new Map([[startKey, 0]]);
   const prev = new Map();
   const done = new Set();
   while (true) {
@@ -198,7 +223,7 @@ function autoRoute(from, to, cableways) {
       if (!done.has(k) && (cur === null || d < best.get(cur))) cur = k;
     }
     if (cur === null) return null;
-    if (cur === 'E') break;
+    if (cur === endKey) break;
     done.add(cur);
     for (const { to: n, w } of adj.get(cur) || []) {
       const nd = best.get(cur) + w;
@@ -208,13 +233,24 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-  const keys = ['E'];
-  while (keys[0] !== 'S') {
+  const keys = [endKey];
+  while (keys[0] !== startKey) {
     const p = prev.get(keys[0]);
     if (p === undefined) return null;
     keys.unshift(p);
   }
-  return keys.map((k) => pos.get(k));
+  return [from, ...keys.map((k) => pos.get(k)), to];
+}
+
+// Elements rotate about their top-left corner, so the drawn centre moves with the angle.
+export function elementCentre(el) {
+  const theta = ((el.rotation || 0) * Math.PI) / 180;
+  const hw = (el.width_cm || 0) / 2;
+  const hh = (el.height_cm || 0) / 2;
+  return [
+    el.position_x + hw * Math.cos(theta) - hh * Math.sin(theta),
+    el.position_y + hw * Math.sin(theta) + hh * Math.cos(theta),
+  ];
 }
 
 export function routeCable(from, to, cableways, route) {
@@ -239,7 +275,7 @@ export function buildCableRows({ lists, devices, elements, plan }) {
   const centerOfDevice = new Map();
   const centerOfElement = new Map();
   for (const el of elements || []) {
-    const c = [el.position_x + (el.width_cm || 0) / 2, el.position_y + (el.height_cm || 0) / 2];
+    const c = elementCentre(el);
     centerOfElement.set(el.id, c);
     if (
       el.linked_device_id &&
