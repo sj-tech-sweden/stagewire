@@ -2034,7 +2034,7 @@ async function saveStagePosition() {
       stage_x_cm: stageX.value,
       stage_y_cm: stageY.value,
     });
-    job.value = data;
+    applyJobFields(data, ['stage_x_cm', 'stage_y_cm']);
   } catch (err) {
     console.error('Failed to save stage position', err);
   }
@@ -2046,7 +2046,7 @@ async function saveVenueSize() {
       venue_width_cm: venueW.value,
       venue_height_cm: venueH.value,
     });
-    job.value = data;
+    applyJobFields(data, ['venue_width_cm', 'venue_height_cm']);
   } catch (err) {
     console.error('Failed to save venue size', err);
   }
@@ -2252,7 +2252,7 @@ async function finishAudience() {
 async function saveJobAudience(polygon) {
   try {
     const { data } = await api.patch(`/jobs/${jobId}`, { audience_polygon: polygon });
-    job.value = data;
+    applyJobFields(data, ['audience_polygon']);
   } catch (err) {
     console.error('Failed to save the audience area', err);
   }
@@ -2328,11 +2328,20 @@ const standardLengthsText = computed(() =>
   (cablePlan.value.settings.standard_lengths_m || DEFAULT_CABLE_SETTINGS.standard_lengths_m).join(', '),
 );
 
+// Only the newest cable-plan save may write its response back, so an older reply
+// can never bring back a plan the user has already changed.
+let planSeq = 0;
+// Copies just the named job fields from a response. A full copy could carry an old
+// cable plan from a save that was still in flight.
+function applyJobFields(data, keys) {
+  job.value = { ...job.value, ...Object.fromEntries(keys.map((k) => [k, data[k]])) };
+}
 async function savePlan(next) {
+  const seq = ++planSeq;
   job.value = { ...job.value, cable_plan: next };
   try {
     const { data } = await api.patch(`/jobs/${jobId}`, { cable_plan: next });
-    job.value = { ...job.value, cable_plan: data.cable_plan };
+    if (seq === planSeq) job.value = { ...job.value, cable_plan: data.cable_plan };
   } catch (err) {
     console.error('Failed to save cables', err);
   }
