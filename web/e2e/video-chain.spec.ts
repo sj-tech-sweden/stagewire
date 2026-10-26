@@ -27,7 +27,7 @@ test('the whole patch flow of an input is set in the patch-flow editor, in order
   const input = await post(request, headers, `/jobs/${jobId}/video-lists/${list.id}/inputs`, { source_label: 'Cam 1 FOH' });
 
   await page.goto(`/jobs/${jobId}?view=video`);
-  await page.getByRole('button', { name: 'Patch flow' }).first().click();
+  await page.getByRole('button', { name: 'Edit input' }).first().click();
 
   await page.getByRole('button', { name: 'Add step' }).click();
   await page.getByLabel('Kind').nth(0).click();

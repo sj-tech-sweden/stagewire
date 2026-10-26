@@ -569,6 +569,7 @@ export default {
     speakerSection: 'Speaker coverage',
     coverageAngle: 'Horizontal coverage (°)',
     coverageDistance: 'Throw distance (m)',
+    linkVideo: 'Linked video input',
     linkCamera: 'Linked camera',
     linkOutput: 'Linked output',
     showCoverage: 'Show coverage',

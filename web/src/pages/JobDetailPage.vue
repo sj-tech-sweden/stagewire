@@ -2490,13 +2490,21 @@ function onCreateDevicePoint(pt, val, done) {
   deviceDialog.value = true
 }
 
-async function ensureMixerDevice() {
+// One default mixer per channel list: the device is named after the list and
+// carries the list's Stockwire mixer product.
+async function ensureMixerDevice(list = store.selectedList) {
   await devicesStore.fetchDevices(route.params.jobId)
-  let mixer = devicesStore.devices.find((d) => d.device_type === 'mixer')
+  let mixer = devicesStore.devices.find(
+    (d) => d.device_type === 'mixer' && d.sound_list_id === list?.id,
+  )
   if (!mixer) {
+    const product = list?.mixer_product_name || t('devices.types.mixer')
     mixer = await devicesStore.createDevice(route.params.jobId, {
-      name: store.selectedList?.mixer_product_name || t('devices.types.mixer'),
+      name: list ? `${list.name} · ${product}` : product,
       device_type: 'mixer',
+      sound_list_id: list?.id || null,
+      stockwire_product_id: list?.mixer_product_id || null,
+      stockwire_product_name: list?.mixer_product_name || null,
     })
   }
   return mixer
@@ -2504,7 +2512,7 @@ async function ensureMixerDevice() {
 
 async function ensureDefaultMixerPoint() {
   if (patchPoints.value.length === 0) {
-    const mixer = await ensureMixerDevice()
+    const mixer = await ensureMixerDevice(store.selectedList)
     patchPoints.value.push({
       connector: form.connector || '',
       patch_label: form.channel_number ? String(form.channel_number) : '',
@@ -3059,6 +3067,13 @@ async function saveMixer() {
     mixer_inputs: mixerInputs.value ?? null,
     mixer_buses: mixerBuses.value ?? null,
   })
+  const mixer = await ensureMixerDevice(list)
+  if (mixer) {
+    await devicesStore.updateDevice(jobId, mixer.id, {
+      stockwire_product_id: mixerProduct.value?.id || null,
+      stockwire_product_name: mixerProduct.value?.name || null,
+    })
+  }
   const { addedInputs, addedBuses } = await fillMixerSlots(
     jobId,
     list.id,

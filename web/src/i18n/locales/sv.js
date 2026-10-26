@@ -569,6 +569,7 @@ export default {
     speakerSection: 'Högtalartäckning',
     coverageAngle: 'Horisontell spridning (°)',
     coverageDistance: 'Kastlängd (m)',
+    linkVideo: 'Kopplad videoingång',
     linkCamera: 'Kopplad kamera',
     linkOutput: 'Kopplad utgång',
     showCoverage: 'Visa täckning',

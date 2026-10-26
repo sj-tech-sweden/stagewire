@@ -179,14 +179,6 @@
                 flat
                 dense
                 round
-                icon="device_hub"
-                :aria-label="t('video.patchFlow')"
-                @click="openPatchFlow('input', input)"
-              />
-              <q-btn
-                flat
-                dense
-                round
                 icon="account_tree"
                 :aria-label="t('channels.signalFlow')"
                 @click="openFlow('input', input)"
@@ -329,14 +321,6 @@
               />
             </td>
             <td class="text-no-wrap">
-              <q-btn
-                flat
-                dense
-                round
-                icon="device_hub"
-                :aria-label="t('video.patchFlow')"
-                @click="openPatchFlow('output', output)"
-              />
               <q-btn
                 flat
                 dense
@@ -616,29 +600,14 @@
               class="col"
             />
           </div>
-          <q-select
-            v-model="editDraft.device_id"
-            :options="deviceOptions"
-            :label="t('video.colDevice')"
-            emit-value
-            map-options
-            clearable
-            use-input
-            hide-selected
-            fill-input
-            input-debounce="0"
-            @new-value="(val, done) => onNewDevice('draft', editKind, editTarget, val, done)"
-          />
           <div>
-            <div class="text-caption text-grey-7">
-              {{ t('video.colChain') }}
+            <div class="text-subtitle2 q-mb-xs">
+              {{ t('video.patchFlow') }}
             </div>
-            <PatchChain
+            <PatchFlowEditor
+              ref="flowEditor"
+              :job-id="jobId"
               :points="editTarget?.patch_points || []"
-              :can-add="!!editDraft.device_id"
-              :device-name="deviceName"
-              @add="openChain(editKind, editTarget)"
-              @remove="(point) => removePoint(editKind, editTarget, point)"
             />
           </div>
           <q-input
@@ -698,13 +667,6 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
-    <PatchFlowDialog
-      v-model="patchFlowOpen"
-      :title="patchFlowTitle"
-      :job-id="jobId"
-      :points="patchFlowTarget?.obj?.patch_points || []"
-      :on-save="savePatchFlow"
-    />
 
     <q-dialog v-model="createDialog">
       <q-card style="min-width: 320px">
@@ -792,7 +754,7 @@ import { useDevicesStore } from '@/stores/devices';
 import { useStockwireStore } from '@/stores/stockwire';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import PatchChain from '@/components/PatchChain.vue';
-import PatchFlowDialog from '@/components/PatchFlowDialog.vue';
+import PatchFlowEditor from '@/components/PatchFlowEditor.vue';
 import { VIDEO_DEVICE_KINDS } from '@/constants/videoDevices';
 
 const props = defineProps({
@@ -912,26 +874,6 @@ function confirmCreateDevice() {
   });
 }
 
-const patchFlowOpen = ref(false);
-const patchFlowTarget = ref(null);
-const patchFlowTitle = computed(() => {
-  const target = patchFlowTarget.value;
-  if (!target) return '';
-  const obj = target.obj;
-  const name = target.kind === 'input' ? obj.source_label : obj.name;
-  return `${t('video.patchFlow')}: ${name || (target.kind === 'input' ? obj.input_number : obj.output_number)}`;
-});
-function openPatchFlow(kind, obj) {
-  patchFlowTarget.value = { kind, obj };
-  patchFlowOpen.value = true;
-}
-function savePatchFlow(steps) {
-  const target = patchFlowTarget.value;
-  return target.kind === 'input'
-    ? store.replaceInputChain(jobId, target.obj.id, steps)
-    : store.replaceOutputChain(jobId, target.obj.id, steps);
-}
-
 const flowDialog = ref(false);
 const flowItems = ref([]);
 function openFlow(kind, obj) {
@@ -967,15 +909,17 @@ function openEdit(kind, obj) {
     destination: isInput ? '' : obj.destination_label,
     source_type: isInput ? obj.source_type : null,
     connector: obj.connector,
-    device_id: firstDeviceId(obj),
     notes: obj.notes || '',
   };
   editDialog.value = true;
 }
+const flowEditor = ref(null);
 function saveEdit() {
   const kind = editKind.value;
   const obj = editTarget.value;
   const d = editDraft.value;
+  const steps = flowEditor.value?.collect();
+  if (!steps) return;
   run(async () => {
     const number = Number(d.number) || 1;
     if (kind === 'input') {
@@ -986,6 +930,7 @@ function saveEdit() {
         connector: d.connector,
         notes: d.notes,
       });
+      await store.replaceInputChain(jobId, obj.id, steps);
     } else {
       await store.updateOutput(jobId, obj.id, {
         output_number: number,
@@ -994,8 +939,8 @@ function saveEdit() {
         connector: d.connector,
         notes: d.notes,
       });
+      await store.replaceOutputChain(jobId, obj.id, steps);
     }
-    if (d.device_id !== firstDeviceId(obj)) setFirstDevice(kind, obj, d.device_id);
     editDialog.value = false;
   });
 }

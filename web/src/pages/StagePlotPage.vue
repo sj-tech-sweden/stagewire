@@ -317,9 +317,9 @@
               @update:model-value="commitRotation"
             />
             <q-select
-              v-if="selected && selected.element_type === 'camera'"
+              v-if="selected"
               v-model="draft.linked_video_input_id"
-              :label="t('stagePlot.linkCamera')"
+              :label="t('stagePlot.linkVideo')"
               :options="videoInputOptions"
               emit-value
               map-options
@@ -1113,9 +1113,9 @@ const channelOptions = computed(() => {
   const opts = [];
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
-      const bits = [`Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
+      const bits = [list.name, `Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
       if (ch.input_type) bits.push(ch.input_type);
-      opts.push({ value: ch.id, label: bits.join(' · ') });
+      opts.push({ value: ch.id, label: bits.filter(Boolean).join(' · ') });
     }
   }
   return opts;
@@ -1476,12 +1476,12 @@ function linkedSummary(el) {
     if (name) parts.push(name);
   }
   if (el.linked_channel_id) {
-    const ch = findChannel(el.linked_channel_id);
-    if (ch) parts.push(`Ch ${ch.channel_number}`);
+    const option = channelOptions.value.find((o) => o.value === el.linked_channel_id);
+    if (option) parts.push(option.label);
   }
   if (el.linked_video_input_id) {
     const opt = videoInputOptions.value.find((o) => o.value === el.linked_video_input_id);
-    if (opt) parts.push(`Cam ${opt.label.split(':')[0]}`);
+    if (opt) parts.push(opt.label);
   }
   return parts.join(' · ');
 }
@@ -1712,7 +1712,7 @@ const videoInputOptions = computed(() => {
   for (const list of videoLists.value) {
     for (const input of list.inputs || []) {
       const label = input.source_label || t('video.types.camera');
-      opts.push({ value: input.id, label: `${input.input_number}: ${label} · ${list.name}` });
+      opts.push({ value: input.id, label: `${list.name} · ${input.input_number}: ${label}` });
     }
   }
   return opts;
