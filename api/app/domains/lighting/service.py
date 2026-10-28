@@ -230,9 +230,33 @@ def _clean(data: dict) -> dict:
     return cleaned
 
 
+def first_free_address(
+    fixtures: list[LightingFixture], universe: int, footprint: int, exclude_id: UUID | None = None
+) -> int | None:
+    """The lowest DMX address where a fixture of this footprint fits in the universe."""
+    taken = [False] * (DMX_CHANNELS_PER_UNIVERSE + 1)
+    for fixture in fixtures:
+        if fixture.id == exclude_id or fixture.universe != universe or fixture.dmx_address is None:
+            continue
+        last = min(DMX_CHANNELS_PER_UNIVERSE, fixture.dmx_address + (fixture.footprint or 1) - 1)
+        for channel in range(fixture.dmx_address, last + 1):
+            taken[channel] = True
+    width = min(max(footprint, 1), DMX_CHANNELS_PER_UNIVERSE)
+    for start in range(1, DMX_CHANNELS_PER_UNIVERSE - width + 2):
+        if not any(taken[start : start + width]):
+            return start
+    return None
+
+
 async def create_fixture(db: AsyncSession, job_id: UUID, data: dict) -> LightingFixture:
     data = await apply_type(db, job_id, dict(data))
     data, _ = await apply_device(db, job_id, data)
+    if data.get("dmx_address") is None:
+        universe = data.get("universe") or 1
+        data["universe"] = universe
+        data["dmx_address"] = first_free_address(
+            await list_fixtures(db, job_id), universe, data.get("footprint") or 1
+        )
     position = await db.scalar(
         select(func.count(LightingFixture.id)).where(LightingFixture.job_id == job_id)
     )

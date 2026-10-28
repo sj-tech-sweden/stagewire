@@ -662,3 +662,34 @@ async def test_dmx_chain_is_a_tree_per_universe_and_power_is_a_line_per_fixture(
         ).json()
         assert [s["label"] for s in steps] == ["Outlet 3", "Lead"]
         assert [s["position"] for s in steps] == [0, 1]
+
+
+async def test_new_fixture_takes_the_first_free_address_of_its_universe(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Auto address")
+
+        async def add(body):
+            res = await client.post(
+                f"{BASE}/jobs/{job_id}/fixtures", json=body, headers=auth_headers
+            )
+            assert res.status_code == 201, res.text
+            return res.json()
+
+        first = await add({"universe": 1, "footprint": 16})
+        second = await add({"universe": 1, "footprint": 4})
+        other = await add({"universe": 2, "footprint": 4})
+        assert (first["universe"], first["dmx_address"]) == (1, 1)
+        assert second["dmx_address"] == 17
+        assert (other["universe"], other["dmx_address"]) == (2, 1)
+
+        gap = await add({"universe": 1, "footprint": 2})
+        assert gap["dmx_address"] == 21
+
+        explicit = await add({"universe": 1, "dmx_address": 1, "footprint": 2})
+        assert explicit["dmx_address"] == 1
+        assert explicit["dmx_conflict"] is True
