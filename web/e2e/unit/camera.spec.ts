@@ -42,10 +42,15 @@ test('the view stops at the maximum distance when one is set', () => {
 
 test('a zoom draws its widest and narrowest ends, a fixed lens only one', () => {
   expect(coverageFocals(2.84, 34.1)).toEqual([
-    { focalMm: 2.84, wide: true },
-    { focalMm: 34.1, wide: false },
+    { focalMm: 2.84, filled: true },
+    { focalMm: 34.1, filled: false },
   ]);
-  expect(coverageFocals(50, null)).toEqual([{ focalMm: 50, wide: true }]);
-  expect(coverageFocals(50, 50)).toEqual([{ focalMm: 50, wide: true }]);
+  expect(coverageFocals(50, null)).toEqual([{ focalMm: 50, filled: true }]);
+  expect(coverageFocals(50, 50)).toEqual([{ focalMm: 50, filled: true }]);
   expect(coverageFocals(null, 50)).toEqual([]);
+});
+
+test('the chosen focal mode draws only the focal length in use', () => {
+  expect(coverageFocals(2.84, 34.1, { mode: 'chosen', chosenMm: 12 })).toEqual([{ focalMm: 12, filled: true }]);
+  expect(coverageFocals(2.84, 34.1, { mode: 'chosen' })).toEqual([{ focalMm: 2.84, filled: true }]);
 });

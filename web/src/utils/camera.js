@@ -15,13 +15,15 @@ export function focalInUse(chosenMm, focalMinMm, focalMaxMm) {
   return focalMinMm;
 }
 
-// The focal lengths to draw: the widest end of the lens, and for a zoom also the
-// narrowest end. A fixed lens has only the one.
-export function coverageFocals(focalMinMm, focalMaxMm) {
+// The focal lengths to draw. 'range' gives the widest end of the lens and, for a zoom,
+// the narrowest end too (filled is the widest, the other is an outline). 'chosen' gives
+// only the focal length in use.
+export function coverageFocals(focalMinMm, focalMaxMm, { mode = 'range', chosenMm = null } = {}) {
   if (!focalMinMm) return [];
+  if (mode === 'chosen') return [{ focalMm: chosenMm || focalMinMm, filled: true }];
   const zoom = focalMaxMm && focalMaxMm > focalMinMm;
-  const ends = [{ focalMm: focalMinMm, wide: true }];
-  if (zoom) ends.push({ focalMm: focalMaxMm, wide: false });
+  const ends = [{ focalMm: focalMinMm, filled: true }];
+  if (zoom) ends.push({ focalMm: focalMaxMm, filled: false });
   return ends;
 }
 

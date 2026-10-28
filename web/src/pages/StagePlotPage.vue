@@ -518,6 +518,14 @@
                 v-model="showCameraCoverage"
                 :label="t('stagePlot.showCameraCoverage')"
               />
+              <q-btn-toggle
+                v-if="showCameraCoverage"
+                v-model="cameraViewMode"
+                dense
+                no-caps
+                toggle-color="primary"
+                :options="cameraViewOptions"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -2304,7 +2312,7 @@ function cameraSpec(el) {
 function cameraCaption(el) {
   const spec = cameraSpec(el);
   if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) return t('stagePlot.cameraNeedsValues');
-  const ends = coverageFocals(spec.focal_min_mm, spec.focal_max_mm);
+  const ends = coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec));
   const fovs = ends.map((end) => horizontalFovDeg(spec.sensor_width_mm, end.focalMm).toFixed(1));
   const view =
     fovs.length > 1
@@ -2312,6 +2320,14 @@ function cameraCaption(el) {
       : t('stagePlot.fovCaption', { deg: fovs[0] });
   const source = spec.source === 'stockwire' ? t('stagePlot.specsFromStockwireShort') : t('stagePlot.specsManualShort');
   return `${view} · ${source}`;
+}
+const cameraViewMode = ref('range');
+const cameraViewOptions = computed(() => [
+  { label: t('stagePlot.cameraViewRange'), value: 'range' },
+  { label: t('stagePlot.cameraViewChosen'), value: 'chosen' },
+]);
+function cameraViewSettings(spec) {
+  return { mode: cameraViewMode.value, chosenMm: spec.focal_mm };
 }
 const cameraViews = computed(() => {
   if (!showCameraCoverage.value) return [];
@@ -2327,7 +2343,7 @@ const cameraViews = computed(() => {
     const spec = cameraSpecs.value[el.id];
     if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) continue;
     const [cx, cy] = elementCentre(el);
-    for (const end of coverageFocals(spec.focal_min_mm, spec.focal_max_mm)) {
+    for (const end of coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec))) {
       const points = viewPolygon({
         apex: { x: cx, y: cy },
         rotationDeg: el.rotation || 0,
@@ -2336,14 +2352,14 @@ const cameraViews = computed(() => {
         box,
       });
       views.push({
-        id: `${el.id}-${end.wide ? 'wide' : 'tele'}`,
+        id: `${el.id}-${end.filled ? 'wide' : 'tele'}`,
         config: {
           points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
           closed: true,
-          fill: end.wide ? 'rgba(66, 165, 245, 0.16)' : 'transparent',
+          fill: end.filled ? 'rgba(66, 165, 245, 0.16)' : 'transparent',
           stroke: 'rgba(66, 165, 245, 0.6)',
           strokeWidth: 1,
-          dash: end.wide ? [] : [6, 4],
+          dash: end.filled ? [] : [6, 4],
           listening: false,
         },
       });
