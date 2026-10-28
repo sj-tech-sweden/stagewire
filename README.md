@@ -199,18 +199,24 @@ SQLite test suite.
 ## Rigging & power
 
 - The **Rigging & power** tab is shared by sound, video and lighting. Trusses (hanging
-  points) have a weight capacity; distros have a voltage and an amps-per-phase capacity,
-  and their circuits each sit on one phase with a breaker rating.
-- Every fixture on the Lights tab and every plot element linked to a device is a load.
-  Its weight and power come from the device; a Stockwire value overrides the value
-  entered on the device, field by field. Choose the truss and the circuit each load uses.
-- A power circuit is **single-phase** (on one of L1, L2 or L3) or **three-phase** (its
-  load is shared over L1 to L3). Distro voltage is phase to neutral (230 V), so a three-phase
-  circuit draws watts ÷ (3 × 230) amps on each line.
-- The summary shows the weight on each truss against its capacity, the amps on each
-  circuit against its breaker (amps = watts ÷ distro voltage), each phase against the
-  amps-per-phase capacity, and the phase imbalance. Loads not on a truss or circuit are
-  listed.
+  points) have a weight capacity.
+- **Power is a tree.** The top is a source: mains (a CEE or Socapex feed) or a **venue
+  outlet** saved on the venue. Distros and breakouts hang below it. Each node has a feed
+  connector and a list of outputs (connector, count, and optionally one phase L1-L3). A child
+  plugs into an output of the same connector, so a 32 A three-phase feed cannot go straight
+  into a Schuko outlet: it needs a distro in between. An output cannot take more children and
+  loads than it has.
+- Connectors that are checked: Schuko 16 A, CEE 16 A (1- and 3-phase), CEE 32, 63 and 125 A
+  three-phase, powerCON, powerCON TRUE1 and Socapex (six 16 A circuits).
+- A fixture or plot element plugs into an output of a node, with its connector. Its
+  watts go to that output's phase, or are shared over L1-L3 when the output has no phase.
+- Amps per phase are watts over 230 V. A node's status is OK below 80 % of its rating
+  (its own rating, or its feed connector's amps), warn from 80 %, and over above 100 %.
+  Switching a source off marks everything below it as unpowered.
+- Venue outlets are saved per venue (with a connector and a stage plot position); a job's
+  source can be tied to one of them.
+- The summary shows the weight on each truss against its capacity, the amps and status of
+  every node, and the power status of every load.
 
 ## Cables and cableways
 

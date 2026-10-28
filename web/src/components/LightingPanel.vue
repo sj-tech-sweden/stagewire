@@ -254,9 +254,21 @@
               class="col"
             />
             <q-select
-              v-model="form.power_circuit_id"
-              :options="circuitOptions"
-              :label="t('lights.circuit')"
+              v-model="form.power_node_id"
+              :options="nodeOptions"
+              :label="t('lights.powerNode')"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="col"
+              @update:model-value="form.power_connector = null"
+            />
+            <q-select
+              v-model="form.power_connector"
+              :options="connectorChoices"
+              :label="t('lights.powerConnector')"
+              :disable="!form.power_node_id"
               emit-value
               map-options
               clearable
@@ -409,7 +421,7 @@ const jobId = props.jobId;
 const fixtures = ref([]);
 const types = ref([]);
 const points = ref([]);
-const circuits = ref([]);
+const powerNodes = ref([]);
 const loading = ref(false);
 const error = ref('');
 
@@ -425,7 +437,8 @@ const blankForm = () => ({
   dmx_address: null,
   footprint: null,
   rigging_point_id: null,
-  power_circuit_id: null,
+  power_node_id: null,
+  power_connector: null,
   location: '',
   gel: '',
   purpose: '',
@@ -462,12 +475,14 @@ const modeOptions = computed(() =>
   })),
 );
 const pointOptions = computed(() => points.value.map((p) => ({ value: p.id, label: p.name || '—' })));
-const circuitOptions = computed(() =>
-  circuits.value.map((c) => ({
-    value: c.id,
-    label: `${c.distro_name} · ${c.label || '—'} · ${c.phases === 3 ? t('rigging.threePhaseShort') : c.phase}`,
-  })),
-);
+const nodeOptions = computed(() => powerNodes.value.map((n) => ({ value: n.id, label: n.name || '—' })));
+const connectorChoices = computed(() => {
+  const node = powerNodes.value.find((n) => n.id === form.power_node_id);
+  return (node?.outputs || []).map((o) => ({
+    value: o.connector,
+    label: `${o.connector} · ${o.count}×${o.phase ? ' ' + o.phase : ''}`,
+  }));
+});
 
 function addressLabel(f) {
   return `U${f.universe ?? '—'} · ${f.dmx_address ?? '—'}`;
@@ -484,17 +499,16 @@ async function fetchAll() {
   loading.value = true;
   error.value = '';
   try {
-    const [fixturesRes, typesRes, summaryRes] = await Promise.all([
+    const [fixturesRes, typesRes, summaryRes, nodesRes] = await Promise.all([
       api.get(`/jobs/${jobId}/fixtures`),
       api.get(`/jobs/${jobId}/fixture-types`),
       api.get(`/jobs/${jobId}/rigging/summary`),
+      api.get(`/jobs/${jobId}/power-nodes`),
     ]);
     fixtures.value = fixturesRes.data;
     types.value = typesRes.data;
     points.value = summaryRes.data.points;
-    circuits.value = summaryRes.data.distros.flatMap((d) =>
-      (d.circuits || []).map((c) => ({ ...c, distro_name: d.name || '—' })),
-    );
+    powerNodes.value = nodesRes.data;
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred');
   } finally {
@@ -544,7 +558,8 @@ function openEdit(f) {
     dmx_address: f.dmx_address ?? null,
     footprint: f.footprint ?? null,
     rigging_point_id: f.rigging_point_id ?? null,
-    power_circuit_id: f.power_circuit_id ?? null,
+    power_node_id: f.power_node_id ?? null,
+    power_connector: f.power_connector || null,
     location: f.location || '',
     gel: f.gel || '',
     purpose: f.purpose || '',
@@ -573,36 +588,48 @@ function failed(err) {
   $q.notify({ type: 'negative', message: err.response?.data?.detail || t('common.errorOccurred') });
 }
 
-async function createType(name, done) {
+// A type or mode typed in a select is created by a request; saving waits for it so the new
+// value is part of the fixture.
+let pendingCreate = Promise.resolve();
+
+function createType(name, done) {
   const trimmed = String(name || '').trim();
   if (!trimmed) return;
-  try {
-    const { data } = await api.post(`/jobs/${jobId}/fixture-types`, { name: trimmed });
-    await reloadTypes();
-    done(data.id, 'add-unique');
-  } catch (err) {
-    failed(err);
-  }
+  pendingCreate = pendingCreate.then(async () => {
+    try {
+      const { data } = await api.post(`/jobs/${jobId}/fixture-types`, { name: trimmed });
+      await reloadTypes();
+      form.fixture_type_id = data.id;
+      form.fixture_mode_id = null;
+      done(data.id, 'add-unique');
+    } catch (err) {
+      failed(err);
+    }
+  });
 }
 
-async function createMode(name, done) {
+function createMode(name, done) {
   const trimmed = String(name || '').trim();
-  if (!trimmed || !selectedType.value) return;
+  const typeId = selectedType.value?.id;
+  if (!trimmed || !typeId) return;
   if (!form.footprint) {
     $q.notify({ type: 'warning', message: t('lights.footprintFirst') });
     return;
   }
-  try {
-    const { data } = await api.post(`/jobs/${jobId}/fixture-types/${selectedType.value.id}/modes`, {
-      name: trimmed,
-      footprint: form.footprint,
-    });
-    await reloadTypes();
-    form.fixture_mode_id = data.id;
-    done(data.id, 'add-unique');
-  } catch (err) {
-    failed(err);
-  }
+  const footprint = form.footprint;
+  pendingCreate = pendingCreate.then(async () => {
+    try {
+      const { data } = await api.post(`/jobs/${jobId}/fixture-types/${typeId}/modes`, {
+        name: trimmed,
+        footprint,
+      });
+      await reloadTypes();
+      form.fixture_mode_id = data.id;
+      done(data.id, 'add-unique');
+    } catch (err) {
+      failed(err);
+    }
+  });
 }
 
 async function importFromStockwire(product) {
@@ -646,6 +673,7 @@ function payload() {
 
 async function saveFixture() {
   saving.value = true;
+  await pendingCreate;
   try {
     if (editTarget.value) {
       await api.patch(`/jobs/${jobId}/fixtures/${editTarget.value.id}`, payload());

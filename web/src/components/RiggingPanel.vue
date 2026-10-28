@@ -1,9 +1,7 @@
 <template>
   <div class="q-pa-md">
-    <div class="row items-center q-mb-md">
-      <div class="col text-h6">
-        {{ t('rigging.title') }}
-      </div>
+    <div class="text-h6 q-mb-md">
+      {{ t('rigging.title') }}
     </div>
 
     <div
@@ -104,27 +102,38 @@
           bordered
         >
           <q-card-section>
-            <div class="text-subtitle1 q-mb-sm">
-              {{ t('rigging.distros') }}
+            <div class="text-subtitle1 q-mb-xs">
+              {{ t('rigging.tree') }}
+            </div>
+            <div class="text-caption text-grey-7 q-mb-sm">
+              {{ t('rigging.treeHint') }}
             </div>
             <div
-              v-if="!summary?.distros?.length"
+              v-if="!nodes.length"
               class="text-grey-7 q-mb-sm"
             >
-              {{ t('rigging.noDistros') }}
+              {{ t('rigging.noNodes') }}
             </div>
             <div
-              v-for="distro in summary?.distros || []"
-              :key="distro.id"
-              class="q-mb-md"
+              v-for="node in nodeRows"
+              :key="node.id"
+              :style="{ paddingLeft: `${node.depth * 18}px` }"
+              class="q-mb-sm"
             >
               <div class="row items-center">
                 <div class="col text-body2">
-                  {{ distro.name || '—' }}
+                  {{ node.name }}
                   <span class="text-caption text-grey-7">
-                    · {{ distro.voltage }} V {{ t('rigging.phaseToNeutral') }} · {{ t('rigging.imbalance') }} {{ distro.imbalance_pct }}%
+                    · {{ kindLabel(node.kind) }} · {{ connectorLabel(node.feed_connector) }}
+                    <span v-if="node.phase"> · {{ node.phase }}</span>
                   </span>
                 </div>
+                <q-badge
+                  :color="statusColor(nodeStatus(node.id))"
+                  class="q-mr-xs"
+                >
+                  {{ statusLabel(nodeStatus(node.id)) }}
+                </q-badge>
                 <q-btn
                   flat
                   dense
@@ -132,135 +141,156 @@
                   icon="delete"
                   color="negative"
                   :aria-label="t('app.actions.delete')"
-                  @click="removeDistro(distro)"
+                  @click="removeNode(node)"
                 />
               </div>
-              <q-markup-table
-                flat
-                dense
-                class="q-mt-xs"
-              >
-                <thead>
-                  <tr>
-                    <th class="text-left">
-                      {{ t('rigging.phase') }}
-                    </th>
-                    <th class="text-right">
-                      {{ t('rigging.watts') }}
-                    </th>
-                    <th class="text-right">
-                      {{ t('rigging.amps') }}
-                    </th>
-                    <th class="text-right">
-                      {{ t('rigging.capacity') }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(phase, name) in distro.phases"
-                    :key="name"
-                    :class="phase.over ? 'text-negative' : ''"
-                  >
-                    <td>{{ name }}</td>
-                    <td class="text-right">
-                      {{ phase.watts }}
-                    </td>
-                    <td class="text-right">
-                      {{ phase.amps }}
-                    </td>
-                    <td class="text-right">
-                      {{ phase.capacity_amps ?? '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </q-markup-table>
-              <div
-                v-for="circuit in distro.circuits"
-                :key="circuit.id"
-                class="row items-center q-mt-xs text-caption"
-                :class="circuit.over ? 'text-negative' : ''"
-              >
-                <div class="col">
-                  {{ circuit.label || '—' }} · {{ circuitPhaseLabel(circuit) }} · {{ circuit.amps }} A
-                  <span v-if="circuit.breaker_amps">/ {{ circuit.breaker_amps }} A</span>
-                </div>
-                <q-btn
-                  flat
-                  dense
-                  round
-                  size="sm"
-                  icon="delete"
-                  color="negative"
-                  :aria-label="t('app.actions.delete')"
-                  @click="removeCircuit(circuit)"
-                />
-              </div>
-              <div class="row q-gutter-xs items-end q-mt-xs">
-                <q-input
-                  v-model="newCircuit[distro.id].label"
-                  :label="t('rigging.circuitLabel')"
-                  dense
-                  class="col"
-                />
-                <q-select
-                  v-model="newCircuit[distro.id].phases"
-                  :options="phasesOptions"
-                  :label="t('rigging.circuitType')"
-                  emit-value
-                  map-options
-                  dense
-                  style="min-width: 110px"
-                />
-                <q-select
-                  v-if="newCircuit[distro.id].phases === 1"
-                  v-model="newCircuit[distro.id].phase"
-                  :options="phaseOptions"
-                  :label="t('rigging.phase')"
-                  emit-value
-                  map-options
-                  dense
-                  style="min-width: 90px"
-                />
-                <q-input
-                  v-model.number="newCircuit[distro.id].breaker_amps"
-                  type="number"
-                  min="0"
-                  :label="t('rigging.breaker')"
-                  dense
-                  style="max-width: 100px"
-                />
-                <q-btn
-                  flat
-                  dense
-                  icon="add"
-                  :label="t('rigging.addCircuit')"
-                  @click="addCircuit(distro)"
-                />
+              <div class="text-caption text-grey-7">
+                <template v-if="nodeEval(node.id)">
+                  {{ nodeEval(node.id).amps.L1 }} / {{ nodeEval(node.id).amps.L2 }} /
+                  {{ nodeEval(node.id).amps.L3 }} A
+                  <span v-if="nodeEval(node.id).percent !== null">
+                    · {{ nodeEval(node.id).percent }}% of {{ nodeEval(node.id).rating_amps }} A
+                  </span>
+                </template>
+                <span v-if="node.outputs.length">
+                  · {{ t('rigging.outputs') }}:
+                  {{ node.outputs.map((o) => `${o.count}× ${connectorLabel(o.connector)}${o.phase ? ' ' + o.phase : ''}`).join(', ') }}
+                </span>
               </div>
             </div>
-            <div class="row q-gutter-sm items-end">
+
+            <q-separator class="q-my-sm" />
+            <div class="text-subtitle2 q-mb-xs">
+              {{ t('rigging.addNode') }}
+            </div>
+            <div class="row q-gutter-xs items-end">
               <q-input
-                v-model="newDistro.name"
-                :label="t('rigging.distroName')"
+                v-model="newNode.name"
+                :label="t('rigging.nodeName')"
                 dense
                 class="col"
               />
+              <q-select
+                v-model="newNode.kind"
+                :options="kindOptions"
+                emit-value
+                map-options
+                dense
+                style="min-width: 110px"
+                :label="t('rigging.nodeKind')"
+              />
+            </div>
+            <div class="row q-gutter-xs items-end q-mt-xs">
+              <q-select
+                v-model="newNode.parent_id"
+                :options="parentOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="col"
+                :label="t('rigging.fedFrom')"
+                :disable="newNode.kind === 'source'"
+              />
+              <q-select
+                v-model="newNode.feed_connector"
+                :options="connectorOptions"
+                emit-value
+                map-options
+                dense
+                class="col"
+                :label="t('rigging.feedConnector')"
+              />
+            </div>
+            <div class="row q-gutter-xs items-end q-mt-xs">
+              <q-select
+                v-if="newNode.kind === 'source'"
+                v-model="newNode.venue_outlet_id"
+                :options="outletOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="col"
+                :label="t('rigging.venueOutlet')"
+              />
               <q-input
-                v-model.number="newDistro.amps_per_phase"
+                v-model.number="newNode.rating_amps"
                 type="number"
                 min="0"
-                :label="t('rigging.ampsPerPhase')"
                 dense
-                style="max-width: 120px"
+                style="max-width: 110px"
+                :label="t('rigging.rating')"
+              />
+            </div>
+            <div class="row q-gutter-xs items-end q-mt-xs">
+              <q-select
+                v-model="newOutput.connector"
+                :options="connectorOptions"
+                emit-value
+                map-options
+                dense
+                class="col"
+                :label="t('rigging.outputConnector')"
+              />
+              <q-input
+                v-model.number="newOutput.count"
+                type="number"
+                min="1"
+                dense
+                style="max-width: 90px"
+                :label="t('rigging.count')"
+              />
+              <q-select
+                v-model="newOutput.phase"
+                :options="phaseChoices"
+                emit-value
+                map-options
+                dense
+                style="min-width: 110px"
+                :label="t('rigging.phase')"
               />
               <q-btn
-                color="primary"
+                flat
+                dense
                 icon="add"
-                :label="t('rigging.addDistro')"
-                :disable="!newDistro.name.trim()"
-                @click="addDistro"
+                :label="t('rigging.addOutput')"
+                :disable="!newOutput.connector"
+                @click="addOutput"
               />
+            </div>
+            <div
+              v-if="newNode.outputs.length"
+              class="text-caption q-mt-xs"
+            >
+              {{ newNode.outputs.map((o) => `${o.count}× ${connectorLabel(o.connector)}${o.phase ? ' ' + o.phase : ''}`).join(', ') }}
+              <q-btn
+                flat
+                dense
+                size="sm"
+                icon="clear"
+                @click="newNode.outputs = []"
+              />
+            </div>
+            <q-btn
+              class="q-mt-sm"
+              color="primary"
+              icon="add"
+              :label="t('rigging.addNodeButton')"
+              :disable="!newNode.name.trim() || !newNode.feed_connector"
+              @click="addNode"
+            />
+
+            <div
+              v-if="summary?.errors?.length"
+              class="q-mt-md text-negative text-caption"
+            >
+              <div
+                v-for="(e, i) in summary.errors"
+                :key="i"
+              >
+                {{ e }}
+              </div>
             </div>
           </q-card-section>
         </q-card>
@@ -311,14 +341,25 @@
                     @update:model-value="(v) => assign(load, { rigging_point_id: v })"
                   />
                   <q-select
-                    :model-value="load.power_circuit_id"
-                    :options="circuitOptions"
-                    :label="t('rigging.circuit')"
+                    :model-value="load.power_node_id"
+                    :options="nodeOptions"
+                    :label="t('rigging.node')"
                     emit-value
                     map-options
                     clearable
                     dense
-                    @update:model-value="(v) => assign(load, { power_circuit_id: v })"
+                    @update:model-value="(v) => assign(load, { power_node_id: v, power_connector: null })"
+                  />
+                  <q-select
+                    :model-value="load.power_connector || null"
+                    :options="outputOptionsFor(load.power_node_id)"
+                    :label="t('rigging.connector')"
+                    emit-value
+                    map-options
+                    clearable
+                    dense
+                    :disable="!load.power_node_id"
+                    @update:model-value="(v) => assign(load, { power_connector: v || '' })"
                   />
                 </q-item-section>
               </q-item>
@@ -343,7 +384,13 @@
                     {{ t('rigging.truss') }}
                   </th>
                   <th class="text-left">
-                    {{ t('rigging.circuit') }}
+                    {{ t('rigging.node') }}
+                  </th>
+                  <th class="text-left">
+                    {{ t('rigging.connector') }}
+                  </th>
+                  <th class="text-left">
+                    {{ t('rigging.colPowerStatus') }}
                   </th>
                 </tr>
               </thead>
@@ -368,22 +415,44 @@
                       clearable
                       dense
                       borderless
-                      style="min-width: 160px"
+                      style="min-width: 150px"
                       @update:model-value="(v) => assign(load, { rigging_point_id: v })"
                     />
                   </td>
                   <td>
                     <q-select
-                      :model-value="load.power_circuit_id"
-                      :options="circuitOptions"
+                      :model-value="load.power_node_id"
+                      :options="nodeOptions"
                       emit-value
                       map-options
                       clearable
                       dense
                       borderless
-                      style="min-width: 180px"
-                      @update:model-value="(v) => assign(load, { power_circuit_id: v })"
+                      style="min-width: 160px"
+                      @update:model-value="(v) => assign(load, { power_node_id: v, power_connector: null })"
                     />
+                  </td>
+                  <td>
+                    <q-select
+                      :model-value="load.power_connector || null"
+                      :options="outputOptionsFor(load.power_node_id)"
+                      emit-value
+                      map-options
+                      clearable
+                      dense
+                      borderless
+                      :disable="!load.power_node_id"
+                      style="min-width: 150px"
+                      @update:model-value="(v) => assign(load, { power_connector: v || '' })"
+                    />
+                  </td>
+                  <td>
+                    <q-badge
+                      :color="statusColor(load.power_status)"
+                      class="q-mr-xs"
+                    >
+                      {{ statusLabel(load.power_status) }}
+                    </q-badge>
                   </td>
                 </tr>
               </tbody>
@@ -422,53 +491,115 @@ const jobId = props.jobId;
 
 const summary = ref(null);
 const loads = ref([]);
+const nodes = ref([]);
+const catalog = ref([]);
+const outlets = ref([]);
 const loading = ref(false);
 const error = ref('');
 
 const newPoint = reactive({ name: '', weight_capacity_kg: null });
-const newDistro = reactive({ name: '', amps_per_phase: null });
-const newCircuit = reactive({});
+const newNode = reactive({
+  name: '',
+  kind: 'distro',
+  parent_id: null,
+  feed_connector: null,
+  venue_outlet_id: null,
+  rating_amps: null,
+  outputs: [],
+});
+const newOutput = reactive({ connector: null, count: 1, phase: null });
 
-const phaseOptions = [
+const kindOptions = [
+  { value: 'source', label: t('rigging.kindSource') },
+  { value: 'distro', label: t('rigging.kindDistro') },
+  { value: 'breakout', label: t('rigging.kindBreakout') },
+];
+const phaseChoices = [
+  { value: null, label: t('rigging.phaseShared') },
   { value: 'L1', label: 'L1' },
   { value: 'L2', label: 'L2' },
   { value: 'L3', label: 'L3' },
 ];
-const phasesOptions = [
-  { value: 1, label: t('rigging.singlePhase') },
-  { value: 3, label: t('rigging.threePhase') },
-];
-function circuitPhaseLabel(circuit) {
-  return circuit.phases === 3 ? t('rigging.threePhaseShort') : circuit.phase;
-}
-
+const connectorOptions = computed(() =>
+  catalog.value.map((c) => ({ value: c.key, label: c.label })),
+);
+const outletOptions = computed(() =>
+  outlets.value.map((o) => ({ value: o.id, label: `${o.name || '—'} · ${connectorLabel(o.connector)}` })),
+);
 const pointOptions = computed(() =>
   (summary.value?.points || []).map((p) => ({ value: p.id, label: p.name || '—' })),
 );
-const circuitOptions = computed(() =>
-  (summary.value?.distros || []).flatMap((d) =>
-    (d.circuits || []).map((c) => ({
-      value: c.id,
-      label: `${d.name || '—'} · ${c.label || '—'} · ${circuitPhaseLabel(c)}`,
-    })),
-  ),
+const nodeOptions = computed(() => nodes.value.map((n) => ({ value: n.id, label: n.name || '—' })));
+const parentOptions = computed(() =>
+  nodes.value.map((n) => ({ value: n.id, label: n.name || '—' })),
 );
+
+// Nodes in tree order, with their depth, so the tree reads top to bottom.
+const nodeRows = computed(() => {
+  const byParent = new Map();
+  for (const n of nodes.value) {
+    const key = n.parent_id || null;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(n);
+  }
+  const rows = [];
+  const walk = (parent, depth) => {
+    for (const n of byParent.get(parent) || []) {
+      rows.push({ ...n, depth });
+      walk(n.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
+});
+
+function outputOptionsFor(nodeId) {
+  const node = nodes.value.find((n) => n.id === nodeId);
+  return (node?.outputs || []).map((o) => ({
+    value: o.connector,
+    label: `${connectorLabel(o.connector)} · ${o.count}×${o.phase ? ' ' + o.phase : ''}`,
+  }));
+}
+
+function connectorLabel(key) {
+  return catalog.value.find((c) => c.key === key)?.label || key || '—';
+}
+
+function kindLabel(kind) {
+  return t(`rigging.kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`);
+}
+
+function nodeEval(id) {
+  return (summary.value?.nodes || []).find((n) => n.id === id) || null;
+}
+
+function nodeStatus(id) {
+  return nodeEval(id)?.status || 'ok';
+}
+
+function statusLabel(status) {
+  return t(`rigging.status.${status}`);
+}
+
+function statusColor(status) {
+  return { ok: 'positive', warn: 'warning', over: 'negative', unpowered: 'grey-7' }[status] || 'grey-7';
+}
 
 async function fetchAll() {
   loading.value = true;
   error.value = '';
   try {
-    const [summaryRes, loadsRes] = await Promise.all([
+    const [summaryRes, nodesRes, catalogRes, outletsRes] = await Promise.all([
       api.get(`/jobs/${jobId}/rigging/summary`),
-      api.get(`/jobs/${jobId}/rigging/loads`),
+      api.get(`/jobs/${jobId}/power-nodes`),
+      api.get('/power-connectors'),
+      api.get(`/jobs/${jobId}/power-outlets`),
     ]);
     summary.value = summaryRes.data;
-    loads.value = loadsRes.data;
-    for (const distro of summary.value.distros) {
-      if (!newCircuit[distro.id]) {
-        newCircuit[distro.id] = { label: '', phases: 1, phase: 'L1', breaker_amps: null };
-      }
-    }
+    loads.value = summaryRes.data.loads;
+    nodes.value = nodesRes.data;
+    catalog.value = catalogRes.data;
+    outlets.value = outletsRes.data;
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred');
   } finally {
@@ -502,43 +633,44 @@ function removePoint(point) {
   run(() => api.delete(`/jobs/${jobId}/rigging-points/${point.id}`));
 }
 
-function addDistro() {
+function addOutput() {
+  newNode.outputs.push({
+    connector: newOutput.connector,
+    count: newOutput.count || 1,
+    phase: newOutput.phase || null,
+  });
+  newOutput.connector = null;
+  newOutput.count = 1;
+  newOutput.phase = null;
+}
+
+function addNode() {
   const body = {
-    name: newDistro.name.trim(),
-    amps_per_phase: newDistro.amps_per_phase || null,
+    name: newNode.name.trim(),
+    kind: newNode.kind,
+    parent_id: newNode.kind === 'source' ? null : newNode.parent_id,
+    feed_connector: newNode.feed_connector,
+    venue_outlet_id: newNode.venue_outlet_id || null,
+    rating_amps: newNode.rating_amps || null,
+    outputs: newNode.outputs,
   };
   run(async () => {
-    await api.post(`/jobs/${jobId}/power-distros`, body);
-    newDistro.name = '';
-    newDistro.amps_per_phase = null;
+    await api.post(`/jobs/${jobId}/power-nodes`, body);
+    newNode.name = '';
+    newNode.parent_id = null;
+    newNode.feed_connector = null;
+    newNode.venue_outlet_id = null;
+    newNode.rating_amps = null;
+    newNode.outputs = [];
   });
 }
 
-function removeDistro(distro) {
-  run(() => api.delete(`/jobs/${jobId}/power-distros/${distro.id}`));
+function removeNode(node) {
+  run(() => api.delete(`/jobs/${jobId}/power-nodes/${node.id}`));
 }
 
-function addCircuit(distro) {
-  const form = newCircuit[distro.id];
-  run(async () => {
-    await api.post(`/jobs/${jobId}/power-circuits`, {
-      distro_id: distro.id,
-      label: form.label.trim(),
-      phases: form.phases,
-      phase: form.phases === 1 ? form.phase : null,
-      breaker_amps: form.breaker_amps || null,
-    });
-    form.label = '';
-    form.breaker_amps = null;
-  });
-}
-
-function removeCircuit(circuit) {
-  run(() => api.delete(`/jobs/${jobId}/power-circuits/${circuit.id}`));
-}
-
-function assign(item, change) {
-  run(() => api.patch(`/jobs/${jobId}/rigging/loads/${item.kind}/${item.id}`, change));
+function assign(load, change) {
+  run(() => api.patch(`/jobs/${jobId}/rigging/loads/${load.kind}/${load.id}`, change));
 }
 
 onMounted(fetchAll);
