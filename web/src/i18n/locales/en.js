@@ -578,6 +578,8 @@ export default {
     speakerSection: 'Speaker coverage',
     coverageAngle: 'Horizontal coverage (°)',
     coverageDistance: 'Throw distance (m)',
+    createCameraDeviceTitle: 'New camera device',
+    cameraDeviceName: 'Camera device name',
     createCameraDevice: 'Create new camera device',
     linkLens: 'Lens',
     focalLength: 'Focal length',

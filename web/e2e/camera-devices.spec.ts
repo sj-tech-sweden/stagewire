@@ -74,6 +74,9 @@ test('a placed camera can create a new camera device from the stage plot', async
   await page.getByText('Camera', { exact: true }).first().click();
   await expect(page.getByRole('button', { name: 'Create new camera device' })).toBeVisible();
   await page.getByRole('button', { name: 'Create new camera device' }).click();
+  await expect(page.getByLabel('Camera device name')).toHaveValue('Camera 2');
+  await page.getByLabel('Camera device name').fill('Front PTZ');
+  await page.getByRole('button', { name: /save/i }).click();
 
   await expect
     .poll(async () => {
@@ -88,5 +91,5 @@ test('a placed camera can create a new camera device from the stage plot', async
       const linked = devices.find((d) => d.id === elements.find((e) => e.element_type === 'camera')?.linked_device_id);
       return linked?.name ?? null;
     })
-    .toBe('Camera 2');
+    .toBe('Front PTZ');
 });

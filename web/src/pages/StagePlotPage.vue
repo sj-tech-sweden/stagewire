@@ -283,7 +283,7 @@
               color="primary"
               class="q-mt-xs"
               :label="t('stagePlot.createCameraDevice')"
-              @click="createCameraDevice"
+              @click="openCameraDeviceDialog"
             />
             <div
               v-if="draft.linked_channel_id || draft.linked_device_id"
@@ -1076,6 +1076,36 @@
             :label="t('stagePlot.addSpeakerConfirm')"
             :loading="addingSpeakers"
             @click="addSpeakers"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="cameraDeviceDialog">
+      <q-card style="min-width: 320px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('stagePlot.createCameraDeviceTitle') }}
+        </q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="cameraDeviceName"
+            :label="t('stagePlot.cameraDeviceName')"
+            autofocus
+            dense
+            @keyup.enter="createCameraDevice"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            flat
+            color="primary"
+            :label="t('app.actions.save')"
+            :disable="!cameraDeviceName.trim()"
+            @click="createCameraDevice"
           />
         </q-card-actions>
       </q-card>
@@ -1960,15 +1990,23 @@ function commitDevice(val) {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { linked_device_id: val || null });
 }
-async function createCameraDevice() {
+const cameraDeviceDialog = ref(false);
+const cameraDeviceName = ref('');
+function openCameraDeviceDialog() {
   if (!selected.value) return;
   const count = devicesStore.devices.filter((d) => d.device_type === 'camera').length;
+  cameraDeviceName.value = `${paletteLabel(palette.camera)} ${count + 1}`;
+  cameraDeviceDialog.value = true;
+}
+async function createCameraDevice() {
+  if (!selected.value || !cameraDeviceName.value.trim()) return;
   const device = await devicesStore.createDevice(jobId, {
-    name: `${paletteLabel(palette.camera)} ${count + 1}`,
+    name: cameraDeviceName.value.trim(),
     device_type: 'camera',
   });
   draft.value.linked_device_id = device.id;
   commitDevice(device.id);
+  cameraDeviceDialog.value = false;
 }
 function commitSize() {
   if (!selected.value) return;

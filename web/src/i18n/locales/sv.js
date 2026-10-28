@@ -578,6 +578,8 @@ export default {
     speakerSection: 'Högtalartäckning',
     coverageAngle: 'Horisontell spridning (°)',
     coverageDistance: 'Kastlängd (m)',
+    createCameraDeviceTitle: 'Ny kameraenhet',
+    cameraDeviceName: 'Namn på kameraenhet',
     createCameraDevice: 'Skapa ny kameraenhet',
     linkLens: 'Objektiv',
     focalLength: 'Brännvidd',
