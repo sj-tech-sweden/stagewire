@@ -44,6 +44,8 @@ DEVICE_CLEARABLE_KEYS = {
     "focal_min_mm",
     "focal_max_mm",
     "max_distance_m",
+    "throw_ratio_min",
+    "throw_ratio_max",
     "sound_list_id",
     "video_list_id",
     "stockwire_product_id",

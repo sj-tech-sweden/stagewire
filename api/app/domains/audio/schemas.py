@@ -306,6 +306,8 @@ class AudioDeviceBase(BaseModel):
     focal_min_mm: float | None = Field(None, gt=0)
     focal_max_mm: float | None = Field(None, gt=0)
     max_distance_m: float | None = Field(None, gt=0)
+    throw_ratio_min: float | None = Field(None, gt=0)
+    throw_ratio_max: float | None = Field(None, gt=0)
 
 
 class AudioDeviceCreate(AudioDeviceBase):

@@ -159,6 +159,8 @@ class AudioDevice(Base):
     focal_min_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     focal_max_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    throw_ratio_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    throw_ratio_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
