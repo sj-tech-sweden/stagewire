@@ -489,3 +489,176 @@ async def test_manual_weight_and_power_on_a_type_reach_the_truss_load(auth_heade
             headers=auth_headers,
         )
         assert bad.status_code == 422
+
+
+STOCKWIRE_TRIPAR = {
+    "id": 51,
+    "sku": "51",
+    "name": "ADJ Mega Tripar Profile",
+    "manufacturer": "American DJ",
+    "brand": "American DJ",
+    "weight_kg": "1.200",
+    "power_consumption_watts": None,
+    "specs": {
+        "lt_fixture_type": "PAR",
+        "channel_modes": [{"name": str(n), "footprint": n} for n in range(1, 8)],
+        "lt_dmx_channels": 7,
+        "lt_power_w": 16,
+    },
+}
+
+
+async def test_stockwire_product_becomes_a_fixture_type_with_all_its_modes(
+    auth_headers, monkeypatch
+):
+    async def fake_integration(db):
+        async def fetch(product_id):
+            return STOCKWIRE_TRIPAR if product_id == "51" else None
+
+        return fetch
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", fake_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Stockwire types")
+        res = await client.post(
+            f"{BASE}/jobs/{job_id}/fixture-types/from-stockwire",
+            json={"product_id": "51"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+        fixture_type = res.json()
+        assert fixture_type["name"] == "ADJ Mega Tripar Profile"
+        assert fixture_type["manufacturer"] == "American DJ"
+        assert fixture_type["category"] == "PAR"
+        assert fixture_type["source"] == "stockwire"
+        assert fixture_type["stockwire_product_id"] == "51"
+        assert fixture_type["weight_kg"] == 1.2
+        assert fixture_type["power_watts"] is None
+        assert [(m["name"], m["footprint"]) for m in fixture_type["modes"]] == [
+            (str(n), n) for n in range(1, 8)
+        ]
+
+        again = await client.post(
+            f"{BASE}/jobs/{job_id}/fixture-types/from-stockwire",
+            json={"product_id": "51"},
+            headers=auth_headers,
+        )
+        assert again.json()["id"] == fixture_type["id"]
+        types = (
+            await client.get(f"{BASE}/jobs/{job_id}/fixture-types", headers=auth_headers)
+        ).json()
+        assert len(types) == 1
+        assert len(types[0]["modes"]) == 7
+
+        missing = await client.post(
+            f"{BASE}/jobs/{job_id}/fixture-types/from-stockwire",
+            json={"product_id": "999"},
+            headers=auth_headers,
+        )
+        assert missing.status_code == 404
+
+
+async def test_stockwire_import_needs_an_integration(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "No Stockwire")
+        res = await client.post(
+            f"{BASE}/jobs/{job_id}/fixture-types/from-stockwire",
+            json={"product_id": "51"},
+            headers=auth_headers,
+        )
+        assert res.status_code == 422
+
+
+async def test_dmx_chain_is_a_tree_per_universe_and_power_is_a_line_per_fixture(
+    auth_headers, monkeypatch
+):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Chains")
+
+        async def post(path, body):
+            res = await client.post(f"{BASE}/jobs/{job_id}/{path}", json=body, headers=auth_headers)
+            assert res.status_code in (200, 201), res.text
+            return res.json()
+
+        desk = await post("devices", {"name": "Console", "device_type": "mixer"})
+        splitter = await post("devices", {"name": "DMX splitter", "device_type": "other"})
+        outlet = await post("devices", {"name": "Distro outlet", "device_type": "other"})
+        fixture_a = await post(
+            "fixtures", {"device_name": "Wash A", "universe": 1, "dmx_address": 1}
+        )
+        fixture_b = await post(
+            "fixtures", {"device_name": "Wash B", "universe": 1, "dmx_address": 9}
+        )
+        universe = await post(
+            "dmx-universes",
+            {
+                "number": 1,
+                "name": "Universe 1",
+                "source_device_id": desk["id"],
+                "source_port": "DMX out 1",
+            },
+        )
+        after_split = await post(
+            f"dmx-universes/{universe['id']}/steps",
+            {"device_id": splitter["id"], "in_port": "IN", "out_port": "OUT 1"},
+        )
+        split_id = after_split["steps"][0]["id"]
+        await post(
+            f"dmx-universes/{universe['id']}/steps",
+            {"parent_id": split_id, "fixture_id": fixture_a["id"], "in_port": "IN"},
+        )
+        tree = await post(
+            f"dmx-universes/{universe['id']}/steps",
+            {"parent_id": split_id, "fixture_id": fixture_b["id"], "in_port": "IN"},
+        )
+        root = tree["steps"][0]
+        assert root["label"] == "DMX splitter"
+        assert [c["label"] for c in root["children"]] == ["Wash A", "Wash B"]
+        assert tree["source_label"] == "Console"
+
+        bad_parent = await client.post(
+            f"{BASE}/jobs/{job_id}/dmx-universes/{universe['id']}/steps",
+            json={"parent_id": "00000000-0000-0000-0000-000000000000", "device_id": outlet["id"]},
+            headers=auth_headers,
+        )
+        assert bad_parent.status_code == 422
+
+        loop = await client.patch(
+            f"{BASE}/jobs/{job_id}/dmx-universes/{universe['id']}/steps/{split_id}",
+            json={"parent_id": root["children"][0]["id"]},
+            headers=auth_headers,
+        )
+        assert loop.status_code == 422
+
+        power = await post(
+            f"fixtures/{fixture_a['id']}/power-steps",
+            {
+                "device_id": outlet["id"],
+                "label": "Outlet 3",
+                "connector_in": "powerCON TRUE1",
+                "connector_out": "powerCON TRUE1",
+            },
+        )
+        assert power["position"] == 0
+        await post(
+            f"fixtures/{fixture_a['id']}/power-steps",
+            {"label": "Lead", "connector_in": "powerCON", "connector_out": "IEC"},
+        )
+        steps = (
+            await client.get(
+                f"{BASE}/jobs/{job_id}/fixtures/{fixture_a['id']}/power-steps", headers=auth_headers
+            )
+        ).json()
+        assert [s["label"] for s in steps] == ["Outlet 3", "Lead"]
+        assert [s["position"] for s in steps] == [0, 1]

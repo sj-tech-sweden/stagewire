@@ -1,14 +1,21 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.auth.deps import get_current_user
-from app.domains.lighting import importers, schemas, service
-from app.domains.lighting.models import FixtureType, LightingFixture
+from app.domains.lighting import chains, importers, schemas, service
+from app.domains.lighting.models import (
+    DmxStep,
+    DmxUniverse,
+    FixtureType,
+    LightingFixture,
+    PowerStep,
+)
 from app.domains.rigging import service as rigging_service
 
 router = APIRouter(tags=["lighting"], dependencies=[Depends(get_current_user)])
@@ -155,6 +162,33 @@ async def create_type(
     return await service.create_type(db, job_id, payload.model_dump())
 
 
+@router.post(
+    "/jobs/{job_id}/fixture-types/from-stockwire",
+    response_model=schemas.FixtureTypeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_type_from_stockwire(
+    job_id: UUID, payload: schemas.StockwireTypeImport, db: AsyncSession = Depends(get_db)
+):
+    from app.domains.audio.router import stockwire_product_fetcher
+    from app.domains.lighting.stockwire import type_from_product
+
+    await _job_or_404(db, job_id)
+    fetch = await stockwire_product_fetcher(db)
+    if fetch is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Stockwire is not connected")
+    try:
+        product = await fetch(payload.product_id)
+    except Exception as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Stockwire could not be reached") from exc
+    if not product:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found in Stockwire")
+    values = type_from_product(product)
+    if not values["name"]:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The product has no name")
+    return await service.import_stockwire_type(db, job_id, payload.product_id, values)
+
+
 @router.patch("/jobs/{job_id}/fixture-types/{type_id}", response_model=schemas.FixtureTypeRead)
 async def update_type(
     job_id: UUID,
@@ -219,3 +253,264 @@ async def delete_mode(
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
     await service.delete_mode(db, mode)
+
+
+async def _check_device(db: AsyncSession, job_id: UUID, device_id: UUID | None) -> None:
+    if device_id is None:
+        return
+    device = await audio_service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
+
+
+async def _universe_or_404(db: AsyncSession, job_id: UUID, universe_id: UUID) -> DmxUniverse:
+    await _job_or_404(db, job_id)
+    universe = await db.get(DmxUniverse, universe_id)
+    if universe is None or universe.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Universe not found")
+    return universe
+
+
+async def _steps(db: AsyncSession, universe_id: UUID) -> list[DmxStep]:
+    result = await db.execute(select(DmxStep).where(DmxStep.universe_id == universe_id))
+    return list(result.scalars().all())
+
+
+async def _universe_read(db: AsyncSession, job_id: UUID, universe: DmxUniverse) -> dict:
+    steps = await _steps(db, universe.id)
+    devices = {str(d.id): d.name for d in await audio_service.list_devices(db, job_id)}
+    fixtures = {str(f.id): f for f in await service.list_fixtures(db, job_id)}
+    labels: dict[str, str] = {}
+    for step in steps:
+        if step.fixture_id:
+            fixture = fixtures.get(str(step.fixture_id))
+            device_name = (
+                devices.get(str(fixture.device_id)) if fixture and fixture.device_id else None
+            )
+            address = f"{fixture.universe}.{fixture.dmx_address}" if fixture else ""
+            labels[str(step.id)] = device_name or f"Fixture {address}".strip()
+        elif step.device_id:
+            labels[str(step.id)] = devices.get(str(step.device_id), "")
+    return {
+        "id": str(universe.id),
+        "job_id": str(universe.job_id),
+        "number": universe.number,
+        "name": universe.name,
+        "source_device_id": str(universe.source_device_id) if universe.source_device_id else None,
+        "source_label": devices.get(str(universe.source_device_id), "")
+        if universe.source_device_id
+        else "",
+        "source_port": universe.source_port,
+        "notes": universe.notes,
+        "steps": chains.build_tree(steps, labels),
+    }
+
+
+@router.get("/jobs/{job_id}/dmx-universes")
+async def list_universes(job_id: UUID, db: AsyncSession = Depends(get_db)) -> list[dict]:
+    await _job_or_404(db, job_id)
+    result = await db.execute(
+        select(DmxUniverse).where(DmxUniverse.job_id == job_id).order_by(DmxUniverse.number)
+    )
+    return [await _universe_read(db, job_id, u) for u in result.scalars().all()]
+
+
+@router.post("/jobs/{job_id}/dmx-universes", status_code=status.HTTP_201_CREATED)
+async def create_universe(
+    job_id: UUID, payload: schemas.DmxUniverseCreate, db: AsyncSession = Depends(get_db)
+) -> dict:
+    await _job_or_404(db, job_id)
+    await _check_device(db, job_id, payload.source_device_id)
+    universe = DmxUniverse(job_id=job_id, **payload.model_dump())
+    db.add(universe)
+    await db.commit()
+    await db.refresh(universe)
+    return await _universe_read(db, job_id, universe)
+
+
+@router.patch("/jobs/{job_id}/dmx-universes/{universe_id}")
+async def update_universe(
+    job_id: UUID,
+    universe_id: UUID,
+    payload: schemas.DmxUniverseUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    universe = await _universe_or_404(db, job_id, universe_id)
+    data = payload.model_dump(exclude_unset=True)
+    await _check_device(db, job_id, data.get("source_device_id"))
+    for key, value in data.items():
+        setattr(universe, key, value)
+    await db.commit()
+    await db.refresh(universe)
+    return await _universe_read(db, job_id, universe)
+
+
+@router.delete("/jobs/{job_id}/dmx-universes/{universe_id}", status_code=204)
+async def delete_universe(
+    job_id: UUID, universe_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    universe = await _universe_or_404(db, job_id, universe_id)
+    await db.delete(universe)
+    await db.commit()
+
+
+@router.post(
+    "/jobs/{job_id}/dmx-universes/{universe_id}/steps",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_step(
+    job_id: UUID,
+    universe_id: UUID,
+    payload: schemas.DmxStepCreate,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    universe = await _universe_or_404(db, job_id, universe_id)
+    if (payload.device_id is None) == (payload.fixture_id is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A step is either a device or a fixture"
+        )
+    await _check_device(db, job_id, payload.device_id)
+    if (
+        payload.fixture_id is not None
+        and await service.get_fixture(db, job_id, payload.fixture_id) is None
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Fixture not found for this job")
+    steps = await _steps(db, universe.id)
+    if payload.parent_id is not None and payload.parent_id not in {s.id for s in steps}:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Parent step is not on this universe"
+        )
+    step = DmxStep(
+        universe_id=universe.id,
+        position=len(steps),
+        **payload.model_dump(),
+    )
+    db.add(step)
+    await db.commit()
+    await db.refresh(universe)
+    return await _universe_read(db, job_id, universe)
+
+
+@router.patch("/jobs/{job_id}/dmx-universes/{universe_id}/steps/{step_id}")
+async def update_step(
+    job_id: UUID,
+    universe_id: UUID,
+    step_id: UUID,
+    payload: schemas.DmxStepUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    universe = await _universe_or_404(db, job_id, universe_id)
+    steps = await _steps(db, universe.id)
+    step = next((s for s in steps if s.id == step_id), None)
+    if step is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("parent_id") is not None:
+        if data["parent_id"] not in {s.id for s in steps}:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Parent step is not on this universe"
+            )
+        if str(data["parent_id"]) in chains.descendants(steps, str(step.id)) | {str(step.id)}:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A step cannot feed itself")
+    for key, value in data.items():
+        setattr(step, key, value if value is not None or key == "parent_id" else "")
+    await db.commit()
+    await db.refresh(universe)
+    return await _universe_read(db, job_id, universe)
+
+
+@router.delete("/jobs/{job_id}/dmx-universes/{universe_id}/steps/{step_id}")
+async def delete_step(
+    job_id: UUID, universe_id: UUID, step_id: UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
+    universe = await _universe_or_404(db, job_id, universe_id)
+    step = await db.get(DmxStep, step_id)
+    if step is None or step.universe_id != universe.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
+    await db.delete(step)
+    await db.commit()
+    await db.refresh(universe)
+    return await _universe_read(db, job_id, universe)
+
+
+async def _fixture_for_power(db: AsyncSession, job_id: UUID, fixture_id: UUID) -> LightingFixture:
+    await _job_or_404(db, job_id)
+    fixture = await service.get_fixture(db, job_id, fixture_id)
+    if fixture is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fixture not found")
+    return fixture
+
+
+@router.get(
+    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps", response_model=list[schemas.PowerStepRead]
+)
+async def list_power_steps(job_id: UUID, fixture_id: UUID, db: AsyncSession = Depends(get_db)):
+    await _fixture_for_power(db, job_id, fixture_id)
+    result = await db.execute(
+        select(PowerStep).where(PowerStep.fixture_id == fixture_id).order_by(PowerStep.position)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps",
+    response_model=schemas.PowerStepRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_power_step(
+    job_id: UUID,
+    fixture_id: UUID,
+    payload: schemas.PowerStepCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    await _fixture_for_power(db, job_id, fixture_id)
+    await _check_device(db, job_id, payload.device_id)
+    result = await db.execute(select(PowerStep).where(PowerStep.fixture_id == fixture_id))
+    step = PowerStep(
+        fixture_id=fixture_id,
+        position=len(result.scalars().all()),
+        **payload.model_dump(),
+    )
+    db.add(step)
+    await db.commit()
+    await db.refresh(step)
+    return step
+
+
+@router.patch(
+    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps/{step_id}",
+    response_model=schemas.PowerStepRead,
+)
+async def update_power_step(
+    job_id: UUID,
+    fixture_id: UUID,
+    step_id: UUID,
+    payload: schemas.PowerStepUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    await _fixture_for_power(db, job_id, fixture_id)
+    step = await db.get(PowerStep, step_id)
+    if step is None or step.fixture_id != fixture_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
+    data = payload.model_dump(exclude_unset=True)
+    await _check_device(db, job_id, data.get("device_id"))
+    for key, value in data.items():
+        setattr(step, key, value if value is not None or key == "device_id" else "")
+    await db.commit()
+    await db.refresh(step)
+    return step
+
+
+@router.delete(
+    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps/{step_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_power_step(
+    job_id: UUID, fixture_id: UUID, step_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    await _fixture_for_power(db, job_id, fixture_id)
+    step = await db.get(PowerStep, step_id)
+    if step is None or step.fixture_id != fixture_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
+    await db.delete(step)
+    await db.commit()

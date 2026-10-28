@@ -60,6 +60,7 @@ class FixtureType(Base):
     )
     name: Mapped[str] = mapped_column(String(255), default="")
     manufacturer: Mapped[str] = mapped_column(String(255), default="")
+    category: Mapped[str] = mapped_column(String(64), default="")
     source: Mapped[str] = mapped_column(String(32), default="manual")
     stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -86,3 +87,65 @@ class FixtureMode(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     fixture_type: Mapped[FixtureType] = relationship(back_populates="modes")
+
+
+class DmxUniverse(Base):
+    """One DMX universe and the output that drives it. Its steps form the chain to the fixtures."""
+
+    __tablename__ = "dmx_universes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    source_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_port: Mapped[str] = mapped_column(String(32), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class DmxStep(Base):
+    """A device or fixture on a universe. A step's parent is the step it takes DMX from."""
+
+    __tablename__ = "dmx_steps"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    universe_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("dmx_universes.id", ondelete="CASCADE"), index=True
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("dmx_steps.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    fixture_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lighting_fixtures.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    in_port: Mapped[str] = mapped_column(String(32), default="")
+    out_port: Mapped[str] = mapped_column(String(32), default="")
+    connector: Mapped[str] = mapped_column(String(64), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class PowerStep(Base):
+    """A step between a fixture's power circuit and the fixture: an outlet, distro or lead."""
+
+    __tablename__ = "power_steps"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fixture_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("lighting_fixtures.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    label: Mapped[str] = mapped_column(String(255), default="")
+    connector_in: Mapped[str] = mapped_column(String(64), default="")
+    connector_out: Mapped[str] = mapped_column(String(64), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")

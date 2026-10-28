@@ -334,3 +334,42 @@ async def update_mode(db: AsyncSession, mode: FixtureMode, data: dict) -> Fixtur
 async def delete_mode(db: AsyncSession, mode: FixtureMode) -> None:
     await db.delete(mode)
     await db.commit()
+
+
+async def import_stockwire_type(
+    db: AsyncSession, job_id: UUID, product_id: str, values: dict
+) -> FixtureType:
+    """Create or refresh the type for a Stockwire product, with the product's modes."""
+    result = await db.execute(
+        select(FixtureType).where(
+            FixtureType.job_id == job_id, FixtureType.stockwire_product_id == product_id
+        )
+    )
+    fixture_type = result.scalars().first()
+    if fixture_type is None:
+        fixture_type = FixtureType(
+            job_id=job_id, source="stockwire", stockwire_product_id=product_id, modes=[]
+        )
+        db.add(fixture_type)
+        await db.flush()
+    fixture_type.name = values["name"]
+    fixture_type.manufacturer = values["manufacturer"]
+    fixture_type.category = values["category"]
+    fixture_type.weight_kg = values["weight_kg"]
+    fixture_type.power_watts = values["power_watts"]
+    for item in values["modes"]:
+        mode = next((m for m in fixture_type.modes if m.name == item["name"]), None)
+        if mode is None:
+            mode = FixtureMode(
+                fixture_type_id=fixture_type.id,
+                name=item["name"],
+                footprint=item["footprint"],
+                position=len(fixture_type.modes),
+            )
+            db.add(mode)
+            fixture_type.modes.append(mode)
+        else:
+            mode.footprint = item["footprint"]
+    await db.commit()
+    await db.refresh(fixture_type)
+    return fixture_type

@@ -99,8 +99,14 @@ class FixtureTypeRead(FixtureTypeBase):
 
     id: UUID
     job_id: UUID
+    category: str = ""
     source: str = "manual"
+    stockwire_product_id: str | None = None
     modes: list[FixtureModeRead] = []
+
+
+class StockwireTypeImport(BaseModel):
+    product_id: str = Field(..., min_length=1, max_length=64)
 
 
 class FixtureImportResult(BaseModel):
@@ -108,3 +114,68 @@ class FixtureImportResult(BaseModel):
     devices_created: int = 0
     cleared: int = 0
     errors: list[str] = []
+
+
+class DmxUniverseCreate(BaseModel):
+    number: int = Field(1, ge=1)
+    name: str = ""
+    source_device_id: UUID | None = None
+    source_port: str = ""
+    notes: str = ""
+
+
+class DmxUniverseUpdate(BaseModel):
+    number: int | None = Field(None, ge=1)
+    name: str | None = None
+    source_device_id: UUID | None = None
+    source_port: str | None = None
+    notes: str | None = None
+
+
+class DmxStepCreate(BaseModel):
+    """A device or a fixture on a universe. Exactly one of device_id and fixture_id is set."""
+
+    parent_id: UUID | None = None
+    device_id: UUID | None = None
+    fixture_id: UUID | None = None
+    in_port: str = ""
+    out_port: str = ""
+    connector: str = ""
+    notes: str = ""
+
+
+class DmxStepUpdate(BaseModel):
+    parent_id: UUID | None = None
+    in_port: str | None = None
+    out_port: str | None = None
+    connector: str | None = None
+    notes: str | None = None
+
+
+class PowerStepCreate(BaseModel):
+    device_id: UUID | None = None
+    label: str = ""
+    connector_in: str = ""
+    connector_out: str = ""
+    notes: str = ""
+
+
+class PowerStepUpdate(BaseModel):
+    device_id: UUID | None = None
+    label: str | None = None
+    connector_in: str | None = None
+    connector_out: str | None = None
+    notes: str | None = None
+
+
+class PowerStepRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    fixture_id: UUID
+    position: int = 0
+    device_id: UUID | None = None
+    label: str = ""
+    connector_in: str = ""
+    connector_out: str = ""
+    notes: str = ""
