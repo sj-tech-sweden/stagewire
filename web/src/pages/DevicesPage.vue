@@ -317,6 +317,56 @@
             >
               {{ t('devices.cameraStockwireHint') }}
             </div>
+            <template v-if="editForm.device_type === 'camera'">
+              <q-select
+                v-model="sensorPreset"
+                :options="sensorPresetOptions"
+                :label="t('devices.sensorPreset')"
+                emit-value
+                map-options
+                clearable
+                dense
+                @update:model-value="applySensorPreset"
+              />
+              <div class="row q-gutter-sm">
+                <q-input
+                  v-model="sensorAspect"
+                  :label="t('devices.sensorAspect')"
+                  :hint="t('devices.sensorAspectHint')"
+                  dense
+                  class="col"
+                />
+                <q-input
+                  v-model="sensorDiagonal"
+                  :label="t('devices.sensorDiagonal')"
+                  :hint="t('devices.sensorDiagonalHint')"
+                  dense
+                  class="col"
+                />
+                <q-select
+                  :model-value="sensorDiagonalUnit"
+                  :options="sensorUnitOptions"
+                  emit-value
+                  map-options
+                  dense
+                  class="col-3"
+                  @update:model-value="convertSensorDiagonal"
+                />
+              </div>
+              <div class="row items-center q-gutter-sm">
+                <div class="col text-caption">
+                  {{ sensorCalcText }}
+                </div>
+                <q-btn
+                  v-if="calculatedSensorWidth"
+                  flat
+                  dense
+                  color="primary"
+                  :label="t('devices.useCalculatedWidth')"
+                  @click="useCalculatedSensorWidth"
+                />
+              </div>
+            </template>
             <q-input
               v-if="editForm.device_type === 'camera'"
               v-model.number="editForm.sensor_width_mm"
@@ -443,6 +493,16 @@ import { useRoute, useRouter } from 'vue-router';
 import { api } from '@/boot/api';
 import { useDevicesStore } from '@/stores/devices';
 import { CONNECTOR_OPTIONS } from '@/constants/connectors';
+import {
+  SENSOR_PRESETS,
+  diagonalToMm,
+  findPreset,
+  mmToDiagonal,
+  parseAspect,
+  parseLength,
+  sensorDiagonalMm,
+  sensorWidthFromDiagonal,
+} from '@/utils/sensor';
 
 const connectorOptions = CONNECTOR_OPTIONS;
 
@@ -605,7 +665,53 @@ function portUsage(device, port) {
   const key = `${port.direction}|${(port.connector || '').toLowerCase()}`;
   return used[key] || 0;
 }
+const sensorPreset = ref(null);
+const sensorAspect = ref('');
+const sensorDiagonal = ref('');
+const sensorDiagonalUnit = ref('mm');
+const sensorPresetOptions = SENSOR_PRESETS.map((p) => ({ value: p.id, label: `${p.label} · ${p.width} × ${p.height} mm` }));
+const sensorUnitOptions = [
+  { value: 'mm', label: 'mm' },
+  { value: 'in', label: 'in' },
+];
+const calculatedSensorWidth = computed(() => {
+  const diagonal = parseLength(sensorDiagonal.value);
+  const aspect = parseAspect(sensorAspect.value);
+  if (!diagonal || !aspect) return null;
+  return sensorWidthFromDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), aspect);
+});
+const sensorCalcText = computed(() =>
+  calculatedSensorWidth.value
+    ? t('devices.sensorCalculated', { mm: calculatedSensorWidth.value.toFixed(2) })
+    : t('devices.sensorCalcHint'),
+);
+function formatDiagonal(mm, unit) {
+  return String(Math.round(mmToDiagonal(mm, unit) * 100) / 100);
+}
+function applySensorPreset(id) {
+  const preset = findPreset(id);
+  if (!preset) return;
+  editForm.sensor_width_mm = preset.width;
+  sensorAspect.value = preset.aspect;
+  sensorDiagonal.value = formatDiagonal(sensorDiagonalMm(preset.width, preset.height), sensorDiagonalUnit.value);
+}
+function convertSensorDiagonal(unit) {
+  const diagonal = parseLength(sensorDiagonal.value);
+  if (diagonal) {
+    sensorDiagonal.value = formatDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), unit);
+  }
+  sensorDiagonalUnit.value = unit;
+}
+function useCalculatedSensorWidth() {
+  if (calculatedSensorWidth.value) {
+    editForm.sensor_width_mm = Math.round(calculatedSensorWidth.value * 100) / 100;
+  }
+}
 function openEdit(device) {
+  sensorPreset.value = null;
+  sensorAspect.value = '';
+  sensorDiagonal.value = '';
+  sensorDiagonalUnit.value = 'mm';
   editTarget.value = device;
   editForm.name = device.name || '';
   editForm.device_type = device.device_type || 'other';

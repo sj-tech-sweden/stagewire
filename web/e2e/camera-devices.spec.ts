@@ -42,3 +42,51 @@ test('camera values can be entered on the device and a lens shows only its focal
   await expect(page.getByLabel('Sensor width (mm)')).toHaveCount(0);
   await expect(page.getByLabel('Maximum useful distance (m)')).toHaveCount(0);
 });
+
+test('a camera sensor width can be calculated or picked from a preset', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Sensor ${Date.now()}` })).id as string;
+  const camera = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Cam Sensor', device_type: 'camera' });
+
+  await page.goto(`/jobs/${jobId}/devices?device=${camera.id}`);
+  await expect(page.getByLabel('Aspect ratio')).toBeVisible();
+  await page.getByLabel('Aspect ratio').fill('3:2');
+  await page.getByLabel('Diagonal').fill('43.27');
+  await expect(page.getByText(/Width 36\.00 mm/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use this width' }).click();
+  await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('36');
+
+  await page.getByRole('combobox', { name: 'Standard sensor' }).click();
+  await page.getByRole('option', { name: /APS-C \(Sony, Nikon\)/ }).click();
+  await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('23.5');
+  await expect(page.getByLabel('Aspect ratio')).toHaveValue('3:2');
+});
+
+test('a placed camera can create a new camera device from the stage plot', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Camera Link ${Date.now()}` })).id as string;
+
+  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  await page.goto(`/jobs/${jobId}/stage-plot`);
+  await loaded;
+  await page.getByText('Camera', { exact: true }).first().click();
+  await expect(page.getByRole('button', { name: 'Create new camera device' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create new camera device' }).click();
+
+  await expect
+    .poll(async () => {
+      const devices = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as Array<{ device_type: string }>;
+      return devices.filter((d) => d.device_type === 'camera').length;
+    })
+    .toBe(2);
+  await expect
+    .poll(async () => {
+      const elements = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json()) as Array<{ element_type: string; linked_device_id: string | null }>;
+      const devices = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as Array<{ id: string; name: string }>;
+      const linked = devices.find((d) => d.id === elements.find((e) => e.element_type === 'camera')?.linked_device_id);
+      return linked?.name ?? null;
+    })
+    .toBe('Camera 2');
+});

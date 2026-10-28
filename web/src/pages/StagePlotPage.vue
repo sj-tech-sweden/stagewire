@@ -274,6 +274,17 @@
               class="q-mt-sm"
               @update:model-value="commitDevice"
             />
+            <q-btn
+              v-if="selected && selected.element_type === 'camera'"
+              flat
+              dense
+              no-caps
+              icon="add"
+              color="primary"
+              class="q-mt-xs"
+              :label="t('stagePlot.createCameraDevice')"
+              @click="createCameraDevice"
+            />
             <div
               v-if="draft.linked_channel_id || draft.linked_device_id"
               class="row q-gutter-sm q-mt-xs"
@@ -1948,6 +1959,16 @@ function openLinkedDevice() {
 function commitDevice(val) {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { linked_device_id: val || null });
+}
+async function createCameraDevice() {
+  if (!selected.value) return;
+  const count = devicesStore.devices.filter((d) => d.device_type === 'camera').length;
+  const device = await devicesStore.createDevice(jobId, {
+    name: `${paletteLabel(palette.camera)} ${count + 1}`,
+    device_type: 'camera',
+  });
+  draft.value.linked_device_id = device.id;
+  commitDevice(device.id);
 }
 function commitSize() {
   if (!selected.value) return;
