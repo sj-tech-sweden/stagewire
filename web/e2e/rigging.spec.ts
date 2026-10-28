@@ -41,3 +41,36 @@ test('the power tree and the trusses are shown on the rigging tab', async ({ pag
 
   await expect(page.getByText('FOH truss', { exact: false }).first()).toBeVisible();
 });
+
+test('a node in the power tree can be edited and saved', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Node Edit ${Date.now()}` })).id as string;
+  const source = await post(request, headers, `/jobs/${jobId}/power-nodes`, {
+    name: 'Mains B',
+    kind: 'source',
+    feed_connector: 'cee63_3p',
+    outputs: [{ connector: 'cee32_3p', count: 2 }],
+  });
+  const distro = await post(request, headers, `/jobs/${jobId}/power-nodes`, {
+    name: 'Distro old',
+    kind: 'distro',
+    parent_id: source.id,
+    feed_connector: 'cee32_3p',
+    outputs: [{ connector: 'schuko', count: 2, phase: 'L1' }],
+  });
+
+  await page.goto(`/jobs/${jobId}?view=rigging`);
+  await expect(page.getByText('Distro old', { exact: false }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
+  const dialog = page.locator('.q-dialog');
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Distro new');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await expect
+    .poll(async () => {
+      const nodes = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/power-nodes`, { headers })).json();
+      return nodes.find((n: { id: string }) => n.id === distro.id)?.name ?? null;
+    })
+    .toBe('Distro new');
+});

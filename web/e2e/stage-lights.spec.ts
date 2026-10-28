@@ -16,7 +16,7 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
   return res.json();
 }
 
-test('the stage plot loads DMX and outlet data, with toggles for both', async ({ page, request }) => {
+test('the stage plot loads DMX and outlet data; the outlet toggle is remembered', async ({ page, request }) => {
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Stage Lights ${Date.now()}` })).id as string;
@@ -35,11 +35,11 @@ test('the stage plot loads DMX and outlet data, with toggles for both', async ({
   const universesLoaded = page.waitForResponse((r) => r.url().includes('/dmx-universes') && r.status() === 200);
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await universesLoaded;
-  await expect(page.getByText('DMX cables', { exact: true })).toBeVisible();
+  await expect(page.getByText('DMX cables', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Power outlets', { exact: true })).toBeVisible();
 
-  await page.getByText('DMX cables', { exact: true }).click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sw_stage_dmx_cables'))).toBe('false');
+  await page.getByText('Power outlets', { exact: true }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sw_stage_outlets'))).toBe('false');
   await page.reload();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sw_stage_dmx_cables'))).toBe('false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sw_stage_outlets'))).toBe('false');
 });

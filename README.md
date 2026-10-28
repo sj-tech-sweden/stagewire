@@ -235,9 +235,8 @@ SQLite test suite.
 - The DMX chain of each universe is drawn as dashed lines between the devices on the plot,
   coloured by universe: from the console to the first steps, and from each step to the steps
   it feeds. A line is drawn only when both devices have an element on the plot.
-- A line follows its ends: turning off the **stage** category hides the fixtures and their
-  DMX lines together. The **DMX cables** toggle hides every DMX line; the choice is kept in the
-  browser.
+- A line follows its ends: turning off the **stage** category hides the fixtures and their DMX
+  lines together. There is no separate DMX toggle.
 - Venue power outlets are drawn as **PWR** markers at their saved place on the plot, when the
   job has a venue. Drag a marker to move it; the position is saved on the venue, in the same
   plot coordinates as the elements. The **Power outlets** toggle hides them.

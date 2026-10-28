@@ -138,6 +138,14 @@
                   flat
                   dense
                   round
+                  icon="edit"
+                  :aria-label="t('app.actions.edit')"
+                  @click="openEditNode(node)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
                   icon="delete"
                   color="negative"
                   :aria-label="t('app.actions.delete')"
@@ -178,6 +186,7 @@
                 dense
                 style="min-width: 110px"
                 :label="t('rigging.nodeKind')"
+                :hint="kindHint(newNode.kind)"
               />
             </div>
             <div class="row q-gutter-xs items-end q-mt-xs">
@@ -486,6 +495,176 @@
         </q-card>
       </div>
     </div>
+
+    <q-dialog v-model="editDialog">
+      <q-card style="min-width: 340px; max-width: 600px; width: 100%">
+        <q-card-section class="text-h6">
+          {{ t('rigging.editNode') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <q-input
+            v-model="editForm.name"
+            :label="t('rigging.nodeName')"
+            dense
+          />
+          <div class="row q-gutter-sm">
+            <q-select
+              v-model="editForm.kind"
+              :options="kindOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              :label="t('rigging.nodeKind')"
+              :hint="kindHint(editForm.kind)"
+            />
+            <q-select
+              v-model="editForm.active"
+              :options="activeOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              :label="t('rigging.state')"
+            />
+          </div>
+          <q-select
+            v-model="editForm.parent_id"
+            :options="editParentOptions"
+            emit-value
+            map-options
+            clearable
+            dense
+            :disable="editForm.kind === 'source'"
+            :label="t('rigging.fedFrom')"
+          />
+          <div class="row q-gutter-sm">
+            <q-select
+              v-model="editForm.feed_connector"
+              :options="connectorOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              :label="t('rigging.feedConnector')"
+            />
+            <q-input
+              v-model.number="editForm.rating_amps"
+              type="number"
+              min="0"
+              dense
+              style="max-width: 120px"
+              :label="t('rigging.rating')"
+            />
+          </div>
+          <q-select
+            v-model="editForm.device_id"
+            :options="deviceOptions"
+            emit-value
+            map-options
+            clearable
+            dense
+            :label="t('rigging.standsFor')"
+          />
+          <q-select
+            v-if="editForm.kind === 'source'"
+            v-model="editForm.venue_outlet_id"
+            :options="outletOptions"
+            emit-value
+            map-options
+            clearable
+            dense
+            :label="t('rigging.venueOutlet')"
+          />
+          <div class="text-subtitle2 q-mt-sm">
+            {{ t('rigging.outputs') }}
+          </div>
+          <div
+            v-for="(o, idx) in editForm.outputs"
+            :key="idx"
+            class="row items-center q-gutter-xs"
+          >
+            <div class="col text-body2">
+              {{ o.count }}× {{ connectorLabel(o.connector) }}{{ o.phase ? ' ' + o.phase : '' }}
+            </div>
+            <q-btn
+              flat
+              dense
+              round
+              icon="delete"
+              color="negative"
+              :aria-label="t('app.actions.delete')"
+              @click="editForm.outputs.splice(idx, 1)"
+            />
+          </div>
+          <div class="row q-gutter-xs items-end">
+            <q-select
+              v-model="editOutput.connector"
+              :options="connectorOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              :label="t('rigging.outputConnector')"
+            />
+            <q-input
+              v-model.number="editOutput.count"
+              type="number"
+              min="1"
+              dense
+              style="max-width: 90px"
+              :label="t('rigging.count')"
+            />
+            <q-select
+              v-model="editOutput.phase"
+              :options="phaseChoices"
+              emit-value
+              map-options
+              dense
+              style="min-width: 110px"
+              :label="t('rigging.phase')"
+            />
+            <q-btn
+              flat
+              dense
+              icon="add"
+              :label="t('rigging.addOutput')"
+              :disable="!editOutput.connector"
+              @click="addEditOutput"
+            />
+          </div>
+          <q-input
+            v-model="editForm.notes"
+            type="textarea"
+            autogrow
+            dense
+            :label="t('lights.notes')"
+          />
+        </q-card-section>
+        <q-card-actions align="between">
+          <q-btn
+            flat
+            color="negative"
+            icon="delete"
+            :label="t('app.actions.delete')"
+            @click="deleteEditingNode"
+          />
+          <div>
+            <q-btn
+              v-close-popup
+              flat
+              :label="t('app.actions.cancel')"
+            />
+            <q-btn
+              color="primary"
+              :label="t('app.actions.save')"
+              :disable="!editForm.name.trim()"
+              @click="saveEditNode"
+            />
+          </div>
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -523,6 +702,44 @@ const newNode = reactive({
   outputs: [],
 });
 const newOutput = reactive({ connector: null, count: 1, phase: null });
+
+const editDialog = ref(false);
+const editingId = ref(null);
+const editForm = reactive({
+  name: '',
+  kind: 'distro',
+  parent_id: null,
+  feed_connector: null,
+  phase: null,
+  outputs: [],
+  rating_amps: null,
+  active: true,
+  device_id: null,
+  venue_outlet_id: null,
+  notes: '',
+});
+const editOutput = reactive({ connector: null, count: 1, phase: null });
+const activeOptions = [
+  { value: true, label: t('rigging.stateOn') },
+  { value: false, label: t('rigging.stateOff') },
+];
+// A node cannot hang from itself or from anything below it.
+const editParentOptions = computed(() => {
+  const blocked = new Set([editingId.value]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const n of nodes.value) {
+      if (n.parent_id && blocked.has(n.parent_id) && !blocked.has(n.id)) {
+        blocked.add(n.id);
+        grew = true;
+      }
+    }
+  }
+  return nodes.value
+    .filter((n) => !blocked.has(n.id))
+    .map((n) => ({ value: n.id, label: n.name || '—' }));
+});
 
 const kindOptions = [
   { value: 'source', label: t('rigging.kindSource') },
@@ -685,6 +902,71 @@ function addNode() {
     newNode.rating_amps = null;
     newNode.outputs = [];
   });
+}
+
+function kindHint(kind) {
+  const key = { source: 'kindHintSource', distro: 'kindHintDistro', breakout: 'kindHintBreakout' }[kind];
+  return key ? `${t(`rigging.${key}`)} ${t('rigging.kindHintNote')}` : '';
+}
+
+function openEditNode(node) {
+  editingId.value = node.id;
+  Object.assign(editForm, {
+    name: node.name || '',
+    kind: node.kind,
+    parent_id: node.parent_id || null,
+    feed_connector: node.feed_connector || null,
+    phase: node.phase || null,
+    outputs: (node.outputs || []).map((o) => ({ connector: o.connector, count: o.count, phase: o.phase || null })),
+    rating_amps: node.rating_amps ?? null,
+    active: node.active !== false,
+    device_id: node.device_id || null,
+    venue_outlet_id: node.venue_outlet_id || null,
+    notes: node.notes || '',
+  });
+  editOutput.connector = null;
+  editOutput.count = 1;
+  editOutput.phase = null;
+  editDialog.value = true;
+}
+
+function addEditOutput() {
+  editForm.outputs.push({
+    connector: editOutput.connector,
+    count: editOutput.count || 1,
+    phase: editOutput.phase || null,
+  });
+  editOutput.connector = null;
+  editOutput.count = 1;
+  editOutput.phase = null;
+}
+
+function saveEditNode() {
+  const id = editingId.value;
+  const body = {
+    name: editForm.name.trim(),
+    kind: editForm.kind,
+    parent_id: editForm.kind === 'source' ? null : editForm.parent_id,
+    feed_connector: editForm.feed_connector || '',
+    phase: editForm.phase || null,
+    outputs: editForm.outputs,
+    rating_amps: editForm.rating_amps || null,
+    active: editForm.active,
+    device_id: editForm.device_id || null,
+    venue_outlet_id: editForm.venue_outlet_id || null,
+    notes: editForm.notes,
+  };
+  run(async () => {
+    await api.patch(`/jobs/${jobId}/power-nodes/${id}`, body);
+    editDialog.value = false;
+  }, t('rigging.nodeSaved'));
+}
+
+function deleteEditingNode() {
+  const node = nodes.value.find((n) => n.id === editingId.value);
+  if (!node) return;
+  editDialog.value = false;
+  removeNode(node);
 }
 
 function removeNode(node) {

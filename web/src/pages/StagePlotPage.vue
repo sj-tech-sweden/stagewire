@@ -537,10 +537,6 @@
                 :label="t('stagePlot.showProjectorCoverage')"
               />
               <q-toggle
-                v-model="showDmxCables"
-                :label="t('stagePlot.showDmxCables')"
-              />
-              <q-toggle
                 v-if="job?.venue_id"
                 v-model="showOutlets"
                 :label="t('stagePlot.showOutlets')"
@@ -2693,9 +2689,7 @@ function savedToggle(key, fallback) {
     return fallback;
   }
 }
-const showDmxCables = ref(savedToggle('sw_stage_dmx_cables', true));
 const showOutlets = ref(savedToggle('sw_stage_outlets', true));
-watch(showDmxCables, (v) => localStorage.setItem('sw_stage_dmx_cables', JSON.stringify(v)));
 watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringify(v)));
 
 async function loadLights() {
@@ -2757,13 +2751,11 @@ const dmxRows = computed(() => {
 // A DMX line follows its endpoints: it is hidden when either end's category is hidden, so
 // turning off the stage category (fixtures) also hides their DMX lines.
 const visibleDmxRows = computed(() =>
-  showDmxCables.value
-    ? dmxRows.value.filter(
-        (r) =>
-          endpointVisible(r.fromElementId, r.fromDeviceId) &&
-          endpointVisible(r.toElementId, r.toDeviceId),
-      )
-    : [],
+  dmxRows.value.filter(
+    (r) =>
+      endpointVisible(r.fromElementId, r.fromDeviceId) &&
+      endpointVisible(r.toElementId, r.toDeviceId),
+  ),
 );
 function dmxConfig(row) {
   return {

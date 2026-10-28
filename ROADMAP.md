@@ -20,7 +20,7 @@
 - [x] Lighting fixtures on the stage plot and in a registry-seeded fixture patch PDF (EN/SV).
 - [x] Rigging and power (Phase 3b), shared with sound and video: trusses with weight capacity, a power tree (source, distros, breakouts) with connector checks, phase balance and status, on a Rigging & power tab.
 - [x] Venue power outlets saved on the venue; a power source can be tied to one.
-- [x] DMX cables drawn on the stage plot, with a toggle, following their fixtures; venue power outlets drawn as draggable points.
+- [x] DMX cables drawn on the stage plot, following their fixtures; venue power outlets drawn as draggable points.
 - [ ] The power tree drawn on the stage plot.
 - [ ] Rigging drawn on the stage plot itself (truss positions and hung loads).
 - [x] Stockwire fixture products: name, maker, channel modes and weight become a fixture type (spec §3.9).

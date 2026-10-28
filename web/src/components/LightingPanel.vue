@@ -560,9 +560,9 @@ const addressClashNames = computed(() =>
     .join(', '),
 );
 
+// The popup stays open so the channels can be compared; Close ends it.
 function pickFromGrid(address) {
   form.dmx_address = address;
-  gridOpen.value = false;
 }
 
 watch(() => [form.universe, form.footprint, fixtures.value], suggestAddress);
