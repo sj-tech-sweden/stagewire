@@ -167,6 +167,24 @@ SQLite test suite.
 - In a patch step, typing the name of an existing device chooses it; a device created
   from a step is chosen at once.
 
+## Lighting: DMX fixture patch
+
+- The fixture patch is one row per fixture: universe, DMX address, fixture type, channel
+  mode, footprint (channels), location or truss position, gel or colour, purpose and notes.
+  Open it from the job with **Lights**.
+- A row can be linked to a fixture device by typing its name. Typing a new name creates
+  the device. The device's fixture type, mode, footprint and gel fill empty row fields.
+- The patch flags a **DMX overlap** when two fixtures in the same universe share a channel,
+  and **past channel 512** when a footprint runs beyond its universe.
+- **Import** reads a CSV (one row per fixture, headers as on the patch sheet; `;` or `,`
+  separators) or an MVR file (My Virtual Rig, exported by Capture 2021 or later, MA,
+  Vectorworks or WYSIWYG). From MVR the address, position (its truss or position name, or
+  coordinates), mode and footprint come from the scene and the GDTF file it names. Imports
+  replace the fixtures of an earlier import unless that is switched off.
+- Weight and power are device values for rigging and power planning. A Stockwire product
+  value (`specs.weight_kg`, `specs.power_w`) overrides the value entered on the device; see
+  `docs/stockwire-integration-spec.md` §3.8.
+
 ## Cables and cableways
 
 - Cables are derived from the sound and video chains, from speaker outputs, and from
@@ -210,6 +228,6 @@ Migrations are reviewed before commit; see `AGENTS.md` for the Alembic workflow.
 - **Phase 2 (in progress)**: Video suite — video inputs, outputs, patch chains with
   ports and splits, signal flow, cameras, lenses, projectors and screens are in. The
   pixel map / LED wall is not.
-- **Phase 3 (prep)**: Lighting & rigging — DMX fixture patch, rigging & power plot.
-
-Domain folders for video and lighting exist as stubs for later phases.
+- **Phase 3 (in progress)**: Lighting & rigging. The DMX fixture patch is in; the rigging
+  and power plot (shared with sound and video) and fixtures on the stage plot and in PDF
+  reports are not yet.
