@@ -20,6 +20,10 @@ const ELEMENT_CATEGORY = {
   switcher: 'video',
   screen: 'video',
   projector: 'video',
+  moving_light: 'stage',
+  static_light: 'stage',
+  led_fixture: 'stage',
+  hazer: 'stage',
 };
 
 const DEVICE_CATEGORY = {
@@ -43,6 +47,7 @@ const DEVICE_CATEGORY = {
   computer: 'video',
   screen: 'video',
   projector: 'video',
+  fixture: 'stage',
 };
 
 // Network equipment and patchbays can carry any of the signals, so they sit under Other.

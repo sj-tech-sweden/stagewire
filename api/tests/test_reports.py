@@ -34,6 +34,7 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
             "channel-list",
             "patch-sheet",
             "stage-plot",
+            "fixture-patch",
         }
         assert next(item for item in types_response.json() if item["report_type"] == "patch-sheet")[
             "requires_patchpoint"

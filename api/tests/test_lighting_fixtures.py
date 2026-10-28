@@ -311,3 +311,35 @@ async def test_stockwire_weight_and_power_win_over_manual_values(auth_headers, m
         assert listed[manual["id"]]["weight_kg_effective"] == 5
         assert listed[manual["id"]]["weight_source"] == "manual"
         assert listed[manual["id"]]["power_source"] is None
+
+
+async def test_fixture_patch_report_lists_fixtures_with_their_dmx_checks(auth_headers, monkeypatch):
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Report")
+        for row in (
+            {"device_name": "Robin Report A", "universe": 1, "dmx_address": 1, "footprint": 10},
+            {"device_name": "Robin Report B", "universe": 1, "dmx_address": 5, "footprint": 4},
+        ):
+            await client.post(f"{BASE}/jobs/{job_id}/fixtures", json=row, headers=auth_headers)
+        types = (await client.get(f"{BASE}/reports/types", headers=auth_headers)).json()
+        assert "lighting.fixture-patch" in {t["key"] for t in types}
+        report = await client.get(
+            f"{BASE}/reports/jobs/{job_id}/lighting/fixture-patch/pdf", headers=auth_headers
+        )
+        assert report.status_code == 200
+        text = " ".join(
+            " ".join(page.extract_text().split())
+            for page in PdfReader(BytesIO(report.content)).pages
+        )
+        assert "Robin Report A" in text
+        assert "Robin Report B" in text
+        assert "Overlap" in text

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
+from app.domains.lighting import service as lighting_service
 from app.domains.reports.cable_routing import routed_cable_paths
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
@@ -206,6 +207,32 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
     }
 
 
+async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
+    job = await _load_job(db, job_id)
+    fixtures = await lighting_service.list_fixtures(db, job_id)
+    flags = lighting_service.dmx_flags(fixtures)
+    names = {str(device.id): device.name for device in job.devices}
+    rows = []
+    for fixture in fixtures:
+        overlap, overflow = flags[fixture.id]
+        checks = [label for label, hit in (("Overlap", overlap), ("> 512", overflow)) if hit]
+        rows.append(
+            {
+                "universe": fixture.universe if fixture.universe is not None else "",
+                "dmx_address": fixture.dmx_address if fixture.dmx_address is not None else "",
+                "device_name": names.get(str(fixture.device_id), "") if fixture.device_id else "",
+                "fixture_type": fixture.fixture_type,
+                "channel_mode": fixture.channel_mode,
+                "footprint": fixture.footprint if fixture.footprint is not None else "",
+                "location": fixture.location,
+                "gel": fixture.gel,
+                "purpose": fixture.purpose,
+                "check": " · ".join(checks),
+            }
+        )
+    return {"job": job, "fixture_patch": rows}
+
+
 async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     sheets: dict[str, dict] = {}
@@ -329,6 +356,32 @@ _CHANNEL_COLUMNS = (
     ReportField(key="connector", label="Connector"),
     ReportField(key="phantom_power", label="48V"),
     ReportField(key="notes", label="Notes"),
+)
+
+_FIXTURE_COLUMNS = (
+    ReportField(key="universe", label="Universe"),
+    ReportField(key="dmx_address", label="Address"),
+    ReportField(key="device_name", label="Device"),
+    ReportField(key="fixture_type", label="Fixture type"),
+    ReportField(key="channel_mode", label="Mode"),
+    ReportField(key="footprint", label="Footprint"),
+    ReportField(key="location", label="Location / truss"),
+    ReportField(key="gel", label="Gel / colour"),
+    ReportField(key="purpose", label="Purpose"),
+    ReportField(key="check", label="Check"),
+)
+
+_FIXTURE_COLUMNS_SV = (
+    ReportField(key="universe", label="Universum"),
+    ReportField(key="dmx_address", label="Adress"),
+    ReportField(key="device_name", label="Enhet"),
+    ReportField(key="fixture_type", label="Armaturtyp"),
+    ReportField(key="channel_mode", label="Läge"),
+    ReportField(key="footprint", label="Kanaler"),
+    ReportField(key="location", label="Plats / truss"),
+    ReportField(key="gel", label="Filter / färg"),
+    ReportField(key="purpose", label="Användning"),
+    ReportField(key="check", label="Kontroll"),
 )
 
 _STAGE_COLUMNS = (
@@ -575,6 +628,53 @@ REPORT_DEFINITIONS = (
                 key="stage_plot_elements",
                 label="Scenelement",
                 columns=list(_STAGE_COLUMNS_SV),
+            ),
+        ),
+    ),
+    ReportDefinition(
+        domain="lighting",
+        report_type="fixture-patch",
+        name="Fixture patch",
+        description=(
+            "DMX universe and address, fixture type, mode, footprint, location, gel and purpose "
+            "for each fixture."
+        ),
+        default_html=(
+            "<h1>{{job.title}} — Fixture patch</h1>"
+            "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+            "<h2>Fixtures</h2>{{table:fixture_patch}}"
+        ),
+        fields=(
+            ReportField(key="job.title", label="Job title"),
+            ReportField(key="job.venue_name", label="Venue"),
+        ),
+        tables=(
+            ReportTable(
+                key="fixture_patch",
+                label="Fixtures",
+                columns=list(_FIXTURE_COLUMNS),
+            ),
+        ),
+        context_builder=_fixture_patch_context,
+        name_sv="Armaturpatch",
+        description_sv=(
+            "DMX-universum och adress, armaturtyp, läge, kanaler, plats, filter och användning "
+            "för varje armatur."
+        ),
+        default_html_sv=(
+            "<h1>{{job.title}} — Armaturpatch</h1>"
+            "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+            "<h2>Armaturer</h2>{{table:fixture_patch}}"
+        ),
+        fields_sv=(
+            ReportField(key="job.title", label="Jobbtitel"),
+            ReportField(key="job.venue_name", label="Spelplats"),
+        ),
+        tables_sv=(
+            ReportTable(
+                key="fixture_patch",
+                label="Armaturer",
+                columns=list(_FIXTURE_COLUMNS_SV),
             ),
         ),
     ),
