@@ -309,6 +309,12 @@ class AudioDeviceBase(BaseModel):
     throw_ratio_min: float | None = Field(None, gt=0)
     throw_ratio_max: float | None = Field(None, gt=0)
     image_aspect_ratio: float | None = Field(None, gt=0)
+    weight_kg: float | None = Field(None, gt=0)
+    power_watts: float | None = Field(None, gt=0)
+    fixture_type: str | None = None
+    channel_mode: str | None = None
+    footprint_channels: int | None = Field(None, ge=1)
+    default_gel: str | None = None
 
 
 class AudioDeviceCreate(AudioDeviceBase):
@@ -341,6 +347,10 @@ class AudioDeviceRead(AudioDeviceBase):
     stockwire_inputs: int | None = None
     stockwire_outputs: int | None = None
     stockwire_connectors: list[str] = []
+    weight_kg_effective: float | None = None
+    weight_source: str | None = None
+    power_watts_effective: float | None = None
+    power_source: str | None = None
 
 
 __all__ = [

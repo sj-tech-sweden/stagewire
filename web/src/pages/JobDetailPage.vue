@@ -60,6 +60,13 @@
               class="q-ml-sm"
               @click="router.push({ path: `/jobs/${route.params.jobId}/devices`, query: subPageQuery })"
             />
+            <q-btn
+              flat
+              icon="lightbulb"
+              :label="t('lights.nav')"
+              class="q-ml-sm"
+              @click="router.push({ path: `/jobs/${route.params.jobId}/lights`, query: subPageQuery })"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip

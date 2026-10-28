@@ -162,6 +162,12 @@ class AudioDevice(Base):
     throw_ratio_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     throw_ratio_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     image_aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    power_watts: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fixture_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    footprint_channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_gel: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

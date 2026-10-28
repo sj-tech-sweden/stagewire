@@ -8,6 +8,7 @@ const routes = [
       { path: 'jobs/:jobId/patch-sheets', component: () => import('@/pages/PatchSheetsPage.vue') },
       { path: 'jobs/:jobId/stage-plot', component: () => import('@/pages/StagePlotPage.vue') },
       { path: 'jobs/:jobId/devices', component: () => import('@/pages/DevicesPage.vue') },
+      { path: 'jobs/:jobId/lights', component: () => import('@/pages/LightingPage.vue') },
       {
         path: 'jobs/:jobId/video',
         redirect: (to) => ({ path: `/jobs/${to.params.jobId}`, query: { view: 'video' } }),

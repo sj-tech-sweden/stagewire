@@ -40,6 +40,12 @@ async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
 
 
 DEVICE_CLEARABLE_KEYS = {
+    "weight_kg",
+    "power_watts",
+    "fixture_type",
+    "channel_mode",
+    "footprint_channels",
+    "default_gel",
     "sensor_width_mm",
     "focal_min_mm",
     "focal_max_mm",
