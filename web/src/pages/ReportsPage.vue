@@ -165,6 +165,27 @@
                   :label="t('reports.showSpeakerCoverage')"
                 />
                 <q-toggle
+                  v-model="draft.stage_plot_options.show_camera_coverage"
+                  class="col-12 col-sm-6"
+                  :label="t('reports.showCameraCoverage')"
+                />
+                <q-toggle
+                  v-model="draft.stage_plot_options.show_projector_coverage"
+                  class="col-12 col-sm-6"
+                  :label="t('reports.showProjectorCoverage')"
+                />
+                <q-btn-toggle
+                  v-model="draft.stage_plot_options.camera_view_mode"
+                  class="col-12"
+                  dense
+                  no-caps
+                  toggle-color="primary"
+                  :options="[
+                    { label: t('reports.cameraViewRange'), value: 'range' },
+                    { label: t('reports.cameraViewChosen'), value: 'chosen' },
+                  ]"
+                />
+                <q-toggle
                   v-model="draft.stage_plot_options.show_cables"
                   class="col-12 col-sm-6"
                   :label="t('reports.showCables')"
@@ -642,6 +663,9 @@ const draft = reactive({
   stage_plot_options: {
     view: 'stage',
     show_coverage: false,
+    show_camera_coverage: false,
+    show_projector_coverage: false,
+    camera_view_mode: 'range',
     show_cables: false,
     show_cableways: false,
   },
@@ -754,6 +778,9 @@ function applyTemplate(template) {
   Object.assign(draft.stage_plot_options, {
     view: 'stage',
     show_coverage: false,
+    show_camera_coverage: false,
+    show_projector_coverage: false,
+    camera_view_mode: 'range',
     show_cables: false,
     show_cableways: false,
     ...(template.stage_plot_options || {}),

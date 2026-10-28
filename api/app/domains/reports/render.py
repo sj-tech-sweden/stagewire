@@ -32,7 +32,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.domains.reports.cable_routing import element_centre
 from app.domains.reports.models import ReportLetterhead, ReportTemplate
+from app.domains.reports.plot_geometry import (
+    IMAGE_ASPECT,
+    coverage_focals,
+    fill_distance_range,
+    fit_status,
+    horizontal_fov_deg,
+    nearest_screen,
+    projection_geometry,
+    view_polygon,
+)
 from app.domains.reports.registry import REPORT_DEFINITIONS_BY_KEY, ReportDefinition
 
 FIELD_PATTERN = re.compile(r"\{\{([a-zA-Z0-9_.-]+)\}\}")
@@ -42,6 +53,9 @@ MAX_TEMPLATE_HTML_LENGTH = 100_000
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
     "show_coverage": False,
+    "show_camera_coverage": False,
+    "show_projector_coverage": False,
+    "camera_view_mode": "range",
     "show_cables": False,
     "show_cableways": False,
 }
@@ -263,6 +277,27 @@ def _stage_plot_drawing(
             )
         ]
 
+    audience = context.get("audience") or []
+    if use_venue and len(audience) >= 3:
+        drawing.add(
+            Polygon(
+                [
+                    coordinate
+                    for point_x, point_y in audience
+                    for coordinate in (point_x * scale, drawing_height - point_y * scale)
+                ],
+                strokeColor=colors.HexColor("#6d4c41"),
+                fillColor=colors.Color(0.43, 0.3, 0.25, alpha=0.12),
+                strokeWidth=0.8,
+            )
+        )
+    view_box = {
+        "minX": -offset_x,
+        "minY": -offset_y,
+        "maxX": drawing_width_cm - offset_x,
+        "maxY": drawing_height_cm - offset_y,
+    }
+
     if selected_options["show_coverage"]:
         speaker_types = {"speaker", "speaker_main", "speaker_sub", "speaker_delay"}
         for element in context.get("elements", []):
@@ -273,8 +308,7 @@ def _stage_plot_drawing(
             if angle <= 0 or distance <= 0:
                 continue
             rotation = radians(float(element.rotation or 0))
-            center_x = offset_x + float(element.position_x or 0) + float(element.width_cm or 0) / 2
-            center_y = offset_y + float(element.position_y or 0) + float(element.height_cm or 0) / 2
+            center_x, center_y = element_centre(element)
             facing = atan2(-cos(rotation), sin(rotation))
             half_angle = min(radians(angle), 2 * 3.141592653589793) / 2
             arc_steps = max(8, min(48, int(angle / 6) + 1))
@@ -294,6 +328,94 @@ def _stage_plot_drawing(
                     strokeColor=colors.HexColor("#d88920"),
                     fillColor=colors.Color(1, 0.72, 0.3, alpha=0.22),
                     strokeWidth=0.5,
+                )
+            )
+
+    if selected_options["show_camera_coverage"]:
+        cameras = context.get("cameras") or {}
+        for element in context.get("elements", []):
+            spec = cameras.get(str(element.id))
+            if not spec or not spec.get("sensor_width_mm") or not spec.get("focal_min_mm"):
+                continue
+            apex = element_centre(element)
+            rotation = float(element.rotation or 0)
+            ends = coverage_focals(
+                spec["focal_min_mm"],
+                spec.get("focal_max_mm"),
+                selected_options.get("camera_view_mode", "range"),
+                spec.get("focal_mm"),
+            )
+            for end in ends:
+                fov = horizontal_fov_deg(spec["sensor_width_mm"], end["focal_mm"])
+                points = view_polygon(apex, rotation, fov, view_box)
+                drawing.add(
+                    Polygon(
+                        drawing_points(points),
+                        strokeColor=colors.HexColor("#42a5f5"),
+                        fillColor=colors.Color(0.26, 0.65, 0.96, alpha=0.16)
+                        if end["filled"]
+                        else colors.Color(1, 1, 1, alpha=0),
+                        strokeWidth=0.6,
+                        strokeDashArray=None if end["filled"] else [3, 2],
+                    )
+                )
+            if spec.get("max_distance_m"):
+                first = ends[0]
+                fov = horizontal_fov_deg(spec["sensor_width_mm"], first["focal_mm"])
+                points = view_polygon(
+                    apex, rotation, fov, view_box, max_distance_cm=spec["max_distance_m"] * 100
+                )
+                drawing.add(
+                    Polygon(
+                        drawing_points(points),
+                        strokeColor=colors.HexColor("#42a5f5"),
+                        fillColor=colors.Color(1, 1, 1, alpha=0),
+                        strokeWidth=0.6,
+                        strokeDashArray=[1, 2],
+                    )
+                )
+
+    if selected_options["show_projector_coverage"]:
+        devices_by_id = context.get("devices_by_id") or {}
+        elements = context.get("elements", [])
+        for element in elements:
+            if element.element_type != "projector":
+                continue
+            device = devices_by_id.get(str(element.linked_device_id))
+            screen = nearest_screen(element, elements)
+            if device is None or screen is None:
+                continue
+            aspect = float(device.image_aspect_ratio or IMAGE_ASPECT)
+            geometry = projection_geometry(
+                element_centre(element),
+                element_centre(screen),
+                float(screen.rotation or 0),
+                float(screen.width_cm or 0),
+                float(screen.height_cm or 0),
+                aspect,
+            )
+            fill_range = fill_distance_range(
+                device.throw_ratio_min,
+                device.throw_ratio_max,
+                float(screen.width_cm or 0),
+                float(screen.height_cm or 0),
+                aspect,
+            )
+            status = fit_status(geometry["distance_cm"] / 100, fill_range)
+            zone_colour = "#66bb6a" if status == "fits" else "#ffa726" if status else "#90a4af"
+            drawing.add(
+                Polygon(
+                    drawing_points(geometry["cone"]),
+                    strokeColor=colors.HexColor("#ab47bc"),
+                    fillColor=colors.Color(0.67, 0.28, 0.74, alpha=0.14),
+                    strokeWidth=0.5,
+                )
+            )
+            drawing.add(
+                PolyLine(
+                    drawing_points(geometry["zone"]),
+                    strokeColor=colors.HexColor(zone_colour),
+                    strokeWidth=2,
                 )
             )
 
@@ -326,16 +448,11 @@ def _stage_plot_drawing(
         x_cm = offset_x + float(element.position_x or 0)
         y_cm = offset_y + float(element.position_y or 0)
         angle = radians(float(element.rotation or 0))
-        corners = [
-            (-width_cm / 2, -height_cm / 2),
-            (width_cm / 2, -height_cm / 2),
-            (width_cm / 2, height_cm / 2),
-            (-width_cm / 2, height_cm / 2),
-        ]
+        corners = [(0, 0), (width_cm, 0), (width_cm, height_cm), (0, height_cm)]
         rotated = [
             (
-                x_cm + width_cm / 2 + x * cos(angle) - y * sin(angle),
-                y_cm + height_cm / 2 + x * sin(angle) + y * cos(angle),
+                x_cm + x * cos(angle) - y * sin(angle),
+                y_cm + x * sin(angle) + y * cos(angle),
             )
             for x, y in corners
         ]
@@ -369,8 +486,9 @@ def _stage_plot_drawing(
                 strokeWidth=0.8,
             )
         )
-        center_x = x_cm + width_cm / 2
-        center_y = y_cm + height_cm / 2
+        element_x, element_y = element_centre(element)
+        center_x = offset_x + element_x
+        center_y = offset_y + element_y
         if not (0 <= center_x <= drawing_width_cm and 0 <= center_y <= drawing_height_cm):
             continue
         label = (element.label or element.element_type or "")[:24]

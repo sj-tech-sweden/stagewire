@@ -206,3 +206,13 @@ test('letterhead printable-area preview updates before margins are saved', async
     .poll(() => printableArea.evaluate((element) => element.style.top))
     .not.toBe(initialTop);
 });
+
+test('the stage plot template offers camera and projector coverage selectors', async ({ page }) => {
+  await login(page);
+  await page.goto('/reports');
+  await page.getByRole('combobox', { name: 'Template', exact: true }).click();
+  await page.getByText('Stage plot · Default', { exact: true }).click();
+  await expect(page.getByText('Camera coverage', { exact: true })).toBeVisible();
+  await expect(page.getByText('Projector coverage', { exact: true })).toBeVisible();
+  await expect(page.getByText('Chosen focal', { exact: true })).toBeVisible();
+});
