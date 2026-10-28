@@ -15,6 +15,16 @@ export function focalInUse(chosenMm, focalMinMm, focalMaxMm) {
   return focalMinMm;
 }
 
+// The focal lengths to draw: the widest end of the lens, and for a zoom also the
+// narrowest end. A fixed lens has only the one.
+export function coverageFocals(focalMinMm, focalMaxMm) {
+  if (!focalMinMm) return [];
+  const zoom = focalMaxMm && focalMaxMm > focalMinMm;
+  const ends = [{ focalMm: focalMinMm, wide: true }];
+  if (zoom) ends.push({ focalMm: focalMaxMm, wide: false });
+  return ends;
+}
+
 // Direction the camera faces, as a vector.
 export function facing(rotationDeg) {
   const t = (rotationDeg * Math.PI) / 180;

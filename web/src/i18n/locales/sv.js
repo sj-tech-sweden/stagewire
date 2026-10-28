@@ -584,6 +584,7 @@ export default {
     linkLens: 'Objektiv',
     focalLength: 'Brännvidd',
     cameraNeedsValues: 'Ange sensorbredd och brännviddsintervall på kameran eller objektivet för att se dess vy.',
+    fovRangeCaption: 'Horisontell vy {wide}° vid vidvinkel till {tele}° vid tele',
     fovCaption: 'Horisontell vy {deg}°',
     specsFromStockwireShort: 'från Stockwire',
     specsManualShort: 'angivna värden',

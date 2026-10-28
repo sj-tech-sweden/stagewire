@@ -584,6 +584,7 @@ export default {
     linkLens: 'Lens',
     focalLength: 'Focal length',
     cameraNeedsValues: 'Set the sensor width and focal range on the camera or its lens to see its view.',
+    fovRangeCaption: 'Horizontal view {wide}° wide to {tele}° tele',
     fovCaption: 'Horizontal view {deg}°',
     specsFromStockwireShort: 'from Stockwire',
     specsManualShort: 'entered values',

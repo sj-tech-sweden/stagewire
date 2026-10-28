@@ -1124,7 +1124,7 @@ import { useStagePlotStore } from '@/stores/stageplot';
 import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
-import { horizontalFovDeg, viewPolygon } from '@/utils/camera';
+import { coverageFocals, horizontalFovDeg, viewPolygon } from '@/utils/camera';
 import {
   buildCableRows,
   elementCentre,
@@ -2303,10 +2303,15 @@ function cameraSpec(el) {
 }
 function cameraCaption(el) {
   const spec = cameraSpec(el);
-  if (!spec || !spec.sensor_width_mm || !spec.focal_mm) return t('stagePlot.cameraNeedsValues');
-  const fov = horizontalFovDeg(spec.sensor_width_mm, spec.focal_mm).toFixed(1);
+  if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) return t('stagePlot.cameraNeedsValues');
+  const ends = coverageFocals(spec.focal_min_mm, spec.focal_max_mm);
+  const fovs = ends.map((end) => horizontalFovDeg(spec.sensor_width_mm, end.focalMm).toFixed(1));
+  const view =
+    fovs.length > 1
+      ? t('stagePlot.fovRangeCaption', { wide: fovs[0], tele: fovs[1] })
+      : t('stagePlot.fovCaption', { deg: fovs[0] });
   const source = spec.source === 'stockwire' ? t('stagePlot.specsFromStockwireShort') : t('stagePlot.specsManualShort');
-  return `${t('stagePlot.fovCaption', { deg: fov })} · ${source}`;
+  return `${view} · ${source}`;
 }
 const cameraViews = computed(() => {
   if (!showCameraCoverage.value) return [];
@@ -2320,26 +2325,29 @@ const cameraViews = computed(() => {
   const views = [];
   for (const el of visibleElements.value) {
     const spec = cameraSpecs.value[el.id];
-    if (!spec || !spec.sensor_width_mm || !spec.focal_mm) continue;
+    if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) continue;
     const [cx, cy] = elementCentre(el);
-    const points = viewPolygon({
-      apex: { x: cx, y: cy },
-      rotationDeg: el.rotation || 0,
-      fovDeg: horizontalFovDeg(spec.sensor_width_mm, spec.focal_mm),
-      maxDistanceCm: spec.max_distance_m ? spec.max_distance_m * 100 : null,
-      box,
-    });
-    views.push({
-      id: el.id,
-      config: {
-        points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
-        closed: true,
-        fill: 'rgba(66, 165, 245, 0.16)',
-        stroke: 'rgba(66, 165, 245, 0.6)',
-        strokeWidth: 1,
-        listening: false,
-      },
-    });
+    for (const end of coverageFocals(spec.focal_min_mm, spec.focal_max_mm)) {
+      const points = viewPolygon({
+        apex: { x: cx, y: cy },
+        rotationDeg: el.rotation || 0,
+        fovDeg: horizontalFovDeg(spec.sensor_width_mm, end.focalMm),
+        maxDistanceCm: spec.max_distance_m ? spec.max_distance_m * 100 : null,
+        box,
+      });
+      views.push({
+        id: `${el.id}-${end.wide ? 'wide' : 'tele'}`,
+        config: {
+          points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
+          closed: true,
+          fill: end.wide ? 'rgba(66, 165, 245, 0.16)' : 'transparent',
+          stroke: 'rgba(66, 165, 245, 0.6)',
+          strokeWidth: 1,
+          dash: end.wide ? [] : [6, 4],
+          listening: false,
+        },
+      });
+    }
   }
   return views;
 });

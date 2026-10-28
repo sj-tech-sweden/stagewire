@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { focalInUse, horizontalFovDeg, viewPolygon } from '../../src/utils/camera';
+import { coverageFocals, focalInUse, horizontalFovDeg, viewPolygon } from '../../src/utils/camera';
 
 test('horizontal field of view follows the sensor and focal length', () => {
   expect(horizontalFovDeg(35, 55)).toBeCloseTo(35.3, 1);
@@ -38,4 +38,14 @@ test('the view stops at the maximum distance when one is set', () => {
   }
   const centre = poly[Math.floor(poly.length / 2)];
   expect(centre[1]).toBeCloseTo(300, 0);
+});
+
+test('a zoom draws its widest and narrowest ends, a fixed lens only one', () => {
+  expect(coverageFocals(2.84, 34.1)).toEqual([
+    { focalMm: 2.84, wide: true },
+    { focalMm: 34.1, wide: false },
+  ]);
+  expect(coverageFocals(50, null)).toEqual([{ focalMm: 50, wide: true }]);
+  expect(coverageFocals(50, 50)).toEqual([{ focalMm: 50, wide: true }]);
+  expect(coverageFocals(null, 50)).toEqual([]);
 });
