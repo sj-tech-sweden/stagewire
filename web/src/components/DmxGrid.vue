@@ -13,6 +13,17 @@
         @click="emit('update:modelValue', firstFree)"
       />
     </div>
+    <div
+      v-if="check.clashes.length || check.overflow"
+      class="text-negative text-caption q-mb-xs"
+    >
+      <span v-if="check.clashes.length">
+        {{ t('lights.clashesWith', { names: clashNames }) }}
+      </span>
+      <span v-if="check.overflow">
+        {{ t('lights.pastChannel512') }}
+      </span>
+    </div>
     <div class="dmx-cells">
       <button
         v-for="c in channels"
@@ -22,6 +33,8 @@
         :class="{
           'dmx-cell--taken': taken.has(c),
           'dmx-cell--selected': selected.has(c),
+          'dmx-cell--clash': selected.has(c) && taken.has(c),
+          'dmx-cell--was': was.has(c),
         }"
         :title="titleOf(c)"
         :aria-label="`${t('lights.channel')} ${c}`"
@@ -39,7 +52,13 @@
 <script setup>
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { DMX_CHANNELS, firstFreeAddress, footprintOf, occupiedChannels } from '@/utils/dmx';
+import {
+  clashesFor,
+  DMX_CHANNELS,
+  firstFreeAddress,
+  footprintOf,
+  occupiedChannels,
+} from '@/utils/dmx';
 
 const props = defineProps({
   modelValue: { type: Number, default: null },
@@ -47,6 +66,8 @@ const props = defineProps({
   universe: { type: Number, default: 1 },
   footprint: { type: Number, default: 1 },
   excludeId: { type: String, default: null },
+  // The address the fixture has now, shown as an outline while the new address is chosen.
+  originalAddress: { type: Number, default: null },
 });
 const emit = defineEmits(['update:modelValue']);
 const { t } = useI18n({ useScope: 'global' });
@@ -57,15 +78,26 @@ const usedCount = computed(() => taken.value.size);
 const firstFree = computed(() =>
   firstFreeAddress(props.fixtures, props.universe, props.footprint, props.excludeId),
 );
-const selected = computed(() => {
+
+const span = (start, width) => {
   const set = new Set();
-  if (props.modelValue) {
-    for (let c = props.modelValue; c < props.modelValue + footprintOf({ footprint: props.footprint }); c += 1) {
-      set.add(c);
-    }
-  }
+  if (start) for (let c = start; c < start + width && c <= DMX_CHANNELS; c += 1) set.add(c);
   return set;
-});
+};
+const selected = computed(() => span(props.modelValue, footprintOf({ footprint: props.footprint })));
+const was = computed(() =>
+  props.originalAddress && props.originalAddress !== props.modelValue
+    ? span(props.originalAddress, footprintOf({ footprint: props.footprint }))
+    : new Set(),
+);
+const check = computed(() =>
+  clashesFor(props.fixtures, props.universe, props.modelValue, props.footprint, props.excludeId),
+);
+const clashNames = computed(() =>
+  check.value.clashes
+    .map((f) => `${f.device_name || t('lights.fixtureSection')} (${f.dmx_address}–${f.dmx_address + footprintOf(f) - 1})`)
+    .join(', '),
+);
 
 function titleOf(c) {
   const f = taken.value.get(c);
@@ -97,5 +129,13 @@ function titleOf(c) {
 .dmx-cell--selected {
   background: var(--q-primary, #3f873f);
   color: #fff;
+}
+.dmx-cell--clash {
+  background: #e53935;
+  color: #fff;
+  box-shadow: inset 0 0 0 2px #ffcdd2;
+}
+.dmx-cell--was {
+  box-shadow: inset 0 0 0 2px #ffb300;
 }
 </style>

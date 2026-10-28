@@ -181,6 +181,10 @@ SQLite test suite.
   fixture's footprint. A type can have several modes, and an MVR import keeps every mode
   its GDTF file defines. A type also holds a manual weight and power, used for loads on the
   rigging tab when the device gives no value.
+- Before saving, the address field warns when the fixture's run would share channels with
+  another fixture in its universe, or run past channel 512. The **Pick from grid** popup
+  shows the same: the run is drawn in place, clashing channels are red, and the fixture's
+  current address is outlined in amber while you choose.
 - The fixture patch is reported from the **Reports** page like any other report
   (`lighting.fixture-patch`).
 - A row can be linked to a fixture device by typing its name. Typing a new name creates

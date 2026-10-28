@@ -37,3 +37,18 @@ export function firstFreeAddress(fixtures, universe, footprint, excludeId = null
   }
   return null;
 }
+
+// The fixtures a run of `footprint` channels from `start` would share channels with, and
+// whether the run goes past channel 512. Used to warn before a fixture is saved.
+export function clashesFor(fixtures, universe, start, footprint, excludeId = null) {
+  if (!start) return { clashes: [], overflow: false };
+  const width = Math.max(1, Number(footprint) || 1);
+  const last = start + width - 1;
+  const clashes = [];
+  for (const f of fixtures || []) {
+    if (f.id === excludeId || f.universe !== universe || !f.dmx_address) continue;
+    const fLast = f.dmx_address + footprintOf(f) - 1;
+    if (start <= fLast && f.dmx_address <= last) clashes.push(f);
+  }
+  return { clashes, overflow: last > DMX_CHANNELS };
+}

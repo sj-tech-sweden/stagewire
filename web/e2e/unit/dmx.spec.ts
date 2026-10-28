@@ -25,3 +25,13 @@ test('no free run returns null', () => {
   const full = [{ id: 'x', universe: 1, dmx_address: 1, footprint: 512 }];
   expect(firstFreeAddress(full, 1, 1)).toBeNull();
 });
+
+test('a run that shares channels with other fixtures, or runs past 512, is reported', async () => {
+  const { clashesFor } = await import('../../src/utils/dmx');
+  const result = clashesFor(fixtures, 1, 10, 8, null);
+  expect(result.clashes.map((f) => f.id)).toEqual(['a']);
+  expect(clashesFor(fixtures, 1, 17, 2, null).clashes).toEqual([]);
+  expect(clashesFor(fixtures, 1, 1, 16, 'a').clashes).toEqual([]);
+  expect(clashesFor(fixtures, 1, 510, 4, null).overflow).toBe(true);
+  expect(clashesFor(fixtures, 1, 510, 2, null).overflow).toBe(false);
+});

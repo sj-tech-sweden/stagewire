@@ -225,6 +225,19 @@
             </div>
             <div class="row q-gutter-xs items-end q-mt-xs">
               <q-select
+                v-model="newNode.device_id"
+                :options="deviceOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="col"
+                :label="t('rigging.standsFor')"
+                :hint="t('rigging.standsForHint')"
+              />
+            </div>
+            <div class="row q-gutter-xs items-end q-mt-xs">
+              <q-select
                 v-model="newOutput.connector"
                 :options="connectorOptions"
                 emit-value
@@ -492,6 +505,7 @@ const jobId = props.jobId;
 const summary = ref(null);
 const loads = ref([]);
 const nodes = ref([]);
+const devices = ref([]);
 const catalog = ref([]);
 const outlets = ref([]);
 const loading = ref(false);
@@ -503,6 +517,7 @@ const newNode = reactive({
   kind: 'distro',
   parent_id: null,
   feed_connector: null,
+  device_id: null,
   venue_outlet_id: null,
   rating_amps: null,
   outputs: [],
@@ -520,6 +535,9 @@ const phaseChoices = [
   { value: 'L2', label: 'L2' },
   { value: 'L3', label: 'L3' },
 ];
+const deviceOptions = computed(() =>
+  devices.value.map((d) => ({ value: d.id, label: d.name || '—' })),
+);
 const connectorOptions = computed(() =>
   catalog.value.map((c) => ({ value: c.key, label: c.label })),
 );
@@ -582,19 +600,21 @@ function statusLabel(status) {
 }
 
 function statusColor(status) {
-  return { ok: 'positive', warn: 'warning', over: 'negative', unpowered: 'grey-7' }[status] || 'grey-7';
+  return { ok: 'positive', warn: 'warning', over: 'negative', unpowered: 'grey-7', unrated: 'warning' }[status] || 'grey-7';
 }
 
 async function fetchAll() {
   loading.value = true;
   error.value = '';
   try {
-    const [summaryRes, nodesRes, catalogRes, outletsRes] = await Promise.all([
+    const [summaryRes, nodesRes, catalogRes, outletsRes, devicesRes] = await Promise.all([
       api.get(`/jobs/${jobId}/rigging/summary`),
       api.get(`/jobs/${jobId}/power-nodes`),
       api.get('/power-connectors'),
       api.get(`/jobs/${jobId}/power-outlets`),
+      api.get(`/jobs/${jobId}/devices`),
     ]);
+    devices.value = devicesRes.data;
     summary.value = summaryRes.data;
     loads.value = summaryRes.data.loads;
     nodes.value = nodesRes.data;
@@ -651,6 +671,7 @@ function addNode() {
     parent_id: newNode.kind === 'source' ? null : newNode.parent_id,
     feed_connector: newNode.feed_connector,
     venue_outlet_id: newNode.venue_outlet_id || null,
+    device_id: newNode.device_id || null,
     rating_amps: newNode.rating_amps || null,
     outputs: newNode.outputs,
   };
@@ -660,6 +681,7 @@ function addNode() {
     newNode.parent_id = null;
     newNode.feed_connector = null;
     newNode.venue_outlet_id = null;
+    newNode.device_id = null;
     newNode.rating_amps = null;
     newNode.outputs = [];
   });

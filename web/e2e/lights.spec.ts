@@ -85,3 +85,17 @@ test('a new fixture pre-fills the first free DMX address, and the grid sets anot
   await page.getByRole('button', { name: 'Channel 40', exact: true }).click();
   await expect(page.getByLabel('DMX address')).toHaveValue('40');
 });
+
+test('an address that overlaps another fixture is flagged before saving', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Lights Clash ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/fixtures`, { device_name: 'Clash A', universe: 1, dmx_address: 1, footprint: 16 });
+
+  await page.goto(`/jobs/${jobId}?view=lights`);
+  await page.getByRole('button', { name: 'Add fixture' }).click();
+  await page.getByLabel('DMX address').fill('5');
+  await expect(page.getByText('Overlaps Clash A', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Pick from grid' }).click();
+  await expect(page.getByText('Overlaps Clash A', { exact: false }).last()).toBeVisible();
+});

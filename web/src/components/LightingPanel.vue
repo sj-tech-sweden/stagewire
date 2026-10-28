@@ -172,6 +172,17 @@
             @new-value="(val, done) => createMode(val, done)"
             @update:model-value="onModeChange"
           />
+          <div
+            v-if="addressCheck.clashes.length || addressCheck.overflow"
+            class="text-negative text-caption"
+          >
+            <span v-if="addressCheck.clashes.length">
+              {{ t('lights.clashesWith', { names: addressClashNames }) }}
+            </span>
+            <span v-if="addressCheck.overflow">
+              {{ t('lights.pastChannel512') }}
+            </span>
+          </div>
           <div class="row items-center q-gutter-sm">
             <span class="text-caption text-grey-7 col">
               {{ t('lights.gridEntry') }}
@@ -338,6 +349,7 @@
             :universe="form.universe || 1"
             :footprint="form.footprint || 1"
             :exclude-id="editTarget?.id || null"
+            :original-address="editTarget?.dmx_address ?? null"
             @update:model-value="pickFromGrid"
           />
         </q-card-section>
@@ -409,7 +421,7 @@ import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import DmxGrid from '@/components/DmxGrid.vue';
-import { firstFreeAddress } from '@/utils/dmx';
+import { clashesFor, firstFreeAddress } from '@/utils/dmx';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -531,6 +543,22 @@ function suggestAddress() {
   lastSuggestion = firstFreeAddress(fixtures.value, form.universe || 1, form.footprint || 1) ?? null;
   form.dmx_address = lastSuggestion;
 }
+
+// The overlap of the address in the form, shown before saving.
+const addressCheck = computed(() =>
+  clashesFor(
+    fixtures.value,
+    form.universe || 1,
+    form.dmx_address,
+    form.footprint || 1,
+    editTarget.value?.id || null,
+  ),
+);
+const addressClashNames = computed(() =>
+  addressCheck.value.clashes
+    .map((f) => `${f.device_name || t('lights.fixtureSection')} (${f.dmx_address}–${f.dmx_address + (f.footprint || 1) - 1})`)
+    .join(', '),
+);
 
 function pickFromGrid(address) {
   form.dmx_address = address;
