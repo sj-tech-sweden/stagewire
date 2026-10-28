@@ -38,10 +38,10 @@ export function parseLength(text) {
     .trim()
     .replace(',', '.');
   let value;
-  let m = s.match(/^(\d+)\s+(\d+)\/(\d+)$/);
+  let m = s.match(/^(\d+)\s+(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
   if (m) {
     value = Number(m[1]) + Number(m[2]) / Number(m[3]);
-  } else if ((m = s.match(/^(\d+)\/(\d+)$/))) {
+  } else if ((m = s.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/))) {
     value = Number(m[1]) / Number(m[2]);
   } else if (/^\d+(\.\d+)?$/.test(s)) {
     value = Number(s);

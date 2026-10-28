@@ -14,6 +14,8 @@ test('lengths accept decimals, comma decimals, fractions and mixed numbers', () 
   expect(parseLength('21,6')).toBe(21.6);
   expect(parseLength('7/8')).toBe(0.875);
   expect(parseLength('1 1/2')).toBe(1.5);
+  expect(parseLength('1/4.7')).toBeCloseTo(0.2128, 4);
+  expect(parseLength('1 1/4.5')).toBeCloseTo(1.2222, 4);
   expect(parseLength('0')).toBeNull();
   expect(parseLength('1/0')).toBeNull();
   expect(parseLength('abc')).toBeNull();
