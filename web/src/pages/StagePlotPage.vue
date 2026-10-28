@@ -695,6 +695,10 @@
                     :config="wedgeConfig(el)"
                   />
                   <v-rect :config="rectConfig(el)" />
+                  <v-rect
+                    v-if="el.element_type === 'screen'"
+                    :config="screenBarConfig(el)"
+                  />
                   <v-image
                     v-if="imageFor(el)"
                     :config="imageConfig(el)"
@@ -1148,7 +1152,15 @@ import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
 import { coverageFocals, horizontalFovDeg, viewPolygon } from '@/utils/camera';
-import { IMAGE_ASPECT, fillDistanceRangeM, fitStatus, projectionGeometry } from '@/utils/projection';
+import {
+  IMAGE_ASPECT,
+  fillDistanceRangeM,
+  fitStatus,
+  projectionGeometry,
+  projectorEnds,
+  targetScreen,
+  throwAngleDeg,
+} from '@/utils/projection';
 import {
   buildCableRows,
   elementCentre,
@@ -1663,6 +1675,18 @@ function rotateBy(step) {
   draft.value.rotation = ((((current + step) % 360) + 360) % 360);
   commitRotation();
 }
+function screenBarConfig(el) {
+  const thickness = Math.max(3, 2 * pxPerCm.value);
+  return {
+    x: 0,
+    y: (el.height_cm * pxPerCm.value - thickness) / 2,
+    width: el.width_cm * pxPerCm.value,
+    height: thickness,
+    fill: '#78909C',
+    cornerRadius: 1,
+    listening: false,
+  };
+}
 function rectConfig(el) {
   const def = defFor(el.element_type);
   const hi = highlightIds.value.includes(el.id);
@@ -1674,7 +1698,7 @@ function rectConfig(el) {
     // When an image is present it fills the box, so hide the coloured fill
     // (the picture shows instead of the box). Keep a transparent fill so the
     // shape still catches clicks/drag.
-    fill: hasImage && !hi ? 'transparent' : elementColor(el, def.color),
+    fill: (hasImage && !hi) || el.element_type === 'screen' ? 'transparent' : elementColor(el, def.color),
     cornerRadius: 4,
     opacity: hi || selected ? 1 : hasImage ? 1 : 0.85,
     stroke: hi ? '#35A853' : selected ? '#ffb300' : 'transparent',
@@ -2439,36 +2463,20 @@ const projectorCoverageLabels = {
   far: 'stagePlot.projectorFar',
 };
 function nearestScreen(el) {
-  const [px, py] = elementCentre(el);
-  let best = null;
-  let bestDistance = Infinity;
-  for (const s of store.elements) {
-    if (s.element_type !== 'screen') continue;
-    const [sx, sy] = elementCentre(s);
-    const distance = Math.hypot(sx - px, sy - py);
-    if (distance < bestDistance) {
-      best = s;
-      bestDistance = distance;
-    }
-  }
-  return best;
+  return targetScreen(el, store.elements);
 }
 function projectorState(el) {
   const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;
-  const screen = nearestScreen(el);
-  if (!device || !screen) return null;
-  const aspect = device.image_aspect_ratio || IMAGE_ASPECT;
+  if (!device || !device.throw_ratio_min) return null;
   const [px, py] = elementCentre(el);
+  const aspect = device.image_aspect_ratio || IMAGE_ASPECT;
+  const ends = projectorEnds(device.throw_ratio_min, device.throw_ratio_max);
+  const screen = nearestScreen(el);
+  if (!screen) {
+    return { device, ends, aspect, apex: [px, py], screen: null, range: null, status: null, distanceM: null };
+  }
   const [sx, sy] = elementCentre(screen);
-  const screenCm = {
-    x: sx,
-    y: sy,
-    rotationDeg: screen.rotation || 0,
-    widthCm: screen.width_cm,
-    heightCm: screen.height_cm,
-  };
-  const geometry = projectionGeometry({ apex: { x: px, y: py }, screen: screenCm, aspect });
-  const distanceM = geometry.distanceCm / 100;
+  const distanceM = Math.hypot(sx - px, sy - py) / 100;
   const range = fillDistanceRangeM({
     throwMin: device.throw_ratio_min,
     throwMax: device.throw_ratio_max,
@@ -2477,17 +2485,26 @@ function projectorState(el) {
     aspect,
   });
   return {
-    range,
+    device,
+    ends,
     aspect,
-    distanceM,
+    apex: [px, py],
+    screen: { x: sx, y: sy, rotationDeg: screen.rotation || 0 },
+    range,
     status: fitStatus(distanceM, range),
-    screenCm,
+    distanceM,
   };
 }
 function projectorCaption(el) {
-  if (!nearestScreen(el)) return t('stagePlot.projectorNoScreen');
   const state = projectorState(el);
-  if (!state || !state.range) return t('stagePlot.projectorNeedsValues');
+  if (!state) return t('stagePlot.projectorNeedsValues');
+  if (!state.screen) {
+    const wide = throwAngleDeg(state.ends[0].throwRatio).toFixed(1);
+    const narrow = state.ends[1] ? throwAngleDeg(state.ends[1].throwRatio).toFixed(1) : null;
+    return narrow
+      ? t('stagePlot.projectorWallRangeCaption', { wide, narrow })
+      : t('stagePlot.projectorWallCaption', { deg: wide });
+  }
   return t('stagePlot.projectorCaption', {
     min: state.range.minM.toFixed(1),
     max: state.range.maxM.toFixed(1),
@@ -2499,38 +2516,78 @@ const projectorViews = computed(() => {
   if (!showProjectorCoverage.value) return [];
   const s = pxPerCm.value;
   const toPx = ([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s];
+  const box = {
+    minX: -stageX.value,
+    minY: -stageY.value,
+    maxX: canvasW.value - stageX.value,
+    maxY: canvasH.value - stageY.value,
+  };
   const views = [];
   for (const el of visibleElements.value) {
     if (el.element_type !== 'projector') continue;
     const state = projectorState(el);
     if (!state) continue;
-    const [px, py] = elementCentre(el);
-    const geometry = projectionGeometry({
-      apex: { x: px, y: py },
-      screen: state.screenCm,
-      aspect: state.aspect,
-    });
-    const zoneColour = state.status === 'fits' ? '#66BB6A' : state.status ? '#FFA726' : '#90A4AE';
-    views.push({
-      id: `${el.id}-cone`,
-      config: {
-        points: geometry.cone.flatMap(toPx),
-        closed: true,
-        fill: 'rgba(171, 71, 188, 0.14)',
-        stroke: 'rgba(171, 71, 188, 0.6)',
-        strokeWidth: 1,
-        listening: false,
-      },
-    });
-    views.push({
-      id: `${el.id}-zone`,
-      config: {
-        points: geometry.zone.flatMap(toPx),
-        stroke: zoneColour,
-        strokeWidth: 3,
-        listening: false,
-      },
-    });
+    const [px, py] = state.apex;
+    const zoneColour = !state.screen
+      ? 'rgba(171, 71, 188, 0.8)'
+      : state.status === 'fits'
+        ? '#66BB6A'
+        : state.status
+          ? '#FFA726'
+          : '#90A4AE';
+    for (const end of state.ends) {
+      const key = end.filled ? 'min' : 'max';
+      const dash = end.filled ? [] : [6, 4];
+      if (state.screen) {
+        const geometry = projectionGeometry({
+          apex: { x: px, y: py },
+          screen: state.screen,
+          throwRatio: end.throwRatio,
+        });
+        views.push({
+          id: `${el.id}-cone-${key}`,
+          config: {
+            points: geometry.cone.flatMap(toPx),
+            closed: true,
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'transparent',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            strokeWidth: 1,
+            dash,
+            listening: false,
+          },
+        });
+        views.push({
+          id: `${el.id}-zone-${key}`,
+          config: {
+            points: geometry.zone.flatMap(toPx),
+            stroke: zoneColour,
+            strokeWidth: end.filled ? 3 : 2,
+            dash,
+            listening: false,
+          },
+        });
+      } else {
+        const points = viewPolygon({
+          apex: { x: px, y: py },
+          rotationDeg: el.rotation || 0,
+          fovDeg: throwAngleDeg(end.throwRatio),
+          maxDistanceCm: null,
+          box,
+        });
+        views.push({
+          id: `${el.id}-wall-${key}`,
+          config: {
+            points: points.flatMap(toPx),
+            closed: true,
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'transparent',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            strokeWidth: 1,
+            dash,
+            listening: false,
+          },
+        });
+      }
+    }
   }
   return views;
 });

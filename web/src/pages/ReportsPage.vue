@@ -235,6 +235,8 @@
                     :preview-job="previewJob"
                     :stage-plot-elements="stagePlotElements"
                     :stage-plot-cables="stagePlotCables"
+                    :stage-plot-devices="stagePlotDevices"
+                    :stage-plot-cameras="stagePlotCameras"
                     :stage-plot-options="draft.stage_plot_options"
                     :stage-width="previewJob?.stage_width_cm || 0"
                     :stage-height="previewJob?.stage_height_cm || 0"
@@ -640,6 +642,8 @@ const letterheads = ref([])
 const jobs = ref([])
 const stagePlotElements = ref([])
 const stagePlotCables = ref([])
+const stagePlotDevices = ref([])
+const stagePlotCameras = ref({})
 const previewPatchpointSheets = ref([])
 const previewPatchpointId = ref(null)
 const loadingPreviewPatchpoints = ref(false)
@@ -1109,17 +1113,21 @@ watch(previewJobId, async (jobId) => {
     loadingPreviewPatchpoints.value = false
     stagePlotElements.value = []
     stagePlotCables.value = []
+    stagePlotDevices.value = []
+    stagePlotCameras.value = {}
     return
   }
   loadingPreviewPatchpoints.value = true
   try {
     const [plotData, patchpointSheets] = await Promise.all([
-      store.fetchStagePlotData(jobId, previewJob.value?.cable_plan || {}),
+      store.fetchStagePlotData(jobId, previewJob.value || {}),
       store.fetchPatchSheets(jobId),
     ])
     if (previewJobId.value !== jobId) return
     stagePlotElements.value = plotData.elements
     stagePlotCables.value = plotData.cables
+    stagePlotDevices.value = plotData.devices
+    stagePlotCameras.value = plotData.cameras
     previewPatchpointSheets.value = patchpointSheets
     previewPatchpointId.value = patchpointSheets[0]?.device_id || null
   } catch (error) {

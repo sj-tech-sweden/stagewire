@@ -1,10 +1,28 @@
-// Projector throw distance against a screen, in metres. Throw ratio is distance divided
-// by image width. Images are 16:9, and the largest 16:9 image that fits the screen sets
-// the width.
+import { elementCentre } from './cables';
+
+// Projector throw, in cm and m. Throw ratio is distance divided by image width, so the
+// image width at a distance is distance / throw ratio, and the horizontal throw angle is
+// 2 * atan(1 / (2 * throw ratio)). Images are 16:9 unless an aspect ratio is given.
 export const IMAGE_ASPECT = 16 / 9;
 const FIXED_LENS_TOLERANCE = 0.05;
 
-// Distances (m) at which the projector can fill the screen, from its throw ratio range.
+// Horizontal angle (degrees) a projector throws across at this throw ratio.
+export function throwAngleDeg(throwRatio) {
+  if (!throwRatio) return null;
+  return (2 * Math.atan(1 / (2 * throwRatio)) * 180) / Math.PI;
+}
+
+// The throw ratios to draw: the shortest throw (widest angle, filled) and, for a zoom,
+// the longest (outline). A fixed lens has only the one.
+export function projectorEnds(throwMin, throwMax) {
+  if (!throwMin) return [];
+  const ends = [{ throwRatio: throwMin, filled: true }];
+  if (throwMax && throwMax > throwMin) ends.push({ throwRatio: throwMax, filled: false });
+  return ends;
+}
+
+// Distances (m) at which the projector fills a screen of the given size. The image is
+// the largest 16:9 (or the given aspect) that fits the screen.
 export function fillDistanceRangeM({ throwMin, throwMax, screenWidthCm, screenHeightCm, aspect = IMAGE_ASPECT }) {
   if (!throwMin || !screenWidthCm) return null;
   const limitCm = screenHeightCm ? Math.min(screenWidthCm, screenHeightCm * aspect) : screenWidthCm;
@@ -25,25 +43,20 @@ export function fitStatus(distanceM, range) {
   return 'fits';
 }
 
-// Plan-view shape of a projector throwing onto a screen. The image sits on the screen's
-// face that points at the projector. The cone runs from the projector to the image, and
-// the coverage zone is the image width on that face, centred on it. Screen rotation follows
-// the speaker convention: 0 faces up, width along x, depth along y.
-export function projectionGeometry({ apex, screen, aspect = IMAGE_ASPECT }) {
+// Plan-view triangle from a projector to a screen face at one throw ratio. The screen is
+// a line in plan (its height is vertical), so the face is its centre. The zone is the
+// image width at that distance, centred on the face.
+export function projectionGeometry({ apex, screen, throwRatio }) {
   const t = (screen.rotationDeg * Math.PI) / 180;
   const u = { x: Math.cos(t), y: Math.sin(t) };
-  const n = { x: Math.sin(t), y: -Math.cos(t) };
-  const towards = n.x * (apex.x - screen.x) + n.y * (apex.y - screen.y);
-  const side = towards < 0 ? -1 : 1;
-  const depth = (screen.heightCm || 0) / 2;
-  const face = { x: screen.x + side * n.x * depth, y: screen.y + side * n.y * depth };
-  const limitCm = screen.heightCm ? Math.min(screen.widthCm, screen.heightCm * aspect) : screen.widthCm;
-  const half = limitCm / 2;
-  const left = { x: face.x - u.x * half, y: face.y - u.y * half };
-  const right = { x: face.x + u.x * half, y: face.y + u.y * half };
+  const distanceCm = Math.hypot(screen.x - apex.x, screen.y - apex.y);
+  const imageWidthCm = distanceCm / throwRatio;
+  const half = imageWidthCm / 2;
+  const left = { x: screen.x - u.x * half, y: screen.y - u.y * half };
+  const right = { x: screen.x + u.x * half, y: screen.y + u.y * half };
   return {
-    imageWidthCm: limitCm,
-    distanceCm: Math.hypot(face.x - apex.x, face.y - apex.y),
+    imageWidthCm,
+    distanceCm,
     cone: [
       [apex.x, apex.y],
       [left.x, left.y],
@@ -54,4 +67,25 @@ export function projectionGeometry({ apex, screen, aspect = IMAGE_ASPECT }) {
       [right.x, right.y],
     ],
   };
+}
+
+// The screen a projector aims at: the nearest one in front of it. A screen behind the
+// projector is not its target, and a projector facing the wall has none.
+export function targetScreen(projector, elements) {
+  const [px, py] = elementCentre(projector);
+  const theta = ((projector.rotation || 0) * Math.PI) / 180;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const el of elements || []) {
+    if (el.element_type !== 'screen') continue;
+    const [sx, sy] = elementCentre(el);
+    const towards = Math.sin(theta) * (sx - px) - Math.cos(theta) * (sy - py);
+    if (towards <= 0) continue;
+    const distance = Math.hypot(sx - px, sy - py);
+    if (distance < bestDistance) {
+      best = el;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }

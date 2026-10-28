@@ -104,48 +104,58 @@ def fit_status(distance_m: float | None, fill_range: tuple[float, float] | None)
     return "fits"
 
 
+def throw_angle_deg(throw_ratio: float | None) -> float | None:
+    if not throw_ratio:
+        return None
+    return math.degrees(2 * math.atan(1 / (2 * throw_ratio)))
+
+
+def projector_ends(throw_min: float | None, throw_max: float | None) -> list[dict[str, Any]]:
+    """The shortest throw (widest, filled) and, for a zoom, the longest (outline)."""
+    if not throw_min:
+        return []
+    ends = [{"throw_ratio": throw_min, "filled": True}]
+    if throw_max and throw_max > throw_min:
+        ends.append({"throw_ratio": throw_max, "filled": False})
+    return ends
+
+
 def projection_geometry(
     apex: Point,
     screen_centre: Point,
     screen_rotation_deg: float,
-    screen_width_cm: float,
-    screen_height_cm: float,
-    aspect: float = IMAGE_ASPECT,
+    throw_ratio: float,
 ) -> dict[str, Any]:
-    """The image sits on the screen face that points at the projector."""
+    """Triangle from the projector to a screen face. The image width is distance / throw ratio."""
     theta = math.radians(screen_rotation_deg)
     u = (math.cos(theta), math.sin(theta))
-    n = (math.sin(theta), -math.cos(theta))
-    towards = n[0] * (apex[0] - screen_centre[0]) + n[1] * (apex[1] - screen_centre[1])
-    side = -1 if towards < 0 else 1
-    depth = (screen_height_cm or 0) / 2
-    face = (
-        screen_centre[0] + side * n[0] * depth,
-        screen_centre[1] + side * n[1] * depth,
-    )
-    limit_cm = (
-        min(screen_width_cm, screen_height_cm * aspect) if screen_height_cm else screen_width_cm
-    )
-    half = limit_cm / 2
-    left = (face[0] - u[0] * half, face[1] - u[1] * half)
-    right = (face[0] + u[0] * half, face[1] + u[1] * half)
+    distance = math.hypot(screen_centre[0] - apex[0], screen_centre[1] - apex[1])
+    image_width = distance / throw_ratio
+    half = image_width / 2
+    left = (screen_centre[0] - u[0] * half, screen_centre[1] - u[1] * half)
+    right = (screen_centre[0] + u[0] * half, screen_centre[1] + u[1] * half)
     return {
-        "image_width_cm": limit_cm,
-        "distance_cm": math.hypot(face[0] - apex[0], face[1] - apex[1]),
+        "image_width_cm": image_width,
+        "distance_cm": distance,
         "cone": [apex, left, right],
         "zone": [left, right],
     }
 
 
 def nearest_screen(projector: Any, elements: list[Any]) -> Any | None:
+    """The nearest screen the projector faces. A screen behind the projector is not its target."""
     best = None
     best_distance = math.inf
-    projector_centre = element_centre(projector)
+    px, py = element_centre(projector)
+    theta = math.radians(float(projector.rotation or 0))
     for element in elements:
         if element.element_type != "screen":
             continue
-        centre = element_centre(element)
-        distance = math.hypot(centre[0] - projector_centre[0], centre[1] - projector_centre[1])
+        sx, sy = element_centre(element)
+        towards = math.sin(theta) * (sx - px) - math.cos(theta) * (sy - py)
+        if towards <= 0:
+            continue
+        distance = math.hypot(sx - px, sy - py)
         if distance < best_distance:
             best = element
             best_distance = distance

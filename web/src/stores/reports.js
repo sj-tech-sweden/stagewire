@@ -82,16 +82,27 @@ export const useReportsStore = defineStore('reports', () => {
     return data
   }
 
-  async function fetchStagePlotData(jobId, cablePlan = {}) {
-    const [{ data: elements }, { data: lists }, { data: devices }] = await Promise.all([
-      api.get(`/jobs/${jobId}/plot-elements`),
-      api.get(`/jobs/${jobId}/channel-lists`),
-      api.get(`/jobs/${jobId}/devices`),
-    ])
-    const cables = buildCableRows({ lists, devices, elements, plan: cablePlan })
+  async function fetchStagePlotData(jobId, job = {}) {
+    const [{ data: elements }, { data: lists }, { data: devices }, { data: videoLists }, { data: cameras }] =
+      await Promise.all([
+        api.get(`/jobs/${jobId}/plot-elements`),
+        api.get(`/jobs/${jobId}/channel-lists`),
+        api.get(`/jobs/${jobId}/devices`),
+        api.get(`/jobs/${jobId}/video-lists`),
+        api.get(`/jobs/${jobId}/camera-specs`),
+      ])
+    const cables = buildCableRows({
+      lists,
+      devices,
+      elements,
+      plan: job.cable_plan || {},
+      videoLists,
+      audience: job.audience_polygon || [],
+      stageOffset: [job.stage_x_cm || 0, job.stage_y_cm || 0],
+    })
       .filter((cable) => cable.placed && !cable.hidden)
       .map(({ key, points }) => ({ id: key, points }))
-    return { elements, cables }
+    return { elements, cables, devices, cameras: cameras || {} }
   }
 
   async function fetchPatchSheets(jobId) {

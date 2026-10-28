@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import date, datetime
 from html import escape
@@ -42,6 +43,8 @@ from app.domains.reports.plot_geometry import (
     horizontal_fov_deg,
     nearest_screen,
     projection_geometry,
+    projector_ends,
+    throw_angle_deg,
     view_polygon,
 )
 from app.domains.reports.registry import REPORT_DEFINITIONS_BY_KEY, ReportDefinition
@@ -50,6 +53,7 @@ FIELD_PATTERN = re.compile(r"\{\{([a-zA-Z0-9_.-]+)\}\}")
 TABLE_PATTERN = re.compile(r"\{\{table:([a-zA-Z0-9_.-]+)\}\}")
 STAGE_PLOT_TOKEN = "{{stage_plot}}"
 MAX_TEMPLATE_HTML_LENGTH = 100_000
+SCREEN_THICKNESS_CM = 3
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
     "show_coverage": False,
@@ -382,18 +386,28 @@ def _stage_plot_drawing(
             if element.element_type != "projector":
                 continue
             device = devices_by_id.get(str(element.linked_device_id))
+            if device is None or not device.throw_ratio_min:
+                continue
+            apex = element_centre(element)
+            ends = projector_ends(device.throw_ratio_min, device.throw_ratio_max)
             screen = nearest_screen(element, elements)
-            if device is None or screen is None:
+            if screen is None:
+                for end in ends:
+                    angle = throw_angle_deg(end["throw_ratio"])
+                    points = view_polygon(apex, float(element.rotation or 0), angle, view_box)
+                    drawing.add(
+                        Polygon(
+                            drawing_points(points),
+                            strokeColor=colors.HexColor("#ab47bc"),
+                            fillColor=colors.Color(0.67, 0.28, 0.74, alpha=0.14)
+                            if end["filled"]
+                            else colors.Color(1, 1, 1, alpha=0),
+                            strokeWidth=0.6,
+                            strokeDashArray=None if end["filled"] else [3, 2],
+                        )
+                    )
                 continue
             aspect = float(device.image_aspect_ratio or IMAGE_ASPECT)
-            geometry = projection_geometry(
-                element_centre(element),
-                element_centre(screen),
-                float(screen.rotation or 0),
-                float(screen.width_cm or 0),
-                float(screen.height_cm or 0),
-                aspect,
-            )
             fill_range = fill_distance_range(
                 device.throw_ratio_min,
                 device.throw_ratio_max,
@@ -401,23 +415,34 @@ def _stage_plot_drawing(
                 float(screen.height_cm or 0),
                 aspect,
             )
-            status = fit_status(geometry["distance_cm"] / 100, fill_range)
+            screen_centre = element_centre(screen)
+            screen_rotation = float(screen.rotation or 0)
+            distance_m = math.hypot(screen_centre[0] - apex[0], screen_centre[1] - apex[1]) / 100
+            status = fit_status(distance_m, fill_range)
             zone_colour = "#66bb6a" if status == "fits" else "#ffa726" if status else "#90a4af"
-            drawing.add(
-                Polygon(
-                    drawing_points(geometry["cone"]),
-                    strokeColor=colors.HexColor("#ab47bc"),
-                    fillColor=colors.Color(0.67, 0.28, 0.74, alpha=0.14),
-                    strokeWidth=0.5,
+            for end in ends:
+                geometry = projection_geometry(
+                    apex, screen_centre, screen_rotation, end["throw_ratio"]
                 )
-            )
-            drawing.add(
-                PolyLine(
-                    drawing_points(geometry["zone"]),
-                    strokeColor=colors.HexColor(zone_colour),
-                    strokeWidth=2,
+                drawing.add(
+                    Polygon(
+                        drawing_points(geometry["cone"]),
+                        strokeColor=colors.HexColor("#ab47bc"),
+                        fillColor=colors.Color(0.67, 0.28, 0.74, alpha=0.14)
+                        if end["filled"]
+                        else colors.Color(1, 1, 1, alpha=0),
+                        strokeWidth=0.5,
+                        strokeDashArray=None if end["filled"] else [3, 2],
+                    )
                 )
-            )
+                drawing.add(
+                    PolyLine(
+                        drawing_points(geometry["zone"]),
+                        strokeColor=colors.HexColor(zone_colour),
+                        strokeWidth=2 if end["filled"] else 1.2,
+                        strokeDashArray=None if end["filled"] else [3, 2],
+                    )
+                )
 
     if selected_options["show_cableways"]:
         for way in (job.cable_plan or {}).get("cableways", []):
@@ -448,7 +473,17 @@ def _stage_plot_drawing(
         x_cm = offset_x + float(element.position_x or 0)
         y_cm = offset_y + float(element.position_y or 0)
         angle = radians(float(element.rotation or 0))
-        corners = [(0, 0), (width_cm, 0), (width_cm, height_cm), (0, height_cm)]
+        # A screen is drawn as a thin strip through its centre line: its height is vertical.
+        strip_top = (height_cm - SCREEN_THICKNESS_CM) / 2 if element.element_type == "screen" else 0
+        strip_height = (
+            min(SCREEN_THICKNESS_CM, height_cm) if element.element_type == "screen" else height_cm
+        )
+        corners = [
+            (0, strip_top),
+            (width_cm, strip_top),
+            (width_cm, strip_top + strip_height),
+            (0, strip_top + strip_height),
+        ]
         rotated = [
             (
                 x_cm + x * cos(angle) - y * sin(angle),

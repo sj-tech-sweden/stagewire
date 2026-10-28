@@ -16,7 +16,7 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
   return res.json();
 }
 
-test('a projector without a screen asks for one on the plot', async ({ page, request }) => {
+test('a projector without throw values asks for them, with or without a screen', async ({ page, request }) => {
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Projector ${Date.now()}` })).id as string;
@@ -25,7 +25,7 @@ test('a projector without a screen asks for one on the plot', async ({ page, req
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.getByText('Projector', { exact: true }).first().click();
-  await expect(page.getByText(/Place a screen on the plot/)).toBeVisible();
+  await expect(page.getByText(/Set the throw ratio on the projector/)).toBeVisible();
 });
 
 test('a projector next to a screen asks for its throw ratio, and the screen can be placed', async ({ page, request }) => {
