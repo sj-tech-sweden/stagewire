@@ -49,7 +49,18 @@ def test_a_screen_behind_the_projector_is_not_its_target():
     ahead = _el(
         id="s2", element_type="screen", position_x=500, position_y=100, width_cm=200, height_cm=112
     )
-    assert nearest_screen(projector, [behind]) is None
-    assert nearest_screen(projector, [behind, ahead]).id == "s2"
+    assert nearest_screen(projector, [behind], 1.2) is None
+    assert nearest_screen(projector, [behind, ahead], 1.2).id == "s2"
     turned = _el(id="p2", element_type="projector", position_x=500, position_y=600, rotation=180)
-    assert nearest_screen(turned, [ahead]) is None
+    assert nearest_screen(turned, [ahead], 1.2) is None
+    assert nearest_screen(projector, [ahead], None) is None
+
+
+def test_a_screen_outside_the_throw_angle_is_not_the_target():
+    wall = _el(id="p3", element_type="projector", position_x=1100, position_y=700, rotation=270)
+    off = _el(
+        id="s3", element_type="screen", position_x=550, position_y=100, width_cm=200, height_cm=112
+    )
+    assert nearest_screen(wall, [off], 1.5) is None
+    # A 0.4 throw is about 102 degrees wide, so the same screen is inside it.
+    assert nearest_screen(wall, [off], 0.4) is off

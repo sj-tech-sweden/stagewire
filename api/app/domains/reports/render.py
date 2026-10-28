@@ -390,7 +390,7 @@ def _stage_plot_drawing(
                 continue
             apex = element_centre(element)
             ends = projector_ends(device.throw_ratio_min, device.throw_ratio_max)
-            screen = nearest_screen(element, elements)
+            screen = nearest_screen(element, elements, device.throw_ratio_min)
             if screen is None:
                 for end in ends:
                     angle = throw_angle_deg(end["throw_ratio"])

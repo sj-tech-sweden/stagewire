@@ -2463,7 +2463,8 @@ const projectorCoverageLabels = {
   far: 'stagePlot.projectorFar',
 };
 function nearestScreen(el) {
-  return targetScreen(el, store.elements);
+  const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;
+  return targetScreen(el, store.elements, device?.throw_ratio_min);
 }
 function projectorState(el) {
   const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;

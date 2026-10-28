@@ -69,19 +69,24 @@ export function projectionGeometry({ apex, screen, throwRatio }) {
   };
 }
 
-// The screen a projector aims at: the nearest one in front of it. A screen behind the
-// projector is not its target, and a projector facing the wall has none.
-export function targetScreen(projector, elements) {
+// The screen a projector aims at: the nearest one inside its throw angle (the widest throw,
+// from the shortest throw ratio). A screen outside that angle is not its target, and a
+// projector facing the wall has none.
+export function targetScreen(projector, elements, throwMin) {
+  if (!throwMin) return null;
   const [px, py] = elementCentre(projector);
   const theta = ((projector.rotation || 0) * Math.PI) / 180;
+  const facing = { x: Math.sin(theta), y: -Math.cos(theta) };
+  const cosHalf = Math.cos((throwAngleDeg(throwMin) * Math.PI) / 360);
   let best = null;
   let bestDistance = Infinity;
   for (const el of elements || []) {
     if (el.element_type !== 'screen') continue;
     const [sx, sy] = elementCentre(el);
-    const towards = Math.sin(theta) * (sx - px) - Math.cos(theta) * (sy - py);
-    if (towards <= 0) continue;
-    const distance = Math.hypot(sx - px, sy - py);
+    const dx = sx - px;
+    const dy = sy - py;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0 || (dx * facing.x + dy * facing.y) / distance < cosHalf) continue;
     if (distance < bestDistance) {
       best = el;
       bestDistance = distance;

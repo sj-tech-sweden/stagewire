@@ -296,7 +296,7 @@ const coverageViews = computed(() => {
       if (!device || !device.throw_ratio_min) continue
       const [ax, ay] = elementCentre(element)
       const apex = { x: ax, y: ay }
-      const screen = targetScreen(element, elements)
+      const screen = targetScreen(element, elements, device.throw_ratio_min)
       const aspect = device.image_aspect_ratio || IMAGE_ASPECT
       const ends = projectorEnds(device.throw_ratio_min, device.throw_ratio_max)
       let status = null

@@ -4,6 +4,7 @@ import {
   fitStatus,
   projectionGeometry,
   projectorEnds,
+  targetScreen,
   throwAngleDeg,
 } from '../../src/utils/projection';
 
@@ -58,4 +59,16 @@ test('the throw angle and the ends of a zoom come from the throw ratio range', (
   ]);
   expect(projectorEnds(1.5, null)).toEqual([{ throwRatio: 1.5, filled: true }]);
   expect(projectorEnds(null, 2)).toEqual([]);
+});
+
+test('a projector targets only a screen inside its throw angle', () => {
+  const ahead = { id: 'screen', element_type: 'screen', position_x: 500, position_y: 0, width_cm: 200, height_cm: 112, rotation: 0 };
+  const projector = { id: 'p', element_type: 'projector', position_x: 500, position_y: 600, width_cm: 40, height_cm: 25, rotation: 0 };
+  expect(targetScreen(projector, [ahead], 1.2)).toBe(ahead);
+  // Facing left, the screen is about 47 degrees off. A 1.5 throw is about 37 degrees wide.
+  const wall = { ...projector, position_x: 1100, rotation: 270 };
+  const off = { ...ahead, position_x: 550, position_y: 100 };
+  expect(targetScreen(wall, [off], 1.5)).toBeNull();
+  expect(targetScreen(projector, [ahead], null)).toBeNull();
+  expect(targetScreen(projector, [{ ...ahead, position_y: 900 }], 1.2)).toBeNull();
 });

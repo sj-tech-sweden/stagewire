@@ -142,20 +142,31 @@ def projection_geometry(
     }
 
 
-def nearest_screen(projector: Any, elements: list[Any]) -> Any | None:
-    """The nearest screen the projector faces. A screen behind the projector is not its target."""
+def nearest_screen(
+    projector: Any, elements: list[Any], throw_ratio_min: float | None
+) -> Any | None:
+    """The nearest screen inside the projector's throw angle (the widest throw).
+
+    A screen outside that angle is not its target, and a projector facing the wall has none.
+    """
+    angle = throw_angle_deg(throw_ratio_min)
+    if angle is None:
+        return None
+    cos_half = math.cos(math.radians(angle) / 2)
     best = None
     best_distance = math.inf
     px, py = element_centre(projector)
     theta = math.radians(float(projector.rotation or 0))
+    facing = (math.sin(theta), -math.cos(theta))
     for element in elements:
         if element.element_type != "screen":
             continue
         sx, sy = element_centre(element)
-        towards = math.sin(theta) * (sx - px) - math.cos(theta) * (sy - py)
-        if towards <= 0:
+        dx = sx - px
+        dy = sy - py
+        distance = math.hypot(dx, dy)
+        if distance == 0 or (dx * facing[0] + dy * facing[1]) / distance < cos_half:
             continue
-        distance = math.hypot(sx - px, sy - py)
         if distance < best_distance:
             best = element
             best_distance = distance
