@@ -46,6 +46,7 @@ DEVICE_CLEARABLE_KEYS = {
     "max_distance_m",
     "throw_ratio_min",
     "throw_ratio_max",
+    "image_aspect_ratio",
     "sound_list_id",
     "video_list_id",
     "stockwire_product_id",

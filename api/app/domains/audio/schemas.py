@@ -308,6 +308,7 @@ class AudioDeviceBase(BaseModel):
     max_distance_m: float | None = Field(None, gt=0)
     throw_ratio_min: float | None = Field(None, gt=0)
     throw_ratio_max: float | None = Field(None, gt=0)
+    image_aspect_ratio: float | None = Field(None, gt=0)
 
 
 class AudioDeviceCreate(AudioDeviceBase):

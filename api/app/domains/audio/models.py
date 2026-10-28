@@ -161,6 +161,7 @@ class AudioDevice(Base):
     max_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     throw_ratio_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     throw_ratio_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    image_aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

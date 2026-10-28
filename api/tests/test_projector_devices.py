@@ -19,11 +19,13 @@ async def test_a_projector_keeps_its_throw_ratio_range_and_can_clear_it(auth_hea
                     "device_type": "projector",
                     "throw_ratio_min": 1.2,
                     "throw_ratio_max": 2.4,
+                    "image_aspect_ratio": 1.6,
                 },
                 headers=auth_headers,
             )
         ).json()
         assert (projector["throw_ratio_min"], projector["throw_ratio_max"]) == (1.2, 2.4)
+        assert projector["image_aspect_ratio"] == 1.6
 
         updated = await client.patch(
             f"{BASE}/jobs/{job_id}/devices/{projector['id']}",
