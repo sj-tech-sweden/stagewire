@@ -32,6 +32,12 @@ class LightingFixture(Base):
     import_batch_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
+    rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    power_circuit_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("power_circuits.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

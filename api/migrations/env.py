@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.domains.audio.models  # noqa: F401  (register models)
 import app.domains.auth.models  # noqa: F401  (register models)
+import app.domains.lighting.models  # noqa: F401  (register models)
 import app.domains.reports.models  # noqa: F401  (register models)
+import app.domains.rigging.models  # noqa: F401  (register models)
 import app.domains.venues.models  # noqa: F401  (register models)
 import app.domains.video.models  # noqa: F401  (register models)
 from app.core.config import get_settings

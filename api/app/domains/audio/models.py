@@ -220,6 +220,12 @@ class StagePlotElement(Base):
     image_url: Mapped[str] = mapped_column(String(1024), default="")
     coverage_angle_h: Mapped[float] = mapped_column(Float, default=0.0)
     coverage_distance_m: Mapped[float] = mapped_column(Float, default=0.0)
+    rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    power_circuit_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("power_circuits.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 
