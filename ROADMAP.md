@@ -20,4 +20,5 @@
 - [x] Lighting fixtures on the stage plot and in a registry-seeded fixture patch PDF (EN/SV).
 - [x] Rigging and power (Phase 3b), shared with sound and video: trusses with weight capacity, distros and circuits, weight loading, circuit load and phase balance, on a Rigging & power tab.
 - [ ] Rigging drawn on the stage plot itself (truss positions and hung loads).
-- [ ] Stockwire fixture profile fields (fixture type, modes, footprint), pending agreement in `docs/stockwire-integration-spec.md` §3.9.
+- [x] Stockwire fixture products: name, maker, channel modes and weight become a fixture type (spec §3.9).
+- [ ] DMX chains per universe and power chains per fixture: the data and API are in; the signal-flow editor is not.

@@ -122,15 +122,18 @@ uses the power entered on the device. An unreachable product falls back to the m
 The same product also carries `height_cm`, `width_cm` and `depth_cm`. Stagewire does not read them
 yet; they are the natural source for fixture and truss footprints when the rigging plot is built.
 
-### 3.9 Fixture profile (proposed, not yet read by Stagewire)
+### 3.9 Fixture products (read by Stagewire)
 
-For the DMX patch, Stagewire would read these from `specs` on the product linked to a fixture device.
-They are not used yet: until they are agreed, the fixture type, channel mode and footprint are
-entered by hand or come from an MVR import.
+Stagewire adds a fixture type from a fixture product, `GET /inventory/products/{id}`. It reads:
 
-- `specs.fixture_type`: fixture type name, for example `MAC Aura`.
-- `specs.channel_modes`: list of modes, each with `name` and `footprint` (DMX channels), for example
-  `[{"name": "Mode 1", "footprint": 16}]`.
+- `name`, `manufacturer` (top level): the fixture type's name and maker.
+- `specs.lt_fixture_type`: the fixture category, for example `PAR`.
+- `specs.channel_modes`: one entry per DMX mode, `{"name": "1", "footprint": 1}`. Footprint is the
+  number of DMX channels that mode uses. All modes are imported.
+- `weight_kg` and `power_consumption_watts` (top level), as in §3.8.
+
+Fields that duplicate these (for example `specs.lt_power_w`, `specs.lt_dmx_channels`) are ignored.
+A later import of the same product updates its modes and values rather than adding a second type.
 
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
@@ -169,6 +172,7 @@ stockwire-rental will call these (key from §3.2):
 - [ ] Ensure `POST /api/v1/jobs/{job_id}/requirements` exists and matches Stagewire's addition item.
 - [ ] Add mixer I/O counts to product model + list filter (inputs/outputs).
 - [ ] Expose the camera, lens and projector `specs` fields in §3.6 and §3.7 on products (values as numbers).
+- [x] Fixture products expose `name`, `manufacturer`, `specs.lt_fixture_type` and `specs.channel_modes` (§3.9). Nothing to add.
 - [x] Weight and power are already top-level product fields (`weight_kg`, `power_consumption_watts`), so they are read from there (§3.8). Nothing to add.
 - [ ] Document the signed deeplink token scheme (HMAC) and a resolver endpoint.
 - [ ] Add an OpenAPI note + a small integration test that pings a mock Stagewire base URL.

@@ -172,6 +172,10 @@ SQLite test suite.
 - The fixture patch is one row per fixture: universe, DMX address, fixture type, channel
   mode, footprint (channels), location or truss position, gel or colour, purpose and notes.
   Open it from the job's **Lights** tab, next to Sound, Video and Rigging & power.
+- A fixture type can be added from a **Stockwire** fixture product (**Add type from
+  Stockwire**): its name, maker, all its channel modes and its weight are copied in.
+  Importing the same product again updates that type. See
+  `docs/stockwire-integration-spec.md` §3.9.
 - A fixture takes a **fixture type** from the job's library and one of its **channel modes**.
   Typing a new name in either box adds it to the library; the mode's footprint sets the
   fixture's footprint. A type can have several modes, and an MVR import keeps every mode

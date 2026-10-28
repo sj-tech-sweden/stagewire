@@ -149,6 +149,12 @@
             @new-value="(val, done) => createType(val, done)"
             @update:model-value="onTypeChange"
           />
+          <StockwireProductPicker
+            :model-value="null"
+            :label="t('lights.fromStockwire')"
+            :hint="t('lights.fromStockwireHint')"
+            @update:model-value="importFromStockwire"
+          />
           <q-select
             v-model="form.fixture_mode_id"
             :options="modeOptions"
@@ -352,6 +358,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -533,6 +540,22 @@ async function createMode(name, done) {
     await reloadTypes();
     form.fixture_mode_id = data.id;
     done(data.id, 'add-unique');
+  } catch (err) {
+    failed(err);
+  }
+}
+
+async function importFromStockwire(product) {
+  if (!product?.id) return;
+  try {
+    const { data } = await api.post(`/jobs/${jobId}/fixture-types/from-stockwire`, {
+      product_id: String(product.id),
+    });
+    await reloadTypes();
+    form.fixture_type_id = data.id;
+    form.fixture_mode_id = null;
+    syncTypeValues();
+    $q.notify({ type: 'positive', message: t('lights.fromStockwireDone', { name: data.name }) });
   } catch (err) {
     failed(err);
   }
