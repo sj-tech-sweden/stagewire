@@ -2,6 +2,7 @@
 // the sensor is shot in.
 export const SENSOR_PRESETS = [
   { id: '1/3', label: '1/3"', width: 4.8, height: 3.6, aspect: '4:3' },
+  { id: '1/4.7-3mos', label: 'Panasonic 1/4.7 3MOS (estimate)', width: 3.5, height: 2, aspect: '16:9' },
   { id: '1/2.3', label: '1/2.3"', width: 6.17, height: 4.55, aspect: '4:3' },
   { id: '1/2', label: '1/2"', width: 6.4, height: 4.8, aspect: '4:3' },
   { id: '1/1.8', label: '1/1.8"', width: 7.18, height: 5.32, aspect: '4:3' },

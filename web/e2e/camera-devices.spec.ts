@@ -61,6 +61,11 @@ test('a camera sensor width can be calculated or picked from a preset', async ({
   await page.getByRole('option', { name: /APS-C \(Sony, Nikon\)/ }).click();
   await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('23.5');
   await expect(page.getByLabel('Aspect ratio')).toHaveValue('3:2');
+
+  await page.getByRole('combobox', { name: 'Standard sensor' }).click();
+  await page.getByRole('option', { name: /Panasonic 1\/4\.7 3MOS/ }).click();
+  await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('3.5');
+  await expect(page.getByLabel('Aspect ratio')).toHaveValue('16:9');
 });
 
 test('a placed camera can create a new camera device from the stage plot', async ({ page, request }) => {
