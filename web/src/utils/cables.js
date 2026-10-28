@@ -125,7 +125,7 @@ export function deriveCables(lists, elements, videoLists = []) {
       if (!pts.length) continue;
       const label = `Cam ${input.input_number}${input.source_label ? ` ${input.source_label}` : ''}`;
       for (const el of elements || []) {
-        if (el.linked_video_input_id !== input.id) continue;
+        if (el.linked_video_input_id !== input.id || el.element_type === 'projector') continue;
         cables.push({
           key: `src:${el.id}`,
           kind: 'source',
@@ -148,6 +148,27 @@ export function deriveCables(lists, elements, videoLists = []) {
           kind: 'link',
           label,
           channelId: input.id,
+          fromElementId: null,
+          fromPointId: from.id,
+          fromDeviceId: from.device_id,
+          toDeviceId: to.device_id,
+          toPointId: to.id,
+          connector: to.connector || '',
+        });
+      }
+    }
+    for (const out of list.outputs || []) {
+      const pts = orderedPoints(out.patch_points).filter((p) => p.device_id);
+      const label = `Out ${out.output_number}${out.name ? ` ${out.name}` : ''}`;
+      for (let i = 1; i < pts.length; i++) {
+        const from = pts[i - 1];
+        const to = pts[i];
+        if (from.device_id === to.device_id) continue;
+        cables.push({
+          key: to.id,
+          kind: 'link',
+          label,
+          channelId: out.id,
           fromElementId: null,
           fromPointId: from.id,
           fromDeviceId: from.device_id,

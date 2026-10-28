@@ -98,7 +98,8 @@ def test_routed_cables_come_from_channels_and_video_inputs_in_stage_coordinates(
                     source_label="Cam 1",
                     patch_points=[NS(id="vp1", position=1, device_id="vdev", connector="sdi")],
                 )
-            ]
+            ],
+            outputs=[],
         )
     ]
     audience = [(400, 100), (600, 100), (600, 300), (400, 300)]
@@ -146,3 +147,52 @@ def test_hidden_cables_are_left_out():
         stage_offset=(0, 0),
     )
     assert paths == []
+
+
+def test_a_video_output_chain_gives_cables_and_projectors_are_never_video_sources():
+    switcher = _element(
+        id="sw", element_type="switcher", position_x=0, position_y=0, linked_device_id="sw_dev"
+    )
+    projector = _element(
+        id="proj",
+        element_type="projector",
+        position_x=600,
+        position_y=0,
+        linked_device_id="proj_dev",
+        linked_video_input_id="vin",
+    )
+    video_lists = [
+        NS(
+            inputs=[
+                NS(
+                    id="vin",
+                    input_number=1,
+                    source_label="",
+                    patch_points=[NS(id="vp1", position=1, device_id="sw_dev", connector="sdi")],
+                )
+            ],
+            outputs=[
+                NS(
+                    id="vout",
+                    patch_points=[
+                        NS(id="op1", position=1, device_id="sw_dev", connector="hdmi"),
+                        NS(id="op2", position=2, device_id="proj_dev", connector="hdmi"),
+                    ],
+                )
+            ],
+        )
+    ]
+    paths = routed_cable_paths(
+        cable_plan={},
+        channel_lists=[],
+        elements=[switcher, projector],
+        video_lists=video_lists,
+        audience=[],
+        stage_offset=(0, 0),
+    )
+    keys = {path["key"] for path in paths}
+    assert "op2" in keys
+    assert "src:proj" not in keys
+    chain = next(path for path in paths if path["key"] == "op2")
+    assert chain["points"][0] == (0, 0)
+    assert chain["points"][-1] == (600, 0)

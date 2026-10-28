@@ -219,7 +219,7 @@
               @update:model-value="commitLink"
             />
             <q-select
-              v-if="selected"
+              v-if="selected && selected.element_type !== 'projector'"
               v-model="draft.linked_video_input_id"
               :label="t('stagePlot.linkVideo')"
               :options="videoInputOptions"

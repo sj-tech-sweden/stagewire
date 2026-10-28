@@ -48,3 +48,19 @@ test('a projector next to a screen asks for its throw ratio, and the screen can 
   await page.getByText('Projector', { exact: true }).first().click();
   await expect(page.getByText(/Set the throw ratio on the projector/)).toBeVisible();
 });
+
+test('a projector has no linked video input on the plot; a camera still does', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Projector Link ${Date.now()}` })).id as string;
+
+  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  await page.goto(`/jobs/${jobId}/stage-plot`);
+  await loaded;
+  await page.getByText('Projector', { exact: true }).first().click();
+  await expect(page.getByText(/Set the throw ratio on the projector/)).toBeVisible();
+  await expect(page.getByLabel('Linked video input')).toHaveCount(0);
+
+  await page.getByText('Camera', { exact: true }).first().click();
+  await expect(page.getByLabel('Linked video input')).toBeVisible();
+});

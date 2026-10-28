@@ -294,3 +294,36 @@ test('the cableway preference decides when a tray is used', () => {
   const weak = buildCableRows({ lists, devices, elements, plan: plan(0.5) }).find((r) => r.key === 'spk:spk');
   expect(weak?.mode).toBe('direct');
 });
+
+test('a video output chain gives cables, and a projector is never a video source', () => {
+  const videoLists = [
+    {
+      id: 'vl',
+      inputs: [
+        {
+          id: 'vin',
+          input_number: 1,
+          source_label: 'Cam',
+          patch_points: [{ id: 'vp1', position: 1, device_id: 'switch', connector: 'sdi' }],
+        },
+      ],
+      outputs: [
+        {
+          id: 'vout',
+          output_number: 1,
+          name: 'Main',
+          patch_points: [
+            { id: 'op1', position: 1, device_id: 'switch', connector: 'hdmi' },
+            { id: 'op2', position: 2, device_id: 'projector', connector: 'hdmi' },
+          ],
+        },
+      ],
+    },
+  ];
+  const videoElements = [
+    { id: 'proj', element_type: 'projector', linked_device_id: 'projector', linked_video_input_id: 'vin' },
+  ];
+  const cables = deriveCables([], videoElements, videoLists);
+  expect(cables.map((c) => c.key)).toEqual(['op2']);
+  expect(cables[0]).toMatchObject({ fromDeviceId: 'switch', toDeviceId: 'projector', label: 'Out 1 Main' });
+});

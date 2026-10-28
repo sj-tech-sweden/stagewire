@@ -10,7 +10,7 @@ from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatch
 from app.domains.reports.cable_routing import routed_cable_paths
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
-from app.domains.video.models import VideoInput, VideoInputList
+from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
 
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
@@ -132,7 +132,10 @@ async def _load_video_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputLi
     result = await db.execute(
         select(VideoInputList)
         .where(VideoInputList.job_id == job_id)
-        .options(selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points))
+        .options(
+            selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points),
+            selectinload(VideoInputList.outputs).selectinload(VideoOutput.patch_points),
+        )
         .order_by(VideoInputList.position)
     )
     return list(result.scalars().all())

@@ -116,7 +116,9 @@ def derive_cables(
             if not points:
                 continue
             for element in elements:
-                if element.linked_video_input_id == video_input.id:
+                if element.linked_video_input_id == video_input.id and (
+                    element.element_type != "projector"
+                ):
                     cables.append(
                         Cable(
                             key=f"src:{element.id}",
@@ -124,6 +126,17 @@ def derive_cables(
                             to_device_id=str(points[0].device_id),
                         )
                     )
+            for previous, current in zip(points, points[1:], strict=False):
+                if previous.device_id != current.device_id:
+                    cables.append(
+                        Cable(
+                            key=str(current.id),
+                            from_device_id=str(previous.device_id),
+                            to_device_id=str(current.device_id),
+                        )
+                    )
+        for video_output in video_list.outputs:
+            points = [point for point in _ordered(video_output.patch_points) if point.device_id]
             for previous, current in zip(points, points[1:], strict=False):
                 if previous.device_id != current.device_id:
                     cables.append(
