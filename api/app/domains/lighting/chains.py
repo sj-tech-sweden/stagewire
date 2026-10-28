@@ -8,11 +8,14 @@ the flat step rows, so the router and tests share one shape.
 from typing import Any
 
 
-def build_tree(steps: list[Any], labels: dict[str, str]) -> list[dict]:
+def build_tree(
+    steps: list[Any], labels: dict[str, str], devices: dict[str, str | None] | None = None
+) -> list[dict]:
     """Nested nodes for the steps of one universe, ordered by position.
 
     ``steps`` are rows with id, parent_id, position, device_id, fixture_id, in_port,
-    out_port, connector and notes. ``labels`` maps a step id to its display name.
+    out_port, connector and notes. ``labels`` maps a step id to its display name and
+    ``devices`` to the device it stands for (a fixture's device for a fixture step).
     """
     children: dict[str | None, list[Any]] = {}
     for step in steps:
@@ -26,6 +29,7 @@ def build_tree(steps: list[Any], labels: dict[str, str]) -> list[dict]:
             "id": str(step.id),
             "kind": "fixture" if step.fixture_id else "device",
             "label": labels.get(str(step.id), ""),
+            "device_id": (devices or {}).get(str(step.id)),
             "in_port": step.in_port,
             "out_port": step.out_port,
             "connector": step.connector,

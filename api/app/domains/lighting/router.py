@@ -280,16 +280,18 @@ async def _universe_read(db: AsyncSession, job_id: UUID, universe: DmxUniverse) 
     devices = {str(d.id): d.name for d in await audio_service.list_devices(db, job_id)}
     fixtures = {str(f.id): f for f in await service.list_fixtures(db, job_id)}
     labels: dict[str, str] = {}
+    device_of: dict[str, str | None] = {}
     for step in steps:
         if step.fixture_id:
             fixture = fixtures.get(str(step.fixture_id))
-            device_name = (
-                devices.get(str(fixture.device_id)) if fixture and fixture.device_id else None
-            )
+            device_id = str(fixture.device_id) if fixture and fixture.device_id else None
+            device_name = devices.get(device_id) if device_id else None
             address = f"{fixture.universe}.{fixture.dmx_address}" if fixture else ""
             labels[str(step.id)] = device_name or f"Fixture {address}".strip()
+            device_of[str(step.id)] = device_id
         elif step.device_id:
             labels[str(step.id)] = devices.get(str(step.device_id), "")
+            device_of[str(step.id)] = str(step.device_id)
     return {
         "id": str(universe.id),
         "job_id": str(universe.job_id),
@@ -301,7 +303,7 @@ async def _universe_read(db: AsyncSession, job_id: UUID, universe: DmxUniverse) 
         else "",
         "source_port": universe.source_port,
         "notes": universe.notes,
-        "steps": chains.build_tree(steps, labels),
+        "steps": chains.build_tree(steps, labels, device_of),
     }
 
 
