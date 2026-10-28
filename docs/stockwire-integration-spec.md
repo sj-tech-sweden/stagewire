@@ -107,16 +107,20 @@ Throw ratio is distance ÷ image width, as usually given in projector specificat
 
 ### 3.8 Device weight and power (read by Stagewire)
 
-Stagewire reads these from `specs` on the product linked to any device (sound, video, lighting or
-other), `GET /inventory/products/{id}`, with the same precedence rules as §3.6. They are used for
-rigging and power planning.
+Stagewire reads these top-level fields on the product linked to any device (sound, video, lighting
+or other), `GET /inventory/products/{id}`. They are already on products, so no `specs` entry is
+needed and nothing is duplicated. They are used for rigging and power planning.
 
-- `specs.weight_kg`: weight of one unit, kilograms, as a number.
-- `specs.power_w`: power draw of one unit at typical use, watts, as a number. Use the maximum draw if
-  that is the only figure you have, and say so in the product notes.
+- `weight_kg`: weight of one unit, kilograms. A decimal string such as `"5.550"` or a number is
+  accepted; `null` means unknown.
+- `power_consumption_watts`: power draw of one unit, watts, as a number. `null` means unknown.
 
 A Stockwire value overrides the value entered on the Stagewire device, and the device shows which
-source is in use. Missing fields or an unreachable product fall back to the manual value.
+source is in use. Each field falls back on its own: a product with a weight but no power still
+uses the power entered on the device. An unreachable product falls back to the manual values.
+
+The same product also carries `height_cm`, `width_cm` and `depth_cm`. Stagewire does not read them
+yet; they are the natural source for fixture and truss footprints when the rigging plot is built.
 
 ### 3.9 Fixture profile (proposed, not yet read by Stagewire)
 
@@ -165,7 +169,7 @@ stockwire-rental will call these (key from §3.2):
 - [ ] Ensure `POST /api/v1/jobs/{job_id}/requirements` exists and matches Stagewire's addition item.
 - [ ] Add mixer I/O counts to product model + list filter (inputs/outputs).
 - [ ] Expose the camera, lens and projector `specs` fields in §3.6 and §3.7 on products (values as numbers).
-- [ ] Expose `specs.weight_kg` and `specs.power_w` on products (§3.8), so rigging and power can use them.
+- [x] Weight and power are already top-level product fields (`weight_kg`, `power_consumption_watts`), so they are read from there (§3.8). Nothing to add.
 - [ ] Document the signed deeplink token scheme (HMAC) and a resolver endpoint.
 - [ ] Add an OpenAPI note + a small integration test that pings a mock Stagewire base URL.
 

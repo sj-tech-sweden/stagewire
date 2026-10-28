@@ -853,7 +853,7 @@ def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
         phys.get("weight_kg"), device.weight_kg
     )
     read.power_watts_effective, read.power_source = effective_value(
-        phys.get("power_w"), device.power_watts
+        phys.get("power_watts"), device.power_watts
     )
     if device.device_type not in IO_DEVICE_TYPES:
         return read

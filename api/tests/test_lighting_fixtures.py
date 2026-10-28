@@ -246,7 +246,10 @@ def test_address_forms_and_csv_errors():
 
 
 async def test_stockwire_weight_and_power_win_over_manual_values(auth_headers, monkeypatch):
-    products = {"p1": {"specs": {"weight_kg": 7.5, "power_w": 450}}}
+    products = {
+        "p1": {"weight_kg": "7.500", "power_consumption_watts": 450, "specs": {}},
+        "p2": {"weight_kg": "5.550", "power_consumption_watts": None, "specs": {}},
+    }
 
     async def fake_integration(db):
         async def fetch(product_id):
@@ -271,6 +274,18 @@ async def test_stockwire_weight_and_power_win_over_manual_values(auth_headers, m
                 headers=auth_headers,
             )
         ).json()
+        partial = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/devices",
+                json={
+                    "name": "Desk",
+                    "device_type": "other",
+                    "power_watts": 200,
+                    "stockwire_product_id": "p2",
+                },
+                headers=auth_headers,
+            )
+        ).json()
         manual = (
             await client.post(
                 f"{BASE}/jobs/{job_id}/devices",
@@ -289,6 +304,10 @@ async def test_stockwire_weight_and_power_win_over_manual_values(auth_headers, m
         assert listed[linked["id"]]["weight_source"] == "stockwire"
         assert listed[linked["id"]]["power_watts_effective"] == 450
         assert listed[linked["id"]]["power_source"] == "stockwire"
+        assert listed[partial["id"]]["weight_kg_effective"] == 5.55
+        assert listed[partial["id"]]["weight_source"] == "stockwire"
+        assert listed[partial["id"]]["power_watts"] == 200
+        assert listed[partial["id"]]["power_source"] == "manual"
         assert listed[manual["id"]]["weight_kg_effective"] == 5
         assert listed[manual["id"]]["weight_source"] == "manual"
         assert listed[manual["id"]]["power_source"] is None

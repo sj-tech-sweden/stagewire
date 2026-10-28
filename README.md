@@ -182,8 +182,8 @@ SQLite test suite.
   coordinates), mode and footprint come from the scene and the GDTF file it names. Imports
   replace the fixtures of an earlier import unless that is switched off.
 - Weight and power are device values for rigging and power planning. A Stockwire product
-  value (`specs.weight_kg`, `specs.power_w`) overrides the value entered on the device; see
-  `docs/stockwire-integration-spec.md` §3.8.
+  value (`weight_kg`, `power_consumption_watts` on the product) overrides the value entered
+  on the device, field by field; see `docs/stockwire-integration-spec.md` §3.8.
 
 ## Cables and cableways
 

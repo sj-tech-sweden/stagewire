@@ -45,10 +45,11 @@ def _positive(value: Any) -> float | None:
 
 
 def product_physical_specs(product: dict | None) -> dict:
-    specs = (product or {}).get("specs") or {}
+    """Weight and power are top-level product fields in Stockwire, not under ``specs``."""
+    product = product or {}
     return {
-        "weight_kg": _positive(specs.get("weight_kg")),
-        "power_w": _positive(specs.get("power_w")),
+        "weight_kg": _positive(product.get("weight_kg")),
+        "power_watts": _positive(product.get("power_consumption_watts")),
     }
 
 
