@@ -93,3 +93,19 @@ test('a placed camera can create a new camera device from the stage plot', async
     })
     .toBe('Front PTZ');
 });
+
+test('a 1/4.7 inch diagonal calculates the sensor width once the unit is inches', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Sensor Fraction ${Date.now()}` })).id as string;
+  const camera = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Small sensor', device_type: 'camera' });
+
+  await page.goto(`/jobs/${jobId}/devices?device=${camera.id}`);
+  await page.getByRole('combobox', { name: 'mm' }).click();
+  await page.getByRole('option', { name: 'in', exact: true }).click();
+  await page.getByLabel('Aspect ratio').fill('16:9');
+  await page.getByLabel('Diagonal').fill('1/4.7');
+  await expect(page.getByText(/Width 4\.71 mm/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use this width' }).click();
+  await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('4.71');
+});

@@ -686,7 +686,8 @@ const sensorCalcText = computed(() =>
     : t('devices.sensorCalcHint'),
 );
 function formatDiagonal(mm, unit) {
-  return String(Math.round(mmToDiagonal(mm, unit) * 100) / 100);
+  const digits = unit === 'in' ? 10000 : 100;
+  return String(Math.round(mmToDiagonal(mm, unit) * digits) / digits);
 }
 function applySensorPreset(id) {
   const preset = findPreset(id);
