@@ -9,12 +9,21 @@ from app.domains.lighting.models import FixtureMode, FixtureType, LightingFixtur
 
 FIXTURE_DEVICE_TYPE = "fixture"
 DMX_CHANNELS_PER_UNIVERSE = 512
-TEXT_KEYS = ("fixture_type", "channel_mode", "location", "gel", "purpose", "notes")
+TEXT_KEYS = (
+    "fixture_type",
+    "channel_mode",
+    "location",
+    "gel",
+    "purpose",
+    "notes",
+    "power_connector",
+)
 FIELD_KEYS = {
     "fixture_type_id",
     "fixture_mode_id",
     "rigging_point_id",
-    "power_circuit_id",
+    "power_node_id",
+    "power_connector",
     "universe",
     "dmx_address",
     "footprint",

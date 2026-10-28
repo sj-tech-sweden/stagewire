@@ -41,9 +41,10 @@ class LightingFixture(Base):
     rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    power_circuit_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("power_circuits.id", ondelete="SET NULL"), nullable=True, index=True
+    power_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    power_connector: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -129,23 +130,4 @@ class DmxStep(Base):
     in_port: Mapped[str] = mapped_column(String(32), default="")
     out_port: Mapped[str] = mapped_column(String(32), default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
-    notes: Mapped[str] = mapped_column(Text, default="")
-
-
-class PowerStep(Base):
-    """A step between a fixture's power circuit and the fixture: an outlet, distro or lead."""
-
-    __tablename__ = "power_steps"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    fixture_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("lighting_fixtures.id", ondelete="CASCADE"), index=True
-    )
-    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    device_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    label: Mapped[str] = mapped_column(String(255), default="")
-    connector_in: Mapped[str] = mapped_column(String(64), default="")
-    connector_out: Mapped[str] = mapped_column(String(64), default="")
     notes: Mapped[str] = mapped_column(Text, default="")

@@ -485,7 +485,7 @@ async def test_manual_weight_and_power_on_a_type_reach_the_truss_load(auth_heade
 
         bad = await client.patch(
             f"{BASE}/jobs/{job_id}/fixtures/{fixture['id']}",
-            json={"power_circuit_id": "00000000-0000-0000-0000-000000000000"},
+            json={"power_node_id": "00000000-0000-0000-0000-000000000000"},
             headers=auth_headers,
         )
         assert bad.status_code == 422
@@ -575,9 +575,7 @@ async def test_stockwire_import_needs_an_integration(auth_headers, monkeypatch):
         assert res.status_code == 422
 
 
-async def test_dmx_chain_is_a_tree_per_universe_and_power_is_a_line_per_fixture(
-    auth_headers, monkeypatch
-):
+async def test_dmx_chain_is_a_tree_per_universe(auth_headers, monkeypatch):
     async def no_integration(db):
         return None
 
@@ -640,28 +638,6 @@ async def test_dmx_chain_is_a_tree_per_universe_and_power_is_a_line_per_fixture(
             headers=auth_headers,
         )
         assert loop.status_code == 422
-
-        power = await post(
-            f"fixtures/{fixture_a['id']}/power-steps",
-            {
-                "device_id": outlet["id"],
-                "label": "Outlet 3",
-                "connector_in": "powerCON TRUE1",
-                "connector_out": "powerCON TRUE1",
-            },
-        )
-        assert power["position"] == 0
-        await post(
-            f"fixtures/{fixture_a['id']}/power-steps",
-            {"label": "Lead", "connector_in": "powerCON", "connector_out": "IEC"},
-        )
-        steps = (
-            await client.get(
-                f"{BASE}/jobs/{job_id}/fixtures/{fixture_a['id']}/power-steps", headers=auth_headers
-            )
-        ).json()
-        assert [s["label"] for s in steps] == ["Outlet 3", "Lead"]
-        assert [s["position"] for s in steps] == [0, 1]
 
 
 async def test_new_fixture_takes_the_first_free_address_of_its_universe(auth_headers, monkeypatch):

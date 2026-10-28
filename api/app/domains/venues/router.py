@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -8,7 +9,9 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service as audio_service
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.rigging import connectors
 from app.domains.venues import schemas, service
+from app.domains.venues.models import VenuePowerOutlet
 
 router = APIRouter(tags=["venues"], dependencies=[Depends(get_current_user)])
 
@@ -88,3 +91,68 @@ async def assign_job_venue(
     read = audio_schemas.ProductionJobRead.model_validate(job)
     await publish_job_event(job_id, "job.update", read)
     return read
+
+
+@router.get("/venues/{venue_id}/power-outlets", response_model=list[schemas.VenuePowerOutletRead])
+async def list_power_outlets(venue_id: UUID, db: AsyncSession = Depends(get_db)):
+    await _get_venue_or_404(db, venue_id)
+    result = await db.execute(
+        select(VenuePowerOutlet)
+        .where(VenuePowerOutlet.venue_id == venue_id)
+        .order_by(VenuePowerOutlet.name)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/venues/{venue_id}/power-outlets",
+    response_model=schemas.VenuePowerOutletRead,
+    status_code=201,
+)
+async def create_power_outlet(
+    venue_id: UUID, payload: schemas.VenuePowerOutletCreate, db: AsyncSession = Depends(get_db)
+):
+    await _get_venue_or_404(db, venue_id)
+    if not connectors.known(payload.connector):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown connector")
+    outlet = VenuePowerOutlet(venue_id=venue_id, **payload.model_dump())
+    db.add(outlet)
+    await db.commit()
+    await db.refresh(outlet)
+    return outlet
+
+
+@router.patch(
+    "/venues/{venue_id}/power-outlets/{outlet_id}",
+    response_model=schemas.VenuePowerOutletRead,
+)
+async def update_power_outlet(
+    venue_id: UUID,
+    outlet_id: UUID,
+    payload: schemas.VenuePowerOutletUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_venue_or_404(db, venue_id)
+    outlet = await db.get(VenuePowerOutlet, outlet_id)
+    if outlet is None or outlet.venue_id != venue_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "connector" in data and not connectors.known(data["connector"]):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown connector")
+    for key, value in data.items():
+        setattr(outlet, key, value)
+    await db.commit()
+    await db.refresh(outlet)
+    return outlet
+
+
+@router.delete("/venues/{venue_id}/power-outlets/{outlet_id}", status_code=204)
+async def delete_power_outlet(
+    venue_id: UUID, outlet_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    await _get_venue_or_404(db, venue_id)
+    outlet = await db.get(VenuePowerOutlet, outlet_id)
+    if outlet is None or outlet.venue_id != venue_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found")
+    await db.delete(outlet)
+    await db.commit()

@@ -8,7 +8,8 @@ class FixtureBase(BaseModel):
     fixture_type_id: UUID | None = None
     fixture_mode_id: UUID | None = None
     rigging_point_id: UUID | None = None
-    power_circuit_id: UUID | None = None
+    power_node_id: UUID | None = None
+    power_connector: str | None = None
     universe: int | None = Field(None, ge=1)
     dmx_address: int | None = Field(None, ge=1, le=512)
     fixture_type: str | None = None
@@ -49,7 +50,8 @@ class FixtureRead(BaseModel):
     fixture_type_id: UUID | None = None
     fixture_mode_id: UUID | None = None
     rigging_point_id: UUID | None = None
-    power_circuit_id: UUID | None = None
+    power_node_id: UUID | None = None
+    power_connector: str = ""
     dmx_conflict: bool = False
     dmx_overflow: bool = False
 
@@ -150,32 +152,3 @@ class DmxStepUpdate(BaseModel):
     out_port: str | None = None
     connector: str | None = None
     notes: str | None = None
-
-
-class PowerStepCreate(BaseModel):
-    device_id: UUID | None = None
-    label: str = ""
-    connector_in: str = ""
-    connector_out: str = ""
-    notes: str = ""
-
-
-class PowerStepUpdate(BaseModel):
-    device_id: UUID | None = None
-    label: str | None = None
-    connector_in: str | None = None
-    connector_out: str | None = None
-    notes: str | None = None
-
-
-class PowerStepRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    fixture_id: UUID
-    position: int = 0
-    device_id: UUID | None = None
-    label: str = ""
-    connector_in: str = ""
-    connector_out: str = ""
-    notes: str = ""

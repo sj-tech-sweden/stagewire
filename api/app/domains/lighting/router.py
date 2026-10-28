@@ -14,7 +14,6 @@ from app.domains.lighting.models import (
     DmxUniverse,
     FixtureType,
     LightingFixture,
-    PowerStep,
 )
 from app.domains.rigging import service as rigging_service
 
@@ -40,9 +39,9 @@ async def _check_links(db: AsyncSession, job_id: UUID, data: dict) -> None:
     if data.get("rigging_point_id") is not None:
         if await rigging_service.get_point(db, job_id, data["rigging_point_id"]) is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Rigging point not found")
-    if data.get("power_circuit_id") is not None:
-        if await rigging_service.get_circuit(db, job_id, data["power_circuit_id"]) is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Circuit not found")
+    if data.get("power_node_id") is not None:
+        if await rigging_service.get_node(db, job_id, data["power_node_id"]) is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Power node not found")
 
 
 async def _type_or_404(db: AsyncSession, job_id: UUID, type_id: UUID) -> FixtureType:
@@ -431,86 +430,3 @@ async def delete_step(
     await db.commit()
     await db.refresh(universe)
     return await _universe_read(db, job_id, universe)
-
-
-async def _fixture_for_power(db: AsyncSession, job_id: UUID, fixture_id: UUID) -> LightingFixture:
-    await _job_or_404(db, job_id)
-    fixture = await service.get_fixture(db, job_id, fixture_id)
-    if fixture is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fixture not found")
-    return fixture
-
-
-@router.get(
-    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps", response_model=list[schemas.PowerStepRead]
-)
-async def list_power_steps(job_id: UUID, fixture_id: UUID, db: AsyncSession = Depends(get_db)):
-    await _fixture_for_power(db, job_id, fixture_id)
-    result = await db.execute(
-        select(PowerStep).where(PowerStep.fixture_id == fixture_id).order_by(PowerStep.position)
-    )
-    return list(result.scalars().all())
-
-
-@router.post(
-    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps",
-    response_model=schemas.PowerStepRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_power_step(
-    job_id: UUID,
-    fixture_id: UUID,
-    payload: schemas.PowerStepCreate,
-    db: AsyncSession = Depends(get_db),
-):
-    await _fixture_for_power(db, job_id, fixture_id)
-    await _check_device(db, job_id, payload.device_id)
-    result = await db.execute(select(PowerStep).where(PowerStep.fixture_id == fixture_id))
-    step = PowerStep(
-        fixture_id=fixture_id,
-        position=len(result.scalars().all()),
-        **payload.model_dump(),
-    )
-    db.add(step)
-    await db.commit()
-    await db.refresh(step)
-    return step
-
-
-@router.patch(
-    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps/{step_id}",
-    response_model=schemas.PowerStepRead,
-)
-async def update_power_step(
-    job_id: UUID,
-    fixture_id: UUID,
-    step_id: UUID,
-    payload: schemas.PowerStepUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    await _fixture_for_power(db, job_id, fixture_id)
-    step = await db.get(PowerStep, step_id)
-    if step is None or step.fixture_id != fixture_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
-    data = payload.model_dump(exclude_unset=True)
-    await _check_device(db, job_id, data.get("device_id"))
-    for key, value in data.items():
-        setattr(step, key, value if value is not None or key == "device_id" else "")
-    await db.commit()
-    await db.refresh(step)
-    return step
-
-
-@router.delete(
-    "/jobs/{job_id}/fixtures/{fixture_id}/power-steps/{step_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_power_step(
-    job_id: UUID, fixture_id: UUID, step_id: UUID, db: AsyncSession = Depends(get_db)
-) -> None:
-    await _fixture_for_power(db, job_id, fixture_id)
-    step = await db.get(PowerStep, step_id)
-    if step is None or step.fixture_id != fixture_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Step not found")
-    await db.delete(step)
-    await db.commit()

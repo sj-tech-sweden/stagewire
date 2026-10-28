@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RiggingPointBase(BaseModel):
@@ -27,67 +27,47 @@ class RiggingPointRead(RiggingPointBase):
     position: int = 0
 
 
-class PowerDistroBase(BaseModel):
+class PowerOutput(BaseModel):
+    connector: str
+    count: int = Field(1, ge=1, le=99)
+    phase: Literal["L1", "L2", "L3"] | None = None
+
+
+class PowerNodeBase(BaseModel):
     name: str = ""
-    voltage: int = Field(230, gt=0)
-    amps_per_phase: float | None = Field(None, gt=0)
+    kind: Literal["source", "distro", "breakout"] = "distro"
+    feed_connector: str = ""
+    phase: Literal["L1", "L2", "L3"] | None = None
+    outputs: list[PowerOutput] = []
+    rating_amps: float | None = Field(None, gt=0)
+    active: bool = True
+    venue_outlet_id: UUID | None = None
     notes: str = ""
 
 
-class PowerDistroCreate(PowerDistroBase):
-    pass
+class PowerNodeCreate(PowerNodeBase):
+    parent_id: UUID | None = None
 
 
-class PowerDistroUpdate(PowerDistroBase):
-    pass
+class PowerNodeUpdate(BaseModel):
+    name: str | None = None
+    kind: Literal["source", "distro", "breakout"] | None = None
+    parent_id: UUID | None = None
+    feed_connector: str | None = None
+    phase: Literal["L1", "L2", "L3"] | None = None
+    outputs: list[PowerOutput] | None = None
+    rating_amps: float | None = Field(None, gt=0)
+    active: bool | None = None
+    venue_outlet_id: UUID | None = None
+    notes: str | None = None
 
 
-class PowerDistroRead(PowerDistroBase):
+class PowerNodeRead(PowerNodeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     job_id: UUID
-    position: int = 0
-
-
-class PowerCircuitBase(BaseModel):
-    """A single-phase circuit sits on one phase; a three-phase circuit spreads over L1-L3.
-
-    Breaker rating is per line in both cases.
-    """
-
-    label: str = ""
-    phases: Literal[1, 3] = 1
-    phase: Literal["L1", "L2", "L3"] | None = "L1"
-    breaker_amps: float | None = Field(None, gt=0)
-    notes: str = ""
-
-    @model_validator(mode="after")
-    def _phase_for_single_phase(self):
-        if self.phases == 1 and self.phase is None:
-            self.phase = "L1"
-        if self.phases == 3:
-            self.phase = None
-        return self
-
-
-class PowerCircuitCreate(PowerCircuitBase):
-    distro_id: UUID
-
-
-class PowerCircuitUpdate(BaseModel):
-    label: str | None = None
-    phases: Literal[1, 3] | None = None
-    phase: Literal["L1", "L2", "L3"] | None = None
-    breaker_amps: float | None = Field(None, gt=0)
-    notes: str | None = None
-
-
-class PowerCircuitRead(PowerCircuitBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    distro_id: UUID
+    parent_id: UUID | None = None
     position: int = 0
 
 
@@ -98,9 +78,11 @@ class LoadRead(BaseModel):
     weight_kg: float | None = None
     power_w: float | None = None
     rigging_point_id: UUID | None = None
-    power_circuit_id: UUID | None = None
+    power_node_id: UUID | None = None
+    power_connector: str = ""
 
 
 class LoadAssign(BaseModel):
     rigging_point_id: UUID | None = None
-    power_circuit_id: UUID | None = None
+    power_node_id: UUID | None = None
+    power_connector: str | None = None
