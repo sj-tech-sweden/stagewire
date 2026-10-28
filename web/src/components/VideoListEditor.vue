@@ -608,6 +608,7 @@
               ref="flowEditor"
               :job-id="jobId"
               :points="editTarget?.patch_points || []"
+              :exclude-device-types="editKind === 'input' ? ['projector'] : []"
             />
           </div>
           <q-input
@@ -876,6 +877,12 @@ function confirmCreateDevice() {
 
 const flowDialog = ref(false);
 const flowItems = ref([]);
+// 'OUT 3 → HDMI 1' for a step that takes from an output port and feeds an input port.
+function portsLabel(point) {
+  if (point.source_port && point.input_port) return `${point.source_port} → ${point.input_port}`;
+  if (point.source_port) return `${point.source_port} →`;
+  return point.input_port || '';
+}
 function openFlow(kind, obj) {
   const root =
     kind === 'input'
@@ -889,7 +896,7 @@ function openFlow(kind, obj) {
         };
   const chain = (obj.patch_points || []).map((p) => ({
     title: deviceName(p.device_id),
-    sub: [p.connector, p.patch_label].filter(Boolean).join(' · '),
+    sub: [portsLabel(p), p.connector, p.patch_label].filter(Boolean).join(' · '),
   }));
   flowItems.value = [root, ...chain];
   flowDialog.value = true;

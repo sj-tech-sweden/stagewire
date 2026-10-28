@@ -163,6 +163,7 @@ import { VIDEO_DEVICE_KINDS } from '@/constants/videoDevices';
 const props = defineProps({
   jobId: { type: String, required: true },
   points: { type: Array, default: () => [] },
+  excludeDeviceTypes: { type: Array, default: () => [] },
 });
 
 const { t } = useI18n({ useScope: 'global' });
@@ -172,7 +173,10 @@ const devicesStore = useDevicesStore();
 let keySeq = 0;
 const steps = ref([]);
 
-const kindOptions = VIDEO_DEVICE_KINDS.map((v) => ({ value: v, label: t(`devices.types.${v}`) }));
+const kindOptions = VIDEO_DEVICE_KINDS.filter((v) => !props.excludeDeviceTypes.includes(v)).map((v) => ({
+  value: v,
+  label: t(`devices.types.${v}`),
+}));
 const connectorOptions = [
   { value: 'sdi', label: 'SDI' },
   { value: 'hdmi', label: 'HDMI' },
@@ -247,11 +251,13 @@ function inputPortOptions(step) {
 }
 
 function deviceOptionsFor(step) {
-  const all = devicesStore.devices.map((d) => ({
-    value: d.id,
-    label: `${d.name || '—'} · ${t(`devices.types.${d.device_type}`)}`,
-    kind: d.device_type,
-  }));
+  const all = devicesStore.devices
+    .filter((d) => !props.excludeDeviceTypes.includes(d.device_type))
+    .map((d) => ({
+      value: d.id,
+      label: `${d.name || '—'} · ${t(`devices.types.${d.device_type}`)}`,
+      kind: d.device_type,
+    }));
   const sameKind = all.filter((o) => o.kind === step.kind);
   return (sameKind.length ? sameKind : all).map(({ value, label }) => ({ value, label }));
 }

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
+from app.domains.audio.models import AudioDevice
 from app.domains.auth.deps import get_current_user
 from app.domains.video import schemas, service
 from app.domains.video.models import (
@@ -197,6 +198,12 @@ async def replace_input_chain(
     inp = await _input_or_404(db, job_id, input_id)
     for step in payload.steps:
         await _check_device(db, job_id, step.device_id)
+        device = await db.get(AudioDevice, step.device_id)
+        if device is not None and device.device_type == "projector":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A projector takes its signal from a video output, not a video input",
+            )
     for point in list(inp.patch_points):
         await db.delete(point)
     await db.flush()

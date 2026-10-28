@@ -24,7 +24,7 @@ async def test_a_whole_input_chain_is_replaced_in_order(auth_headers):
         camera = await _device(client, auth_headers, job_id, "PTZ 1", "ptz_camera")
         patchbay = await _device(client, auth_headers, job_id, "Patchbay A", "patchbay")
         switcher = await _device(client, auth_headers, job_id, "ATEM", "switcher")
-        projector = await _device(client, auth_headers, job_id, "Projector FOH", "projector")
+        computer = await _device(client, auth_headers, job_id, "Computer FOH", "computer")
         lst = (
             await client.post(
                 f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Cameras"}, headers=auth_headers
@@ -58,12 +58,12 @@ async def test_a_whole_input_chain_is_replaced_in_order(auth_headers):
 
         reordered = await client.put(
             f"{BASE}/jobs/{job_id}/video-inputs/{inp['id']}/patch-chain",
-            json={"steps": [{"device_id": switcher["id"]}, {"device_id": projector["id"]}]},
+            json={"steps": [{"device_id": switcher["id"]}, {"device_id": computer["id"]}]},
             headers=auth_headers,
         )
         assert [p["device_id"] for p in reordered.json()["patch_points"]] == [
             switcher["id"],
-            projector["id"],
+            computer["id"],
         ]
         listed = (
             await client.get(f"{BASE}/jobs/{job_id}/video-lists", headers=auth_headers)
@@ -130,6 +130,56 @@ async def test_a_whole_output_chain_is_replaced_in_order(auth_headers):
         assert chain.json()["patch_points"][2]["patch_label"] == "Front"
 
 
+async def test_a_projector_is_rejected_on_an_input_chain_but_takes_an_output_chain(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(
+                f"{BASE}/jobs", json={"title": "No projector inputs"}, headers=auth_headers
+            )
+        ).json()["id"]
+        switcher = await _device(client, auth_headers, job_id, "ATEM", "switcher")
+        projector = await _device(client, auth_headers, job_id, "Projector FOH", "projector")
+        lst = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Cameras"}, headers=auth_headers
+            )
+        ).json()
+        inp = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/inputs",
+                json={"source_label": "Cam 1"},
+                headers=auth_headers,
+            )
+        ).json()
+        rejected = await client.put(
+            f"{BASE}/jobs/{job_id}/video-inputs/{inp['id']}/patch-chain",
+            json={"steps": [{"device_id": switcher["id"]}, {"device_id": projector["id"]}]},
+            headers=auth_headers,
+        )
+        assert rejected.status_code == 422, rejected.text
+        out = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/outputs",
+                json={"name": "Main"},
+                headers=auth_headers,
+            )
+        ).json()
+        accepted = await client.put(
+            f"{BASE}/jobs/{job_id}/video-outputs/{out['id']}/patch-chain",
+            json={
+                "steps": [
+                    {"device_id": switcher["id"]},
+                    {"device_id": projector["id"], "source_port": "OUT 3", "input_port": "HDMI 1"},
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert accepted.status_code == 200, accepted.text
+        points = accepted.json()["patch_points"]
+        assert (points[1]["source_port"], points[1]["input_port"]) == ("OUT 3", "HDMI 1")
+
+
 async def test_a_chain_step_keeps_the_output_port_it_takes_and_the_input_port_it_feeds(
     auth_headers,
 ):
@@ -139,7 +189,7 @@ async def test_a_chain_step_keeps_the_output_port_it_takes_and_the_input_port_it
             await client.post(f"{BASE}/jobs", json={"title": "Ports"}, headers=auth_headers)
         ).json()["id"]
         switcher = await _device(client, auth_headers, job_id, "ATEM", "switcher")
-        projector = await _device(client, auth_headers, job_id, "Projector FOH", "projector")
+        computer = await _device(client, auth_headers, job_id, "Computer FOH", "computer")
         lst = (
             await client.post(
                 f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Cameras"}, headers=auth_headers
@@ -157,7 +207,7 @@ async def test_a_chain_step_keeps_the_output_port_it_takes_and_the_input_port_it
             json={
                 "steps": [
                     {"device_id": switcher["id"], "input_port": "IN 1", "source_port": ""},
-                    {"device_id": projector["id"], "source_port": "OUT 3", "input_port": "HDMI 1"},
+                    {"device_id": computer["id"], "source_port": "OUT 3", "input_port": "HDMI 1"},
                 ]
             },
             headers=auth_headers,
