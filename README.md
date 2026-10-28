@@ -172,6 +172,13 @@ SQLite test suite.
 - The fixture patch is one row per fixture: universe, DMX address, fixture type, channel
   mode, footprint (channels), location or truss position, gel or colour, purpose and notes.
   Open it from the job's **Lights** tab, next to Sound, Video and Rigging & power.
+- A fixture takes a **fixture type** from the job's library and one of its **channel modes**.
+  Typing a new name in either box adds it to the library; the mode's footprint sets the
+  fixture's footprint. A type can have several modes, and an MVR import keeps every mode
+  its GDTF file defines. A type also holds a manual weight and power, used for loads on the
+  rigging tab when the device gives no value.
+- The fixture patch is reported from the **Reports** page like any other report
+  (`lighting.fixture-patch`).
 - A row can be linked to a fixture device by typing its name. Typing a new name creates
   the device. The device's fixture type, mode, footprint and gel fill empty row fields.
 - The patch flags a **DMX overlap** when two fixtures in the same universe share a channel,
@@ -193,6 +200,9 @@ SQLite test suite.
 - Every fixture on the Lights tab and every plot element linked to a device is a load.
   Its weight and power come from the device; a Stockwire value overrides the value
   entered on the device, field by field. Choose the truss and the circuit each load uses.
+- A power circuit is **single-phase** (on one of L1, L2 or L3) or **three-phase** (its
+  load is shared over L1 to L3). Distro voltage is phase to neutral (230 V), so a three-phase
+  circuit draws watts ÷ (3 × 230) amps on each line.
 - The summary shows the weight on each truss against its capacity, the amps on each
   circuit against its breaker (amps = watts ÷ distro voltage), each phase against the
   amps-per-phase capacity, and the phase imbalance. Loads not on a truss or circuit are

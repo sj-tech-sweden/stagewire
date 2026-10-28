@@ -2,27 +2,16 @@
   <div class="q-pa-md">
     <div class="row items-center q-mb-md">
       <div class="col">
-        <div class="text-h5">
+        <div class="text-h6">
           {{ t('lights.title') }}
         </div>
-        <div
-          v-if="job"
-          class="text-subtitle2 text-grey-7"
-        >
-          {{ job.title }}<span v-if="job.venue_name"> · {{ job.venue_name }}</span>
+        <div class="text-caption text-grey-7">
+          {{ t('lights.subtitle') }}
         </div>
       </div>
       <q-btn
         flat
-        icon="picture_as_pdf"
-        :label="t('lights.pdf')"
-        :disable="!fixtures.length"
-        @click="showReport = true"
-      />
-      <q-btn
-        flat
         icon="upload_file"
-        class="q-ml-sm"
         :label="t('lights.import')"
         @click="openImport"
       />
@@ -128,7 +117,7 @@
     </q-table>
 
     <q-dialog v-model="editDialog">
-      <q-card style="min-width: 320px; max-width: 520px; width: 100%">
+      <q-card style="min-width: 340px; max-width: 560px; width: 100%">
         <q-card-section class="text-h6">
           {{ editTarget ? t('lights.editTitle') : t('lights.newTitle') }}
         </q-card-section>
@@ -139,7 +128,54 @@
             :hint="t('lights.deviceHint')"
             dense
           />
+
+          <div class="text-subtitle2 q-mt-sm">
+            {{ t('lights.fixtureSection') }}
+          </div>
+          <q-select
+            v-model="form.fixture_type_id"
+            :options="typeOptions"
+            :label="t('lights.fixtureType')"
+            :hint="t('lights.typeHint')"
+            emit-value
+            map-options
+            clearable
+            use-input
+            fill-input
+            hide-selected
+            input-debounce="0"
+            dense
+            new-value-mode="add-unique"
+            @new-value="(val, done) => createType(val, done)"
+            @update:model-value="onTypeChange"
+          />
+          <q-select
+            v-model="form.fixture_mode_id"
+            :options="modeOptions"
+            :label="t('lights.mode')"
+            :disable="!form.fixture_type_id"
+            emit-value
+            map-options
+            clearable
+            use-input
+            fill-input
+            hide-selected
+            input-debounce="0"
+            dense
+            new-value-mode="add-unique"
+            @new-value="(val, done) => createMode(val, done)"
+            @update:model-value="onModeChange"
+          />
           <div class="row q-gutter-sm">
+            <q-input
+              v-model.number="form.footprint"
+              type="number"
+              min="1"
+              max="512"
+              dense
+              class="col"
+              :label="t('lights.footprint')"
+            />
             <q-input
               v-model.number="form.universe"
               type="number"
@@ -158,41 +194,67 @@
               :label="t('lights.address')"
             />
           </div>
-          <div class="row q-gutter-sm">
+          <div
+            v-if="selectedType"
+            class="row q-gutter-sm"
+          >
             <q-input
-              v-model="form.fixture_type"
+              v-model.number="typeValues.weight_kg"
+              type="number"
+              min="0"
+              step="0.1"
               dense
               class="col"
-              :label="t('lights.colFixtureType')"
+              :label="t('lights.typeWeight')"
+              :hint="t('lights.typeValuesHint')"
+              @blur="saveTypeValues"
             />
             <q-input
-              v-model="form.channel_mode"
+              v-model.number="typeValues.power_watts"
+              type="number"
+              min="0"
+              step="1"
               dense
               class="col"
-              :label="t('lights.colChannelMode')"
+              :label="t('lights.typePower')"
+              @blur="saveTypeValues"
             />
           </div>
+
+          <div class="text-subtitle2 q-mt-sm">
+            {{ t('lights.placement') }}
+          </div>
           <div class="row q-gutter-sm">
-            <q-input
-              v-model.number="form.footprint"
-              type="number"
-              min="1"
-              max="512"
+            <q-select
+              v-model="form.rigging_point_id"
+              :options="pointOptions"
+              :label="t('lights.truss')"
+              emit-value
+              map-options
+              clearable
               dense
               class="col"
-              :label="t('lights.footprint')"
             />
-            <q-input
-              v-model="form.gel"
+            <q-select
+              v-model="form.power_circuit_id"
+              :options="circuitOptions"
+              :label="t('lights.circuit')"
+              emit-value
+              map-options
+              clearable
               dense
               class="col"
-              :label="t('lights.gel')"
             />
           </div>
           <q-input
             v-model="form.location"
             dense
             :label="t('lights.location')"
+          />
+          <q-input
+            v-model="form.gel"
+            dense
+            :label="t('lights.gel')"
           />
           <q-input
             v-model="form.purpose"
@@ -282,11 +344,6 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
-    <ReportGenerationDialog
-      v-model="showReport"
-      :job-id="jobId"
-      initial-type-key="lighting.fixture-patch"
-    />
   </div>
 </template>
 
@@ -295,17 +352,18 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
-import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 
-const { t } = useI18n({ useScope: 'global' });
-const $q = useQuasar();
 const props = defineProps({
   jobId: { type: String, required: true },
 });
+const { t } = useI18n({ useScope: 'global' });
+const $q = useQuasar();
 const jobId = props.jobId;
 
-const job = ref(null);
 const fixtures = ref([]);
+const types = ref([]);
+const points = ref([]);
+const circuits = ref([]);
 const loading = ref(false);
 const error = ref('');
 
@@ -314,19 +372,21 @@ const editTarget = ref(null);
 const saving = ref(false);
 const blankForm = () => ({
   device_name: '',
+  fixture_type_id: null,
+  fixture_mode_id: null,
   universe: null,
   dmx_address: null,
-  fixture_type: '',
-  channel_mode: '',
   footprint: null,
+  rigging_point_id: null,
+  power_circuit_id: null,
   location: '',
   gel: '',
   purpose: '',
   notes: '',
 });
 const form = reactive(blankForm());
+const typeValues = reactive({ weight_kg: null, power_watts: null });
 
-const showReport = ref(false);
 const importDialog = ref(false);
 const importFile = ref(null);
 const clearImported = ref(true);
@@ -346,10 +406,24 @@ const columns = computed(() => [
   { name: 'status', label: t('lights.colStatus'), field: 'status', align: 'left' },
 ]);
 
+const typeOptions = computed(() => types.value.map((ft) => ({ value: ft.id, label: ft.name })));
+const selectedType = computed(() => types.value.find((ft) => ft.id === form.fixture_type_id) || null);
+const modeOptions = computed(() =>
+  (selectedType.value?.modes || []).map((m) => ({
+    value: m.id,
+    label: `${m.name} · ${m.footprint} ch`,
+  })),
+);
+const pointOptions = computed(() => points.value.map((p) => ({ value: p.id, label: p.name || '—' })));
+const circuitOptions = computed(() =>
+  circuits.value.map((c) => ({
+    value: c.id,
+    label: `${c.distro_name} · ${c.label || '—'} · ${c.phases === 3 ? t('rigging.threePhaseShort') : c.phase}`,
+  })),
+);
+
 function addressLabel(f) {
-  const universe = f.universe ?? '—';
-  const address = f.dmx_address ?? '—';
-  return `U${universe} · ${address}`;
+  return `U${f.universe ?? '—'} · ${f.dmx_address ?? '—'}`;
 }
 
 function statusItems(f) {
@@ -359,16 +433,21 @@ function statusItems(f) {
   return items;
 }
 
-async function load() {
+async function fetchAll() {
   loading.value = true;
   error.value = '';
   try {
-    const [jobRes, fixturesRes] = await Promise.all([
-      api.get(`/jobs/${jobId}`),
+    const [fixturesRes, typesRes, summaryRes] = await Promise.all([
       api.get(`/jobs/${jobId}/fixtures`),
+      api.get(`/jobs/${jobId}/fixture-types`),
+      api.get(`/jobs/${jobId}/rigging/summary`),
     ]);
-    job.value = jobRes.data;
     fixtures.value = fixturesRes.data;
+    types.value = typesRes.data;
+    points.value = summaryRes.data.points;
+    circuits.value = summaryRes.data.distros.flatMap((d) =>
+      (d.circuits || []).map((c) => ({ ...c, distro_name: d.name || '—' })),
+    );
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred');
   } finally {
@@ -376,9 +455,15 @@ async function load() {
   }
 }
 
+async function reloadTypes() {
+  const { data } = await api.get(`/jobs/${jobId}/fixture-types`);
+  types.value = data;
+}
+
 function openNew() {
   editTarget.value = null;
   Object.assign(form, blankForm());
+  syncTypeValues();
   editDialog.value = true;
 }
 
@@ -386,17 +471,84 @@ function openEdit(f) {
   editTarget.value = f;
   Object.assign(form, {
     device_name: f.device_name || '',
+    fixture_type_id: f.fixture_type_id ?? null,
+    fixture_mode_id: f.fixture_mode_id ?? null,
     universe: f.universe ?? null,
     dmx_address: f.dmx_address ?? null,
-    fixture_type: f.fixture_type || '',
-    channel_mode: f.channel_mode || '',
     footprint: f.footprint ?? null,
+    rigging_point_id: f.rigging_point_id ?? null,
+    power_circuit_id: f.power_circuit_id ?? null,
     location: f.location || '',
     gel: f.gel || '',
     purpose: f.purpose || '',
     notes: f.notes || '',
   });
+  syncTypeValues();
   editDialog.value = true;
+}
+
+function syncTypeValues() {
+  typeValues.weight_kg = selectedType.value?.weight_kg ?? null;
+  typeValues.power_watts = selectedType.value?.power_watts ?? null;
+}
+
+function onTypeChange() {
+  form.fixture_mode_id = null;
+  syncTypeValues();
+}
+
+function onModeChange(modeId) {
+  const mode = selectedType.value?.modes.find((m) => m.id === modeId);
+  if (mode) form.footprint = mode.footprint;
+}
+
+function failed(err) {
+  $q.notify({ type: 'negative', message: err.response?.data?.detail || t('common.errorOccurred') });
+}
+
+async function createType(name, done) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return;
+  try {
+    const { data } = await api.post(`/jobs/${jobId}/fixture-types`, { name: trimmed });
+    await reloadTypes();
+    done(data.id, 'add-unique');
+  } catch (err) {
+    failed(err);
+  }
+}
+
+async function createMode(name, done) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed || !selectedType.value) return;
+  if (!form.footprint) {
+    $q.notify({ type: 'warning', message: t('lights.footprintFirst') });
+    return;
+  }
+  try {
+    const { data } = await api.post(`/jobs/${jobId}/fixture-types/${selectedType.value.id}/modes`, {
+      name: trimmed,
+      footprint: form.footprint,
+    });
+    await reloadTypes();
+    form.fixture_mode_id = data.id;
+    done(data.id, 'add-unique');
+  } catch (err) {
+    failed(err);
+  }
+}
+
+async function saveTypeValues() {
+  if (!selectedType.value) return;
+  try {
+    await api.patch(`/jobs/${jobId}/fixture-types/${selectedType.value.id}`, {
+      weight_kg: typeValues.weight_kg || null,
+      power_watts: typeValues.power_watts || null,
+    });
+    await reloadTypes();
+  } catch (err) {
+    failed(err);
+  }
 }
 
 function payload() {
@@ -419,15 +571,15 @@ async function saveFixture() {
     }
     editDialog.value = false;
     $q.notify({ type: 'positive', message: t('lights.saved') });
-    await load();
+    await fetchAll();
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || t('common.errorOccurred') });
+    failed(err);
   } finally {
     saving.value = false;
   }
 }
 
-async function removeFixture() {
+function removeFixture() {
   if (!editTarget.value) return;
   $q.dialog({
     title: t('app.actions.delete'),
@@ -438,7 +590,7 @@ async function removeFixture() {
     await api.delete(`/jobs/${jobId}/fixtures/${editTarget.value.id}`);
     editDialog.value = false;
     $q.notify({ type: 'positive', message: t('lights.deleted') });
-    await load();
+    await fetchAll();
   });
 }
 
@@ -470,14 +622,14 @@ async function runImport() {
         cleared: data.cleared,
       }),
     });
-    await load();
+    await fetchAll();
     if (!importErrors.value.length) importDialog.value = false;
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || t('common.errorOccurred') });
+    failed(err);
   } finally {
     importing.value = false;
   }
 }
 
-onMounted(load);
+onMounted(fetchAll);
 </script>

@@ -122,7 +122,7 @@
                 <div class="col text-body2">
                   {{ distro.name || '—' }}
                   <span class="text-caption text-grey-7">
-                    · {{ distro.voltage }} V · {{ t('rigging.imbalance') }} {{ distro.imbalance_pct }}%
+                    · {{ distro.voltage }} V {{ t('rigging.phaseToNeutral') }} · {{ t('rigging.imbalance') }} {{ distro.imbalance_pct }}%
                   </span>
                 </div>
                 <q-btn
@@ -182,7 +182,7 @@
                 :class="circuit.over ? 'text-negative' : ''"
               >
                 <div class="col">
-                  {{ circuit.label || '—' }} · {{ circuit.phase }} · {{ circuit.amps }} A
+                  {{ circuit.label || '—' }} · {{ circuitPhaseLabel(circuit) }} · {{ circuit.amps }} A
                   <span v-if="circuit.breaker_amps">/ {{ circuit.breaker_amps }} A</span>
                 </div>
                 <q-btn
@@ -204,6 +204,16 @@
                   class="col"
                 />
                 <q-select
+                  v-model="newCircuit[distro.id].phases"
+                  :options="phasesOptions"
+                  :label="t('rigging.circuitType')"
+                  emit-value
+                  map-options
+                  dense
+                  style="min-width: 110px"
+                />
+                <q-select
+                  v-if="newCircuit[distro.id].phases === 1"
                   v-model="newCircuit[distro.id].phase"
                   :options="phaseOptions"
                   :label="t('rigging.phase')"
@@ -424,6 +434,13 @@ const phaseOptions = [
   { value: 'L2', label: 'L2' },
   { value: 'L3', label: 'L3' },
 ];
+const phasesOptions = [
+  { value: 1, label: t('rigging.singlePhase') },
+  { value: 3, label: t('rigging.threePhase') },
+];
+function circuitPhaseLabel(circuit) {
+  return circuit.phases === 3 ? t('rigging.threePhaseShort') : circuit.phase;
+}
 
 const pointOptions = computed(() =>
   (summary.value?.points || []).map((p) => ({ value: p.id, label: p.name || '—' })),
@@ -432,7 +449,7 @@ const circuitOptions = computed(() =>
   (summary.value?.distros || []).flatMap((d) =>
     (d.circuits || []).map((c) => ({
       value: c.id,
-      label: `${d.name || '—'} · ${c.label || '—'} · ${c.phase}`,
+      label: `${d.name || '—'} · ${c.label || '—'} · ${circuitPhaseLabel(c)}`,
     })),
   ),
 );
@@ -449,7 +466,7 @@ async function fetchAll() {
     loads.value = loadsRes.data;
     for (const distro of summary.value.distros) {
       if (!newCircuit[distro.id]) {
-        newCircuit[distro.id] = { label: '', phase: 'L1', breaker_amps: null };
+        newCircuit[distro.id] = { label: '', phases: 1, phase: 'L1', breaker_amps: null };
       }
     }
   } catch (err) {
@@ -507,7 +524,8 @@ function addCircuit(distro) {
     await api.post(`/jobs/${jobId}/power-circuits`, {
       distro_id: distro.id,
       label: form.label.trim(),
-      phase: form.phase,
+      phases: form.phases,
+      phase: form.phases === 1 ? form.phase : null,
       breaker_amps: form.breaker_amps || null,
     });
     form.label = '';
