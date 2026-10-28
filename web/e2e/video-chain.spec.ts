@@ -157,3 +157,26 @@ test('an output splits: a step can take its signal from any earlier step', async
     })
     .toEqual({ projectorParent: true, recorderParent: true, switcherRoot: null });
 });
+
+test('typing the name of an existing device in a patch step chooses that device', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Name Pick ${Date.now()}` })).id as string;
+  const led = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'LED Wall Hall', device_type: 'screen' });
+  const list = await post(request, headers, `/jobs/${jobId}/video-lists`, { name: 'Program' });
+  const output = await post(request, headers, `/jobs/${jobId}/video-lists/${list.id}/outputs`, { name: 'Main' });
+
+  await page.goto(`/jobs/${jobId}?view=video`);
+  await page.getByRole('button', { name: 'Edit output' }).first().click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByLabel('Device').nth(0).fill('LED Wall');
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json();
+      return lists[0].outputs.find((o: { id: string }) => o.id === output.id).patch_points.map((p: { device_id: string }) => p.device_id);
+    })
+    .toEqual([led.id]);
+});

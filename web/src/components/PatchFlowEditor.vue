@@ -310,6 +310,18 @@ function askNewDevice(step, val, done) {
   done();
   const name = String(val || '').trim();
   if (!name) return;
+  // A typed name picks the device it names: an exact name, or the only device containing it.
+  const typed = name.toLowerCase();
+  const named = devicesStore.devices.filter(
+    (d) => !props.excludeDeviceTypes.includes(d.device_type) && (d.name || '').trim(),
+  );
+  const exact = named.find((d) => d.name.trim().toLowerCase() === typed);
+  const partial = named.filter((d) => d.name.toLowerCase().includes(typed));
+  const chosen = exact || (partial.length === 1 ? partial[0] : null);
+  if (chosen) {
+    step.device_id = chosen.id;
+    return;
+  }
   createStep.value = step;
   createName.value = name;
   createKind.value = step.kind;

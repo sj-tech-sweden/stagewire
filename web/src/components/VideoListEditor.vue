@@ -712,36 +712,13 @@
         <q-card-section class="text-h6">
           {{ t('channels.signalFlow') }}
         </q-card-section>
-        <q-card-section class="column items-center q-gutter-xs">
-          <template
-            v-for="(item, i) in flowItems"
-            :key="i"
-          >
-            <q-icon
-              v-if="i > 0"
-              name="arrow_downward"
-              color="grey-7"
-            />
-            <div
-              class="full-width"
-              :style="{ paddingLeft: `${(item.depth || 0) * 24}px` }"
-            >
-              <q-card
-                flat
-                bordered
-                class="q-pa-sm"
-              >
-                <div class="text-body2">
-                  {{ item.title }}
-                </div>
-                <div class="text-caption text-grey-7">
-                  {{ item.sub || '—' }}
-                </div>
-              </q-card>
-            </div>
-          </template>
+        <q-card-section>
+          <FlowTree
+            v-if="flowTree"
+            :node="flowTree"
+          />
           <div
-            v-if="flowItems.length <= 1"
+            v-if="!flowTree || !flowTree.children.length"
             class="text-grey-7"
           >
             {{ t('video.flowEmpty') }}
@@ -762,6 +739,7 @@ import { useStockwireStore } from '@/stores/stockwire';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import PatchChain from '@/components/PatchChain.vue';
 import PatchFlowEditor from '@/components/PatchFlowEditor.vue';
+import FlowTree from '@/components/FlowTree.vue';
 import { VIDEO_DEVICE_KINDS } from '@/constants/videoDevices';
 
 const props = defineProps({
@@ -882,42 +860,47 @@ function confirmCreateDevice() {
 }
 
 const flowDialog = ref(false);
-const flowItems = ref([]);
+const flowTree = ref(null);
 // 'OUT 3 → HDMI 1' for a step that takes from an output port and feeds an input port.
 function portsLabel(point) {
   if (point.source_port && point.input_port) return `${point.source_port} → ${point.input_port}`;
   if (point.source_port) return `${point.source_port} →`;
   return point.input_port || '';
 }
+// The flow is a tree like the sound side. Input chains are straight lines; output chains
+// branch where several steps share a parent (a split or a passthrough).
 function openFlow(kind, obj) {
-  const root =
-    kind === 'input'
-      ? {
-          title: obj.source_label || t('video.inputNumber', { n: obj.input_number }),
-          sub: [t(`video.types.${obj.source_type}`), obj.connector].filter(Boolean).join(' · '),
-        }
-      : {
-          title: obj.name || t('video.outputNumber', { n: obj.output_number }),
-          sub: [obj.destination_label, obj.connector].filter(Boolean).join(' · '),
-        };
-  // A split shows as branches: each step is indented under the step it takes from.
-  const points = obj.patch_points || [];
-  const byId = new Map(points.map((p) => [p.id, p]));
-  const depthOf = (point) => {
-    let depth = 0;
-    let parent = point.parent_id ? byId.get(point.parent_id) : null;
-    while (parent && depth < points.length) {
-      depth += 1;
-      parent = parent.parent_id ? byId.get(parent.parent_id) : null;
-    }
-    return depth;
+  const root = {
+    id: 'root',
+    name:
+      kind === 'input'
+        ? obj.source_label || t('video.inputNumber', { n: obj.input_number })
+        : obj.name || t('video.outputNumber', { n: obj.output_number }),
+    connector: obj.connector || '',
+    patch_label: '',
+    meta:
+      kind === 'input'
+        ? [t(`video.types.${obj.source_type}`), obj.connector].filter(Boolean).join(' · ')
+        : obj.destination_label || '',
+    children: [],
   };
-  const chain = points.map((p) => ({
-    title: deviceName(p.device_id),
-    sub: [portsLabel(p), p.connector, p.patch_label].filter(Boolean).join(' · '),
-    depth: depthOf(p),
+  const points = obj.patch_points || [];
+  const nodes = points.map((p) => ({
+    id: p.id,
+    name: deviceName(p.device_id),
+    connector: p.connector || '',
+    patch_label: p.patch_label || '',
+    meta: portsLabel(p),
+    children: [],
   }));
-  flowItems.value = [{ ...root, depth: 0 }, ...chain];
+  const indexById = new Map(points.map((p, i) => [p.id, i]));
+  points.forEach((p, i) => {
+    let parentIndex = null;
+    if (kind === 'input') parentIndex = i > 0 ? i - 1 : null;
+    else if (p.parent_id && indexById.has(p.parent_id)) parentIndex = indexById.get(p.parent_id);
+    (parentIndex === null ? root : nodes[parentIndex]).children.push(nodes[i]);
+  });
+  flowTree.value = root;
   flowDialog.value = true;
 }
 
