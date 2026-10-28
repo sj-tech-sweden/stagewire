@@ -624,11 +624,11 @@
                   :key="'g' + i"
                   :config="g"
                 />
+                <v-rect :config="stageBg" />
                 <v-image
                   v-if="coverageImage"
                   :config="coverageConfig"
                 />
-                <v-rect :config="stageBg" />
                 <v-line
                   v-for="cv in cameraViews"
                   :key="'cam' + cv.id"
