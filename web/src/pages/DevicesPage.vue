@@ -411,6 +411,46 @@
               :hint="t('devices.maxDistanceHint')"
             />
           </div>
+          <div
+            v-if="editForm.device_type === 'projector'"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.projectorHint') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.throw_ratio_min"
+                type="number"
+                min="0"
+                step="0.01"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.throwRatioMin')"
+              />
+              <q-input
+                v-model.number="editForm.throw_ratio_max"
+                type="number"
+                min="0"
+                step="0.01"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.throwRatioMax')"
+              />
+            </div>
+            <q-input
+              v-model.number="editForm.image_aspect_ratio"
+              type="number"
+              min="0"
+              step="0.01"
+              clearable
+              dense
+              :label="t('devices.imageAspect')"
+              :hint="t('devices.imageAspectHint')"
+            />
+          </div>
           <div class="text-caption q-mt-sm">
             {{ t('devices.ports') }}
           </div>
@@ -576,6 +616,9 @@ const editForm = reactive({
   focal_min_mm: null,
   focal_max_mm: null,
   max_distance_m: null,
+  throw_ratio_min: null,
+  throw_ratio_max: null,
+  image_aspect_ratio: null,
 });
 const directionOptions = [
   { value: 'in', label: t('devices.directionIn') },
@@ -728,6 +771,9 @@ function openEdit(device) {
   editForm.focal_min_mm = device.focal_min_mm ?? null;
   editForm.focal_max_mm = device.focal_max_mm ?? null;
   editForm.max_distance_m = device.max_distance_m ?? null;
+  editForm.throw_ratio_min = device.throw_ratio_min ?? null;
+  editForm.throw_ratio_max = device.throw_ratio_max ?? null;
+  editForm.image_aspect_ratio = device.image_aspect_ratio ?? null;
   editDialog.value = true;
 }
 async function saveEdit() {

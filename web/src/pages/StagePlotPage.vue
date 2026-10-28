@@ -286,6 +286,12 @@
               @click="openCameraDeviceDialog"
             />
             <div
+              v-if="selected && selected.element_type === 'projector'"
+              class="text-caption text-grey-7 q-mt-xs"
+            >
+              {{ projectorCaption(selected) }}
+            </div>
+            <div
               v-if="draft.linked_channel_id || draft.linked_device_id"
               class="row q-gutter-sm q-mt-xs"
             >
@@ -526,6 +532,10 @@
                 toggle-color="primary"
                 :options="cameraViewOptions"
               />
+              <q-toggle
+                v-model="showProjectorCoverage"
+                :label="t('stagePlot.showProjectorCoverage')"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -633,6 +643,11 @@
                   v-for="cv in cameraViews"
                   :key="'cam' + cv.id"
                   :config="cv.config"
+                />
+                <v-line
+                  v-for="pv in projectorViews"
+                  :key="'proj' + pv.id"
+                  :config="pv.config"
                 />
                 <v-line
                   v-if="audienceShown.length >= 3"
@@ -1133,6 +1148,7 @@ import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
 import { coverageFocals, horizontalFovDeg, viewPolygon } from '@/utils/camera';
+import { IMAGE_ASPECT, fillDistanceRangeM, fitStatus, projectionGeometry } from '@/utils/projection';
 import {
   buildCableRows,
   elementCentre,
@@ -1213,6 +1229,22 @@ const palette = {
     w: 40,
     h: 30,
     deviceType: 'camera',
+    createDevice: true,
+  },
+  screen: {
+    labelKey: 'stagePlot.types.screen',
+    icon: 'tv',
+    color: '#78909C',
+    w: 200,
+    h: 113,
+  },
+  projector: {
+    labelKey: 'stagePlot.types.projector',
+    icon: 'slideshow',
+    color: '#AB47BC',
+    w: 40,
+    h: 25,
+    deviceType: 'projector',
     createDevice: true,
   },
   mixer: {
@@ -1329,9 +1361,10 @@ const savedCoverageView = (() => {
 })();
 const showSoundCoverage = ref(savedCoverageView.sound === true);
 const showCameraCoverage = ref(savedCoverageView.camera === true);
+const showProjectorCoverage = ref(savedCoverageView.projector === true);
 const cameraViewMode = ref(savedCoverageView.cameraMode === 'chosen' ? 'chosen' : 'range');
-watch([showSoundCoverage, showCameraCoverage, cameraViewMode], ([sound, camera, mode]) => {
-  localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, cameraMode: mode }));
+watch([showSoundCoverage, showCameraCoverage, showProjectorCoverage, cameraViewMode], ([sound, camera, projector, mode]) => {
+  localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, projector, cameraMode: mode }));
 });
 const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
 const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
@@ -2359,7 +2392,7 @@ const cameraViews = computed(() => {
         apex: { x: cx, y: cy },
         rotationDeg: el.rotation || 0,
         fovDeg: horizontalFovDeg(spec.sensor_width_mm, end.focalMm),
-        maxDistanceCm: spec.max_distance_m ? spec.max_distance_m * 100 : null,
+        maxDistanceCm: null,
         box,
       });
       views.push({
@@ -2375,6 +2408,129 @@ const cameraViews = computed(() => {
         },
       });
     }
+    if (spec.max_distance_m) {
+      const [first] = coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec));
+      const points = viewPolygon({
+        apex: { x: cx, y: cy },
+        rotationDeg: el.rotation || 0,
+        fovDeg: horizontalFovDeg(spec.sensor_width_mm, first.focalMm),
+        maxDistanceCm: spec.max_distance_m * 100,
+        box,
+      });
+      views.push({
+        id: `${el.id}-recommended`,
+        config: {
+          points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
+          closed: true,
+          fill: 'transparent',
+          stroke: 'rgba(66, 165, 245, 0.8)',
+          strokeWidth: 1,
+          dash: [2, 3],
+          listening: false,
+        },
+      });
+    }
+  }
+  return views;
+});
+const projectorCoverageLabels = {
+  fits: 'stagePlot.projectorFits',
+  close: 'stagePlot.projectorClose',
+  far: 'stagePlot.projectorFar',
+};
+function nearestScreen(el) {
+  const [px, py] = elementCentre(el);
+  let best = null;
+  let bestDistance = Infinity;
+  for (const s of store.elements) {
+    if (s.element_type !== 'screen') continue;
+    const [sx, sy] = elementCentre(s);
+    const distance = Math.hypot(sx - px, sy - py);
+    if (distance < bestDistance) {
+      best = s;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+function projectorState(el) {
+  const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;
+  const screen = nearestScreen(el);
+  if (!device || !screen) return null;
+  const aspect = device.image_aspect_ratio || IMAGE_ASPECT;
+  const [px, py] = elementCentre(el);
+  const [sx, sy] = elementCentre(screen);
+  const screenCm = {
+    x: sx,
+    y: sy,
+    rotationDeg: screen.rotation || 0,
+    widthCm: screen.width_cm,
+    heightCm: screen.height_cm,
+  };
+  const geometry = projectionGeometry({ apex: { x: px, y: py }, screen: screenCm, aspect });
+  const distanceM = geometry.distanceCm / 100;
+  const range = fillDistanceRangeM({
+    throwMin: device.throw_ratio_min,
+    throwMax: device.throw_ratio_max,
+    screenWidthCm: screen.width_cm,
+    screenHeightCm: screen.height_cm,
+    aspect,
+  });
+  return {
+    range,
+    aspect,
+    distanceM,
+    status: fitStatus(distanceM, range),
+    screenCm,
+  };
+}
+function projectorCaption(el) {
+  if (!nearestScreen(el)) return t('stagePlot.projectorNoScreen');
+  const state = projectorState(el);
+  if (!state || !state.range) return t('stagePlot.projectorNeedsValues');
+  return t('stagePlot.projectorCaption', {
+    min: state.range.minM.toFixed(1),
+    max: state.range.maxM.toFixed(1),
+    dist: state.distanceM.toFixed(1),
+    status: t(projectorCoverageLabels[state.status]),
+  });
+}
+const projectorViews = computed(() => {
+  if (!showProjectorCoverage.value) return [];
+  const s = pxPerCm.value;
+  const toPx = ([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s];
+  const views = [];
+  for (const el of visibleElements.value) {
+    if (el.element_type !== 'projector') continue;
+    const state = projectorState(el);
+    if (!state) continue;
+    const [px, py] = elementCentre(el);
+    const geometry = projectionGeometry({
+      apex: { x: px, y: py },
+      screen: state.screenCm,
+      aspect: state.aspect,
+    });
+    const zoneColour = state.status === 'fits' ? '#66BB6A' : state.status ? '#FFA726' : '#90A4AE';
+    views.push({
+      id: `${el.id}-cone`,
+      config: {
+        points: geometry.cone.flatMap(toPx),
+        closed: true,
+        fill: 'rgba(171, 71, 188, 0.14)',
+        stroke: 'rgba(171, 71, 188, 0.6)',
+        strokeWidth: 1,
+        listening: false,
+      },
+    });
+    views.push({
+      id: `${el.id}-zone`,
+      config: {
+        points: geometry.zone.flatMap(toPx),
+        stroke: zoneColour,
+        strokeWidth: 3,
+        listening: false,
+      },
+    });
   }
   return views;
 });

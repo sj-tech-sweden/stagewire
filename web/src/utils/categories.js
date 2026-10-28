@@ -18,6 +18,8 @@ const ELEMENT_CATEGORY = {
   mixer: 'sound',
   camera: 'video',
   switcher: 'video',
+  screen: 'video',
+  projector: 'video',
 };
 
 const DEVICE_CATEGORY = {
