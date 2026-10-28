@@ -159,11 +159,12 @@ export function deriveCables(lists, elements, videoLists = []) {
     }
     for (const out of list.outputs || []) {
       const pts = orderedPoints(out.patch_points).filter((p) => p.device_id);
+      const byId = new Map(pts.map((p) => [p.id, p]));
       const label = `Out ${out.output_number}${out.name ? ` ${out.name}` : ''}`;
-      for (let i = 1; i < pts.length; i++) {
-        const from = pts[i - 1];
-        const to = pts[i];
-        if (from.device_id === to.device_id) continue;
+      // A step takes its signal from its parent step; a split is several steps with one parent.
+      for (const to of pts) {
+        const from = to.parent_id ? byId.get(to.parent_id) : null;
+        if (!from || from.device_id === to.device_id) continue;
         cables.push({
           key: to.id,
           kind: 'link',

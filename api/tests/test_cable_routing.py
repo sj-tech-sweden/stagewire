@@ -175,8 +175,20 @@ def test_a_video_output_chain_gives_cables_and_projectors_are_never_video_source
                 NS(
                     id="vout",
                     patch_points=[
-                        NS(id="op1", position=1, device_id="sw_dev", connector="hdmi"),
-                        NS(id="op2", position=2, device_id="proj_dev", connector="hdmi"),
+                        NS(
+                            id="op1",
+                            position=1,
+                            device_id="sw_dev",
+                            connector="hdmi",
+                            parent_id=None,
+                        ),
+                        NS(
+                            id="op2",
+                            position=2,
+                            device_id="proj_dev",
+                            connector="hdmi",
+                            parent_id="op1",
+                        ),
                     ],
                 )
             ],

@@ -37,7 +37,18 @@
           @new-value="(val, done) => askNewDevice(step, val, done)"
         />
         <q-select
-          v-if="i > 0"
+          v-if="branching"
+          v-model="step.parent_key"
+          :options="parentOptionsFor(i)"
+          :label="t('video.fromStep')"
+          emit-value
+          map-options
+          dense
+          style="min-width: 120px; max-width: 160px"
+          @update:model-value="() => (step.source_port = '')"
+        />
+        <q-select
+          v-if="hasParent(i)"
           v-model="step.source_port"
           :options="sourcePortOptions(i)"
           :label="t('video.sourcePort')"
@@ -164,6 +175,8 @@ const props = defineProps({
   jobId: { type: String, required: true },
   points: { type: Array, default: () => [] },
   excludeDeviceTypes: { type: Array, default: () => [] },
+  // Output chains can branch: each step picks the earlier step it takes its signal from.
+  branching: { type: Boolean, default: false },
 });
 
 const { t } = useI18n({ useScope: 'global' });
@@ -197,17 +210,24 @@ function stepFromPoint(point) {
     notes: point.notes || '',
     source_port: point.source_port || '',
     input_port: point.input_port || '',
+    parent_key: '',
   };
 }
 
 function reset() {
-  steps.value = (props.points || []).map(stepFromPoint);
+  const points = props.points || [];
+  steps.value = points.map(stepFromPoint);
+  steps.value.forEach((step, i) => {
+    const parentIndex = points.findIndex((p) => p.id === points[i].parent_id);
+    step.parent_key = parentIndex >= 0 ? steps.value[parentIndex].key : '';
+  });
 }
 
 watch(() => props.points, reset, { immediate: true });
 
 function addStep() {
   keySeq += 1;
+  const previous = steps.value[steps.value.length - 1];
   steps.value = [
     ...steps.value,
     {
@@ -219,6 +239,7 @@ function addStep() {
       notes: '',
       source_port: '',
       input_port: '',
+      parent_key: props.branching && previous ? previous.key : '',
     },
   ];
 }
@@ -240,9 +261,28 @@ function portOptions(count, prefix) {
     label: `${prefix} ${n + 1}`,
   }));
 }
+// Index of the step this one takes its signal from, or null when it comes from the output.
+// Input chains are straight lines, so every step after the first takes from the one before.
+function parentIndexOf(index) {
+  if (!props.branching) return index > 0 ? index - 1 : null;
+  const parent = steps.value.findIndex((s) => s.key === steps.value[index].parent_key);
+  return parent >= 0 && parent < index ? parent : null;
+}
+function hasParent(index) {
+  return parentIndexOf(index) !== null;
+}
+function parentOptionsFor(index) {
+  return [
+    { value: '', label: t('video.fromOutput') },
+    ...steps.value.slice(0, index).map((s, j) => ({
+      value: s.key,
+      label: `${j + 1} · ${devicesStore.byId(s.device_id)?.name || '—'}`,
+    })),
+  ];
+}
 function sourcePortOptions(index) {
-  const previous = steps.value[index - 1];
-  const device = previous?.device_id ? devicesStore.byId(previous.device_id) : null;
+  const parent = parentIndexOf(index);
+  const device = parent === null ? null : devicesStore.byId(steps.value[parent].device_id);
   return portOptions(device?.output_count, 'OUT');
 }
 function inputPortOptions(step) {
@@ -293,13 +333,14 @@ function collect() {
     $q.notify({ type: 'warning', message: t('video.stepsNeedDevice') });
     return null;
   }
-  return steps.value.map((s) => ({
+  return steps.value.map((s, i) => ({
     device_id: s.device_id,
     connector: s.connector || '',
     patch_label: s.patch_label || '',
     notes: s.notes || '',
-    source_port: s.source_port || '',
+    source_port: hasParent(i) ? s.source_port || '' : '',
     input_port: s.input_port || '',
+    parent_index: parentIndexOf(i),
   }));
 }
 

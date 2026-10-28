@@ -115,6 +115,9 @@ class VideoOutputPatchPoint(Base):
     notes: Mapped[str] = mapped_column(String(2000), default="")
     source_port: Mapped[str] = mapped_column(String(32), default="")
     input_port: Mapped[str] = mapped_column(String(32), default="")
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video_output_patch_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )

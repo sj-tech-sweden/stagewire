@@ -673,6 +673,8 @@ export default {
     patchFlowHint: 'The whole route from source to destination, in order. Each step is a device of the chosen kind; type a name to create a new one.',
     stepKind: 'Kind',
     stepDevice: 'Device',
+    fromStep: 'From step',
+    fromOutput: 'Output',
     sourcePort: 'From output',
     inputPort: 'To input',
     stepLabel: 'Label',

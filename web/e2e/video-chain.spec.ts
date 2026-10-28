@@ -112,3 +112,48 @@ test('a projector cannot be a step in an input chain', async ({ page, request })
   await page.getByLabel('Kind').nth(0).click();
   await expect(page.locator('.q-menu .q-item', { hasText: 'Projector' })).toHaveCount(0);
 });
+
+test('an output splits: a step can take its signal from any earlier step', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Split ${Date.now()}` })).id as string;
+  const atem = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'ATEM Split', device_type: 'switcher' });
+  const proj = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Proj Split', device_type: 'projector' });
+  const rec = await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Rec Split', device_type: 'recorder' });
+  const list = await post(request, headers, `/jobs/${jobId}/video-lists`, { name: 'Program' });
+  const output = await post(request, headers, `/jobs/${jobId}/video-lists/${list.id}/outputs`, { name: 'Main' });
+
+  await page.goto(`/jobs/${jobId}?view=video`);
+  await page.getByRole('button', { name: 'Edit output' }).first().click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByLabel('Kind').nth(0).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Switcher' }).click();
+  await page.getByLabel('Device').nth(0).click();
+  await page.locator('.q-menu .q-item', { hasText: 'ATEM Split' }).click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByLabel('Kind').nth(1).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Projector' }).click();
+  await page.getByLabel('Device').nth(1).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Proj Split' }).click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByLabel('Kind').nth(2).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Recorder' }).click();
+  await page.getByLabel('Device').nth(2).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Rec Split' }).click();
+  await page.getByLabel('From step').nth(2).click();
+  await page.locator('.q-menu .q-item', { hasText: 'ATEM Split' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json();
+      const points = lists[0].outputs.find((o: { id: string }) => o.id === output.id).patch_points as Array<{ id: string; device_id: string; parent_id: string | null }>;
+      const byDevice = Object.fromEntries(points.map((p) => [p.device_id, p]));
+      return {
+        projectorParent: byDevice[proj.id]?.parent_id === byDevice[atem.id]?.id,
+        recorderParent: byDevice[rec.id]?.parent_id === byDevice[atem.id]?.id,
+        switcherRoot: byDevice[atem.id]?.parent_id ?? null,
+      };
+    })
+    .toEqual({ projectorParent: true, recorderParent: true, switcherRoot: null });
+});

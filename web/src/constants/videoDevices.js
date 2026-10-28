@@ -11,5 +11,6 @@ export const VIDEO_DEVICE_KINDS = [
   'recorder',
   'screen',
   'projector',
+  'split',
   'other',
 ];

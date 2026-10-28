@@ -237,24 +237,34 @@ async def replace_output_chain(
     db: AsyncSession = Depends(get_db),
 ) -> schemas.VideoOutputRead:
     out = await _output_or_404(db, job_id, output_id)
-    for step in payload.steps:
+    for position, step in enumerate(payload.steps):
         await _check_device(db, job_id, step.device_id)
+        if step.parent_index is not None and not 0 <= step.parent_index < position:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A step can only take its signal from an earlier step",
+            )
     for point in list(out.patch_points):
         await db.delete(point)
     await db.flush()
+    created: list[VideoOutputPatchPoint] = []
     for position, step in enumerate(payload.steps):
-        db.add(
-            VideoOutputPatchPoint(
-                output_id=out.id,
-                position=position,
-                device_id=step.device_id,
-                connector=step.connector or "",
-                patch_label=step.patch_label or "",
-                notes=step.notes or "",
-                source_port=step.source_port or "",
-                input_port=step.input_port or "",
-            )
+        point = VideoOutputPatchPoint(
+            output_id=out.id,
+            position=position,
+            device_id=step.device_id,
+            connector=step.connector or "",
+            patch_label=step.patch_label or "",
+            notes=step.notes or "",
+            source_port=step.source_port or "",
+            input_port=step.input_port or "",
         )
+        db.add(point)
+        created.append(point)
+    await db.flush()
+    for step, point in zip(payload.steps, created, strict=True):
+        if step.parent_index is not None:
+            point.parent_id = created[step.parent_index].id
     await db.commit()
     db.expire_all()
     updated = await service.get_output(db, job_id, output_id)

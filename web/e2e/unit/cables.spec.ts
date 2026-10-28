@@ -314,7 +314,7 @@ test('a video output chain gives cables, and a projector is never a video source
           name: 'Main',
           patch_points: [
             { id: 'op1', position: 1, device_id: 'switch', connector: 'hdmi' },
-            { id: 'op2', position: 2, device_id: 'projector', connector: 'hdmi' },
+            { id: 'op2', position: 2, device_id: 'projector', connector: 'hdmi', parent_id: 'op1' },
           ],
         },
       ],
@@ -326,4 +326,32 @@ test('a video output chain gives cables, and a projector is never a video source
   const cables = deriveCables([], videoElements, videoLists);
   expect(cables.map((c) => c.key)).toEqual(['op2']);
   expect(cables[0]).toMatchObject({ fromDeviceId: 'switch', toDeviceId: 'projector', label: 'Out 1 Main' });
+});
+
+test('a video output splits: steps that share a parent each get a cable from it', () => {
+  const videoLists = [
+    {
+      id: 'vl',
+      inputs: [],
+      outputs: [
+        {
+          id: 'vout',
+          output_number: 1,
+          name: '',
+          patch_points: [
+            { id: 'op1', position: 1, device_id: 'switch', connector: 'sdi' },
+            { id: 'op2', position: 2, device_id: 'projector', connector: 'hdmi', parent_id: 'op1' },
+            { id: 'op3', position: 3, device_id: 'recorder', connector: 'sdi', parent_id: 'op1' },
+            { id: 'op4', position: 4, device_id: 'monitor', connector: 'sdi', parent_id: 'op3' },
+          ],
+        },
+      ],
+    },
+  ];
+  const cables = deriveCables([], [], videoLists);
+  expect(cables.map((c) => [c.fromDeviceId, c.toDeviceId])).toEqual([
+    ['switch', 'projector'],
+    ['switch', 'recorder'],
+    ['recorder', 'monitor'],
+  ]);
 });

@@ -83,6 +83,7 @@ class VideoOutputPatchPointRead(VideoOutputPatchPointBase):
 
     id: UUID
     output_id: UUID
+    parent_id: UUID | None = None
 
 
 class VideoOutputBase(BaseModel):
@@ -171,6 +172,9 @@ class VideoChainStep(BaseModel):
     notes: str | None = ""
     source_port: str | None = ""
     input_port: str | None = ""
+    # Index of the earlier step this one takes its signal from. None means it takes it
+    # straight from the output. Several steps can share a parent: a split or a passthrough.
+    parent_index: int | None = None
 
 
 class VideoChain(BaseModel):

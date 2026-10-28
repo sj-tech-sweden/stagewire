@@ -216,3 +216,56 @@ async def test_a_chain_step_keeps_the_output_port_it_takes_and_the_input_port_it
         points = chained.json()["patch_points"]
         assert (points[1]["source_port"], points[1]["input_port"]) == ("OUT 3", "HDMI 1")
         assert (points[0]["source_port"], points[0]["input_port"]) == ("", "IN 1")
+
+
+async def test_an_output_can_split_and_a_passthrough_can_feed_on(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(f"{BASE}/jobs", json={"title": "Splits"}, headers=auth_headers)
+        ).json()["id"]
+        switcher = await _device(client, auth_headers, job_id, "ATEM", "switcher")
+        projector = await _device(client, auth_headers, job_id, "Projector FOH", "projector")
+        recorder = await _device(client, auth_headers, job_id, "Recorder", "recorder")
+        monitor = await _device(client, auth_headers, job_id, "Monitor", "screen")
+        lst = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Program"}, headers=auth_headers
+            )
+        ).json()
+        out = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/outputs",
+                json={"name": "Main"},
+                headers=auth_headers,
+            )
+        ).json()
+        url = f"{BASE}/jobs/{job_id}/video-outputs/{out['id']}/patch-chain"
+        split = await client.put(
+            url,
+            json={
+                "steps": [
+                    {"device_id": switcher["id"]},
+                    {"device_id": projector["id"], "parent_index": 0},
+                    {"device_id": recorder["id"], "parent_index": 0},
+                    {"device_id": monitor["id"], "parent_index": 2},
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert split.status_code == 200, split.text
+        points = split.json()["patch_points"]
+        ids = [p["id"] for p in points]
+        assert [p["parent_id"] for p in points] == [None, ids[0], ids[0], ids[2]]
+
+        forward = await client.put(
+            url,
+            json={
+                "steps": [
+                    {"device_id": switcher["id"], "parent_index": 1},
+                    {"device_id": projector["id"]},
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert forward.status_code == 422, forward.text

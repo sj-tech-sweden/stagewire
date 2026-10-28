@@ -609,6 +609,7 @@
               :job-id="jobId"
               :points="editTarget?.patch_points || []"
               :exclude-device-types="editKind === 'input' ? ['projector'] : []"
+              :branching="editKind === 'output'"
             />
           </div>
           <q-input
@@ -721,18 +722,23 @@
               name="arrow_downward"
               color="grey-7"
             />
-            <q-card
-              flat
-              bordered
-              class="full-width q-pa-sm"
+            <div
+              class="full-width"
+              :style="{ paddingLeft: `${(item.depth || 0) * 24}px` }"
             >
-              <div class="text-body2">
-                {{ item.title }}
-              </div>
-              <div class="text-caption text-grey-7">
-                {{ item.sub || '—' }}
-              </div>
-            </q-card>
+              <q-card
+                flat
+                bordered
+                class="q-pa-sm"
+              >
+                <div class="text-body2">
+                  {{ item.title }}
+                </div>
+                <div class="text-caption text-grey-7">
+                  {{ item.sub || '—' }}
+                </div>
+              </q-card>
+            </div>
           </template>
           <div
             v-if="flowItems.length <= 1"
@@ -894,11 +900,24 @@ function openFlow(kind, obj) {
           title: obj.name || t('video.outputNumber', { n: obj.output_number }),
           sub: [obj.destination_label, obj.connector].filter(Boolean).join(' · '),
         };
-  const chain = (obj.patch_points || []).map((p) => ({
+  // A split shows as branches: each step is indented under the step it takes from.
+  const points = obj.patch_points || [];
+  const byId = new Map(points.map((p) => [p.id, p]));
+  const depthOf = (point) => {
+    let depth = 0;
+    let parent = point.parent_id ? byId.get(point.parent_id) : null;
+    while (parent && depth < points.length) {
+      depth += 1;
+      parent = parent.parent_id ? byId.get(parent.parent_id) : null;
+    }
+    return depth;
+  };
+  const chain = points.map((p) => ({
     title: deviceName(p.device_id),
     sub: [portsLabel(p), p.connector, p.patch_label].filter(Boolean).join(' · '),
+    depth: depthOf(p),
   }));
-  flowItems.value = [root, ...chain];
+  flowItems.value = [{ ...root, depth: 0 }, ...chain];
   flowDialog.value = true;
 }
 
