@@ -42,6 +42,7 @@ class PowerNodeBase(BaseModel):
     rating_amps: float | None = Field(None, gt=0)
     active: bool = True
     venue_outlet_id: UUID | None = None
+    device_id: UUID | None = None
     notes: str = ""
 
 
@@ -59,6 +60,7 @@ class PowerNodeUpdate(BaseModel):
     rating_amps: float | None = Field(None, gt=0)
     active: bool | None = None
     venue_outlet_id: UUID | None = None
+    device_id: UUID | None = None
     notes: str | None = None
 
 
@@ -75,6 +77,7 @@ class LoadRead(BaseModel):
     id: UUID
     kind: Literal["fixture", "element"]
     label: str
+    device_id: UUID | None = None
     weight_kg: float | None = None
     power_w: float | None = None
     rigging_point_id: UUID | None = None

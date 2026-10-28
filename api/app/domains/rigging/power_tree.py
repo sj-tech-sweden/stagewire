@@ -8,7 +8,8 @@ Pure functions over plain values. The tree is evaluated from the sources down:
   of the output it plugs into, or all three phases evenly when that output has no phase.
 - Amps per phase are watts on that phase over 230 V.
 - A node's rating is its own rating, or the amps of its feed connector when unset. Status is
-  "ok" below 80 % of the rating, "warn" from 80 %, and "over" above 100 %.
+  "ok" below 80 % of the rating, "warn" from 80 %, and "over" above 100 %. A node with no
+  rating at all (installation wiring that was not rated) is "unrated".
 - A node with no power is "unpowered"; its loads inherit that.
 """
 
@@ -66,7 +67,7 @@ def _rating(node: Node) -> float:
 
 def _status(amps: float, rating: float) -> str:
     if rating <= 0:
-        return "ok"
+        return "unrated"
     ratio = amps / rating
     if ratio > 1:
         return "over"

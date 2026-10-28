@@ -111,3 +111,33 @@ def test_a_node_without_a_source_is_reported():
     result = evaluate([orphan], [])
     assert any("not connected to a source" in e for e in result.errors)
     assert result.nodes["d1"]["powered"] is False
+
+
+def test_installation_wiring_without_a_rating_is_unrated_not_ok():
+    node = _source(
+        feed_connector="install_1p", outputs=(Output("install_1p", 1),), rating_amps=None
+    )
+    result = evaluate([node], [Load("a", "Wash", "src", "install_1p", 500)])
+    assert result.nodes["src"]["status"] == "unrated"
+    assert result.nodes["src"]["percent"] is None
+
+
+def test_installation_wiring_with_a_rating_is_checked_like_any_node():
+    node = _source(
+        feed_connector="install_3p",
+        outputs=(Output("install_3p", 1, "L1"),),
+        rating_amps=25.0,
+    )
+    result = evaluate([node], [Load("a", "Wash", "src", "install_3p", 6000)])
+    assert result.nodes["src"]["percent"] == 104.3
+    assert result.nodes["src"]["status"] == "over"
+    shared = evaluate(
+        [
+            _source(
+                feed_connector="install_3p", outputs=(Output("install_3p", 1),), rating_amps=25.0
+            )
+        ],
+        [Load("a", "Wash", "src", "install_3p", 6000)],
+    )
+    assert shared.nodes["src"]["percent"] == 34.8
+    assert shared.nodes["src"]["status"] == "ok"

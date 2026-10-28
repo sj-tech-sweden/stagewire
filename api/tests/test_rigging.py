@@ -242,3 +242,54 @@ async def test_venue_outlets_are_saved_on_the_venue_and_can_feed_a_source(
             headers=auth_headers,
         )
         assert mismatch.status_code == 422
+
+
+async def test_installation_wiring_needs_a_rating_and_nodes_can_stand_for_a_device(
+    auth_headers, monkeypatch
+):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(f"{BASE}/jobs", json={"title": "Install"}, headers=auth_headers)
+        ).json()["id"]
+        unrated = await client.post(
+            f"{BASE}/jobs/{job_id}/power-nodes",
+            json={
+                "name": "Venue feed",
+                "kind": "source",
+                "feed_connector": "install_3p",
+                "outputs": [{"connector": "install_3p", "count": 1}],
+            },
+            headers=auth_headers,
+        )
+        assert unrated.status_code == 422
+        assert "rating" in unrated.text
+        device = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/devices",
+                json={"name": "Stage DB", "device_type": "other"},
+                headers=auth_headers,
+            )
+        ).json()
+        rated = await client.post(
+            f"{BASE}/jobs/{job_id}/power-nodes",
+            json={
+                "name": "Venue feed",
+                "kind": "source",
+                "feed_connector": "install_3p",
+                "rating_amps": 32,
+                "device_id": device["id"],
+                "outputs": [{"connector": "install_3p", "count": 1}],
+            },
+            headers=auth_headers,
+        )
+        assert rated.status_code == 201, rated.text
+        assert rated.json()["device_id"] == device["id"]
+        summary = (
+            await client.get(f"{BASE}/jobs/{job_id}/rigging/summary", headers=auth_headers)
+        ).json()
+        assert summary["nodes"][0]["rating_amps"] == 32

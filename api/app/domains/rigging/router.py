@@ -33,7 +33,7 @@ def _outputs(items: list[schemas.PowerOutput]) -> list[dict]:
     return [{"connector": o.connector, "count": o.count, "phase": o.phase} for o in items]
 
 
-def _check_connectors(node_outputs: list[dict], feed: str) -> None:
+def _check_connectors(node_outputs: list[dict], feed: str, rating: float | None) -> None:
     for output in node_outputs:
         if not connectors.known(output["connector"]):
             raise HTTPException(
@@ -41,6 +41,22 @@ def _check_connectors(node_outputs: list[dict], feed: str) -> None:
             )
     if feed and not connectors.known(feed):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown connector {feed}")
+    wiring = connectors.needs_rating(feed) or any(
+        connectors.needs_rating(o["connector"]) for o in node_outputs
+    )
+    if wiring and not rating:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Installation wiring has no fixed rating: enter the cable's rating in amps",
+        )
+
+
+async def _check_device(db: AsyncSession, job_id: UUID, device_id: UUID | None) -> None:
+    if device_id is None:
+        return
+    device = await audio_service.get_device(db, device_id)
+    if device is None or device.job_id != job_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
 
 
 def _problems(evaluation: power_tree.Evaluation, *names: str) -> list[str]:
@@ -125,7 +141,8 @@ async def create_node(
     job = await _job(db, job_id)
     data = payload.model_dump(exclude_unset=True)
     outputs = _outputs(payload.outputs)
-    _check_connectors(outputs, payload.feed_connector)
+    _check_connectors(outputs, payload.feed_connector, payload.rating_amps)
+    await _check_device(db, job_id, payload.device_id)
     if payload.kind == "source":
         if payload.parent_id is not None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A source has no parent")
@@ -178,7 +195,15 @@ async def update_node(
     data = payload.model_dump(exclude_unset=True)
     if "outputs" in data and data["outputs"] is not None:
         data["outputs"] = _outputs([schemas.PowerOutput(**o) for o in data["outputs"]])
-    _check_connectors(data.get("outputs", []), data.get("feed_connector") or "")
+    current = node
+    current = node
+    new_outputs = data["outputs"] if data.get("outputs") is not None else current.outputs or []
+    _check_connectors(
+        [{"connector": o["connector"], "count": o["count"]} for o in new_outputs],
+        data.get("feed_connector") or current.feed_connector,
+        data["rating_amps"] if "rating_amps" in data else current.rating_amps,
+    )
+    await _check_device(db, job_id, data.get("device_id"))
     if data.get("venue_outlet_id") is not None:
         await _found(
             await service.get_outlet(db, job.venue_id, data["venue_outlet_id"]),
@@ -271,6 +296,7 @@ async def list_loads(job_id: UUID, db: AsyncSession = Depends(get_db)):
             rigging_point_id=UUID(r.rigging_point_id) if r.rigging_point_id else None,
             power_node_id=UUID(r.power_node_id) if r.power_node_id else None,
             power_connector=r.power_connector,
+            device_id=UUID(r.device_id) if r.device_id else None,
         )
         for r in await service.collect_loads(db, job_id)
     ]
@@ -300,6 +326,7 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
                 "rigging_point_id": r.rigging_point_id,
                 "power_node_id": r.power_node_id,
                 "power_connector": r.power_connector,
+                "device_id": r.device_id,
                 "power_status": power.get(
                     "status", "ok" if r.power_node_id is None else "unpowered"
                 ),

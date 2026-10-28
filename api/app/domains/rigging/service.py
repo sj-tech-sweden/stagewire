@@ -23,6 +23,7 @@ class LoadRow:
     rigging_point_id: str | None
     power_node_id: str | None
     power_connector: str
+    device_id: str | None = None
 
 
 async def _fetcher(db: AsyncSession):
@@ -67,6 +68,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
                 else None,
                 power_node_id=str(fixture.power_node_id) if fixture.power_node_id else None,
                 power_connector=fixture.power_connector or "",
+                device_id=str(fixture.device_id) if fixture.device_id else None,
             )
         )
     for element in await audio_service.list_plot_elements(db, job_id):
@@ -85,6 +87,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
                 else None,
                 power_node_id=str(element.power_node_id) if element.power_node_id else None,
                 power_connector=element.power_connector or "",
+                device_id=str(element.linked_device_id),
             )
         )
     return rows

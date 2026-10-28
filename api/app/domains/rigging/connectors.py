@@ -34,12 +34,21 @@ CONNECTORS: dict[str, Connector] = {
         Connector("powercon", "powerCON 20 A", 1, 20),
         Connector("powercon_true1", "powerCON TRUE1", 1, 20),
         Connector("socapex", "Socapex 19-pin (6 × 16 A)", 1, 16, circuits=6),
+        # Fixed wiring in a venue: bare wires or terminals whose rating depends on the cable
+        # size, so the node must be rated by hand (amps 0 means "rate it").
+        Connector("install_1p", "Fixed installation, bare wires, 1-phase", 1, 0),
+        Connector("install_3p", "Fixed installation, bare wires, 3-phase", 3, 0),
     )
 }
 
 
 def known(key: str | None) -> bool:
     return key in CONNECTORS
+
+
+def needs_rating(key: str | None) -> bool:
+    """Installation wiring has no fixed rating: its node must be rated by hand."""
+    return key in CONNECTORS and CONNECTORS[key].amps == 0
 
 
 def connector(key: str) -> Connector:
