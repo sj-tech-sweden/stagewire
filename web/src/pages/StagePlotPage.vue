@@ -628,12 +628,12 @@
                   v-if="coverageImage"
                   :config="coverageConfig"
                 />
+                <v-rect :config="stageBg" />
                 <v-line
                   v-for="cv in cameraViews"
                   :key="'cam' + cv.id"
                   :config="cv.config"
                 />
-                <v-rect :config="stageBg" />
                 <v-line
                   v-if="audienceShown.length >= 3"
                   :config="audienceConfig"
