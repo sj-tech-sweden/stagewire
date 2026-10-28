@@ -6,7 +6,7 @@ assignments.
 
 This is a monorepo:
 
-```
+```text
 .
 ├── api/   FastAPI backend (Python 3.12+, SQLAlchemy 2 async, Alembic)
 ├── web/   Quasar / Vue 3 PWA frontend (Pinia, Konva.js stage-plot canvas)
