@@ -9,6 +9,8 @@ class VideoPatchPointBase(BaseModel):
     patch_label: str | None = None
     notes: str | None = None
     device_id: UUID | None = None
+    source_port: str | None = None
+    input_port: str | None = None
 
 
 class VideoPatchPointCreate(VideoPatchPointBase):
@@ -59,6 +61,8 @@ class VideoInputRead(BaseModel):
 
 
 class VideoOutputPatchPointBase(BaseModel):
+    source_port: str | None = None
+    input_port: str | None = None
     position: int = 0
     connector: str | None = None
     patch_label: str | None = None
@@ -165,6 +169,8 @@ class VideoChainStep(BaseModel):
     connector: str | None = ""
     patch_label: str | None = ""
     notes: str | None = ""
+    source_port: str | None = ""
+    input_port: str | None = ""
 
 
 class VideoChain(BaseModel):

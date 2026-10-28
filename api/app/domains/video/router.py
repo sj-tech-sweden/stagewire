@@ -209,6 +209,8 @@ async def replace_input_chain(
                 connector=step.connector or "",
                 patch_label=step.patch_label or "",
                 notes=step.notes or "",
+                source_port=step.source_port or "",
+                input_port=step.input_port or "",
             )
         )
     await db.commit()
@@ -242,6 +244,8 @@ async def replace_output_chain(
                 connector=step.connector or "",
                 patch_label=step.patch_label or "",
                 notes=step.notes or "",
+                source_port=step.source_port or "",
+                input_port=step.input_port or "",
             )
         )
     await db.commit()

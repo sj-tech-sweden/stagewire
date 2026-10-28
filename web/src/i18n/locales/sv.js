@@ -673,6 +673,8 @@ export default {
     patchFlowHint: 'Hela vägen från källa till mål, i ordning. Varje steg är en enhet av vald typ; skriv ett namn för att skapa en ny.',
     stepKind: 'Typ',
     stepDevice: 'Enhet',
+    sourcePort: 'Från utgång',
+    inputPort: 'Till ingång',
     stepLabel: 'Etikett',
     moveUp: 'Flytta upp',
     moveDown: 'Flytta ner',

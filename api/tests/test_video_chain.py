@@ -128,3 +128,41 @@ async def test_a_whole_output_chain_is_replaced_in_order(auth_headers):
             screen["id"],
         ]
         assert chain.json()["patch_points"][2]["patch_label"] == "Front"
+
+
+async def test_a_chain_step_keeps_the_output_port_it_takes_and_the_input_port_it_feeds(
+    auth_headers,
+):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(f"{BASE}/jobs", json={"title": "Ports"}, headers=auth_headers)
+        ).json()["id"]
+        switcher = await _device(client, auth_headers, job_id, "ATEM", "switcher")
+        projector = await _device(client, auth_headers, job_id, "Projector FOH", "projector")
+        lst = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Cameras"}, headers=auth_headers
+            )
+        ).json()
+        inp = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/inputs",
+                json={"source_label": "Cam 1"},
+                headers=auth_headers,
+            )
+        ).json()
+        chained = await client.put(
+            f"{BASE}/jobs/{job_id}/video-inputs/{inp['id']}/patch-chain",
+            json={
+                "steps": [
+                    {"device_id": switcher["id"], "input_port": "IN 1", "source_port": ""},
+                    {"device_id": projector["id"], "source_port": "OUT 3", "input_port": "HDMI 1"},
+                ]
+            },
+            headers=auth_headers,
+        )
+        assert chained.status_code == 200, chained.text
+        points = chained.json()["patch_points"]
+        assert (points[1]["source_port"], points[1]["input_port"]) == ("OUT 3", "HDMI 1")
+        assert (points[0]["source_port"], points[0]["input_port"]) == ("", "IN 1")

@@ -37,6 +37,31 @@
           @new-value="(val, done) => askNewDevice(step, val, done)"
         />
         <q-select
+          v-if="i > 0"
+          v-model="step.source_port"
+          :options="sourcePortOptions(i)"
+          :label="t('video.sourcePort')"
+          emit-value
+          map-options
+          use-input
+          new-value-mode="add-unique"
+          dense
+          clearable
+          style="min-width: 110px; max-width: 140px"
+        />
+        <q-select
+          v-model="step.input_port"
+          :options="inputPortOptions(step)"
+          :label="t('video.inputPort')"
+          emit-value
+          map-options
+          use-input
+          new-value-mode="add-unique"
+          dense
+          clearable
+          style="min-width: 110px; max-width: 140px"
+        />
+        <q-select
           v-model="step.connector"
           :options="connectorOptions"
           :label="t('video.colConnector')"
@@ -166,6 +191,8 @@ function stepFromPoint(point) {
     connector: point.connector || '',
     patch_label: point.patch_label || '',
     notes: point.notes || '',
+    source_port: point.source_port || '',
+    input_port: point.input_port || '',
   };
 }
 
@@ -179,7 +206,16 @@ function addStep() {
   keySeq += 1;
   steps.value = [
     ...steps.value,
-    { key: `s${keySeq}`, kind: 'patchbay', device_id: null, connector: '', patch_label: '', notes: '' },
+    {
+      key: `s${keySeq}`,
+      kind: 'patchbay',
+      device_id: null,
+      connector: '',
+      patch_label: '',
+      notes: '',
+      source_port: '',
+      input_port: '',
+    },
   ];
 }
 function removeStep(index) {
@@ -190,6 +226,24 @@ function move(index, delta) {
   const target = index + delta;
   [next[index], next[target]] = [next[target], next[index]];
   steps.value = next;
+}
+
+// Ports are the device's numbered outputs (the one the signal leaves from) and inputs
+// (the one it arrives at). The first step takes from the stage source, not a device.
+function portOptions(count, prefix) {
+  return Array.from({ length: count || 0 }, (_, n) => ({
+    value: `${prefix} ${n + 1}`,
+    label: `${prefix} ${n + 1}`,
+  }));
+}
+function sourcePortOptions(index) {
+  const previous = steps.value[index - 1];
+  const device = previous?.device_id ? devicesStore.byId(previous.device_id) : null;
+  return portOptions(device?.output_count, 'OUT');
+}
+function inputPortOptions(step) {
+  const device = step.device_id ? devicesStore.byId(step.device_id) : null;
+  return portOptions(device?.input_count, 'IN');
 }
 
 function deviceOptionsFor(step) {
@@ -238,6 +292,8 @@ function collect() {
     connector: s.connector || '',
     patch_label: s.patch_label || '',
     notes: s.notes || '',
+    source_port: s.source_port || '',
+    input_port: s.input_port || '',
   }));
 }
 

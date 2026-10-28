@@ -71,6 +71,8 @@ class VideoPatchPoint(Base):
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
+    source_port: Mapped[str] = mapped_column(String(32), default="")
+    input_port: Mapped[str] = mapped_column(String(32), default="")
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -111,6 +113,8 @@ class VideoOutputPatchPoint(Base):
     connector: Mapped[str] = mapped_column(String(64), default="")
     patch_label: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(2000), default="")
+    source_port: Mapped[str] = mapped_column(String(32), default="")
+    input_port: Mapped[str] = mapped_column(String(32), default="")
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
