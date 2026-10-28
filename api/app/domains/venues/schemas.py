@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.domains.audio.polygon import check_polygon
 
 
 class VenueBase(BaseModel):
@@ -15,6 +17,12 @@ class VenueBase(BaseModel):
     stage_width_cm: float = Field(0.0, ge=0)
     stage_height_cm: float = Field(0.0, ge=0)
     background_image_url: str = Field("", max_length=1024)
+    audience_polygon: list[list[float]] = Field(default_factory=list)
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class VenueCreate(VenueBase):
@@ -31,6 +39,12 @@ class VenueUpdate(BaseModel):
     stage_width_cm: float | None = Field(None, ge=0)
     stage_height_cm: float | None = Field(None, ge=0)
     background_image_url: str | None = Field(None, max_length=1024)
+    audience_polygon: list[list[float]] | None = None
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class VenueRead(VenueBase):

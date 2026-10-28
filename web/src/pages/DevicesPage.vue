@@ -7,7 +7,7 @@
         icon="arrow_back"
         :aria-label="t('channels.backToJobs')"
         class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="goBackToJob"
       />
       <div class="text-h6">
         {{ t('devices.title') }}
@@ -148,6 +148,7 @@
             round
             icon="edit"
             class="q-ml-sm"
+            :aria-label="t('app.actions.edit')"
             @click="openEdit(device)"
           />
         </div>
@@ -268,11 +269,17 @@
             dense
           />
           <div
-            v-if="editForm.device_type === 'mixer'"
+            v-if="ioDeviceTypes.includes(editForm.device_type)"
             class="q-gutter-sm"
           >
             <div class="text-caption">
               {{ t('devices.ioHint') }}
+            </div>
+            <div
+              v-if="(editTarget?.stockwire_connectors || []).length"
+              class="text-caption"
+            >
+              {{ t('devices.stockwireConnectors', { list: editTarget.stockwire_connectors.join(', ') }) }}
             </div>
             <div class="row q-gutter-sm">
               <q-input
@@ -283,7 +290,7 @@
                 dense
                 class="col"
                 :label="t('devices.inputs')"
-                :hint="t('devices.ioDefault', { n: editTarget?.input_default ?? 0 })"
+                :hint="ioSourceHint(editTarget, 'input')"
               />
               <q-input
                 v-model.number="editForm.output_override"
@@ -293,9 +300,156 @@
                 dense
                 class="col"
                 :label="t('devices.outputs')"
-                :hint="t('devices.ioDefault', { n: editTarget?.output_default ?? 0 })"
+                :hint="ioSourceHint(editTarget, 'output')"
               />
             </div>
+          </div>
+          <div
+            v-if="['camera', 'lens'].includes(editForm.device_type)"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.cameraHint') }}
+            </div>
+            <div
+              v-if="editTarget?.stockwire_product_id"
+              class="text-caption"
+            >
+              {{ t('devices.cameraStockwireHint') }}
+            </div>
+            <template v-if="editForm.device_type === 'camera'">
+              <q-select
+                v-model="sensorPreset"
+                :options="sensorPresetOptions"
+                :label="t('devices.sensorPreset')"
+                emit-value
+                map-options
+                clearable
+                dense
+                @update:model-value="applySensorPreset"
+              />
+              <div class="row q-gutter-sm">
+                <q-input
+                  v-model="sensorAspect"
+                  :label="t('devices.sensorAspect')"
+                  :hint="t('devices.sensorAspectHint')"
+                  dense
+                  class="col"
+                />
+                <q-input
+                  v-model="sensorDiagonal"
+                  :label="t('devices.sensorDiagonal')"
+                  :hint="t('devices.sensorDiagonalHint')"
+                  dense
+                  class="col"
+                />
+                <q-select
+                  :model-value="sensorDiagonalUnit"
+                  :options="sensorUnitOptions"
+                  emit-value
+                  map-options
+                  dense
+                  class="col-3"
+                  @update:model-value="convertSensorDiagonal"
+                />
+              </div>
+              <div class="row items-center q-gutter-sm">
+                <div class="col text-caption">
+                  {{ sensorCalcText }}
+                </div>
+                <q-btn
+                  v-if="calculatedSensorWidth"
+                  flat
+                  dense
+                  color="primary"
+                  :label="t('devices.useCalculatedWidth')"
+                  @click="useCalculatedSensorWidth"
+                />
+              </div>
+            </template>
+            <q-input
+              v-if="editForm.device_type === 'camera'"
+              v-model.number="editForm.sensor_width_mm"
+              type="number"
+              min="0"
+              step="0.1"
+              clearable
+              dense
+              :label="t('devices.sensorWidth')"
+            />
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.focal_min_mm"
+                type="number"
+                min="0"
+                step="0.1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.focalMin')"
+              />
+              <q-input
+                v-model.number="editForm.focal_max_mm"
+                type="number"
+                min="0"
+                step="0.1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.focalMax')"
+              />
+            </div>
+            <q-input
+              v-if="editForm.device_type === 'camera'"
+              v-model.number="editForm.max_distance_m"
+              type="number"
+              min="0"
+              step="0.5"
+              clearable
+              dense
+              :label="t('devices.maxDistance')"
+              :hint="t('devices.maxDistanceHint')"
+            />
+          </div>
+          <div
+            v-if="editForm.device_type === 'projector'"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.projectorHint') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.throw_ratio_min"
+                type="number"
+                min="0"
+                step="0.01"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.throwRatioMin')"
+              />
+              <q-input
+                v-model.number="editForm.throw_ratio_max"
+                type="number"
+                min="0"
+                step="0.01"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.throwRatioMax')"
+              />
+            </div>
+            <q-input
+              v-model.number="editForm.image_aspect_ratio"
+              type="number"
+              min="0"
+              step="0.01"
+              clearable
+              dense
+              :label="t('devices.imageAspect')"
+              :hint="t('devices.imageAspectHint')"
+            />
           </div>
           <div class="text-caption q-mt-sm">
             {{ t('devices.ports') }}
@@ -379,12 +533,29 @@ import { useRoute, useRouter } from 'vue-router';
 import { api } from '@/boot/api';
 import { useDevicesStore } from '@/stores/devices';
 import { CONNECTOR_OPTIONS } from '@/constants/connectors';
+import {
+  SENSOR_PRESETS,
+  diagonalToMm,
+  findPreset,
+  mmToDiagonal,
+  parseAspect,
+  parseLength,
+  sensorDiagonalMm,
+  sensorWidthFromDiagonal,
+} from '@/utils/sensor';
 
 const connectorOptions = CONNECTOR_OPTIONS;
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
 const router = useRouter();
+
+function goBackToJob() {
+  router.push({
+    path: `/jobs/${jobId}`,
+    query: route.query.from === 'video' ? { view: 'video' } : {},
+  });
+}
 const jobId = route.params.jobId;
 const devicesStore = useDevicesStore();
 
@@ -395,8 +566,31 @@ const DEVICE_TYPES = [
   'split',
   'network',
   'direct',
+  'switcher',
+  'router',
+  'multiviewer',
+  'camera',
+  'lens',
+  'ptz_camera',
+  'computer',
+  'patchbay',
+  'converter',
+  'encoder',
+  'recorder',
+  'screen',
+  'projector',
   'other',
 ];
+const ioDeviceTypes = ['mixer', 'switcher', 'router', 'multiviewer'];
+function ioSourceHint(device, side) {
+  const source = side === 'input' ? device?.input_source : device?.output_source;
+  const count = side === 'input' ? device?.input_default : device?.output_default;
+  const stockwire = side === 'input' ? device?.stockwire_inputs : device?.stockwire_outputs;
+  if (source === 'override') return t('devices.ioOverridden');
+  if (source === 'stockwire') return t('devices.ioStockwire', { n: stockwire });
+  if (source === 'patch') return t('devices.ioDefault', { n: count ?? 0 });
+  return t('devices.ioUnset');
+}
 const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
   value: v,
   label: t(`devices.types.${v}`),
@@ -418,6 +612,13 @@ const editForm = reactive({
   notes: '',
   input_override: null,
   output_override: null,
+  sensor_width_mm: null,
+  focal_min_mm: null,
+  focal_max_mm: null,
+  max_distance_m: null,
+  throw_ratio_min: null,
+  throw_ratio_max: null,
+  image_aspect_ratio: null,
 });
 const directionOptions = [
   { value: 'in', label: t('devices.directionIn') },
@@ -507,7 +708,54 @@ function portUsage(device, port) {
   const key = `${port.direction}|${(port.connector || '').toLowerCase()}`;
   return used[key] || 0;
 }
+const sensorPreset = ref(null);
+const sensorAspect = ref('');
+const sensorDiagonal = ref('');
+const sensorDiagonalUnit = ref('mm');
+const sensorPresetOptions = SENSOR_PRESETS.map((p) => ({ value: p.id, label: `${p.label} · ${p.width} × ${p.height} mm` }));
+const sensorUnitOptions = [
+  { value: 'mm', label: 'mm' },
+  { value: 'in', label: 'in' },
+];
+const calculatedSensorWidth = computed(() => {
+  const diagonal = parseLength(sensorDiagonal.value);
+  const aspect = parseAspect(sensorAspect.value);
+  if (!diagonal || !aspect) return null;
+  return sensorWidthFromDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), aspect);
+});
+const sensorCalcText = computed(() =>
+  calculatedSensorWidth.value
+    ? t('devices.sensorCalculated', { mm: calculatedSensorWidth.value.toFixed(2) })
+    : t('devices.sensorCalcHint'),
+);
+function formatDiagonal(mm, unit) {
+  const digits = unit === 'in' ? 10000 : 100;
+  return String(Math.round(mmToDiagonal(mm, unit) * digits) / digits);
+}
+function applySensorPreset(id) {
+  const preset = findPreset(id);
+  if (!preset) return;
+  editForm.sensor_width_mm = preset.width;
+  sensorAspect.value = preset.aspect;
+  sensorDiagonal.value = formatDiagonal(sensorDiagonalMm(preset.width, preset.height), sensorDiagonalUnit.value);
+}
+function convertSensorDiagonal(unit) {
+  const diagonal = parseLength(sensorDiagonal.value);
+  if (diagonal) {
+    sensorDiagonal.value = formatDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), unit);
+  }
+  sensorDiagonalUnit.value = unit;
+}
+function useCalculatedSensorWidth() {
+  if (calculatedSensorWidth.value) {
+    editForm.sensor_width_mm = Math.round(calculatedSensorWidth.value * 100) / 100;
+  }
+}
 function openEdit(device) {
+  sensorPreset.value = null;
+  sensorAspect.value = '';
+  sensorDiagonal.value = '';
+  sensorDiagonalUnit.value = 'mm';
   editTarget.value = device;
   editForm.name = device.name || '';
   editForm.device_type = device.device_type || 'other';
@@ -519,6 +767,13 @@ function openEdit(device) {
   editForm.notes = device.notes || '';
   editForm.input_override = device.input_override ?? null;
   editForm.output_override = device.output_override ?? null;
+  editForm.sensor_width_mm = device.sensor_width_mm ?? null;
+  editForm.focal_min_mm = device.focal_min_mm ?? null;
+  editForm.focal_max_mm = device.focal_max_mm ?? null;
+  editForm.max_distance_m = device.max_distance_m ?? null;
+  editForm.throw_ratio_min = device.throw_ratio_min ?? null;
+  editForm.throw_ratio_max = device.throw_ratio_max ?? null;
+  editForm.image_aspect_ratio = device.image_aspect_ratio ?? null;
   editDialog.value = true;
 }
 async function saveEdit() {

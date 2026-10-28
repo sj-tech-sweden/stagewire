@@ -93,12 +93,23 @@
               vector-effect="non-scaling-stroke"
             />
           </template>
+          <path
+            v-for="view in coverageViews"
+            :key="view.key"
+            :d="view.d"
+            :fill="view.fill"
+            :stroke="view.stroke"
+            :stroke-dasharray="view.dash || undefined"
+            :stroke-width="view.width || 1"
+            vector-effect="non-scaling-stroke"
+          />
           <g
             v-for="element in stagePlotElements"
             :key="element.id"
-            :transform="`rotate(${element.rotation || 0} ${(plotOffsetX + element.position_x + element.width_cm / 2) * stagePlotScale} ${(plotOffsetY + element.position_y + element.height_cm / 2) * stagePlotScale})`"
+            :transform="`rotate(${element.rotation || 0} ${(plotOffsetX + element.position_x) * stagePlotScale} ${(plotOffsetY + element.position_y) * stagePlotScale})`"
           >
             <rect
+              v-if="element.element_type !== 'screen'"
               :x="(plotOffsetX + element.position_x) * stagePlotScale"
               :y="(plotOffsetY + element.position_y) * stagePlotScale"
               :width="element.width_cm * stagePlotScale"
@@ -106,6 +117,15 @@
               :fill="['mixer', 'stagebox', 'split'].includes(element.element_type) ? '#e6ddf1' : '#dce9ef'"
               stroke="#1f4b66"
               vector-effect="non-scaling-stroke"
+            />
+            <line
+              v-else
+              :x1="(plotOffsetX + element.position_x) * stagePlotScale"
+              :y1="(plotOffsetY + element.position_y + element.height_cm / 2) * stagePlotScale"
+              :x2="(plotOffsetX + element.position_x + element.width_cm) * stagePlotScale"
+              :y2="(plotOffsetY + element.position_y + element.height_cm / 2) * stagePlotScale"
+              stroke="#78909c"
+              stroke-width="4"
             />
             <text
               :x="(plotOffsetX + element.position_x + element.width_cm / 2) * stagePlotScale"
@@ -143,6 +163,17 @@
 <script setup>
 import { computed, defineComponent, h, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { elementCentre } from '@/utils/cables'
+import { coverageFocals, horizontalFovDeg, viewPolygon } from '@/utils/camera'
+import {
+  IMAGE_ASPECT,
+  fillDistanceRangeM,
+  fitStatus,
+  projectionGeometry,
+  projectorEnds,
+  targetScreen,
+  throwAngleDeg,
+} from '@/utils/projection'
 
 const { t } = useI18n()
 const props = defineProps({
@@ -155,6 +186,8 @@ const props = defineProps({
   previewJob: { type: Object, default: null },
   stagePlotElements: { type: Array, default: () => [] },
   stagePlotCables: { type: Array, default: () => [] },
+  stagePlotDevices: { type: Array, default: () => [] },
+  stagePlotCameras: { type: Object, default: () => ({}) },
   stageWidth: { type: Number, default: 0 },
   stageHeight: { type: Number, default: 0 },
   venueWidth: { type: Number, default: 0 },
@@ -193,14 +226,151 @@ function plotPolyline(points = []) {
     .join(' ')
 }
 
+const devicesById = computed(() => Object.fromEntries(props.stagePlotDevices.map((device) => [device.id, device])))
+const plotBox = computed(() => ({
+  minX: -plotOffsetX.value,
+  minY: -plotOffsetY.value,
+  maxX: plotWidth.value - plotOffsetX.value,
+  maxY: plotHeight.value - plotOffsetY.value,
+}))
+
+function pathFrom(points, closed) {
+  const scale = stagePlotScale.value
+  const body = points
+    .map(([x, y], index) => `${index ? 'L' : 'M'} ${(plotOffsetX.value + x) * scale} ${(plotOffsetY.value + y) * scale}`)
+    .join(' ')
+  return closed ? `${body} Z` : body
+}
+
+const coverageViews = computed(() => {
+  const views = []
+  const options = props.stagePlotOptions
+  const elements = props.stagePlotElements
+  if (options.show_camera_coverage) {
+    for (const element of elements) {
+      const spec = props.stagePlotCameras[element.id]
+      if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) continue
+      const [ax, ay] = elementCentre(element)
+      const apex = { x: ax, y: ay }
+      const rotation = element.rotation || 0
+      const ends = coverageFocals(spec.focal_min_mm, spec.focal_max_mm, options.camera_view_mode || 'range', spec.focal_mm)
+      for (const end of ends) {
+        const points = viewPolygon({
+          apex,
+          rotationDeg: rotation,
+          fovDeg: horizontalFovDeg(spec.sensor_width_mm, end.focalMm),
+          maxDistanceCm: null,
+          box: plotBox.value,
+        })
+        views.push({
+          key: `cam-${element.id}-${end.filled ? 'widest' : 'narrowest'}`,
+          d: pathFrom(points, true),
+          fill: end.filled ? 'rgba(66, 165, 245, 0.16)' : 'none',
+          stroke: 'rgba(66, 165, 245, 0.6)',
+          dash: end.filled ? '' : '6 4',
+        })
+      }
+      if (spec.max_distance_m) {
+        const first = ends[0]
+        const points = viewPolygon({
+          apex,
+          rotationDeg: rotation,
+          fovDeg: horizontalFovDeg(spec.sensor_width_mm, first.focalMm),
+          maxDistanceCm: spec.max_distance_m * 100,
+          box: plotBox.value,
+        })
+        views.push({
+          key: `cam-${element.id}-recommended`,
+          d: pathFrom(points, true),
+          fill: 'none',
+          stroke: 'rgba(66, 165, 245, 0.8)',
+          dash: '2 3',
+        })
+      }
+    }
+  }
+  if (options.show_projector_coverage) {
+    for (const element of elements) {
+      if (element.element_type !== 'projector') continue
+      const device = devicesById.value[element.linked_device_id]
+      if (!device || !device.throw_ratio_min) continue
+      const [ax, ay] = elementCentre(element)
+      const apex = { x: ax, y: ay }
+      const screen = targetScreen(element, elements, device.throw_ratio_min)
+      const aspect = device.image_aspect_ratio || IMAGE_ASPECT
+      const ends = projectorEnds(device.throw_ratio_min, device.throw_ratio_max)
+      let status = null
+      let screenCentre = null
+      if (screen) {
+        screenCentre = elementCentre(screen)
+        const distanceM = Math.hypot(screenCentre[0] - ax, screenCentre[1] - ay) / 100
+        status = fitStatus(
+          distanceM,
+          fillDistanceRangeM({
+            throwMin: device.throw_ratio_min,
+            throwMax: device.throw_ratio_max,
+            screenWidthCm: screen.width_cm,
+            screenHeightCm: screen.height_cm,
+            aspect,
+          }),
+        )
+      }
+      const zoneColour = !screen ? 'rgba(171, 71, 188, 0.8)' : status === 'fits' ? '#66bb6a' : status ? '#ffa726' : '#90a4af'
+      for (const end of ends) {
+        const key = end.filled ? 'widest' : 'narrowest'
+        const dash = end.filled ? '' : '6 4'
+        if (screen) {
+          const geometry = projectionGeometry({
+            apex,
+            screen: { x: screenCentre[0], y: screenCentre[1], rotationDeg: screen.rotation || 0 },
+            throwRatio: end.throwRatio,
+          })
+          views.push({
+            key: `proj-${element.id}-cone-${key}`,
+            d: pathFrom(geometry.cone, true),
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'none',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            dash,
+          })
+          views.push({
+            key: `proj-${element.id}-zone-${key}`,
+            d: pathFrom(geometry.zone, false),
+            fill: 'none',
+            stroke: zoneColour,
+            dash,
+            width: end.filled ? 3 : 2,
+          })
+        } else {
+          const points = viewPolygon({
+            apex,
+            rotationDeg: element.rotation || 0,
+            fovDeg: throwAngleDeg(end.throwRatio),
+            maxDistanceCm: null,
+            box: plotBox.value,
+          })
+          views.push({
+            key: `proj-${element.id}-wall-${key}`,
+            d: pathFrom(points, true),
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'none',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            dash,
+          })
+        }
+      }
+    }
+  }
+  return views
+})
+
 function coveragePath(element) {
   const types = ['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay']
   const angle = Number(element.coverage_angle_h) || 0
   const distance = Number(element.coverage_distance_m) || 0
   if (!types.includes(element.element_type) || angle <= 0 || distance <= 0) return ''
   const scale = stagePlotScale.value
-  const cx = (plotOffsetX.value + element.position_x + element.width_cm / 2) * scale
-  const cy = (plotOffsetY.value + element.position_y + element.height_cm / 2) * scale
+  const [centreX, centreY] = elementCentre(element)
+  const cx = (plotOffsetX.value + centreX) * scale
+  const cy = (plotOffsetY.value + centreY) * scale
   const rotation = Number(element.rotation) || 0
   const start = (rotation - 90 - Math.min(angle, 360) / 2) * Math.PI / 180
   const steps = Math.max(8, Math.min(48, Math.ceil(angle / 6)))

@@ -137,6 +137,12 @@ test('report editor includes the selected patchpoint in the PDF preview request'
   await page.route(`**/api/v1/jobs/${jobId}/devices`, (route) =>
     route.fulfill({ json: [] }),
   );
+  await page.route(`**/api/v1/jobs/${jobId}/video-lists`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/v1/jobs/${jobId}/camera-specs`, (route) =>
+    route.fulfill({ json: {} }),
+  );
   await page.route(`**/api/v1/jobs/${jobId}/patch-sheets`, (route) =>
     route.fulfill({
       json: [
@@ -205,4 +211,14 @@ test('letterhead printable-area preview updates before margins are saved', async
   await expect
     .poll(() => printableArea.evaluate((element) => element.style.top))
     .not.toBe(initialTop);
+});
+
+test('the stage plot template offers camera and projector coverage selectors', async ({ page }) => {
+  await login(page);
+  await page.goto('/reports');
+  await page.getByRole('combobox', { name: 'Template', exact: true }).click();
+  await page.getByText('Stage plot · Default', { exact: true }).click();
+  await expect(page.getByText('Camera coverage', { exact: true })).toBeVisible();
+  await expect(page.getByText('Projector coverage', { exact: true })).toBeVisible();
+  await expect(page.getByText('Chosen focal', { exact: true })).toBeVisible();
 });

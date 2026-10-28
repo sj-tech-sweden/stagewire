@@ -7,7 +7,7 @@
         icon="arrow_back"
         :aria-label="t('stagePlot.back')"
         class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="goBackToJob"
       />
       <div class="col">
         <div class="text-h6">
@@ -158,6 +158,16 @@
               <q-item
                 v-ripple
                 clickable
+                @click="startAudience"
+              >
+                <q-item-section avatar>
+                  <q-icon name="groups" />
+                </q-item-section>
+                <q-item-section>{{ t('stagePlot.audienceDraw') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-ripple
+                clickable
                 @click="openSpeakerDialog"
               >
                 <q-item-section avatar>
@@ -209,6 +219,50 @@
               @update:model-value="commitLink"
             />
             <q-select
+              v-if="selected && selected.element_type !== 'projector'"
+              v-model="draft.linked_video_input_id"
+              :label="t('stagePlot.linkVideo')"
+              :options="videoInputOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="q-mt-sm"
+              @update:model-value="commitVideoInput"
+            />
+            <template v-if="selected && selected.element_type === 'camera'">
+              <q-select
+                v-model="draft.linked_lens_device_id"
+                :label="t('stagePlot.linkLens')"
+                :options="lensOptions"
+                emit-value
+                map-options
+                clearable
+                dense
+                class="q-mt-sm"
+                @update:model-value="commitLens"
+              />
+              <div
+                v-if="cameraSpec(selected) && cameraSpec(selected).focal_min_mm && cameraSpec(selected).focal_max_mm > cameraSpec(selected).focal_min_mm"
+                class="q-mt-sm"
+              >
+                <div class="text-caption">
+                  {{ t('stagePlot.focalLength') }}: {{ Math.round(cameraSpec(selected).focal_mm) }} mm
+                </div>
+                <q-slider
+                  :model-value="cameraSpec(selected).focal_mm"
+                  :min="cameraSpec(selected).focal_min_mm"
+                  :max="cameraSpec(selected).focal_max_mm"
+                  label
+                  color="primary"
+                  @change="commitFocal"
+                />
+              </div>
+              <div class="text-caption text-grey-7 q-mt-xs">
+                {{ cameraCaption(selected) }}
+              </div>
+            </template>
+            <q-select
               v-if="!isSpeakerElement(selected)"
               v-model="draft.linked_device_id"
               :label="t('stagePlot.linkDevice')"
@@ -220,6 +274,23 @@
               class="q-mt-sm"
               @update:model-value="commitDevice"
             />
+            <q-btn
+              v-if="selected && selected.element_type === 'camera'"
+              flat
+              dense
+              no-caps
+              icon="add"
+              color="primary"
+              class="q-mt-xs"
+              :label="t('stagePlot.createCameraDevice')"
+              @click="openCameraDeviceDialog"
+            />
+            <div
+              v-if="selected && selected.element_type === 'projector'"
+              class="text-caption text-grey-7 q-mt-xs"
+            >
+              {{ projectorCaption(selected) }}
+            </div>
             <div
               v-if="draft.linked_channel_id || draft.linked_device_id"
               class="row q-gutter-sm q-mt-xs"
@@ -432,7 +503,7 @@
         </q-card>
       </div>
 
-      <div class="col-12 col-md-9">
+      <div class="col-12 col-md-9 order-first order-md-last">
         <q-card
           flat
           bordered
@@ -446,21 +517,92 @@
             </div>
             <div class="row items-center q-gutter-sm q-mt-xs">
               <q-toggle
-                v-model="showCoverage"
-                :label="t('stagePlot.showCoverage')"
+                v-model="showSoundCoverage"
+                :label="t('stagePlot.showSoundCoverage')"
+              />
+              <q-toggle
+                v-model="showCameraCoverage"
+                :label="t('stagePlot.showCameraCoverage')"
+              />
+              <q-btn-toggle
+                v-if="showCameraCoverage"
+                v-model="cameraViewMode"
+                dense
+                no-caps
+                toggle-color="primary"
+                :options="cameraViewOptions"
+              />
+              <q-toggle
+                v-model="showProjectorCoverage"
+                :label="t('stagePlot.showProjectorCoverage')"
+              />
+              <q-btn
+                v-for="c in categoryOptions"
+                :key="c.value"
+                dense
+                no-caps
+                :outline="!visibleCategories.includes(c.value)"
+                :color="visibleCategories.includes(c.value) ? 'primary' : 'grey-7'"
+                :label="c.label"
+                :aria-pressed="visibleCategories.includes(c.value) ? 'true' : 'false'"
+                @click="toggleCategory(c.value)"
               />
               <div
-                v-if="showCoverage && !hasVenue"
+                v-if="showSoundCoverage && !hasVenue"
                 class="text-caption text-warning"
               >
                 {{ t('stagePlot.coverageNoVenue') }}
               </div>
               <div
-                v-else-if="showCoverage && coverageLabel"
+                v-else-if="showSoundCoverage && coverageLabel"
                 class="text-caption"
               >
                 {{ coverageLabel }}
               </div>
+            </div>
+            <div
+              v-if="drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceHint') }}
+              </div>
+              <q-btn
+                dense
+                color="primary"
+                :label="t('stagePlot.audienceFinish')"
+                :disable="audiencePoints.length < 3"
+                @click="finishAudience"
+              />
+              <q-btn
+                dense
+                flat
+                :label="t('app.actions.cancel')"
+                @click="cancelAudience"
+              />
+            </div>
+            <div
+              v-if="audienceShown.length >= 3 && !drawingAudience"
+              class="row items-center q-gutter-sm q-mt-sm"
+            >
+              <div class="text-caption">
+                {{ t('stagePlot.audienceShown') }}
+              </div>
+              <q-btn
+                flat
+                dense
+                icon="delete"
+                :label="t('stagePlot.audienceClear')"
+                @click="clearAudience"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                flat
+                dense
+                icon="save"
+                :label="t('stagePlot.audienceSaveVenue')"
+                @click="saveAudienceToVenue"
+              />
             </div>
             <div
               v-if="store.loading"
@@ -492,11 +634,33 @@
                   :key="'g' + i"
                   :config="g"
                 />
+                <v-rect :config="stageBg" />
                 <v-image
                   v-if="coverageImage"
                   :config="coverageConfig"
                 />
-                <v-rect :config="stageBg" />
+                <v-line
+                  v-for="cv in cameraViews"
+                  :key="'cam' + cv.id"
+                  :config="cv.config"
+                />
+                <v-line
+                  v-for="pv in projectorViews"
+                  :key="'proj' + pv.id"
+                  :config="pv.config"
+                />
+                <v-line
+                  v-if="audienceShown.length >= 3"
+                  :config="audienceConfig"
+                />
+                <v-text
+                  v-if="audienceShown.length >= 3"
+                  :config="audienceLabelConfig"
+                />
+                <v-line
+                  v-if="drawingAudience && audiencePoints.length"
+                  :config="audienceDraftConfig"
+                />
                 <v-line
                   v-for="w in cablePlan.cableways"
                   :key="'w' + w.id"
@@ -522,15 +686,19 @@
                   :config="waypointConfig(wp)"
                 />
                 <v-group
-                  v-for="el in store.elements"
+                  v-for="el in visibleElements"
                   :key="el.id"
                   :config="groupConfig(el)"
                 >
                   <v-wedge
-                    v-if="showCoverage && sectorFor(el)"
+                    v-if="showSoundCoverage && sectorFor(el)"
                     :config="wedgeConfig(el)"
                   />
                   <v-rect :config="rectConfig(el)" />
+                  <v-rect
+                    v-if="el.element_type === 'screen'"
+                    :config="screenBarConfig(el)"
+                  />
                   <v-image
                     v-if="imageFor(el)"
                     :config="imageConfig(el)"
@@ -569,7 +737,7 @@
                 dense
                 icon="alt_route"
                 :label="t('cables.drawWay')"
-                :disable="drawingWay || !!rerouteKey"
+                :disable="drawingWay || drawingAudience || !!rerouteKey"
                 @click="startDrawWay"
               />
               <q-btn
@@ -658,6 +826,20 @@
                 class="col-12 col-sm-3"
                 @update:model-value="(v) => saveCableSettings({ slack_m: Number(v) || 0 })"
               />
+              <div class="col-12 col-sm-6">
+                <div class="text-caption text-grey-7">
+                  {{ t('cables.cablewayFactor') }}: {{ Number(cablePlan.settings.cableway_factor).toFixed(2) }}
+                </div>
+                <q-slider
+                  :model-value="Number(cablePlan.settings.cableway_factor)"
+                  :min="0.1"
+                  :max="1"
+                  :step="0.05"
+                  label
+                  color="primary"
+                  @change="(v) => saveCableSettings({ cableway_factor: Number(v) })"
+                />
+              </div>
               <q-input
                 :model-value="standardLengthsText"
                 dense
@@ -686,6 +868,29 @@
               </q-chip>
             </div>
 
+            <div
+              v-if="cableTypes.length"
+              class="q-mt-md"
+            >
+              <div class="text-subtitle2 q-mb-xs">
+                {{ t('cables.byType') }}
+              </div>
+              <div
+                v-for="g in cableTypes"
+                :key="g.type"
+                class="text-body2"
+              >
+                <b>{{ g.type === 'unspecified' ? t('cables.unspecified') : g.type.toUpperCase() }}</b>
+                · {{ g.total }} {{ t('cables.total') }}:
+                <span
+                  v-for="(l, li) in g.lengths"
+                  :key="String(l.length)"
+                >
+                  {{ l.count }} × {{ l.length === 'over' ? t('cables.overMax') : `${l.length} m` }}<span v-if="li < g.lengths.length - 1">, </span>
+                </span>
+              </div>
+            </div>
+
             <div class="text-caption text-grey-7 q-mt-md">
               {{ t('cables.actionsHint') }}
             </div>
@@ -711,6 +916,12 @@
                         ? t(`cables.route.${row.mode}`)
                         : t('cables.missingOn', { name: row.missingName })
                     }}
+                    <span
+                      v-if="row.crossesAudience"
+                      class="text-warning"
+                    >
+                      · {{ t('cables.crossesAudience') }}
+                    </span>
                   </q-item-label>
                   <div class="row wrap q-mt-xs">
                     <q-btn
@@ -896,29 +1107,81 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="cameraDeviceDialog">
+      <q-card style="min-width: 320px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('stagePlot.createCameraDeviceTitle') }}
+        </q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="cameraDeviceName"
+            :label="t('stagePlot.cameraDeviceName')"
+            autofocus
+            dense
+            @keyup.enter="createCameraDevice"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            flat
+            color="primary"
+            :label="t('app.actions.save')"
+            :disable="!cameraDeviceName.trim()"
+            @click="createCameraDevice"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
+import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
+import { coverageFocals, horizontalFovDeg, viewPolygon } from '@/utils/camera';
+import {
+  IMAGE_ASPECT,
+  fillDistanceRangeM,
+  fitStatus,
+  projectionGeometry,
+  projectorEnds,
+  targetScreen,
+  throwAngleDeg,
+} from '@/utils/projection';
 import {
   buildCableRows,
+  elementCentre,
   cablesToCsv,
   DEFAULT_CABLE_SETTINGS,
   emptyCablePlan,
+  cableTypeCsv,
+  cableTypeOrder,
   lengthOrder,
 } from '@/utils/cables';
 
 const { t } = useI18n({ useScope: 'global' });
 const route = useRoute();
 const router = useRouter();
+
+function goBackToJob() {
+  router.push({
+    path: `/jobs/${jobId}`,
+    query: route.query.from === 'video' ? { view: 'video' } : {},
+  });
+}
 const jobId = route.params.jobId;
 const store = useStagePlotStore();
 const devicesStore = useDevicesStore();
@@ -971,6 +1234,47 @@ const palette = {
     coverageAngle: 60,
     coverageDistance: 8,
   },
+  camera: {
+    labelKey: 'stagePlot.types.camera',
+    icon: 'videocam',
+    color: '#42A5F5',
+    w: 40,
+    h: 30,
+    deviceType: 'camera',
+    createDevice: true,
+  },
+  screen: {
+    labelKey: 'stagePlot.types.screen',
+    icon: 'tv',
+    color: '#78909C',
+    w: 200,
+    h: 113,
+  },
+  projector: {
+    labelKey: 'stagePlot.types.projector',
+    icon: 'slideshow',
+    color: '#AB47BC',
+    w: 40,
+    h: 25,
+    deviceType: 'projector',
+    createDevice: true,
+  },
+  mixer: {
+    labelKey: 'stagePlot.types.mixer',
+    icon: 'tune',
+    color: '#7E57C2',
+    w: 90,
+    h: 45,
+    deviceType: 'mixer',
+  },
+  switcher: {
+    labelKey: 'stagePlot.types.switcher',
+    icon: 'memory',
+    color: '#26A69A',
+    w: 80,
+    h: 45,
+    deviceType: 'switcher',
+  },
   di: { label: 'DI', icon: 'crop_square', color: '#5C6BC0', w: 24, h: 18 },
   multicore: { label: 'Multicore', icon: 'cable', color: '#8D6E63', w: 32, h: 120 },
   dais: { labelKey: 'stagePlot.types.dais', icon: 'crop_16_9', color: '#78909C', w: 220, h: 120 },
@@ -1013,7 +1317,14 @@ function defFor(type) {
   return palette[type] || palette[LEGACY_TYPE[type]] || CUSTOM_DEF;
 }
 
+const $q = useQuasar();
 const scale = ref(0.7);
+// On a phone the whole plot should fit the screen width when it is first shown.
+function fitPlotToScreen() {
+  if (!$q.screen.lt.sm) return;
+  const usable = Math.max(200, window.innerWidth - 64);
+  scale.value = Math.max(0.15, Math.min(0.7, usable / (canvasW.value || 1200)));
+}
 const unit = ref('cm');
 const unitOptions = [
   { label: 'cm', value: 'cm' },
@@ -1030,12 +1341,16 @@ const draft = ref({
   linked_channel_id: null,
   linked_device_id: null,
   linked_output_point_id: null,
+  linked_video_input_id: null,
+  linked_lens_device_id: null,
+  focal_mm: null,
   width_cm: 60,
   height_cm: 60,
   image_url: '',
   coverage_angle_h: 0,
   coverage_distance_m: 0,
 });
+const videoLists = ref([]);
 
 const stageW = ref(DEFAULT_W);
 const stageH = ref(DEFAULT_H);
@@ -1048,7 +1363,59 @@ const channelLists = ref([]);
 const imageCache = ref({});
 const bgImage = ref(null);
 const uploading = ref(false);
-const showCoverage = ref(false);
+const COVERAGE_VIEW_KEY = 'sw_stage_coverage_view';
+const savedCoverageView = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(COVERAGE_VIEW_KEY) || 'null') || {};
+  } catch {
+    return {};
+  }
+})();
+const showSoundCoverage = ref(savedCoverageView.sound === true);
+const showCameraCoverage = ref(savedCoverageView.camera === true);
+const showProjectorCoverage = ref(savedCoverageView.projector === true);
+const cameraViewMode = ref(savedCoverageView.cameraMode === 'chosen' ? 'chosen' : 'range');
+watch([showSoundCoverage, showCameraCoverage, showProjectorCoverage, cameraViewMode], ([sound, camera, projector, mode]) => {
+  localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, projector, cameraMode: mode }));
+});
+const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
+const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
+const visibleCategories = ref([...CATEGORIES]);
+watch(categoryStorageKey, (key) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    visibleCategories.value = Array.isArray(saved) ? saved : [...CATEGORIES];
+  } catch {
+    visibleCategories.value = [...CATEGORIES];
+  }
+}, { immediate: true });
+watch(visibleCategories, (value) => {
+  localStorage.setItem(categoryStorageKey.value, JSON.stringify(value));
+});
+function toggleCategory(category) {
+  visibleCategories.value = visibleCategories.value.includes(category)
+    ? visibleCategories.value.filter((c) => c !== category)
+    : [...visibleCategories.value, category];
+}
+function deviceTypeOf(deviceId) {
+  return deviceId ? devicesStore.byId(deviceId)?.device_type || null : null;
+}
+function elementCategory(el) {
+  return categoryOfElement(el, deviceTypeOf(el.linked_device_id));
+}
+const visibleElements = computed(() =>
+  store.elements.filter((el) => visibleCategories.value.includes(elementCategory(el))),
+);
+function endpointVisible(elementId, deviceId) {
+  if (elementId) {
+    const el = store.elements.find((e) => e.id === elementId);
+    return !!el && visibleCategories.value.includes(elementCategory(el));
+  }
+  if (deviceId) {
+    return visibleCategories.value.includes(categoryOfDeviceType(deviceTypeOf(deviceId)));
+  }
+  return true;
+}
 const coverage = ref(null);
 const coverageImage = ref(null);
 const speakerSpecs = ref({});
@@ -1085,9 +1452,9 @@ const channelOptions = computed(() => {
   const opts = [];
   for (const list of channelLists.value) {
     for (const ch of list.channels || []) {
-      const bits = [`Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
+      const bits = [list.name, `Ch ${ch.channel_number}: ${ch.source_label || ''}`.trim()];
       if (ch.input_type) bits.push(ch.input_type);
-      opts.push({ value: ch.id, label: bits.join(' · ') });
+      opts.push({ value: ch.id, label: bits.filter(Boolean).join(' · ') });
     }
   }
   return opts;
@@ -1308,6 +1675,18 @@ function rotateBy(step) {
   draft.value.rotation = ((((current + step) % 360) + 360) % 360);
   commitRotation();
 }
+function screenBarConfig(el) {
+  const thickness = Math.max(3, 2 * pxPerCm.value);
+  return {
+    x: 0,
+    y: (el.height_cm * pxPerCm.value - thickness) / 2,
+    width: el.width_cm * pxPerCm.value,
+    height: thickness,
+    fill: '#78909C',
+    cornerRadius: 1,
+    listening: false,
+  };
+}
 function rectConfig(el) {
   const def = defFor(el.element_type);
   const hi = highlightIds.value.includes(el.id);
@@ -1319,7 +1698,7 @@ function rectConfig(el) {
     // When an image is present it fills the box, so hide the coloured fill
     // (the picture shows instead of the box). Keep a transparent fill so the
     // shape still catches clicks/drag.
-    fill: hasImage && !hi ? 'transparent' : elementColor(el, def.color),
+    fill: (hasImage && !hi) || el.element_type === 'screen' ? 'transparent' : elementColor(el, def.color),
     cornerRadius: 4,
     opacity: hi || selected ? 1 : hasImage ? 1 : 0.85,
     stroke: hi ? '#35A853' : selected ? '#ffb300' : 'transparent',
@@ -1448,8 +1827,12 @@ function linkedSummary(el) {
     if (name) parts.push(name);
   }
   if (el.linked_channel_id) {
-    const ch = findChannel(el.linked_channel_id);
-    if (ch) parts.push(`Ch ${ch.channel_number}`);
+    const option = channelOptions.value.find((o) => o.value === el.linked_channel_id);
+    if (option) parts.push(option.label);
+  }
+  if (el.linked_video_input_id) {
+    const opt = videoInputOptions.value.find((o) => o.value === el.linked_video_input_id);
+    if (opt) parts.push(opt.label);
   }
   return parts.join(' · ');
 }
@@ -1533,6 +1916,9 @@ function select(id) {
       linked_channel_id: el.linked_channel_id || null,
       linked_device_id: el.linked_device_id || null,
       linked_output_point_id: el.linked_output_point_id || null,
+      linked_video_input_id: el.linked_video_input_id || null,
+      linked_lens_device_id: el.linked_lens_device_id || null,
+      focal_mm: el.focal_mm ?? null,
       width_cm: el.width_cm,
       height_cm: el.height_cm,
       image_url: el.image_url || '',
@@ -1544,6 +1930,10 @@ function select(id) {
 }
 
 function onStageClick(e) {
+  if (drawingAudience.value) {
+    addAudiencePoint(e);
+    return;
+  }
   if (drawingWay.value) {
     addDrawPoint(e);
     return;
@@ -1599,22 +1989,39 @@ function onTransformEnd(el, e) {
   }
 }
 
-function addElement(type) {
+// A mixer or switcher on the plot links to a job device of its type that is not on
+// the plot yet, so the cables from it and to it are drawn.
+function unplacedDeviceOf(deviceType) {
+  const placed = new Set(store.elements.map((e) => e.linked_device_id).filter(Boolean));
+  return devicesStore.devices.find((d) => d.device_type === deviceType && !placed.has(d.id)) || null;
+}
+
+async function addElement(type) {
   const def = palette[type];
+  let device = def.deviceType ? unplacedDeviceOf(def.deviceType) : null;
+  if (!device && def.createDevice) {
+    const count = devicesStore.devices.filter((d) => d.device_type === def.deviceType).length;
+    device = await devicesStore.createDevice(jobId, {
+      name: `${paletteLabel(def)} ${count + 1}`,
+      device_type: def.deviceType,
+    });
+  }
   const payload = {
     element_type: type,
     position_x: stageW.value / 2 - def.w / 2,
     position_y: stageH.value / 2 - def.h / 2,
     rotation: def.defaultRotation ?? 0,
-    label: paletteLabel(def),
+    label: device?.name || paletteLabel(def),
     width_cm: def.w,
     height_cm: def.h,
+    linked_device_id: device?.id || null,
   };
   if (def.coverageAngle) {
     payload.coverage_angle_h = def.coverageAngle;
     payload.coverage_distance_m = def.coverageDistance;
   }
-  store.createElement(jobId, payload).then((created) => select(created.id));
+  const created = await store.createElement(jobId, payload);
+  select(created.id);
 }
 
 function addCustom() {
@@ -1660,6 +2067,24 @@ function commitDevice(val) {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, { linked_device_id: val || null });
 }
+const cameraDeviceDialog = ref(false);
+const cameraDeviceName = ref('');
+function openCameraDeviceDialog() {
+  if (!selected.value) return;
+  const count = devicesStore.devices.filter((d) => d.device_type === 'camera').length;
+  cameraDeviceName.value = `${paletteLabel(palette.camera)} ${count + 1}`;
+  cameraDeviceDialog.value = true;
+}
+async function createCameraDevice() {
+  if (!selected.value || !cameraDeviceName.value.trim()) return;
+  const device = await devicesStore.createDevice(jobId, {
+    name: cameraDeviceName.value.trim(),
+    device_type: 'camera',
+  });
+  draft.value.linked_device_id = device.id;
+  commitDevice(device.id);
+  cameraDeviceDialog.value = false;
+}
 function commitSize() {
   if (!selected.value) return;
   store.updateElement(jobId, selected.value.id, {
@@ -1673,6 +2098,20 @@ function commitCoverage() {
     coverage_angle_h: Number(draft.value.coverage_angle_h) || 0,
     coverage_distance_m: Number(draft.value.coverage_distance_m) || 0,
   });
+}
+const videoInputOptions = computed(() => {
+  const opts = [];
+  for (const list of videoLists.value) {
+    for (const input of list.inputs || []) {
+      const label = input.source_label || t('video.types.camera');
+      opts.push({ value: input.id, label: `${list.name} · ${input.input_number}: ${label}` });
+    }
+  }
+  return opts;
+});
+function commitVideoInput(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_video_input_id: val || null });
 }
 function commitOutputPoint(val) {
   if (!selected.value) return;
@@ -1789,7 +2228,7 @@ async function saveStagePosition() {
       stage_x_cm: stageX.value,
       stage_y_cm: stageY.value,
     });
-    job.value = data;
+    applyJobFields(data, ['stage_x_cm', 'stage_y_cm']);
   } catch (err) {
     console.error('Failed to save stage position', err);
   }
@@ -1801,7 +2240,7 @@ async function saveVenueSize() {
       venue_width_cm: venueW.value,
       venue_height_cm: venueH.value,
     });
-    job.value = data;
+    applyJobFields(data, ['venue_width_cm', 'venue_height_cm']);
   } catch (err) {
     console.error('Failed to save venue size', err);
   }
@@ -1818,13 +2257,14 @@ async function loadJob() {
     venueW.value = data.venue_width_cm || 0;
     venueH.value = data.venue_height_cm || 0;
     loadBgImage(data.venue_background_image_url);
+    fitPlotToScreen();
   } catch (err) {
     console.error('Failed to load job', err);
   }
 }
 
 async function fetchCoverage() {
-  if (!showCoverage.value || !hasVenue.value) {
+  if (!showSoundCoverage.value || !hasVenue.value) {
     coverage.value = null;
     return;
   }
@@ -1833,6 +2273,16 @@ async function fetchCoverage() {
     coverage.value = data;
   } catch (err) {
     console.error('Failed to load coverage', err);
+  }
+}
+
+const cameraSpecs = ref({});
+async function fetchCameraSpecs() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/camera-specs`);
+    cameraSpecs.value = data || {};
+  } catch (err) {
+    console.error('Failed to load camera specs', err);
   }
 }
 
@@ -1850,6 +2300,7 @@ function scheduleCoverage() {
   coverageTimer = setTimeout(() => {
     fetchCoverage();
     fetchSpeakerSpecs();
+    fetchCameraSpecs();
   }, 250);
 }
 
@@ -1919,9 +2370,248 @@ function buildCoverageCanvas(data) {
   return canvas;
 }
 
+const lensOptions = computed(() =>
+  devicesStore.devices
+    .filter((d) => d.device_type === 'lens')
+    .map((d) => ({ value: d.id, label: d.name || '—' })),
+);
+function cameraSpec(el) {
+  return cameraSpecs.value[el.id] || null;
+}
+function cameraCaption(el) {
+  const spec = cameraSpec(el);
+  if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) return t('stagePlot.cameraNeedsValues');
+  const ends = coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec));
+  const fovs = ends.map((end) => horizontalFovDeg(spec.sensor_width_mm, end.focalMm).toFixed(1));
+  const view =
+    fovs.length > 1
+      ? t('stagePlot.fovRangeCaption', { wide: fovs[0], tele: fovs[1] })
+      : t('stagePlot.fovCaption', { deg: fovs[0] });
+  const source = spec.source === 'stockwire' ? t('stagePlot.specsFromStockwireShort') : t('stagePlot.specsManualShort');
+  return `${view} · ${source}`;
+}
+const cameraViewOptions = computed(() => [
+  { label: t('stagePlot.cameraViewRange'), value: 'range' },
+  { label: t('stagePlot.cameraViewChosen'), value: 'chosen' },
+]);
+function cameraViewSettings(spec) {
+  return { mode: cameraViewMode.value, chosenMm: spec.focal_mm };
+}
+const cameraViews = computed(() => {
+  if (!showCameraCoverage.value) return [];
+  const s = pxPerCm.value;
+  const box = {
+    minX: -stageX.value,
+    minY: -stageY.value,
+    maxX: canvasW.value - stageX.value,
+    maxY: canvasH.value - stageY.value,
+  };
+  const views = [];
+  for (const el of visibleElements.value) {
+    const spec = cameraSpecs.value[el.id];
+    if (!spec || !spec.sensor_width_mm || !spec.focal_min_mm) continue;
+    const [cx, cy] = elementCentre(el);
+    for (const end of coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec))) {
+      const points = viewPolygon({
+        apex: { x: cx, y: cy },
+        rotationDeg: el.rotation || 0,
+        fovDeg: horizontalFovDeg(spec.sensor_width_mm, end.focalMm),
+        maxDistanceCm: null,
+        box,
+      });
+      views.push({
+        id: `${el.id}-${end.filled ? 'wide' : 'tele'}`,
+        config: {
+          points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
+          closed: true,
+          fill: end.filled ? 'rgba(66, 165, 245, 0.16)' : 'transparent',
+          stroke: 'rgba(66, 165, 245, 0.6)',
+          strokeWidth: 1,
+          dash: end.filled ? [] : [6, 4],
+          listening: false,
+        },
+      });
+    }
+    if (spec.max_distance_m) {
+      const [first] = coverageFocals(spec.focal_min_mm, spec.focal_max_mm, cameraViewSettings(spec));
+      const points = viewPolygon({
+        apex: { x: cx, y: cy },
+        rotationDeg: el.rotation || 0,
+        fovDeg: horizontalFovDeg(spec.sensor_width_mm, first.focalMm),
+        maxDistanceCm: spec.max_distance_m * 100,
+        box,
+      });
+      views.push({
+        id: `${el.id}-recommended`,
+        config: {
+          points: points.flatMap(([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s]),
+          closed: true,
+          fill: 'transparent',
+          stroke: 'rgba(66, 165, 245, 0.8)',
+          strokeWidth: 1,
+          dash: [2, 3],
+          listening: false,
+        },
+      });
+    }
+  }
+  return views;
+});
+const projectorCoverageLabels = {
+  fits: 'stagePlot.projectorFits',
+  close: 'stagePlot.projectorClose',
+  far: 'stagePlot.projectorFar',
+};
+function nearestScreen(el) {
+  const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;
+  return targetScreen(el, store.elements, device?.throw_ratio_min);
+}
+function projectorState(el) {
+  const device = el.linked_device_id ? devicesStore.byId(el.linked_device_id) : null;
+  if (!device || !device.throw_ratio_min) return null;
+  const [px, py] = elementCentre(el);
+  const aspect = device.image_aspect_ratio || IMAGE_ASPECT;
+  const ends = projectorEnds(device.throw_ratio_min, device.throw_ratio_max);
+  const screen = nearestScreen(el);
+  if (!screen) {
+    return { device, ends, aspect, apex: [px, py], screen: null, range: null, status: null, distanceM: null };
+  }
+  const [sx, sy] = elementCentre(screen);
+  const distanceM = Math.hypot(sx - px, sy - py) / 100;
+  const range = fillDistanceRangeM({
+    throwMin: device.throw_ratio_min,
+    throwMax: device.throw_ratio_max,
+    screenWidthCm: screen.width_cm,
+    screenHeightCm: screen.height_cm,
+    aspect,
+  });
+  return {
+    device,
+    ends,
+    aspect,
+    apex: [px, py],
+    screen: { x: sx, y: sy, rotationDeg: screen.rotation || 0 },
+    range,
+    status: fitStatus(distanceM, range),
+    distanceM,
+  };
+}
+function projectorCaption(el) {
+  const state = projectorState(el);
+  if (!state) return t('stagePlot.projectorNeedsValues');
+  if (!state.screen) {
+    const wide = throwAngleDeg(state.ends[0].throwRatio).toFixed(1);
+    const narrow = state.ends[1] ? throwAngleDeg(state.ends[1].throwRatio).toFixed(1) : null;
+    return narrow
+      ? t('stagePlot.projectorWallRangeCaption', { wide, narrow })
+      : t('stagePlot.projectorWallCaption', { deg: wide });
+  }
+  return t('stagePlot.projectorCaption', {
+    min: state.range.minM.toFixed(1),
+    max: state.range.maxM.toFixed(1),
+    dist: state.distanceM.toFixed(1),
+    status: t(projectorCoverageLabels[state.status]),
+  });
+}
+const projectorViews = computed(() => {
+  if (!showProjectorCoverage.value) return [];
+  const s = pxPerCm.value;
+  const toPx = ([x, y]) => [(x + stageX.value) * s, (y + stageY.value) * s];
+  const box = {
+    minX: -stageX.value,
+    minY: -stageY.value,
+    maxX: canvasW.value - stageX.value,
+    maxY: canvasH.value - stageY.value,
+  };
+  const views = [];
+  for (const el of visibleElements.value) {
+    if (el.element_type !== 'projector') continue;
+    const state = projectorState(el);
+    if (!state) continue;
+    const [px, py] = state.apex;
+    const zoneColour = !state.screen
+      ? 'rgba(171, 71, 188, 0.8)'
+      : state.status === 'fits'
+        ? '#66BB6A'
+        : state.status
+          ? '#FFA726'
+          : '#90A4AE';
+    for (const end of state.ends) {
+      const key = end.filled ? 'min' : 'max';
+      const dash = end.filled ? [] : [6, 4];
+      if (state.screen) {
+        const geometry = projectionGeometry({
+          apex: { x: px, y: py },
+          screen: state.screen,
+          throwRatio: end.throwRatio,
+        });
+        views.push({
+          id: `${el.id}-cone-${key}`,
+          config: {
+            points: geometry.cone.flatMap(toPx),
+            closed: true,
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'transparent',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            strokeWidth: 1,
+            dash,
+            listening: false,
+          },
+        });
+        views.push({
+          id: `${el.id}-zone-${key}`,
+          config: {
+            points: geometry.zone.flatMap(toPx),
+            stroke: zoneColour,
+            strokeWidth: end.filled ? 3 : 2,
+            dash,
+            listening: false,
+          },
+        });
+      } else {
+        const points = viewPolygon({
+          apex: { x: px, y: py },
+          rotationDeg: el.rotation || 0,
+          fovDeg: throwAngleDeg(end.throwRatio),
+          maxDistanceCm: null,
+          box,
+        });
+        views.push({
+          id: `${el.id}-wall-${key}`,
+          config: {
+            points: points.flatMap(toPx),
+            closed: true,
+            fill: end.filled ? 'rgba(171, 71, 188, 0.14)' : 'transparent',
+            stroke: 'rgba(171, 71, 188, 0.6)',
+            strokeWidth: 1,
+            dash,
+            listening: false,
+          },
+        });
+      }
+    }
+  }
+  return views;
+});
+function commitLens(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { linked_lens_device_id: val || null });
+}
+function commitFocal(val) {
+  if (!selected.value) return;
+  store.updateElement(jobId, selected.value.id, { focal_mm: Number(val) });
+}
 const coverageLabel = computed(() =>
   coverage.value ? t('stagePlot.coveragePct', { pct: coverage.value.covered_pct }) : '',
 );
+
+async function loadVideoLists() {
+  try {
+    const { data } = await api.get(`/jobs/${jobId}/video-lists`);
+    videoLists.value = data || [];
+  } catch (err) {
+    console.error('Failed to load video inputs', err);
+  }
+}
 
 async function loadChannels() {
   try {
@@ -1936,6 +2626,83 @@ const cablesVisible = ref(true);
 const selectedCableKey = ref(null);
 const rerouteKey = ref(null);
 const drawingWay = ref(false);
+const drawingAudience = ref(false);
+const audiencePoints = ref([]);
+const audienceShown = computed(() => job.value?.audience_polygon || []);
+const audienceConfig = computed(() => {
+  const s = pxPerCm.value;
+  const flat = audienceShown.value.flatMap(([x, y]) => [x * s, y * s]);
+  return {
+    points: flat,
+    closed: true,
+    fill: 'rgba(229, 57, 53, 0.12)',
+    stroke: '#e53935',
+    strokeWidth: 2,
+    dash: [10, 6],
+    listening: false,
+  };
+});
+const audienceLabelConfig = computed(() => {
+  const s = pxPerCm.value;
+  const [x, y] = audienceShown.value[0] || [0, 0];
+  return {
+    x: x * s + 6,
+    y: y * s + 4,
+    text: t('stagePlot.audienceLabel'),
+    fontSize: Math.max(11, 12 * s),
+    fill: '#ef9a9a',
+    listening: false,
+  };
+});
+const audienceDraftConfig = computed(() => {
+  const s = pxPerCm.value;
+  return {
+    points: audiencePoints.value.flatMap(([x, y]) => [x * s, y * s]),
+    stroke: '#e53935',
+    strokeWidth: 2,
+    dash: [6, 4],
+    listening: false,
+  };
+});
+function startAudience() {
+  rerouteKey.value = null;
+  drawingWay.value = false;
+  audiencePoints.value = [];
+  drawingAudience.value = true;
+}
+function cancelAudience() {
+  drawingAudience.value = false;
+  audiencePoints.value = [];
+}
+function addAudiencePoint(e) {
+  const p = e.target.getStage().getPointerPosition();
+  if (!p) return;
+  audiencePoints.value = [...audiencePoints.value, [round1(p.x / pxPerCm.value), round1(p.y / pxPerCm.value)]];
+}
+async function finishAudience() {
+  if (audiencePoints.value.length < 3) return;
+  await saveJobAudience(audiencePoints.value);
+  cancelAudience();
+}
+async function saveJobAudience(polygon) {
+  try {
+    const { data } = await api.patch(`/jobs/${jobId}`, { audience_polygon: polygon });
+    applyJobFields(data, ['audience_polygon']);
+  } catch (err) {
+    console.error('Failed to save the audience area', err);
+  }
+}
+function clearAudience() {
+  saveJobAudience([]);
+}
+async function saveAudienceToVenue() {
+  if (!job.value?.venue_id) return;
+  try {
+    await api.patch(`/venues/${job.value.venue_id}`, { audience_polygon: audienceShown.value });
+  } catch (err) {
+    console.error('Failed to save the audience area to the venue', err);
+  }
+}
 const drawPoints = ref([]);
 const editingWayId = ref(null);
 
@@ -1946,6 +2713,9 @@ const cableRows = computed(() =>
     devices: devicesStore.devices,
     elements: store.elements,
     plan: cablePlan.value,
+    videoLists: videoLists.value,
+    audience: job.value?.audience_polygon || [],
+    stageOffset: [job.value?.stage_x_cm || 0, job.value?.stage_y_cm || 0],
   }),
 );
 const highlightCableKeys = computed(() => {
@@ -1978,10 +2748,13 @@ const visibleCableRows = computed(() =>
   cableRows.value.filter(
     (r) =>
       r.placed &&
+      endpointVisible(r.fromElementId, r.fromDeviceId) &&
+      endpointVisible(r.toElementId, r.toDeviceId) &&
       (highlightCableKeys.value.has(r.key) || (cablesVisible.value && !r.hidden)),
   ),
 );
 const cableOrder = computed(() => lengthOrder(cableRows.value));
+const cableTypes = computed(() => cableTypeOrder(cableRows.value));
 const rerouteRow = computed(() => cableRows.value.find((r) => r.key === rerouteKey.value) || null);
 const rerouteWaypoints = computed(
   () => cablePlan.value.routes[rerouteKey.value]?.waypoints || [],
@@ -1990,11 +2763,20 @@ const standardLengthsText = computed(() =>
   (cablePlan.value.settings.standard_lengths_m || DEFAULT_CABLE_SETTINGS.standard_lengths_m).join(', '),
 );
 
+// Only the newest cable-plan save may write its response back, so an older reply
+// can never bring back a plan the user has already changed.
+let planSeq = 0;
+// Copies just the named job fields from a response. A full copy could carry an old
+// cable plan from a save that was still in flight.
+function applyJobFields(data, keys) {
+  job.value = { ...job.value, ...Object.fromEntries(keys.map((k) => [k, data[k]])) };
+}
 async function savePlan(next) {
+  const seq = ++planSeq;
   job.value = { ...job.value, cable_plan: next };
   try {
     const { data } = await api.patch(`/jobs/${jobId}`, { cable_plan: next });
-    job.value = { ...job.value, cable_plan: data.cable_plan };
+    if (seq === planSeq) job.value = { ...job.value, cable_plan: data.cable_plan };
   } catch (err) {
     console.error('Failed to save cables', err);
   }
@@ -2114,7 +2896,7 @@ function saveStandardLengths(text) {
   saveCableSettings({ standard_lengths_m: lengths });
 }
 function exportCables() {
-  const blob = new Blob([cablesToCsv(cableRows.value)], { type: 'text/csv' });
+  const blob = new Blob([`${cablesToCsv(cableRows.value)}\n\n${cableTypeCsv(cableRows.value)}`], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -2177,7 +2959,10 @@ watch(
   (els) => loadImages(els),
   { deep: false },
 );
-watch(showCoverage, fetchCoverage);
+watch(showSoundCoverage, fetchCoverage);
+watch(hasVenue, (ready) => {
+  if (ready && showSoundCoverage.value) fetchCoverage();
+});
 watch(() => [venueW.value, venueH.value, stageX.value, stageY.value], scheduleCoverage);
 watch(
   () =>
@@ -2193,6 +2978,9 @@ watch(
           el.coverage_angle_h,
           el.coverage_distance_m,
           el.linked_output_point_id,
+          el.linked_device_id,
+          el.linked_lens_device_id,
+          el.focal_mm,
         ].join(','),
       )
       .join('|'),
@@ -2203,7 +2991,10 @@ watch(coverage, (data) => {
 });
 
 onMounted(() => {
+  fitPlotToScreen();
   fetchSpeakerSpecs();
+  fetchCameraSpecs();
+  loadVideoLists();
   loadJob();
   loadChannels();
   devicesStore.fetchDevices(jobId);

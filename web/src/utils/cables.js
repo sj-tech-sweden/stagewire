@@ -7,6 +7,8 @@ export const DEFAULT_CABLE_SETTINGS = {
   slack_pct: 10,
   slack_m: 1,
   standard_lengths_m: [1, 2, 3, 5, 7.5, 10, 15, 20, 30, 50],
+  // Lower values favour cableways more: a cable on a tray costs this share of its length.
+  cableway_factor: 0.5,
 };
 
 export function emptyCablePlan(plan) {
@@ -31,7 +33,7 @@ export function sourceElementsFor(channelId, elements) {
 
 const SPEAKER_TYPES = new Set(['speaker', 'speaker_main', 'speaker_sub', 'speaker_delay', 'monitor']);
 
-export function deriveCables(lists, elements) {
+export function deriveCables(lists, elements, videoLists = []) {
   const cables = [];
   for (const list of lists || []) {
     for (const ch of list.channels || []) {
@@ -117,6 +119,67 @@ export function deriveCables(lists, elements) {
       connector: hit.pt.connector || '',
     });
   }
+  for (const list of videoLists || []) {
+    for (const input of list.inputs || []) {
+      const pts = orderedPoints(input.patch_points).filter((p) => p.device_id);
+      if (!pts.length) continue;
+      const label = `Cam ${input.input_number}${input.source_label ? ` ${input.source_label}` : ''}`;
+      for (const el of elements || []) {
+        if (el.linked_video_input_id !== input.id || el.element_type === 'projector') continue;
+        cables.push({
+          key: `src:${el.id}`,
+          kind: 'source',
+          label,
+          channelId: input.id,
+          fromElementId: el.id,
+          fromPointId: null,
+          fromDeviceId: null,
+          toDeviceId: pts[0].device_id,
+          toPointId: pts[0].id,
+          connector: pts[0].connector || '',
+        });
+      }
+      for (let i = 1; i < pts.length; i++) {
+        const from = pts[i - 1];
+        const to = pts[i];
+        if (from.device_id === to.device_id) continue;
+        cables.push({
+          key: to.id,
+          kind: 'link',
+          label,
+          channelId: input.id,
+          fromElementId: null,
+          fromPointId: from.id,
+          fromDeviceId: from.device_id,
+          toDeviceId: to.device_id,
+          toPointId: to.id,
+          connector: to.connector || '',
+        });
+      }
+    }
+    for (const out of list.outputs || []) {
+      const pts = orderedPoints(out.patch_points).filter((p) => p.device_id);
+      const byId = new Map(pts.map((p) => [p.id, p]));
+      const label = `Out ${out.output_number}${out.name ? ` ${out.name}` : ''}`;
+      // A step takes its signal from its parent step; a split is several steps with one parent.
+      for (const to of pts) {
+        const from = to.parent_id ? byId.get(to.parent_id) : null;
+        if (!from || from.device_id === to.device_id) continue;
+        cables.push({
+          key: to.id,
+          kind: 'link',
+          label,
+          channelId: out.id,
+          fromElementId: null,
+          fromPointId: from.id,
+          fromDeviceId: from.device_id,
+          toDeviceId: to.device_id,
+          toPointId: to.id,
+          connector: to.connector || '',
+        });
+      }
+    }
+  }
   return cables;
 }
 
@@ -157,12 +220,76 @@ function segmentIntersection(a, b, c, d) {
 
 const nodeKey = (p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`;
 
-// Shortest path from `from` to `to` that follows the cableways. All cableways form
-// one network: segments are split where they cross or meet, both ends snap onto
-// the nearest point of that network, and Dijkstra runs over the result.
-function autoRoute(from, to, cableways) {
+// Cable on a cableway costs this fraction of the same length in the open. A tray is
+// used when it saves real distance; a cable never goes across the room to reach one.
+const CABLEWAY_TRAVEL = 0.5;
+// Each metre inside the audience area costs this much. Crossing is allowed, so a
+// cable crosses only when the detour around the audience is much longer.
+const AUDIENCE_PENALTY = 3;
+
+function pointInPolygon(p, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Parameters t in [0, 1] where segment a-b crosses the polygon outline.
+function crossingParams(a, b, poly) {
+  const ts = [];
+  for (let i = 0; i < poly.length; i++) {
+    const c = poly[i];
+    const d = poly[(i + 1) % poly.length];
+    const rx = b[0] - a[0];
+    const ry = b[1] - a[1];
+    const sx = d[0] - c[0];
+    const sy = d[1] - c[1];
+    const denom = rx * sy - ry * sx;
+    if (Math.abs(denom) < 1e-9) continue;
+    const qx = c[0] - a[0];
+    const qy = c[1] - a[1];
+    const t = (qx * sy - qy * sx) / denom;
+    const u = (qx * ry - qy * rx) / denom;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  return ts;
+}
+
+// Length of a-b that lies inside the audience area.
+function insideLength(a, b, poly) {
+  if (!poly || poly.length < 3) return 0;
+  const ts = [0, ...crossingParams(a, b, poly), 1].sort((x, y) => x - y);
+  let inside = 0;
+  for (let k = 1; k < ts.length; k++) {
+    const t0 = ts[k - 1];
+    const t1 = ts[k];
+    if (t1 - t0 < 1e-9) continue;
+    const mid = [a[0] + ((t0 + t1) / 2) * (b[0] - a[0]), a[1] + ((t0 + t1) / 2) * (b[1] - a[1])];
+    if (pointInPolygon(mid, poly)) inside += (t1 - t0) * dist(a, b);
+  }
+  return inside;
+}
+
+// Cost of running a straight cable from a to b: metres in the open, with the
+// audience metres counted at the penalty.
+function openCost(a, b, poly) {
+  const length = dist(a, b);
+  return length + insideLength(a, b, poly) * (AUDIENCE_PENALTY - 1);
+}
+
+// Shortest route from `from` to `to`. The graph joins the cableway network (points
+// where trays meet, and where each end drops onto a tray), the corners of the audience
+// area, and the two ends. Trays cost CABLEWAY_TRAVEL per metre; open runs cost
+// openCost. Returns null when the straight run is best.
+function autoRoute(from, to, cableways, audience = [], trayFactor = CABLEWAY_TRAVEL) {
   const lines = (cableways || []).map((c) => c.points || []).filter((p) => p.length >= 2);
-  if (!lines.length) return null;
+  const poly = audience && audience.length >= 3 ? audience : [];
+  if (!lines.length && !poly.length) return null;
 
   const segs = [];
   for (const line of lines) {
@@ -179,42 +306,57 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-
-  const nearest = (p) => {
-    let best = null;
-    for (const seg of segs) {
-      const { point } = projectOnSegment(p, seg.a, seg.b);
-      const d = dist(p, point);
-      if (!best || d < best.d) best = { d, seg, point };
-    }
-    return best;
-  };
-  const sHit = nearest(from);
-  const eHit = nearest(to);
-  sHit.seg.extra.push(sHit.point);
-  eHit.seg.extra.push(eHit.point);
+  for (const seg of segs) {
+    seg.extra.push(projectOnSegment(from, seg.a, seg.b).point, projectOnSegment(to, seg.a, seg.b).point);
+  }
 
   const pos = new Map();
   const adj = new Map();
-  const link = (a, b) => {
-    const w = dist(pos.get(a), pos.get(b));
+  const addEdge = (a, b, w) => {
     if (!adj.has(a)) adj.set(a, []);
     if (!adj.has(b)) adj.set(b, []);
     adj.get(a).push({ to: b, w });
     adj.get(b).push({ to: a, w });
   };
+  const trayNodes = [];
   for (const seg of segs) {
-    const pts = [seg.a, seg.b, ...seg.extra];
-    for (const p of pts) pos.set(nodeKey(p), p);
-    const ordered = [...new Set(pts.map(nodeKey))]
-      .map((k) => pos.get(k))
-      .sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
-    for (let k = 1; k < ordered.length; k++) link(nodeKey(ordered[k - 1]), nodeKey(ordered[k]));
+    const unique = [...new Map([seg.a, seg.b, ...seg.extra].map((p) => [nodeKey(p), p])).values()];
+    unique.sort((p, q) => dist(seg.a, p) - dist(seg.a, q));
+    for (const p of unique) {
+      if (!pos.has(nodeKey(p))) trayNodes.push(nodeKey(p));
+      pos.set(nodeKey(p), p);
+    }
+    for (let k = 1; k < unique.length; k++) {
+      addEdge(
+        nodeKey(unique[k - 1]),
+        nodeKey(unique[k]),
+        openCost(unique[k - 1], unique[k], poly) * trayFactor,
+      );
+    }
   }
 
-  const startKey = nodeKey(sHit.point);
-  const endKey = nodeKey(eHit.point);
-  const best = new Map([[startKey, 0]]);
+  const S = '__from';
+  const T = '__to';
+  pos.set(S, from);
+  pos.set(T, to);
+  const corners = poly.map((c, i) => {
+    const key = `__corner${i}`;
+    pos.set(key, c);
+    return key;
+  });
+  // Open runs: from each end, from each audience corner, and between the ends and
+  // corners. Trays are only joined to each other along their own segments.
+  const open = [S, T, ...corners];
+  const everyNode = [...trayNodes, ...open];
+  for (const a of open) {
+    for (const b of everyNode) {
+      if (a === b) continue;
+      if (adj.has(a) && (adj.get(a) || []).some((e) => e.to === b)) continue;
+      addEdge(a, b, openCost(pos.get(a), pos.get(b), poly));
+    }
+  }
+
+  const best = new Map([[S, 0]]);
   const prev = new Map();
   const done = new Set();
   while (true) {
@@ -223,7 +365,7 @@ function autoRoute(from, to, cableways) {
       if (!done.has(k) && (cur === null || d < best.get(cur))) cur = k;
     }
     if (cur === null) return null;
-    if (cur === endKey) break;
+    if (cur === T) break;
     done.add(cur);
     for (const { to: n, w } of adj.get(cur) || []) {
       const nd = best.get(cur) + w;
@@ -233,13 +375,15 @@ function autoRoute(from, to, cableways) {
       }
     }
   }
-  const keys = [endKey];
-  while (keys[0] !== startKey) {
+  const keys = [T];
+  while (keys[0] !== S) {
     const p = prev.get(keys[0]);
     if (p === undefined) return null;
     keys.unshift(p);
   }
-  return [from, ...keys.map((k) => pos.get(k)), to];
+  const via = keys.slice(1, -1);
+  if (!via.length) return null;
+  return [from, ...via.map((k) => pos.get(k)), to];
 }
 
 // Elements rotate about their top-left corner, so the drawn centre moves with the angle.
@@ -253,14 +397,24 @@ export function elementCentre(el) {
   ];
 }
 
-export function routeCable(from, to, cableways, route) {
+export function routeCable(from, to, cableways, route, audience = [], trayFactor = CABLEWAY_TRAVEL) {
   if (route?.mode === 'manual') {
     const points = [from, ...(route.waypoints || []), to];
-    return { points, lengthCm: pathLength(points), mode: 'manual' };
+    return { points, lengthCm: pathLength(points), mode: 'manual', crossesAudience: crosses(points, audience) };
   }
-  const routed = autoRoute(from, to, cableways);
-  if (routed) return { points: routed, lengthCm: pathLength(routed), mode: 'auto' };
-  return { points: [from, to], lengthCm: pathLength([from, to]), mode: 'direct' };
+  const routed = autoRoute(from, to, cableways, audience, trayFactor);
+  if (routed) {
+    return { points: routed, lengthCm: pathLength(routed), mode: 'auto', crossesAudience: crosses(routed, audience) };
+  }
+  const direct = [from, to];
+  return { points: direct, lengthCm: pathLength(direct), mode: 'direct', crossesAudience: crosses(direct, audience) };
+}
+
+function crosses(points, audience) {
+  for (let i = 1; i < points.length; i++) {
+    if (insideLength(points[i - 1], points[i], audience) > 0) return true;
+  }
+  return false;
 }
 
 export function assignStandardLength(requiredM, standard) {
@@ -268,7 +422,17 @@ export function assignStandardLength(requiredM, standard) {
   return sorted.find((len) => len >= requiredM) ?? null;
 }
 
-export function buildCableRows({ lists, devices, elements, plan }) {
+export function buildCableRows({
+  lists,
+  devices,
+  elements,
+  plan,
+  videoLists = [],
+  audience = [],
+  stageOffset = [0, 0],
+}) {
+  // The audience area is drawn in venue coordinates; cables work in stage coordinates.
+  const audienceLocal = (audience || []).map(([x, y]) => [x - stageOffset[0], y - stageOffset[1]]);
   const p = emptyCablePlan(plan);
   const settings = { ...DEFAULT_CABLE_SETTINGS, ...(p.settings || {}) };
   const deviceName = new Map((devices || []).map((d) => [d.id, d.name || 'Device']));
@@ -286,7 +450,7 @@ export function buildCableRows({ lists, devices, elements, plan }) {
     }
   }
   const elementName = new Map((elements || []).map((e) => [e.id, e.label || e.element_type]));
-  const rows = deriveCables(lists, elements).map((cable, i) => {
+  const rows = deriveCables(lists, elements, videoLists).map((cable, i) => {
     const route = p.routes?.[cable.key] || { mode: 'auto', waypoints: [], hidden: false };
     const from = cable.fromElementId
       ? centerOfElement.get(cable.fromElementId)
@@ -319,7 +483,7 @@ export function buildCableRows({ lists, devices, elements, plan }) {
         assignedM: null,
       };
     }
-    const routed = routeCable(from, to, p.cableways, route);
+    const routed = routeCable(from, to, p.cableways, route, audienceLocal, Number(settings.cableway_factor) || CABLEWAY_TRAVEL);
     const pathM = routed.lengthCm / 100;
     const requiredM = pathM * (1 + settings.slack_pct / 100) + settings.slack_m;
     const assignedM = assignStandardLength(requiredM, settings.standard_lengths_m);
@@ -328,6 +492,7 @@ export function buildCableRows({ lists, devices, elements, plan }) {
       placed: true,
       mode: routed.mode,
       points: routed.points,
+      crossesAudience: routed.crossesAudience,
       pathM: round2(pathM),
       requiredM: round2(requiredM),
       assignedM,
@@ -350,6 +515,41 @@ export function lengthOrder(rows) {
   return [...counts.entries()]
     .sort((a, b) => (a[0] === 'over' ? 1 : b[0] === 'over' ? -1 : a[0] - b[0]))
     .map(([length, count]) => ({ length, count }));
+}
+
+// Cable type is the connector at the cable's destination. Cables without one are
+// counted under "unspecified" so none are dropped from the shopping list.
+export function cableTypeOrder(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!r.placed) continue;
+    const type = r.connector || 'unspecified';
+    if (!groups.has(type)) groups.set(type, new Map());
+    const lengths = groups.get(type);
+    const key = r.assignedM === null ? 'over' : r.assignedM;
+    lengths.set(key, (lengths.get(key) || 0) + 1);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => (a[0] === 'unspecified' ? 1 : b[0] === 'unspecified' ? -1 : a[0].localeCompare(b[0])))
+    .map(([type, lengths]) => {
+      const sorted = [...lengths.entries()]
+        .sort((a, b) => (a[0] === 'over' ? 1 : b[0] === 'over' ? -1 : a[0] - b[0]))
+        .map(([length, count]) => ({ length, count }));
+      return { type, lengths: sorted, total: sorted.reduce((sum, l) => sum + l.count, 0) };
+    });
+}
+
+export function cableTypeCsv(rows) {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [];
+  for (const group of cableTypeOrder(rows)) {
+    for (const l of group.lengths) {
+      lines.push(
+        [group.type, l.length === 'over' ? 'over max' : l.length, l.count].map(esc).join(','),
+      );
+    }
+  }
+  return ['Cable type,Length class (m),Count', ...lines].join('\n');
 }
 
 export function cablesToCsv(rows) {

@@ -99,6 +99,27 @@
             :label="t('reports.showSpeakerCoverage')"
           />
           <q-toggle
+            v-model="generationPlotOptions.show_camera_coverage"
+            class="col-12 col-sm-6"
+            :label="t('reports.showCameraCoverage')"
+          />
+          <q-toggle
+            v-model="generationPlotOptions.show_projector_coverage"
+            class="col-12 col-sm-6"
+            :label="t('reports.showProjectorCoverage')"
+          />
+          <q-btn-toggle
+            v-model="generationPlotOptions.camera_view_mode"
+            class="col-12"
+            dense
+            no-caps
+            toggle-color="primary"
+            :options="[
+              { label: t('reports.cameraViewRange'), value: 'range' },
+              { label: t('reports.cameraViewChosen'), value: 'chosen' },
+            ]"
+          />
+          <q-toggle
             v-model="generationPlotOptions.show_cables"
             class="col-12 col-sm-6"
             :label="t('reports.showCables')"
@@ -188,6 +209,9 @@ const selectedPatchpointId = ref(null)
 const generationPlotOptions = ref({
   view: 'stage',
   show_coverage: false,
+  show_camera_coverage: false,
+  show_projector_coverage: false,
+  camera_view_mode: 'range',
   show_cables: false,
   show_cableways: false,
 })
@@ -266,6 +290,9 @@ function selectedOptions() {
   if (selectedType.value?.has_stage_plot) {
     options.stage_plot_view = generationPlotOptions.value.view
     options.show_coverage = generationPlotOptions.value.show_coverage
+    options.show_camera_coverage = generationPlotOptions.value.show_camera_coverage
+    options.show_projector_coverage = generationPlotOptions.value.show_projector_coverage
+    options.camera_view_mode = generationPlotOptions.value.camera_view_mode
     options.show_cables = generationPlotOptions.value.show_cables
     options.show_cableways = generationPlotOptions.value.show_cableways
   }
@@ -287,6 +314,9 @@ function applyTemplatePlotOptions() {
   generationPlotOptions.value = {
     view: 'stage',
     show_coverage: false,
+    show_camera_coverage: false,
+    show_projector_coverage: false,
+    camera_view_mode: 'range',
     show_cables: false,
     show_cableways: false,
     ...(selectedTemplate.value?.stage_plot_options || {}),

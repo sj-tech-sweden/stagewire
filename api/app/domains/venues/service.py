@@ -54,6 +54,7 @@ def _apply_venue_snapshot(job: ProductionJob, venue: Venue) -> None:
     for field in SNAPSHOT_FIELDS:
         setattr(job, field, getattr(venue, field))
     job.venue_background_image_url = venue.background_image_url
+    job.audience_polygon = list(venue.audience_polygon or [])
     job.venue_name = venue.name
 
 

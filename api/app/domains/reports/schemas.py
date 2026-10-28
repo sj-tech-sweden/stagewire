@@ -34,6 +34,9 @@ class StagePlotOptions(BaseModel):
 
     view: Literal["stage", "venue"] = "stage"
     show_coverage: bool = False
+    show_camera_coverage: bool = False
+    show_projector_coverage: bool = False
+    camera_view_mode: Literal["range", "chosen"] = "range"
     show_cables: bool = False
     show_cableways: bool = False
 

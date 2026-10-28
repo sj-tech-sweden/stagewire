@@ -7,12 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
+from app.domains.reports.cable_routing import routed_cable_paths
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
+from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
 
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
     "show_coverage": False,
+    "show_camera_coverage": False,
+    "show_projector_coverage": False,
+    "camera_view_mode": "range",
     "show_cables": False,
     "show_cableways": False,
 }
@@ -123,8 +128,62 @@ async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job, "channels": rows}
 
 
+async def _load_video_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputList]:
+    result = await db.execute(
+        select(VideoInputList)
+        .where(VideoInputList.job_id == job_id)
+        .options(
+            selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points),
+            selectinload(VideoInputList.outputs).selectinload(VideoOutput.patch_points),
+        )
+        .order_by(VideoInputList.position)
+    )
+    return list(result.scalars().all())
+
+
+async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]:
+    from app.domains.audio.camera_specs import resolve_camera_specs
+    from app.domains.audio.router import stockwire_product_fetcher
+
+    devices = {
+        str(device.id): {
+            "id": str(device.id),
+            "device_type": device.device_type,
+            "stockwire_product_id": device.stockwire_product_id,
+            "sensor_width_mm": device.sensor_width_mm,
+            "focal_min_mm": device.focal_min_mm,
+            "focal_max_mm": device.focal_max_mm,
+            "max_distance_m": device.max_distance_m,
+        }
+        for device in job.devices
+    }
+    elements = [
+        {
+            "id": str(element.id),
+            "linked_device_id": str(element.linked_device_id) if element.linked_device_id else None,
+            "linked_lens_device_id": str(element.linked_lens_device_id)
+            if element.linked_lens_device_id
+            else None,
+            "focal_mm": element.focal_mm,
+        }
+        for element in job.plot_elements
+    ]
+    fetch = await stockwire_product_fetcher(db)
+    return await resolve_camera_specs(elements, devices, fetch)
+
+
 async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
+    video_lists = await _load_video_lists(db, job_id)
+    audience = [(float(x), float(y)) for x, y in (job.audience_polygon or [])]
+    cables = routed_cable_paths(
+        cable_plan=job.cable_plan,
+        channel_lists=job.channel_lists,
+        elements=job.plot_elements,
+        video_lists=video_lists,
+        audience=audience,
+        stage_offset=(float(job.stage_x_cm or 0), float(job.stage_y_cm or 0)),
+    )
     rows = [
         {
             "label": element.label,
@@ -136,12 +195,14 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
         }
         for element in job.plot_elements
     ]
-    cables = _cable_paths(job)
     return {
         "job": job,
         "elements": job.plot_elements,
         "stage_plot_elements": rows,
         "cables": cables,
+        "audience": audience,
+        "cameras": await _camera_specs(db, job),
+        "devices_by_id": {str(device.id): device for device in job.devices},
     }
 
 
@@ -255,102 +316,6 @@ async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
             for sheet in sorted(sheets.values(), key=lambda value: value["name"].lower())
         ],
     }
-
-
-def _cable_paths(job: ProductionJob) -> list[dict]:
-    device_centres = {}
-    element_centres = {}
-    for element in job.plot_elements:
-        centre = (
-            float(element.position_x) + float(element.width_cm) / 2,
-            float(element.position_y) + float(element.height_cm) / 2,
-        )
-        element_centres[str(element.id)] = centre
-        if element.linked_device_id and element.element_type not in {
-            "speaker",
-            "speaker_main",
-            "speaker_sub",
-            "speaker_delay",
-            "monitor",
-        }:
-            device_centres.setdefault(str(element.linked_device_id), centre)
-
-    plan = job.cable_plan or {}
-    routes = plan.get("routes") or {}
-    cables = []
-
-    def add(key, start, end):
-        route = routes.get(key) or {}
-        if route.get("hidden") or start is None or end is None:
-            return
-        points = (
-            [start, *(route.get("waypoints") or []), end]
-            if route.get("mode") == "manual"
-            else [start, end]
-        )
-        cables.append({"points": points})
-
-    for channel_list in job.channel_lists:
-        for channel in channel_list.channels:
-            points = sorted(channel.patch_points, key=lambda point: point.position)
-            points = [point for point in points if point.device_id]
-            sources = [
-                element
-                for element in job.plot_elements
-                if element.linked_channel_id == channel.id
-                and element.element_type in {"microphone", "di"}
-            ]
-            if not sources:
-                sources = [
-                    element
-                    for element in job.plot_elements
-                    if element.linked_channel_id == channel.id
-                    and element.element_type == "performer"
-                ]
-            if points:
-                for source in sources:
-                    add(
-                        f"src:{source.id}",
-                        element_centres.get(str(source.id)),
-                        device_centres.get(str(points[0].device_id)),
-                    )
-            for previous, current in zip(points, points[1:], strict=False):
-                if previous.device_id != current.device_id:
-                    add(
-                        str(current.id),
-                        device_centres.get(str(previous.device_id)),
-                        device_centres.get(str(current.device_id)),
-                    )
-        for output in channel_list.outputs:
-            points = sorted(output.points, key=lambda point: point.position)
-            point_by_id = {point.id: point for point in points}
-            for index, point in enumerate(points):
-                previous = (
-                    point_by_id.get(point.parent_id)
-                    if point.parent_id
-                    else (points[index - 1] if index else None)
-                )
-                if previous and previous.device_id != point.device_id:
-                    add(
-                        str(point.id),
-                        device_centres.get(str(previous.device_id)),
-                        device_centres.get(str(point.device_id)),
-                    )
-    output_points = {
-        str(point.id): point
-        for channel_list in job.channel_lists
-        for output in channel_list.outputs
-        for point in output.points
-    }
-    for element in job.plot_elements:
-        point = output_points.get(str(element.linked_output_point_id))
-        if point and point.device_id:
-            add(
-                f"spk:{element.id}",
-                device_centres.get(str(point.device_id)),
-                element_centres.get(str(element.id)),
-            )
-    return cables
 
 
 _CHANNEL_COLUMNS = (

@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.domains.audio.polygon import check_polygon
 
 
 class ProductionJobBase(BaseModel):
@@ -18,7 +20,13 @@ class ProductionJobBase(BaseModel):
     stage_x_cm: float = 0.0
     stage_y_cm: float = 0.0
     venue_background_image_url: str = ""
+    audience_polygon: list[list[float]] = Field(default_factory=list)
     cable_plan: dict = Field(default_factory=dict)
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class ProductionJobCreate(ProductionJobBase):
@@ -38,6 +46,12 @@ class ProductionJobUpdate(BaseModel):
     venue_width_cm: float | None = Field(None, ge=0)
     venue_height_cm: float | None = Field(None, ge=0)
     cable_plan: dict | None = None
+    audience_polygon: list[list[float]] | None = None
+
+    @field_validator("audience_polygon")
+    @classmethod
+    def _check_audience_polygon(cls, value):
+        return check_polygon(value)
 
 
 class ProductionJobRead(ProductionJobBase):
@@ -250,6 +264,9 @@ class StagePlotElementBase(BaseModel):
     label: str = ""
     image_url: str = ""
     linked_output_point_id: UUID | None = None
+    linked_video_input_id: UUID | None = None
+    linked_lens_device_id: UUID | None = None
+    focal_mm: float | None = None
     coverage_angle_h: float = 0.0
     coverage_distance_m: float = 0.0
 
@@ -283,6 +300,15 @@ class AudioDeviceBase(BaseModel):
     ports: list[AudioDevicePort] | None = []
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
+    sound_list_id: UUID | None = None
+    video_list_id: UUID | None = None
+    sensor_width_mm: float | None = Field(None, gt=0)
+    focal_min_mm: float | None = Field(None, gt=0)
+    focal_max_mm: float | None = Field(None, gt=0)
+    max_distance_m: float | None = Field(None, gt=0)
+    throw_ratio_min: float | None = Field(None, gt=0)
+    throw_ratio_max: float | None = Field(None, gt=0)
+    image_aspect_ratio: float | None = Field(None, gt=0)
 
 
 class AudioDeviceCreate(AudioDeviceBase):
@@ -310,6 +336,11 @@ class AudioDeviceRead(AudioDeviceBase):
     output_default: int | None = None
     input_count: int | None = None
     output_count: int | None = None
+    input_source: str | None = None
+    output_source: str | None = None
+    stockwire_inputs: int | None = None
+    stockwire_outputs: int | None = None
+    stockwire_connectors: list[str] = []
 
 
 __all__ = [

@@ -40,6 +40,15 @@ async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
 
 
 DEVICE_CLEARABLE_KEYS = {
+    "sensor_width_mm",
+    "focal_min_mm",
+    "focal_max_mm",
+    "max_distance_m",
+    "throw_ratio_min",
+    "throw_ratio_max",
+    "image_aspect_ratio",
+    "sound_list_id",
+    "video_list_id",
     "stockwire_product_id",
     "stockwire_product_name",
     "input_override",
@@ -47,10 +56,13 @@ DEVICE_CLEARABLE_KEYS = {
 }
 
 PLOT_CLEARABLE_KEYS = {
+    "linked_lens_device_id",
+    "focal_mm",
     "linked_channel_id",
     "linked_patch_point_id",
     "linked_device_id",
     "linked_output_point_id",
+    "linked_video_input_id",
 }
 
 # Stockwire link fields may be explicitly cleared (set to null) by the client.
@@ -393,6 +405,16 @@ async def job_io_totals(db: AsyncSession, job_id: UUID) -> tuple[int, int]:
         select(func.count(ChannelListOutput.id))
         .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
         .where(ChannelList.job_id == job_id)
+    )
+    return int(channels or 0), int(outputs or 0)
+
+
+async def list_io_totals(db: AsyncSession, list_id: UUID) -> tuple[int, int]:
+    channels = await db.scalar(
+        select(func.count(AudioChannelPatch.id)).where(AudioChannelPatch.channel_list_id == list_id)
+    )
+    outputs = await db.scalar(
+        select(func.count(ChannelListOutput.id)).where(ChannelListOutput.channel_list_id == list_id)
     )
     return int(channels or 0), int(outputs or 0)
 

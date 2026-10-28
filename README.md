@@ -6,7 +6,7 @@ assignments.
 
 This is a monorepo:
 
-```
+```text
 .
 ├── api/   FastAPI backend (Python 3.12+, SQLAlchemy 2 async, Alembic)
 ├── web/   Quasar / Vue 3 PWA frontend (Pinia, Konva.js stage-plot canvas)
@@ -117,15 +117,99 @@ SQLite test suite.
   venue, and elements and cables stay positioned relative to the stage.
 - Speakers (`speaker_main`, `speaker_sub`, `speaker_delay`, and `monitor`) carry a
   horizontal coverage angle and throw distance, and can link to an output patch point.
-- **Show coverage** on the stage plot draws each speaker's sector and a covered/gap
+- **Sound coverage** on the stage plot draws each speaker's sector and a covered/gap
   overlay. The grid comes from `GET /api/v1/jobs/{job_id}/coverage?cell_cm=25`.
+- **Camera coverage** and **Projector coverage** have their own toggles. The choice of
+  **Range** (widest and narrowest ends of a zoom) or **Chosen focal** is remembered in
+  the browser with the three toggles, so it survives reloads on that browser.
+
+## Cameras and lenses
+
+- A camera device holds its sensor width (mm), focal range (shortest and longest, mm)
+  and an optional **recommended** maximum distance (m). A lens device holds only the
+  focal range. A camera with an integrated lens takes everything from one product or
+  from the camera device itself.
+- The sensor width can be calculated from an aspect ratio (for example `16:9`) and a
+  diagonal in mm or inches, with fractions accepted (`7/8`, `1 1/2`, `1/4.7`). Common
+  sensor sizes are presets; the Panasonic 1/4.7 3MOS preset is an estimate until a
+  datasheet value is entered.
+- Placing a camera on the plot creates a camera device, or a new one from the element
+  editor (named in a dialog). Camera values come from Stockwire when the product has
+  them (`cam_sensor_width_mm`, `lens_focal_length_min/max_mm`, `cam_max_distance_m`),
+  otherwise from the device. The field of view is horizontal:
+  `2 × atan(sensor ÷ (2 × focal))`.
+- The view runs to the venue wall. The recommended maximum distance is drawn as a
+  dotted outline; it is not a hard limit.
+
+## Projectors and screens
+
+- A projector device holds its throw ratio range (distance ÷ image width, shortest and
+  longest, as usually given in specifications) and an optional image aspect ratio
+  (16:9 by default).
+- A **screen** is a plot object drawn as a thin line; its height is vertical and only
+  used for the fit. A projector targets the nearest screen that sits inside its throw
+  angle; otherwise it throws to the venue wall.
+- The projector cone's image width at the screen is distance ÷ throw ratio. The zone is
+  green when the image can fill the screen, amber when the projector is too close or
+  too far.
+- Projectors take their signal from a **video output chain** (for example from a
+  switcher or computer), never from an input chain.
+
+## Video inputs, outputs and chains
+
+- Video inputs and outputs are lists per job, edited inline or in a dialog. Each has a
+  **patch chain** of devices, and each step records the output port it takes from
+  (`OUT 3`) and the input port it feeds (`HDMI 1`).
+- Output chains can **split**: a step can take its signal from any earlier step, so one
+  switcher output can feed several devices, and a passthrough can feed further devices.
+  Input chains are straight lines.
+- The **signal flow** dialog draws the chain as a tree, with the ports on each line.
+- In a patch step, typing the name of an existing device chooses it; a device created
+  from a step is chosen at once.
+
+## Cables and cableways
+
+- Cables are derived from the sound and video chains, from speaker outputs, and from
+  video output chains. Each cable is routed over cableways when that saves distance,
+  around the audience area unless the detour is much longer, and can be fixed with
+  manual waypoints or hidden.
+- Cables are grouped by length class and by connector, with a CSV export.
+
+## Reports and the stage plot in PDF
+
+- Stage plot reports route cables and draw coverage with the same rules as the plot:
+  the routing runs on the server (`api/app/domains/reports/cable_routing.py`) and the
+  view geometry in `plot_geometry.py`, mirroring `web/src/utils/cables.js`,
+  `camera.js` and `projection.js`.
+- The report options include speaker, camera and projector coverage (camera view
+  range or chosen focal length), cables, cableways, and the venue or stage view.
+- The template editor's layout preview draws the same coverage and cables, using the
+  job's audience area and video lists.
+
+## Testing and linting
+
+```bash
+# Backend (from api/)
+./.venv/bin/ruff check app tests && ./.venv/bin/ruff format --check app tests
+./.venv/bin/pytest -q
+
+# Frontend (from web/)
+./node_modules/.bin/eslint .
+./node_modules/.bin/quasar build
+./node_modules/.bin/playwright test e2e/unit        # geometry and parsing unit specs
+./node_modules/.bin/playwright test                 # full e2e suite (needs the stack running)
+```
+
+Migrations are reviewed before commit; see `AGENTS.md` for the Alembic workflow.
 
 ## Feature phases
 
 - **Phase 1 (this scaffold)**: Audio engine — input list / patch sheet, stage-plot
   designer models, mic & wireless plotter; Stockwire Rental integration (job/gear
   linking + "request to add" push-back stub).
-- **Phase 2 (prep)**: Video suite — pixel map / LED wall, video patch & signal flow.
+- **Phase 2 (in progress)**: Video suite — video inputs, outputs, patch chains with
+  ports and splits, signal flow, cameras, lenses, projectors and screens are in. The
+  pixel map / LED wall is not.
 - **Phase 3 (prep)**: Lighting & rigging — DMX fixture patch, rigging & power plot.
 
 Domain folders for video and lighting exist as stubs for later phases.

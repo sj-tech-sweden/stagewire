@@ -7,7 +7,7 @@
         icon="arrow_back"
         :aria-label="t('channels.backToJobs')"
         class="q-mr-sm"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="goBackToJob"
       />
       <div class="col">
         <div class="text-h5">
@@ -22,6 +22,7 @@
         </div>
       </div>
       <q-btn
+        v-if="view === 'sound'"
         flat
         icon="picture_as_pdf"
         :label="t('reports.generatePatchSheet')"
@@ -32,10 +33,11 @@
         flat
         icon="print"
         :label="t('app.actions.print')"
-        :disable="!selected"
+        :disable="view === 'sound' ? !selected : !videoCurrent"
         @click="printSheet"
       />
       <q-btn
+        v-if="view === 'sound'"
         flat
         icon="map"
         :label="t('stagePlot.viewOnStagePlot')"
@@ -52,8 +54,65 @@
       {{ error }}
     </div>
 
+    <q-btn-toggle
+      v-model="view"
+      spread
+      no-caps
+      toggle-color="primary"
+      class="q-mb-md"
+      :options="viewOptions"
+    />
+
     <div
-      v-if="!error"
+      v-if="view === 'video'"
+      class="q-mb-md"
+    >
+      <div class="row items-center q-mb-md">
+        <q-select
+          v-model="videoSelected"
+          :options="videoSheetOptions"
+          :label="t('video.sheetSelect')"
+          emit-value
+          map-options
+          style="min-width: 280px"
+        />
+        <span
+          v-if="videoCurrent"
+          class="q-ml-md text-subtitle2 text-grey-7"
+        >{{ t(`devices.types.${videoCurrent.device_type}`) }}</span>
+      </div>
+      <div
+        v-if="!videoSheets.length"
+        class="text-grey q-pa-md text-center"
+      >
+        {{ t('video.noSheets') }}
+      </div>
+      <div
+        v-else-if="videoCurrent"
+        id="print-area"
+        class="patch-sheet"
+      >
+        <div class="text-h6 q-mb-xs">
+          {{ videoCurrent.name }}
+        </div>
+        <div class="text-subtitle2 text-grey-7 q-mb-sm">
+          {{ job?.title }}<span v-if="job?.venue_name"> · {{ job.venue_name }}</span>
+        </div>
+        <q-table
+          flat
+          bordered
+          dense
+          hide-bottom
+          row-key="key"
+          :rows="videoCurrent.rows"
+          :columns="videoColumns"
+          :pagination="{ rowsPerPage: 0 }"
+        />
+      </div>
+    </div>
+
+    <div
+      v-if="!error && view === 'sound'"
       class="row q-mb-md items-center"
     >
       <q-select
@@ -71,14 +130,14 @@
     </div>
 
     <div
-      v-if="!error && !sheets.length"
+      v-if="!error && !sheets.length && view === 'sound'"
       class="text-grey q-pa-md text-center"
     >
       {{ t('channels.noPatchSheets') }}
     </div>
 
     <div
-      v-else-if="current"
+      v-else-if="current && view === 'sound'"
       id="print-area"
       class="patch-sheet"
     >
@@ -555,6 +614,13 @@ import { channelColor } from '@/utils/instrumentGroups'
 const { t } = useI18n({ useScope: 'global' })
 const route = useRoute()
 const router = useRouter()
+
+function goBackToJob() {
+  router.push({
+    path: `/jobs/${jobId}`,
+    query: route.query.from === 'video' ? { view: 'video' } : {},
+  })
+}
 const jobId = route.params.jobId
 const devicesStore = useDevicesStore()
 
@@ -579,6 +645,19 @@ const DEVICE_TYPES = [
   'split',
   'network',
   'direct',
+  'switcher',
+  'router',
+  'multiviewer',
+  'camera',
+  'lens',
+  'ptz_camera',
+  'computer',
+  'patchbay',
+  'converter',
+  'encoder',
+  'recorder',
+  'screen',
+  'projector',
   'other',
 ]
 const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
@@ -863,6 +942,34 @@ const columns = [
   { name: 'stageLabel', label: t('stagePlot.onStage'), field: 'stageLabel', align: 'left' },
 ]
 
+const viewOptions = [
+  { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
+  { label: t('video.views.video'), value: 'video', icon: 'videocam' },
+]
+const view = ref(route.query.from === 'video' || route.query.view === 'video' ? 'video' : 'sound')
+const videoSheets = ref([])
+const videoSelected = ref(null)
+const videoSheetOptions = computed(() =>
+  videoSheets.value.map((s) => ({
+    label: `${s.name} · ${t(`devices.types.${s.device_type}`)}`,
+    value: s.device_id,
+  })),
+)
+const videoCurrent = computed(
+  () => videoSheets.value.find((s) => s.device_id === videoSelected.value) || null,
+)
+const videoColumns = [
+  { name: 'list_name', label: t('video.colList'), field: 'list_name', align: 'left' },
+  { name: 'kind', label: t('video.colKind'), field: 'kind', align: 'left', format: (v) => (v === 'output' ? t('video.kindOutput') : t('video.kindInput')) },
+  { name: 'number', label: t('video.colNumber'), field: 'number', align: 'left' },
+  { name: 'label', label: t('video.colName'), field: 'label', align: 'left' },
+  { name: 'detail', label: t('video.colDetail'), field: 'detail', align: 'left' },
+  { name: 'connector', label: t('video.colConnector'), field: 'connector', align: 'left' },
+  { name: 'patch_label', label: t('video.colPatchLabel'), field: 'patch_label', align: 'left' },
+  { name: 'step', label: t('video.colStep'), field: (row) => `${row.step} / ${row.steps}`, align: 'left' },
+  { name: 'notes', label: t('video.colNotes'), field: 'notes', align: 'left' },
+]
+
 function printSheet() {
   window.print()
 }
@@ -898,6 +1005,11 @@ async function reloadData() {
   lists.value = listsRes.data
   plotElements.value = plotRes.data
   sheets.value = sheetsRes.data
+  const { data: videoData } = await api.get(`/jobs/${jobId}/video-patch-sheets`)
+  videoSheets.value = videoData || []
+  if (!videoSelected.value && videoSheets.value.length) {
+    videoSelected.value = videoSheets.value[0].device_id
+  }
   await devicesStore.fetchDevices(jobId)
   if (!selected.value && sheets.value.length) {
     selected.value = sheets.value[0].device_id
@@ -949,6 +1061,11 @@ onMounted(async () => {
     lists.value = listsRes.data
     plotElements.value = plotRes.data || []
     devicesStore.fetchDevices(jobId)
+    const { data: videoData } = await api.get(`/jobs/${jobId}/video-patch-sheets`)
+    videoSheets.value = videoData || []
+    if (!videoSelected.value && videoSheets.value.length) {
+      videoSelected.value = videoSheets.value[0].device_id
+    }
     if (sheets.value.length) selected.value = sheets.value[0].device_id
   } catch (err) {
     error.value = err.response?.data?.detail || t('common.errorOccurred')

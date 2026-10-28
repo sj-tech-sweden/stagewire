@@ -81,6 +81,30 @@ catalog, push gear "requirements" onto a rental job, and create/link jobs in bot
 - When a product provides either field it overrides the manual value on the speaker.
   Missing fields or an unreachable product fall back to the manual values.
 
+### 3.6 Camera and lens data
+
+- Stagewire reads optional fields from a product's `specs` object, for the product linked to a
+  camera device and to a lens device (`GET /inventory/products/{id}`). A camera with an integrated
+  lens has both sets of fields on one product.
+  - `specs.cam_sensor_width_mm`: sensor width, millimetres (camera products).
+  - `specs.cam_max_distance_m`: recommended maximum distance, metres (optional; camera products). Stagewire draws the view to the venue wall and marks this distance as a dotted outline.
+  - `specs.lens_focal_length_min_mm`: shortest focal length, millimetres (lens, or camera with integrated lens).
+  - `specs.lens_focal_length_max_mm`: longest focal length, millimetres. Equal to the minimum for a fixed lens.
+- Values are numbers, not strings. Omit a field or send `null` when it is unknown.
+- When a product provides a field it overrides the value entered in Stagewire. Missing fields or an
+  unreachable product fall back to the manual values.
+
+### 3.7 Projector data (proposed, not yet read by Stagewire)
+
+Stagewire will read these from `specs` on the product linked to a projector device, with the same
+precedence rules as §3.6. The names are proposed and can change to match your conventions.
+
+- `specs.proj_throw_ratio_min`: shortest throw ratio, as distance ÷ image width (for example `1.2`).
+- `specs.proj_throw_ratio_max`: longest throw ratio. Equal to the minimum for a fixed lens.
+- `specs.proj_aspect_ratio`: native image aspect ratio as width ÷ height, as a number (for example `1.78` for 16:9, `1.6` for 16:10). Omit it to assume 16:9.
+
+Throw ratio is distance ÷ image width, as usually given in projector specifications. Some specifications instead give a throw distance table for a screen size; tell us if that is what you have. Lens shift is not used yet, so it is not requested.
+
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
 stockwire-rental will call these (key from §3.2):
@@ -117,6 +141,7 @@ stockwire-rental will call these (key from §3.2):
 - [ ] Add `POST .../{plugin}/test` that probes Stagewire `health/ready` + authenticated endpoint.
 - [ ] Ensure `POST /api/v1/jobs/{job_id}/requirements` exists and matches Stagewire's addition item.
 - [ ] Add mixer I/O counts to product model + list filter (inputs/outputs).
+- [ ] Expose the camera, lens and projector `specs` fields in §3.6 and §3.7 on products (values as numbers).
 - [ ] Document the signed deeplink token scheme (HMAC) and a resolver endpoint.
 - [ ] Add an OpenAPI note + a small integration test that pings a mock Stagewire base URL.
 
@@ -126,5 +151,7 @@ stockwire-rental will call these (key from §3.2):
   link must use a distinct plugin key (e.g. `stagewire`) to avoid clobbering it.
 - Which stockwire-rental role/scope should the API key Stagewire receives have (so it can only
   read catalog + write requirements for its own workspace)?
+- `cam_max_distance_m` is treated as a recommendation, not a hard limit. Confirm that is right for Stockwire's data.
+- Confirm the projector field names in §3.7 or give the names you use, so Stagewire can read them.
 - Confirm whether `jobs/{id}/requirements` is per-job and whether it auto-creates the rental
   booking or just records the need.

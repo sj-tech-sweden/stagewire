@@ -10,6 +10,7 @@ import app.domains.audio.models  # noqa: F401  (register models)
 import app.domains.auth.models  # noqa: F401  (register models)
 import app.domains.reports.models  # noqa: F401  (register models)
 import app.domains.venues.models  # noqa: F401  (register models)
+import app.domains.video.models  # noqa: F401  (register models)
 from app.core.config import get_settings
 from app.core.db import Base
 

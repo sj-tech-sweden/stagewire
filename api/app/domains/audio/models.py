@@ -37,6 +37,7 @@ class ProductionJob(Base):
     stage_x_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_y_cm: Mapped[float] = mapped_column(Float, default=0.0)
     venue_background_image_url: Mapped[str] = mapped_column(String(1024), default="")
+    audience_polygon: Mapped[list] = mapped_column(JSON, default=list)
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
@@ -148,6 +149,19 @@ class AudioDevice(Base):
     stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     input_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sound_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_channel_lists.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    video_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video_input_lists.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    sensor_width_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    focal_min_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    focal_max_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    throw_ratio_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    throw_ratio_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    image_aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -183,6 +197,13 @@ class StagePlotElement(Base):
     linked_output_point_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
     )
+    linked_video_input_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video_inputs.id", ondelete="SET NULL"), nullable=True
+    )
+    linked_lens_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
+    )
+    focal_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     element_type: Mapped[str] = mapped_column(String(64), nullable=False)
     position_x: Mapped[float] = mapped_column(Float, default=0.0)
     position_y: Mapped[float] = mapped_column(Float, default=0.0)
