@@ -137,6 +137,12 @@ test('report editor includes the selected patchpoint in the PDF preview request'
   await page.route(`**/api/v1/jobs/${jobId}/devices`, (route) =>
     route.fulfill({ json: [] }),
   );
+  await page.route(`**/api/v1/jobs/${jobId}/video-lists`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/v1/jobs/${jobId}/camera-specs`, (route) =>
+    route.fulfill({ json: {} }),
+  );
   await page.route(`**/api/v1/jobs/${jobId}/patch-sheets`, (route) =>
     route.fulfill({
       json: [
