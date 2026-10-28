@@ -158,7 +158,7 @@
       />
 
       <q-splitter
-        v-if="view !== 'lights'"
+        v-if="view === 'sound' || view === 'video'"
         v-model="split"
         :horizontal="$q.screen.lt.sm"
         :limits="$q.screen.lt.sm ? [18, 18] : [20, 50]"
@@ -1022,7 +1022,11 @@
       </q-splitter>
 
       <LightingPanel
-        v-else
+        v-else-if="view === 'lights'"
+        :job-id="route.params.jobId"
+      />
+      <RiggingPanel
+        v-else-if="view === 'rigging'"
         :job-id="route.params.jobId"
       />
     </template>
@@ -2165,6 +2169,7 @@ import { useColumnPrefs } from '../composables/useColumnPrefs'
 import { CONNECTOR_OPTIONS } from '@/constants/connectors'
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue'
 import LightingPanel from '@/components/LightingPanel.vue'
+import RiggingPanel from '@/components/RiggingPanel.vue'
 
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
@@ -2178,11 +2183,12 @@ const jobError = ref(null)
 const reportDialog = ref(false)
 const split = ref(28)
 const videoStore = useVideoStore()
-const view = ref(['video', 'lights'].includes(route.query.view) ? route.query.view : 'sound')
+const view = ref(['video', 'lights', 'rigging'].includes(route.query.view) ? route.query.view : 'sound')
 const viewOptions = [
   { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
   { label: t('video.views.video'), value: 'video', icon: 'videocam' },
   { label: t('lights.nav'), value: 'lights', icon: 'lightbulb' },
+  { label: t('rigging.nav'), value: 'rigging', icon: 'bolt' },
 ]
 const subPageQuery = computed(() => (view.value === 'video' ? { from: 'video' } : {}))
 const selectedVideoListId = ref(null)

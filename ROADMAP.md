@@ -17,6 +17,7 @@
 - [ ] Pixel map and LED wall for the video suite.
 - [ ] Stockwire fields for projectors (`proj_throw_ratio_min/max`, `proj_aspect_ratio`), pending agreement in `docs/stockwire-integration-spec.md` §3.7.
 - [x] Lighting fixture patch: universe, address, fixture type, mode, footprint, location, gel, purpose; DMX overlap and channel 512 checks; CSV and MVR import; device weight and power, with Stockwire values.
-- [ ] Lighting fixtures on the stage plot and in a registry-seeded PDF patch sheet (EN/SV).
-- [ ] Rigging and power (Phase 3b), shared with sound and video: truss points with weight capacity, 3-phase distros and circuits, weight loading and phase balance.
+- [x] Lighting fixtures on the stage plot and in a registry-seeded fixture patch PDF (EN/SV).
+- [x] Rigging and power (Phase 3b), shared with sound and video: trusses with weight capacity, distros and circuits, weight loading, circuit load and phase balance, on a Rigging & power tab.
+- [ ] Rigging drawn on the stage plot itself (truss positions and hung loads).
 - [ ] Stockwire fixture profile fields (fixture type, modes, footprint), pending agreement in `docs/stockwire-integration-spec.md` §3.9.

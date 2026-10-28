@@ -171,7 +171,7 @@ SQLite test suite.
 
 - The fixture patch is one row per fixture: universe, DMX address, fixture type, channel
   mode, footprint (channels), location or truss position, gel or colour, purpose and notes.
-  Open it from the job with **Lights**.
+  Open it from the job's **Lights** tab, next to Sound, Video and Rigging & power.
 - A row can be linked to a fixture device by typing its name. Typing a new name creates
   the device. The device's fixture type, mode, footprint and gel fill empty row fields.
 - The patch flags a **DMX overlap** when two fixtures in the same universe share a channel,
@@ -184,6 +184,19 @@ SQLite test suite.
 - Weight and power are device values for rigging and power planning. A Stockwire product
   value (`weight_kg`, `power_consumption_watts` on the product) overrides the value entered
   on the device, field by field; see `docs/stockwire-integration-spec.md` §3.8.
+
+## Rigging & power
+
+- The **Rigging & power** tab is shared by sound, video and lighting. Trusses (hanging
+  points) have a weight capacity; distros have a voltage and an amps-per-phase capacity,
+  and their circuits each sit on one phase with a breaker rating.
+- Every fixture on the Lights tab and every plot element linked to a device is a load.
+  Its weight and power come from the device; a Stockwire value overrides the value
+  entered on the device, field by field. Choose the truss and the circuit each load uses.
+- The summary shows the weight on each truss against its capacity, the amps on each
+  circuit against its breaker (amps = watts ÷ distro voltage), each phase against the
+  amps-per-phase capacity, and the phase imbalance. Loads not on a truss or circuit are
+  listed.
 
 ## Cables and cableways
 
@@ -228,6 +241,7 @@ Migrations are reviewed before commit; see `AGENTS.md` for the Alembic workflow.
 - **Phase 2 (in progress)**: Video suite — video inputs, outputs, patch chains with
   ports and splits, signal flow, cameras, lenses, projectors and screens are in. The
   pixel map / LED wall is not.
-- **Phase 3 (in progress)**: Lighting & rigging. The DMX fixture patch is in; the rigging
-  and power plot (shared with sound and video) and fixtures on the stage plot and in PDF
-  reports are not yet.
+- **Phase 3 (in progress)**: Lighting & rigging. The fixture patch, fixtures on the stage
+  plot, the fixture patch PDF and the rigging & power tab are in. Rigging & power is shared
+  with sound and video. Still open: a rigging plot drawing on the stage plot itself and
+  Stockwire fixture profile fields.
