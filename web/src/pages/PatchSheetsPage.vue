@@ -649,6 +649,7 @@ const DEVICE_TYPES = [
   'router',
   'multiviewer',
   'camera',
+  'lens',
   'ptz_camera',
   'computer',
   'patchbay',

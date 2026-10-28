@@ -304,6 +304,63 @@
               />
             </div>
           </div>
+          <div
+            v-if="['camera', 'lens'].includes(editForm.device_type)"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.cameraHint') }}
+            </div>
+            <div
+              v-if="editTarget?.stockwire_product_id"
+              class="text-caption"
+            >
+              {{ t('devices.cameraStockwireHint') }}
+            </div>
+            <q-input
+              v-if="editForm.device_type === 'camera'"
+              v-model.number="editForm.sensor_width_mm"
+              type="number"
+              min="0"
+              step="0.1"
+              clearable
+              dense
+              :label="t('devices.sensorWidth')"
+            />
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.focal_min_mm"
+                type="number"
+                min="0"
+                step="0.1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.focalMin')"
+              />
+              <q-input
+                v-model.number="editForm.focal_max_mm"
+                type="number"
+                min="0"
+                step="0.1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.focalMax')"
+              />
+            </div>
+            <q-input
+              v-if="editForm.device_type === 'camera'"
+              v-model.number="editForm.max_distance_m"
+              type="number"
+              min="0"
+              step="0.5"
+              clearable
+              dense
+              :label="t('devices.maxDistance')"
+              :hint="t('devices.maxDistanceHint')"
+            />
+          </div>
           <div class="text-caption q-mt-sm">
             {{ t('devices.ports') }}
           </div>
@@ -413,6 +470,7 @@ const DEVICE_TYPES = [
   'router',
   'multiviewer',
   'camera',
+  'lens',
   'ptz_camera',
   'computer',
   'patchbay',
@@ -454,6 +512,10 @@ const editForm = reactive({
   notes: '',
   input_override: null,
   output_override: null,
+  sensor_width_mm: null,
+  focal_min_mm: null,
+  focal_max_mm: null,
+  max_distance_m: null,
 });
 const directionOptions = [
   { value: 'in', label: t('devices.directionIn') },
@@ -555,6 +617,10 @@ function openEdit(device) {
   editForm.notes = device.notes || '';
   editForm.input_override = device.input_override ?? null;
   editForm.output_override = device.output_override ?? null;
+  editForm.sensor_width_mm = device.sensor_width_mm ?? null;
+  editForm.focal_min_mm = device.focal_min_mm ?? null;
+  editForm.focal_max_mm = device.focal_max_mm ?? null;
+  editForm.max_distance_m = device.max_distance_m ?? null;
   editDialog.value = true;
 }
 async function saveEdit() {

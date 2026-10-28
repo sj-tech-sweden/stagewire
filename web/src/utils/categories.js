@@ -36,6 +36,7 @@ const DEVICE_CATEGORY = {
   encoder: 'video',
   recorder: 'video',
   camera: 'video',
+  lens: 'video',
   ptz_camera: 'video',
   computer: 'video',
   screen: 'video',
