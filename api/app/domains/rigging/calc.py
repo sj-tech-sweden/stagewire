@@ -53,14 +53,21 @@ def summarize(
         for circuit in own:
             fed = [load for load in loads if load.power_circuit_id == str(circuit["id"])]
             watts = sum(load.power_w or 0.0 for load in fed)
-            amps = watts / volts
+            three_phase = circuit.get("phases") == 3
+            # Amps on each line: a three-phase circuit shares its watts equally over L1-L3.
+            amps = watts / (3 * volts) if three_phase else watts / volts
             breaker = circuit.get("breaker_amps")
-            phase_watts[circuit["phase"]] += watts
+            if three_phase:
+                for phase in PHASES:
+                    phase_watts[phase] += watts / 3
+            else:
+                phase_watts[circuit.get("phase") or "L1"] += watts
             circuit_rows.append(
                 {
                     **circuit,
                     "watts": _round(watts),
                     "amps": _round(amps, 2),
+                    "phases": 3 if three_phase else 1,
                     "over": bool(breaker) and amps > breaker,
                     "loads": [load.label for load in fed],
                 }

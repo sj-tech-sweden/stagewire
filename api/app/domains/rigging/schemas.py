@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RiggingPointBase(BaseModel):
@@ -51,19 +51,36 @@ class PowerDistroRead(PowerDistroBase):
 
 
 class PowerCircuitBase(BaseModel):
+    """A single-phase circuit sits on one phase; a three-phase circuit spreads over L1-L3.
+
+    Breaker rating is per line in both cases.
+    """
+
     label: str = ""
-    phase: Literal["L1", "L2", "L3"] = "L1"
+    phases: Literal[1, 3] = 1
+    phase: Literal["L1", "L2", "L3"] | None = "L1"
     breaker_amps: float | None = Field(None, gt=0)
     notes: str = ""
+
+    @model_validator(mode="after")
+    def _phase_for_single_phase(self):
+        if self.phases == 1 and self.phase is None:
+            self.phase = "L1"
+        if self.phases == 3:
+            self.phase = None
+        return self
 
 
 class PowerCircuitCreate(PowerCircuitBase):
     distro_id: UUID
 
 
-class PowerCircuitUpdate(PowerCircuitBase):
+class PowerCircuitUpdate(BaseModel):
     label: str | None = None
+    phases: Literal[1, 3] | None = None
     phase: Literal["L1", "L2", "L3"] | None = None
+    breaker_amps: float | None = Field(None, gt=0)
+    notes: str | None = None
 
 
 class PowerCircuitRead(PowerCircuitBase):

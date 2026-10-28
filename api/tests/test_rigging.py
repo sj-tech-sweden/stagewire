@@ -37,8 +37,8 @@ def test_weight_is_summed_per_point_and_flagged_over_capacity():
 def test_circuit_amps_are_watts_over_voltage_and_flagged_over_breaker():
     distros = [{"id": "d1", "name": "Dist", "voltage": 230, "amps_per_phase": 16.0}]
     circuits = [
-        {"id": "c1", "distro_id": "d1", "phase": "L1", "breaker_amps": 10.0},
-        {"id": "c2", "distro_id": "d1", "phase": "L2", "breaker_amps": 16.0},
+        {"id": "c1", "distro_id": "d1", "phases": 1, "phase": "L1", "breaker_amps": 10.0},
+        {"id": "c2", "distro_id": "d1", "phases": 1, "phase": "L2", "breaker_amps": 16.0},
     ]
     loads = [
         _load("a", "Amp", power=2300, circuit="c1"),
@@ -53,9 +53,41 @@ def test_circuit_amps_are_watts_over_voltage_and_flagged_over_breaker():
     assert summary["unassigned_power"] == ["Desk"]
 
 
+def test_three_phase_circuit_shares_its_watts_over_l1_to_l3():
+    distros = [{"id": "d1", "name": "Dist", "voltage": 230, "amps_per_phase": 16.0}]
+    circuits = [
+        {"id": "c1", "distro_id": "d1", "phases": 3, "phase": None, "breaker_amps": 16.0},
+    ]
+    loads = [_load("a", "Big LED", power=6900, circuit="c1")]
+    summary = summarize([], distros, circuits, loads)
+    phases = summary["distros"][0]["phases"]
+    assert [phases[p]["amps"] for p in ("L1", "L2", "L3")] == [10.0, 10.0, 10.0]
+    assert summary["distros"][0]["imbalance_pct"] == 0.0
+    circuit = summary["distros"][0]["circuits"][0]
+    assert circuit["amps"] == 10.0
+    assert circuit["phases"] == 3
+    assert circuit["over"] is False
+
+
+def test_single_phase_load_makes_the_distro_unbalanced():
+    distros = [{"id": "d1", "name": "Dist", "voltage": 230, "amps_per_phase": None}]
+    circuits = [
+        {"id": "c1", "distro_id": "d1", "phases": 3, "phase": None, "breaker_amps": None},
+        {"id": "c2", "distro_id": "d1", "phases": 1, "phase": "L1", "breaker_amps": None},
+    ]
+    loads = [
+        _load("a", "Three-phase bar", power=2300, circuit="c1"),
+        _load("b", "Single wash", power=2300, circuit="c2"),
+    ]
+    distro = summarize([], distros, circuits, loads)["distros"][0]
+    assert distro["phases"]["L1"]["amps"] == 13.33
+    assert distro["phases"]["L2"]["amps"] == 3.33
+    assert distro["imbalance_pct"] > 0
+
+
 def test_phase_imbalance_compares_the_three_phases():
     distros = [{"id": "d1", "name": "Dist", "voltage": 230, "amps_per_phase": 10.0}]
-    circuits = [{"id": "c1", "distro_id": "d1", "phase": "L1", "breaker_amps": None}]
+    circuits = [{"id": "c1", "distro_id": "d1", "phases": 1, "phase": "L1", "breaker_amps": None}]
     loads = [_load("a", "Load", power=2300, circuit="c1")]
     phases = summarize([], distros, circuits, loads)["distros"][0]["phases"]
     assert phases["L1"]["amps"] == 10.0

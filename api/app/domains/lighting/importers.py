@@ -137,47 +137,48 @@ def _translation_m(matrix: str) -> tuple[float, float, float] | None:
 
 
 class _GdtfLookup:
-    """Fixture type name and channel footprint of a GDTF mode, read from the MVR archive."""
+    """Fixture type name and every DMX mode (name to channel footprint) of a GDTF file,
+    read from the MVR archive."""
 
     def __init__(self, archive: zipfile.ZipFile) -> None:
         self._archive = archive
         self._members = {os.path.basename(n).lower(): n for n in archive.namelist()}
-        self._cache: dict[tuple[str, str], tuple[str | None, int | None]] = {}
+        self._cache: dict[str, tuple[str | None, dict[str, int]]] = {}
 
     def _member(self, spec: str) -> str | None:
         base = spec.lower()
         return self._members.get(base) or self._members.get(f"{base}.gdtf")
 
-    def lookup(self, spec: str, mode: str) -> tuple[str | None, int | None]:
-        key = (spec, mode)
-        if key not in self._cache:
-            self._cache[key] = self._read(spec, mode)
-        return self._cache[key]
+    def lookup(self, spec: str) -> tuple[str | None, dict[str, int]]:
+        if spec not in self._cache:
+            self._cache[spec] = self._read(spec)
+        return self._cache[spec]
 
-    def _read(self, spec: str, mode: str) -> tuple[str | None, int | None]:
+    def _read(self, spec: str) -> tuple[str | None, dict[str, int]]:
         member = self._member(spec) if spec else None
         if member is None:
-            return None, None
+            return None, {}
         try:
             with zipfile.ZipFile(io.BytesIO(self._archive.read(member))) as gdtf:
                 description = next(
                     (n for n in gdtf.namelist() if n.lower() == "description.xml"), None
                 )
                 if description is None:
-                    return None, None
+                    return None, {}
                 root = ElementTree.fromstring(gdtf.read(description))
         except (zipfile.BadZipFile, ElementTree.ParseError, KeyError):
-            return None, None
+            return None, {}
         fixture_type = None
-        footprint = None
+        modes: dict[str, int] = {}
         for node in root.iter():
             tag = _local(node.tag)
             if tag == "FixtureType" and fixture_type is None:
                 fixture_type = node.get("Name") or None
-            if tag == "DMXMode" and node.get("Name") == mode:
+            if tag == "DMXMode" and node.get("Name"):
                 footprint = sum(1 for c in node.iter() if _local(c.tag) == "DMXChannel")
-                break
-        return fixture_type, footprint or None
+                if footprint:
+                    modes[node.get("Name")] = footprint
+        return fixture_type, modes
 
 
 def parse_mvr(data: bytes) -> tuple[list[dict], list[str]]:
@@ -213,7 +214,8 @@ def parse_mvr(data: bytes) -> tuple[list[dict], list[str]]:
 def _fixture_row(node: ElementTree.Element, positions: dict[str, str], gdtf: _GdtfLookup) -> dict:
     spec = _child_text(node, "GDTFSpec")
     mode = _child_text(node, "GDTFMode")
-    fixture_type, footprint = gdtf.lookup(spec, mode) if spec and mode else (None, None)
+    fixture_type, modes = gdtf.lookup(spec) if spec else (None, {})
+    footprint = modes.get(mode)
 
     addresses = [
         a for c in node if _local(c.tag) == "Addresses" for a in c if _local(a.tag) == "Address"
@@ -233,6 +235,7 @@ def _fixture_row(node: ElementTree.Element, positions: dict[str, str], gdtf: _Gd
 
     name = _text(node.get("name")) or _child_text(node, "FixtureID") or spec
     row = {
+        "type_modes": modes,
         "device_name": name,
         "universe": universe,
         "dmx_address": dmx_address,
@@ -242,4 +245,4 @@ def _fixture_row(node: ElementTree.Element, positions: dict[str, str], gdtf: _Gd
         "location": location,
         "purpose": _child_text(node, "Function"),
     }
-    return {key: value for key, value in row.items() if value not in (None, "")}
+    return {key: value for key, value in row.items() if value not in (None, "", {})}

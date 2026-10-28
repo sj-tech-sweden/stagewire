@@ -343,3 +343,149 @@ async def test_fixture_patch_report_lists_fixtures_with_their_dmx_checks(auth_he
         assert "Robin Report A" in text
         assert "Robin Report B" in text
         assert "Overlap" in text
+
+
+async def test_fixture_type_with_several_modes_sets_mode_text_and_footprint(
+    auth_headers, monkeypatch
+):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Modes")
+        fixture_type = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixture-types",
+                json={"name": "Aura", "manufacturer": "MAC", "weight_kg": 5.5, "power_watts": 350},
+                headers=auth_headers,
+            )
+        ).json()
+        type_id = fixture_type["id"]
+        mode_a = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixture-types/{type_id}/modes",
+                json={"name": "Mode 1", "footprint": 16},
+                headers=auth_headers,
+            )
+        ).json()
+        mode_b = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixture-types/{type_id}/modes",
+                json={"name": "Mode 2", "footprint": 24},
+                headers=auth_headers,
+            )
+        ).json()
+        types = (
+            await client.get(f"{BASE}/jobs/{job_id}/fixture-types", headers=auth_headers)
+        ).json()
+        assert [m["name"] for m in types[0]["modes"]] == ["Mode 1", "Mode 2"]
+
+        fixture = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixtures",
+                json={
+                    "universe": 1,
+                    "dmx_address": 1,
+                    "fixture_type_id": type_id,
+                    "fixture_mode_id": mode_b["id"],
+                },
+                headers=auth_headers,
+            )
+        ).json()
+        assert fixture["fixture_type"] == "Aura"
+        assert fixture["channel_mode"] == "Mode 2"
+        assert fixture["footprint"] == 24
+
+        changed = (
+            await client.patch(
+                f"{BASE}/jobs/{job_id}/fixtures/{fixture['id']}",
+                json={"fixture_mode_id": mode_a["id"]},
+                headers=auth_headers,
+            )
+        ).json()
+        assert changed["channel_mode"] == "Mode 1"
+        assert changed["footprint"] == 16
+
+        renamed = await client.patch(
+            f"{BASE}/jobs/{job_id}/fixture-types/{type_id}/modes/{mode_a['id']}",
+            json={"footprint": 18},
+            headers=auth_headers,
+        )
+        assert renamed.json()["footprint"] == 18
+
+
+async def test_mvr_import_keeps_every_gdtf_mode_of_the_type(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "MVR modes")
+        files = {"file": ("show.mvr", _mvr_bytes(), "application/octet-stream")}
+        await client.post(
+            f"{BASE}/jobs/{job_id}/fixtures/import", files=files, headers=auth_headers
+        )
+        types = (
+            await client.get(f"{BASE}/jobs/{job_id}/fixture-types", headers=auth_headers)
+        ).json()
+        assert [t["name"] for t in types] == ["Robin Wash"]
+        assert types[0]["source"] == "mvr"
+        assert [(m["name"], m["footprint"]) for m in types[0]["modes"]] == [("Mode 1", 3)]
+
+
+async def test_manual_weight_and_power_on_a_type_reach_the_truss_load(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = await _job(client, auth_headers, "Type loads")
+        fixture_type = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixture-types",
+                json={"name": "Par", "weight_kg": 4, "power_watts": 250},
+                headers=auth_headers,
+            )
+        ).json()
+        mode = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixture-types/{fixture_type['id']}/modes",
+                json={"name": "8 bit", "footprint": 6},
+                headers=auth_headers,
+            )
+        ).json()
+        point = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/rigging-points",
+                json={"name": "Side truss", "weight_capacity_kg": 20},
+                headers=auth_headers,
+            )
+        ).json()
+        fixture = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/fixtures",
+                json={
+                    "dmx_address": 1,
+                    "fixture_type_id": fixture_type["id"],
+                    "fixture_mode_id": mode["id"],
+                    "rigging_point_id": point["id"],
+                },
+                headers=auth_headers,
+            )
+        ).json()
+        assert fixture["rigging_point_id"] == point["id"]
+        summary = (
+            await client.get(f"{BASE}/jobs/{job_id}/rigging/summary", headers=auth_headers)
+        ).json()
+        assert summary["points"][0]["load_kg"] == 4
+
+        bad = await client.patch(
+            f"{BASE}/jobs/{job_id}/fixtures/{fixture['id']}",
+            json={"power_circuit_id": "00000000-0000-0000-0000-000000000000"},
+            headers=auth_headers,
+        )
+        assert bad.status_code == 422

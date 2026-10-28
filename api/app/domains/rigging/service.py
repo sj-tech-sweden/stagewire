@@ -35,8 +35,13 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[Load]:
         return device.name, weight, power
 
     loads: list[Load] = []
+    types = {str(t.id): t for t in await lighting_service.list_types(db, job_id)}
     for fixture in await lighting_service.list_fixtures(db, job_id):
         name, weight, power = values(fixture.device_id)
+        fixture_type = types.get(str(fixture.fixture_type_id)) if fixture.fixture_type_id else None
+        if fixture_type is not None:
+            weight = weight if weight is not None else fixture_type.weight_kg
+            power = power if power is not None else fixture_type.power_watts
         loads.append(
             Load(
                 id=str(fixture.id),

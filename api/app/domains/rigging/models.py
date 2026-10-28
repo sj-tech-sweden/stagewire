@@ -46,7 +46,8 @@ class PowerCircuit(Base):
         ForeignKey("power_distros.id", ondelete="CASCADE"), index=True
     )
     label: Mapped[str] = mapped_column(String(255), default="")
-    phase: Mapped[str] = mapped_column(String(4), nullable=False, default="L1")
+    phases: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    phase: Mapped[str | None] = mapped_column(String(4), nullable=True, default="L1")
     breaker_amps: Mapped[float | None] = mapped_column(Float, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
