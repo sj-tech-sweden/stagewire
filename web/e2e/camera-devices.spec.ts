@@ -114,3 +114,19 @@ test('a 1/4.7 inch diagonal calculates the sensor width once the unit is inches'
   await page.getByRole('button', { name: 'Use this width' }).click();
   await expect(page.getByLabel('Sensor width (mm)')).toHaveValue('4.71');
 });
+
+test('the coverage toggles and the range or chosen view survive a reload', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Coverage Prefs ${Date.now()}`, venue_width_cm: 1000, venue_height_cm: 1000 })).id as string;
+
+  await page.goto(`/jobs/${jobId}/stage-plot`);
+  await page.getByText('Sound coverage', { exact: true }).click();
+  await page.getByText('Camera coverage', { exact: true }).click();
+  await page.getByRole('button', { name: 'Chosen focal' }).click();
+
+  await page.reload();
+  await expect(page.getByRole('switch', { name: 'Sound coverage' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: 'Camera coverage' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('button', { name: 'Chosen focal' })).toHaveClass(/bg-primary/);
+});

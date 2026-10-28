@@ -1319,8 +1319,20 @@ const channelLists = ref([]);
 const imageCache = ref({});
 const bgImage = ref(null);
 const uploading = ref(false);
-const showSoundCoverage = ref(false);
-const showCameraCoverage = ref(false);
+const COVERAGE_VIEW_KEY = 'sw_stage_coverage_view';
+const savedCoverageView = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(COVERAGE_VIEW_KEY) || 'null') || {};
+  } catch {
+    return {};
+  }
+})();
+const showSoundCoverage = ref(savedCoverageView.sound === true);
+const showCameraCoverage = ref(savedCoverageView.camera === true);
+const cameraViewMode = ref(savedCoverageView.cameraMode === 'chosen' ? 'chosen' : 'range');
+watch([showSoundCoverage, showCameraCoverage, cameraViewMode], ([sound, camera, mode]) => {
+  localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, cameraMode: mode }));
+});
 const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
 const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
 const visibleCategories = ref([...CATEGORIES]);
@@ -2321,7 +2333,6 @@ function cameraCaption(el) {
   const source = spec.source === 'stockwire' ? t('stagePlot.specsFromStockwireShort') : t('stagePlot.specsManualShort');
   return `${view} · ${source}`;
 }
-const cameraViewMode = ref('range');
 const cameraViewOptions = computed(() => [
   { label: t('stagePlot.cameraViewRange'), value: 'range' },
   { label: t('stagePlot.cameraViewChosen'), value: 'chosen' },
@@ -2735,6 +2746,9 @@ watch(
   { deep: false },
 );
 watch(showSoundCoverage, fetchCoverage);
+watch(hasVenue, (ready) => {
+  if (ready && showSoundCoverage.value) fetchCoverage();
+});
 watch(() => [venueW.value, venueH.value, stageX.value, stageY.value], scheduleCoverage);
 watch(
   () =>
