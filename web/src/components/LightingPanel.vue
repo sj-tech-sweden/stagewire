@@ -1,14 +1,6 @@
 <template>
-  <q-page class="q-pa-md">
+  <div class="q-pa-md">
     <div class="row items-center q-mb-md">
-      <q-btn
-        flat
-        round
-        icon="arrow_back"
-        :aria-label="t('channels.backToJobs')"
-        class="q-mr-sm"
-        @click="goBackToJob"
-      />
       <div class="col">
         <div class="text-h5">
           {{ t('lights.title') }}
@@ -22,7 +14,15 @@
       </div>
       <q-btn
         flat
+        icon="picture_as_pdf"
+        :label="t('lights.pdf')"
+        :disable="!fixtures.length"
+        @click="showReport = true"
+      />
+      <q-btn
+        flat
         icon="upload_file"
+        class="q-ml-sm"
         :label="t('lights.import')"
         @click="openImport"
       />
@@ -282,21 +282,27 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
-  </q-page>
+    <ReportGenerationDialog
+      v-model="showReport"
+      :job-id="jobId"
+      initial-type-key="lighting.fixture-patch"
+    />
+  </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
-import { useRoute, useRouter } from 'vue-router';
 import { api } from '@/boot/api';
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 
 const { t } = useI18n({ useScope: 'global' });
 const $q = useQuasar();
-const route = useRoute();
-const router = useRouter();
-const jobId = route.params.jobId;
+const props = defineProps({
+  jobId: { type: String, required: true },
+});
+const jobId = props.jobId;
 
 const job = ref(null);
 const fixtures = ref([]);
@@ -320,6 +326,7 @@ const blankForm = () => ({
 });
 const form = reactive(blankForm());
 
+const showReport = ref(false);
 const importDialog = ref(false);
 const importFile = ref(null);
 const clearImported = ref(true);
@@ -350,10 +357,6 @@ function statusItems(f) {
   if (f.dmx_conflict) items.push({ label: t('lights.conflict'), color: 'negative' });
   if (f.dmx_overflow) items.push({ label: t('lights.overflow'), color: 'warning' });
   return items;
-}
-
-function goBackToJob() {
-  router.push({ path: `/jobs/${jobId}`, query: route.query.from === 'video' ? { view: 'video' } : {} });
 }
 
 async function load() {

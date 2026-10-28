@@ -21,7 +21,7 @@ test('a fixture added on the lights page appears in the patch with its DMX addre
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Lights ${Date.now()}` })).id as string;
 
-  await page.goto(`/jobs/${jobId}/lights`);
+  await page.goto(`/jobs/${jobId}?view=lights`);
   await page.getByRole('button', { name: 'Add fixture' }).click();
   await page.getByLabel('Device name').fill('Robin 9');
   await page.getByLabel('Universe').fill('2');
@@ -38,7 +38,7 @@ test('a CSV patch sheet imports fixtures and creates their devices', async ({ pa
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Lights CSV ${Date.now()}` })).id as string;
 
-  await page.goto(`/jobs/${jobId}/lights`);
+  await page.goto(`/jobs/${jobId}?view=lights`);
   await page.getByRole('button', { name: 'Import patch' }).click();
   await page.locator('.q-dialog input[type=file]').setInputFiles({
     name: 'patch.csv',

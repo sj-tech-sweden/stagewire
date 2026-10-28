@@ -60,13 +60,6 @@
               class="q-ml-sm"
               @click="router.push({ path: `/jobs/${route.params.jobId}/devices`, query: subPageQuery })"
             />
-            <q-btn
-              flat
-              icon="lightbulb"
-              :label="t('lights.nav')"
-              class="q-ml-sm"
-              @click="router.push({ path: `/jobs/${route.params.jobId}/lights`, query: subPageQuery })"
-            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip
@@ -165,6 +158,7 @@
       />
 
       <q-splitter
+        v-if="view !== 'lights'"
         v-model="split"
         :horizontal="$q.screen.lt.sm"
         :limits="$q.screen.lt.sm ? [18, 18] : [20, 50]"
@@ -1026,6 +1020,11 @@
           </div>
         </template>
       </q-splitter>
+
+      <LightingPanel
+        v-else
+        :job-id="route.params.jobId"
+      />
     </template>
 
     <!-- Channel edit dialog -->
@@ -2165,6 +2164,7 @@ import ColumnChooser from '@/components/ColumnChooser.vue'
 import { useColumnPrefs } from '../composables/useColumnPrefs'
 import { CONNECTOR_OPTIONS } from '@/constants/connectors'
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue'
+import LightingPanel from '@/components/LightingPanel.vue'
 
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
@@ -2178,10 +2178,11 @@ const jobError = ref(null)
 const reportDialog = ref(false)
 const split = ref(28)
 const videoStore = useVideoStore()
-const view = ref(route.query.view === 'video' ? 'video' : 'sound')
+const view = ref(['video', 'lights'].includes(route.query.view) ? route.query.view : 'sound')
 const viewOptions = [
   { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
   { label: t('video.views.video'), value: 'video', icon: 'videocam' },
+  { label: t('lights.nav'), value: 'lights', icon: 'lightbulb' },
 ]
 const subPageQuery = computed(() => (view.value === 'video' ? { from: 'video' } : {}))
 const selectedVideoListId = ref(null)
@@ -2201,7 +2202,7 @@ function addVideoList() {
   })
 }
 watch(view, (next) => {
-  router.replace({ query: { ...route.query, view: next === 'video' ? 'video' : undefined } })
+  router.replace({ query: { ...route.query, view: next === 'sound' ? undefined : next } })
 })
 const channelDialog = ref(false)
 const bulkDialog = ref(false)
