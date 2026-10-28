@@ -564,6 +564,8 @@ export default {
     addSpeakerConfirm: 'Add',
     specsFromStockwire: 'Dispersion and throw from Stockwire product {name}',
     specsManual: 'Manual coverage values (no Stockwire product on the output device)',
+    showDmxCables: 'DMX cables',
+    showOutlets: 'Power outlets',
     highlightChannel: 'Highlight on stage plot',
     types: {
       screen: 'Screen',

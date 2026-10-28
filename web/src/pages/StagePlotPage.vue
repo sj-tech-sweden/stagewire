@@ -536,6 +536,15 @@
                 v-model="showProjectorCoverage"
                 :label="t('stagePlot.showProjectorCoverage')"
               />
+              <q-toggle
+                v-model="showDmxCables"
+                :label="t('stagePlot.showDmxCables')"
+              />
+              <q-toggle
+                v-if="job?.venue_id"
+                v-model="showOutlets"
+                :label="t('stagePlot.showOutlets')"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -672,6 +681,11 @@
                   :config="cableConfig(row)"
                 />
                 <v-line
+                  v-for="row in visibleDmxRows"
+                  :key="'dmx' + row.key"
+                  :config="dmxConfig(row)"
+                />
+                <v-line
                   v-if="drawingWay && drawPoints.length"
                   :config="drawConfig"
                 />
@@ -708,6 +722,15 @@
                     v-if="linkedSummary(el)"
                     :config="linkedTextConfig(el)"
                   />
+                </v-group>
+                <v-group
+                  v-for="o in visibleOutlets"
+                  :key="'outlet' + o.id"
+                  :config="outletConfig(o)"
+                >
+                  <v-circle :config="outletDotConfig" />
+                  <v-text :config="outletGlyphConfig" />
+                  <v-text :config="outletNameConfig(o)" />
                 </v-group>
                 <v-transformer
                   ref="trRef"
@@ -2659,6 +2682,128 @@ async function loadChannels() {
 }
 
 const cablesVisible = ref(true);
+const DMX_COLORS = ['#EF5350', '#42A5F5', '#66BB6A', '#FFA726', '#AB47BC', '#26C6DA', '#FFEE58', '#8D6E63'];
+const dmxUniverses = ref([]);
+const powerOutlets = ref([]);
+function savedToggle(key, fallback) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    return typeof saved === 'boolean' ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+const showDmxCables = ref(savedToggle('sw_stage_dmx_cables', true));
+const showOutlets = ref(savedToggle('sw_stage_outlets', true));
+watch(showDmxCables, (v) => localStorage.setItem('sw_stage_dmx_cables', JSON.stringify(v)));
+watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringify(v)));
+
+async function loadLights() {
+  try {
+    const [universes, outlets] = await Promise.all([
+      api.get(`/jobs/${jobId}/dmx-universes`),
+      api.get(`/jobs/${jobId}/power-outlets`),
+    ]);
+    dmxUniverses.value = universes.data;
+    powerOutlets.value = outlets.data;
+  } catch {
+    dmxUniverses.value = [];
+    powerOutlets.value = [];
+  }
+}
+
+// Where a device is on the plot, in pixels: its element's centre. Devices with no element on
+// the plot have no position, so their DMX lines are not drawn.
+function placedCentre(deviceId) {
+  if (!deviceId) return null;
+  const el = store.elements.find((e) => e.linked_device_id === deviceId);
+  if (!el) return null;
+  const [cx, cy] = elementCentre(el);
+  return {
+    el,
+    x: (stageX.value + cx) * pxPerCm.value,
+    y: (stageY.value + cy) * pxPerCm.value,
+  };
+}
+
+// One line per DMX step: from the universe's source to its first steps, then from each step
+// to the steps it feeds. Each line takes the universe's colour.
+const dmxRows = computed(() => {
+  const rows = [];
+  dmxUniverses.value.forEach((u, ui) => {
+    const color = DMX_COLORS[ui % DMX_COLORS.length];
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        const from = placedCentre(node.device_id);
+        const to = placedCentre(child.device_id);
+        if (from && to) {
+          rows.push({
+            key: `${u.id}:${node.id || 'source'}:${child.id}`,
+            color,
+            points: [from.x, from.y, to.x, to.y],
+            fromElementId: from.el.id,
+            toElementId: to.el.id,
+            fromDeviceId: node.device_id,
+            toDeviceId: child.device_id,
+          });
+        }
+        walk(child);
+      }
+    };
+    walk({ id: null, device_id: u.source_device_id, children: u.steps || [] });
+  });
+  return rows;
+});
+// A DMX line follows its endpoints: it is hidden when either end's category is hidden, so
+// turning off the stage category (fixtures) also hides their DMX lines.
+const visibleDmxRows = computed(() =>
+  showDmxCables.value
+    ? dmxRows.value.filter(
+        (r) =>
+          endpointVisible(r.fromElementId, r.fromDeviceId) &&
+          endpointVisible(r.toElementId, r.toDeviceId),
+      )
+    : [],
+);
+function dmxConfig(row) {
+  return {
+    points: row.points,
+    stroke: row.color,
+    strokeWidth: 2,
+    dash: [6, 4],
+    lineCap: 'round',
+    opacity: 0.9,
+    listening: false,
+  };
+}
+
+// Venue power outlets, at their saved place on the plot. They can be dragged to move them.
+const visibleOutlets = computed(() =>
+  showOutlets.value ? powerOutlets.value.filter((o) => o.x_cm != null && o.y_cm != null) : [],
+);
+const outletDotConfig = { radius: 9, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 };
+const outletGlyphConfig = { text: 'PWR', fontSize: 7, x: -9, y: -3.5, width: 18, align: 'center', fill: '#333' };
+function outletNameConfig(o) {
+  return { text: o.name || o.connector || '', fontSize: 10, x: 12, y: -5, fill: '#ddd' };
+}
+function outletConfig(o) {
+  return {
+    x: (stageX.value + o.x_cm) * pxPerCm.value,
+    y: (stageY.value + o.y_cm) * pxPerCm.value,
+    draggable: !!job.value?.venue_id,
+    ondragend: (e) => onOutletDragEnd(o, e),
+  };
+}
+async function onOutletDragEnd(o, e) {
+  const x = round1(e.target.x() / pxPerCm.value - stageX.value);
+  const y = round1(e.target.y() / pxPerCm.value - stageY.value);
+  try {
+    await api.patch(`/venues/${job.value.venue_id}/power-outlets/${o.id}`, { x_cm: x, y_cm: y });
+    await loadLights();
+  } catch {
+    await loadLights();
+  }
+}
 const selectedCableKey = ref(null);
 const rerouteKey = ref(null);
 const drawingWay = ref(false);
@@ -3035,6 +3180,7 @@ onMounted(() => {
   loadChannels();
   devicesStore.fetchDevices(jobId);
   store.fetchElements(jobId);
+  loadLights();
 });
 </script>
 

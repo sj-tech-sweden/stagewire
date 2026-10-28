@@ -564,6 +564,8 @@ export default {
     addSpeakerConfirm: 'Lägg till',
     specsFromStockwire: 'Spridning och kastlängd från Stockwire-produkt {name}',
     specsManual: 'Manuella täckningsvärden (ingen Stockwire-produkt på utgångsenheten)',
+    showDmxCables: 'DMX-kablar',
+    showOutlets: 'Strömuttag',
     highlightChannel: 'Markera på scenkarta',
     types: {
       screen: 'Duk',
