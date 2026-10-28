@@ -172,6 +172,18 @@
             @new-value="(val, done) => createMode(val, done)"
             @update:model-value="onModeChange"
           />
+          <div class="row items-center q-gutter-sm">
+            <span class="text-caption text-grey-7 col">
+              {{ t('lights.gridEntry') }}
+            </span>
+            <q-btn
+              flat
+              dense
+              icon="grid_view"
+              :label="t('lights.pickChannel')"
+              @click="gridOpen = true"
+            />
+          </div>
           <div class="row q-gutter-sm">
             <q-input
               v-model.number="form.footprint"
@@ -302,6 +314,31 @@
       </q-card>
     </q-dialog>
 
+    <q-dialog v-model="gridOpen">
+      <q-card style="min-width: 340px; max-width: 680px; width: 100%">
+        <q-card-section class="text-h6">
+          {{ t('lights.pickChannelTitle') }}
+        </q-card-section>
+        <q-card-section>
+          <DmxGrid
+            :model-value="form.dmx_address"
+            :fixtures="fixtures"
+            :universe="form.universe || 1"
+            :footprint="form.footprint || 1"
+            :exclude-id="editTarget?.id || null"
+            @update:model-value="pickFromGrid"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.close')"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-dialog v-model="importDialog">
       <q-card style="min-width: 320px; max-width: 520px; width: 100%">
         <q-card-section class="text-h6">
@@ -354,11 +391,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import DmxGrid from '@/components/DmxGrid.vue';
+import { firstFreeAddress } from '@/utils/dmx';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -375,6 +414,7 @@ const loading = ref(false);
 const error = ref('');
 
 const editDialog = ref(false);
+const gridOpen = ref(false);
 const editTarget = ref(null);
 const saving = ref(false);
 const blankForm = () => ({
@@ -467,9 +507,29 @@ async function reloadTypes() {
   types.value = data;
 }
 
+// A new fixture takes the first free address of its universe. The suggestion follows
+// universe and footprint changes until the address is set to something other than it.
+let lastSuggestion = null;
+
+function suggestAddress() {
+  if (editTarget.value) return;
+  if (form.dmx_address !== null && form.dmx_address !== lastSuggestion) return;
+  lastSuggestion = firstFreeAddress(fixtures.value, form.universe || 1, form.footprint || 1) ?? null;
+  form.dmx_address = lastSuggestion;
+}
+
+function pickFromGrid(address) {
+  form.dmx_address = address;
+  gridOpen.value = false;
+}
+
+watch(() => [form.universe, form.footprint, fixtures.value], suggestAddress);
+
 function openNew() {
   editTarget.value = null;
   Object.assign(form, blankForm());
+  lastSuggestion = null;
+  suggestAddress();
   syncTypeValues();
   editDialog.value = true;
 }

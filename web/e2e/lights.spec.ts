@@ -71,3 +71,17 @@ test('a fixture type and its mode are created from the fixture form, and the mod
   const types = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixture-types`, { headers })).json();
   expect(types[0].modes.map((m: { name: string; footprint: number }) => [m.name, m.footprint])).toEqual([['8 bit', 6]]);
 });
+
+test('a new fixture pre-fills the first free DMX address, and the grid sets another', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Lights Grid ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/fixtures`, { device_name: 'Grid A', universe: 1, dmx_address: 1, footprint: 16 });
+
+  await page.goto(`/jobs/${jobId}?view=lights`);
+  await page.getByRole('button', { name: 'Add fixture' }).click();
+  await expect(page.getByLabel('DMX address')).toHaveValue('17');
+  await page.getByRole('button', { name: 'Pick from grid' }).click();
+  await page.getByRole('button', { name: 'Channel 40', exact: true }).click();
+  await expect(page.getByLabel('DMX address')).toHaveValue('40');
+});
