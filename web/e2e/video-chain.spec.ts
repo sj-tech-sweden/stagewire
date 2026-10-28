@@ -180,3 +180,33 @@ test('typing the name of an existing device in a patch step chooses that device'
     })
     .toEqual([led.id]);
 });
+
+test('a device created from a patch step is chosen at once, and Enter saves the new device', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Create Pick ${Date.now()}` })).id as string;
+  const list = await post(request, headers, `/jobs/${jobId}/video-lists`, { name: 'Program' });
+  const output = await post(request, headers, `/jobs/${jobId}/video-lists/${list.id}/outputs`, { name: 'Main' });
+
+  await page.goto(`/jobs/${jobId}?view=video`);
+  await page.getByRole('button', { name: 'Edit output' }).first().click();
+  await page.getByRole('button', { name: 'Add step' }).click();
+  await page.getByLabel('Kind').nth(0).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Screen' }).click();
+  await page.getByLabel('Device').nth(0).fill('Fresh Screen Hall');
+  await page.keyboard.press('Enter');
+  await page.locator('.q-dialog').last().locator('input').first().press('Enter');
+  await expect(page.locator('.q-dialog').filter({ hasText: 'New device' })).toHaveCount(0);
+  await expect(page.getByLabel('Device').nth(0)).toHaveValue(/Fresh Screen Hall/);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json();
+      const points = lists[0].outputs.find((o: { id: string }) => o.id === output.id).patch_points as Array<{ device_id: string }>;
+      const devices = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json();
+      const created = devices.find((d: { name: string }) => d.name === 'Fresh Screen Hall');
+      return points.length === 1 && created && points[0].device_id === created.id;
+    })
+    .toBe(true);
+});

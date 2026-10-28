@@ -23,6 +23,7 @@
           @update:model-value="() => (step.device_id = null)"
         />
         <q-select
+          :ref="(el) => bindDeviceSelect(step.key, el)"
           v-model="step.device_id"
           :options="deviceOptionsFor(step)"
           :label="t('video.stepDevice')"
@@ -141,6 +142,7 @@
             :label="t('devices.name')"
             dense
             autofocus
+            @keyup.enter="createName.trim() && confirmNewDevice()"
           />
           <div class="text-caption text-grey-7 q-mt-xs">
             {{ t('devices.type') }}: {{ t(`devices.types.${createKind}`) }}
@@ -306,6 +308,19 @@ const createDialog = ref(false);
 const createName = ref('');
 const createKind = ref('other');
 const createStep = ref(null);
+// Each step's device select, so a chosen device can clear the text typed into it.
+const deviceSelects = {};
+function bindDeviceSelect(key, el) {
+  if (el) deviceSelects[key] = el;
+  else delete deviceSelects[key];
+}
+function chooseDevice(step, deviceId) {
+  step.device_id = deviceId;
+  const device = devicesStore.byId(deviceId);
+  const label = device ? `${device.name || '—'} · ${t(`devices.types.${device.device_type}`)}` : '';
+  deviceSelects[step.key]?.updateInputValue(label, true);
+}
+
 function askNewDevice(step, val, done) {
   done();
   const name = String(val || '').trim();
@@ -319,7 +334,7 @@ function askNewDevice(step, val, done) {
   const partial = named.filter((d) => d.name.toLowerCase().includes(typed));
   const chosen = exact || (partial.length === 1 ? partial[0] : null);
   if (chosen) {
-    step.device_id = chosen.id;
+    chooseDevice(step, chosen.id);
     return;
   }
   createStep.value = step;
@@ -333,7 +348,7 @@ async function confirmNewDevice() {
       name: createName.value.trim(),
       device_type: createKind.value,
     });
-    if (createStep.value) createStep.value.device_id = device.id;
+    if (createStep.value) chooseDevice(createStep.value, device.id);
     createDialog.value = false;
   } catch (err) {
     $q.notify({ type: 'negative', message: err?.response?.data?.detail || t('common.errorOccurred') });
