@@ -1,17 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { coverageFocals, focalInUse, horizontalFovDeg, viewPolygon } from '../../src/utils/camera';
+import { coverageFocals, horizontalFovDeg, viewPolygon } from '../../src/utils/camera';
 
 test('horizontal field of view follows the sensor and focal length', () => {
   expect(horizontalFovDeg(35, 55)).toBeCloseTo(35.3, 1);
   expect(horizontalFovDeg(35, 200)).toBeCloseTo(10.0, 1);
   expect(horizontalFovDeg(null, 50)).toBeNull();
-});
-
-test('the focal length in use is the choice inside the range, else the widest', () => {
-  expect(focalInUse(100, 55, 200)).toBe(100);
-  expect(focalInUse(500, 55, 200)).toBe(55);
-  expect(focalInUse(null, 55, 200)).toBe(55);
-  expect(focalInUse(null, 50, null)).toBe(50);
 });
 
 test('the view ends at the venue wall when no maximum distance is set', () => {

@@ -10,3 +10,10 @@
 - [x] Stockwire integration both for adding products to a job from selecting a microphone with/without stand, DI and so on. But also to select the mixer and get the correct number of inputs and busses, it should also be possible to suggest a mixer based on a channellist with a certain number of inputs and outputs.
   - The stockwire integration should also make it possible to deeplink both from stagewire to stockwire and stockwire to stagewire and create a job in the other platfrom after it is created in one.
 - [x] Make it mobilefriendly with cards instead of table rows on phones and moving the list of channellists and such so that it also works on phones.
+- [x] Video suite: inputs and outputs with patch chains, ports per step, splits and passthroughs, per-device patch sheets and signal flow.
+- [x] Cameras and lenses: sensor width from aspect ratio and diagonal (with presets), focal range, camera coverage with range or chosen focal length, recommended maximum distance.
+- [x] Projectors and screens: throw ratio and aspect, projector cone with screen fit or wall projection, projectors fed from output chains.
+- [x] Stage plot reports and the report layout preview draw cables, cableways, audience, speaker, camera and projector coverage the same way as the plot.
+- [ ] Pixel map and LED wall for the video suite.
+- [ ] Stockwire fields for projectors (`proj_throw_ratio_min/max`, `proj_aspect_ratio`), pending agreement in `docs/stockwire-integration-spec.md` §3.7.
+- [ ] Lighting and rigging (Phase 3).

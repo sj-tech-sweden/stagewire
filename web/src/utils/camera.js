@@ -6,15 +6,6 @@ export function horizontalFovDeg(sensorWidthMm, focalMm) {
   return (2 * Math.atan(sensorWidthMm / (2 * focalMm)) * 180) / Math.PI;
 }
 
-// The focal length in use: the chosen one if it is inside the lens range, else the
-// widest (shortest) focal length.
-export function focalInUse(chosenMm, focalMinMm, focalMaxMm) {
-  if (!focalMinMm) return null;
-  const max = focalMaxMm || focalMinMm;
-  if (chosenMm && chosenMm >= focalMinMm && chosenMm <= max) return chosenMm;
-  return focalMinMm;
-}
-
 // The focal lengths to draw. 'range' gives the widest end of the lens and, for a zoom,
 // the narrowest end too (filled is the widest, the other is an outline). 'chosen' gives
 // only the focal length in use.
