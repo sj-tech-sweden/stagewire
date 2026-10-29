@@ -565,6 +565,7 @@ export default {
     specsFromStockwire: 'Spridning och kastlängd från Stockwire-produkt {name}',
     specsManual: 'Manuella täckningsvärden (ingen Stockwire-produkt på utgångsenheten)',
     showOutlets: 'Strömuttag',
+    showPowerCables: 'Strömkablar',
     highlightChannel: 'Markera på scenkarta',
     types: {
       screen: 'Duk',
@@ -612,7 +613,7 @@ export default {
     linkVideo: 'Kopplad videoingång',
     linkCamera: 'Kopplad kamera',
     linkOutput: 'Kopplad utgång',
-    categories: { sound: 'Ljud', video: 'Video', stage: 'Scen', other: 'Övrigt' },
+    categories: { sound: 'Ljud', video: 'Video', light: 'Ljus', stage: 'Scen', other: 'Övrigt' },
     showSoundCoverage: 'Ljudtäckning',
     showCameraCoverage: 'Kameratäckning',
     coverageNoVenue: 'Ange lokalens storlek för att se täckningen.',

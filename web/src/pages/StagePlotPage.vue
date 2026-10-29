@@ -541,6 +541,10 @@
                 v-model="showOutlets"
                 :label="t('stagePlot.showOutlets')"
               />
+              <q-toggle
+                v-model="showPowerCables"
+                :label="t('stagePlot.showPowerCables')"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -680,6 +684,11 @@
                   v-for="row in visibleDmxRows"
                   :key="'dmx' + row.key"
                   :config="dmxConfig(row)"
+                />
+                <v-line
+                  v-for="row in visiblePowerCables"
+                  :key="'pc' + row.key"
+                  :config="powerCableConfig(row)"
                 />
                 <v-line
                   v-if="drawingWay && drawPoints.length"
@@ -1433,19 +1442,35 @@ const cameraViewMode = ref(savedCoverageView.cameraMode === 'chosen' ? 'chosen' 
 watch([showSoundCoverage, showCameraCoverage, showProjectorCoverage, cameraViewMode], ([sound, camera, projector, mode]) => {
   localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, projector, cameraMode: mode }));
 });
+// Categories that existed before 'light' was added. A legacy (unversioned) saved set is
+// migrated by keeping the user's choices and adding any category that did not exist yet, so
+// 'light' defaults visible for returning users; the result is then upgraded to the versioned
+// format. Once versioned, the saved set is respected exactly, so hiding a category sticks.
+const KNOWN_CATEGORIES = ['sound', 'video', 'stage', 'other'];
+const CATEGORY_STORE_VERSION = 2;
 const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
 const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
 const visibleCategories = ref([...CATEGORIES]);
 watch(categoryStorageKey, (key) => {
   try {
-    const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    visibleCategories.value = Array.isArray(saved) ? saved : [...CATEGORIES];
+    const raw = JSON.parse(localStorage.getItem(key) || 'null');
+    if (Array.isArray(raw)) {
+      const set = new Set(raw);
+      const cats = CATEGORIES.filter((c) => set.has(c) || !KNOWN_CATEGORIES.includes(c));
+      visibleCategories.value = cats;
+      localStorage.setItem(key, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats }));
+    } else if (raw && Array.isArray(raw.cats) && raw.v === CATEGORY_STORE_VERSION) {
+      visibleCategories.value = CATEGORIES.filter((c) => raw.cats.includes(c));
+    } else {
+      visibleCategories.value = [...CATEGORIES];
+      localStorage.setItem(key, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats: [...CATEGORIES] }));
+    }
   } catch {
     visibleCategories.value = [...CATEGORIES];
   }
 }, { immediate: true });
 watch(visibleCategories, (value) => {
-  localStorage.setItem(categoryStorageKey.value, JSON.stringify(value));
+  localStorage.setItem(categoryStorageKey.value, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats: value }));
 });
 function toggleCategory(category) {
   visibleCategories.value = visibleCategories.value.includes(category)
@@ -2681,6 +2706,8 @@ const cablesVisible = ref(true);
 const DMX_COLORS = ['#EF5350', '#42A5F5', '#66BB6A', '#FFA726', '#AB47BC', '#26C6DA', '#FFEE58', '#8D6E63'];
 const dmxUniverses = ref([]);
 const powerOutlets = ref([]);
+const powerNodes = ref([]);
+const powerStatusById = ref({});
 function savedToggle(key, fallback) {
   try {
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
@@ -2691,18 +2718,28 @@ function savedToggle(key, fallback) {
 }
 const showOutlets = ref(savedToggle('sw_stage_outlets', true));
 watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringify(v)));
+const showPowerCables = ref(savedToggle('sw_stage_power_cables', true));
+watch(showPowerCables, (v) => localStorage.setItem('sw_stage_power_cables', JSON.stringify(v)));
 
 async function loadLights() {
   try {
-    const [universes, outlets] = await Promise.all([
+    const [universes, outlets, nodesRes, summaryRes] = await Promise.all([
       api.get(`/jobs/${jobId}/dmx-universes`),
       api.get(`/jobs/${jobId}/power-outlets`),
+      api.get(`/jobs/${jobId}/power-nodes`),
+      api.get(`/jobs/${jobId}/rigging/summary`),
     ]);
     dmxUniverses.value = universes.data;
     powerOutlets.value = outlets.data;
+    powerNodes.value = nodesRes.data;
+    powerStatusById.value = Object.fromEntries(
+      (summaryRes.data.nodes || []).map((n) => [n.id, n.status]),
+    );
   } catch {
     dmxUniverses.value = [];
     powerOutlets.value = [];
+    powerNodes.value = [];
+    powerStatusById.value = {};
   }
 }
 
@@ -2749,7 +2786,7 @@ const dmxRows = computed(() => {
   return rows;
 });
 // A DMX line follows its endpoints: it is hidden when either end's category is hidden, so
-// turning off the stage category (fixtures) also hides their DMX lines.
+// turning off the Lighting category also hides the fixtures' DMX lines.
 const visibleDmxRows = computed(() =>
   dmxRows.value.filter(
     (r) =>
@@ -2765,6 +2802,72 @@ function dmxConfig(row) {
     dash: [6, 4],
     lineCap: 'round',
     opacity: 0.9,
+    listening: false,
+  };
+}
+
+// Power cables: one per power-tree edge that feeds a device on the plot. The cable runs from
+// the feeding node's device (or, for a source, its venue outlet) to the fed device. Nodes that
+// do not stand for a plotted device have no endpoint here, so those edges are not drawn.
+// Colour follows the fed node's load status (green/amber/red/grey).
+const POWER_STATUS_COLOR = {
+  ok: '#66BB6A',
+  warn: '#FFA726',
+  over: '#EF5350',
+  unpowered: '#9E9E9E',
+  unrated: '#FFA726',
+};
+const powerCables = computed(() => {
+  const byId = Object.fromEntries(powerNodes.value.map((n) => [n.id, n]));
+  const rows = [];
+  for (const node of powerNodes.value) {
+    if (!node.device_id || !node.parent_id) continue;
+    const to = placedCentre(node.device_id);
+    if (!to) continue;
+    const parent = byId[node.parent_id];
+    if (!parent) continue;
+    let from = null;
+    let fromDeviceId = null;
+    if (parent.device_id) {
+      from = placedCentre(parent.device_id);
+      fromDeviceId = parent.device_id;
+    } else if (parent.kind === 'source' && parent.venue_outlet_id) {
+      const outlet = powerOutlets.value.find((o) => o.id === parent.venue_outlet_id);
+      if (outlet && outlet.x_cm != null) {
+        from = {
+          x: (stageX.value + outlet.x_cm) * pxPerCm.value,
+          y: (stageY.value + outlet.y_cm) * pxPerCm.value,
+        };
+      }
+    }
+    if (!from) continue;
+    rows.push({
+      key: `pc:${node.id}`,
+      points: [from.x, from.y, to.x, to.y],
+      status: powerStatusById.value[node.id] || 'ok',
+      fromDeviceId,
+      toDeviceId: node.device_id,
+    });
+  }
+  return rows;
+});
+// A power cable follows its plotted devices: it is hidden when the light (or other) category of
+// either end is hidden, so turning off Lighting also hides the power to the fixtures.
+const visiblePowerCables = computed(() =>
+  showPowerCables.value
+    ? powerCables.value.filter(
+        (r) =>
+          endpointVisible(null, r.toDeviceId) &&
+          (r.fromDeviceId ? endpointVisible(null, r.fromDeviceId) : true),
+      )
+    : [],
+);
+function powerCableConfig(row) {
+  return {
+    points: row.points,
+    stroke: POWER_STATUS_COLOR[row.status] || '#9E9E9E',
+    strokeWidth: 3,
+    opacity: 0.85,
     listening: false,
   };
 }

@@ -565,6 +565,7 @@ export default {
     specsFromStockwire: 'Dispersion and throw from Stockwire product {name}',
     specsManual: 'Manual coverage values (no Stockwire product on the output device)',
     showOutlets: 'Power outlets',
+    showPowerCables: 'Power cables',
     highlightChannel: 'Highlight on stage plot',
     types: {
       screen: 'Screen',
@@ -612,7 +613,7 @@ export default {
     linkVideo: 'Linked video input',
     linkCamera: 'Linked camera',
     linkOutput: 'Linked output',
-    categories: { sound: 'Sound', video: 'Video', stage: 'Stage', other: 'Other' },
+    categories: { sound: 'Sound', video: 'Video', light: 'Lighting', stage: 'Stage', other: 'Other' },
     showSoundCoverage: 'Sound coverage',
     showCameraCoverage: 'Camera coverage',
     coverageNoVenue: 'Set the venue size to see coverage.',
