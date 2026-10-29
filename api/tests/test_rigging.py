@@ -293,3 +293,100 @@ async def test_installation_wiring_needs_a_rating_and_nodes_can_stand_for_a_devi
             await client.get(f"{BASE}/jobs/{job_id}/rigging/summary", headers=auth_headers)
         ).json()
         assert summary["nodes"][0]["rating_amps"] == 32
+
+
+async def test_a_node_can_be_merged_from_multiple_parents(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(f"{BASE}/jobs", json={"title": "Merge"}, headers=auth_headers)
+        ).json()["id"]
+
+        async def post(path, body, status=201):
+            res = await client.post(f"{BASE}/jobs/{job_id}/{path}", json=body, headers=auth_headers)
+            assert res.status_code == status, res.text
+            return res.json()
+
+        source = await post(
+            "power-nodes",
+            {
+                "name": "Mains",
+                "kind": "source",
+                "feed_connector": "cee32_3p",
+                "outputs": [{"connector": "cee32_3p", "count": 2}],
+            },
+        )
+        d1 = await post(
+            "power-nodes",
+            {
+                "name": "Distro 1",
+                "kind": "distro",
+                "parent_id": source["id"],
+                "feed_connector": "cee32_3p",
+                "outputs": [{"connector": "schuko", "count": 4}],
+            },
+        )
+        d2 = await post(
+            "power-nodes",
+            {
+                "name": "Distro 2",
+                "kind": "distro",
+                "parent_id": source["id"],
+                "feed_connector": "cee32_3p",
+                "outputs": [{"connector": "schuko", "count": 4}],
+            },
+        )
+
+        # Merge: feed d1 from d2 as an extra (parallel) feed.
+        feed = await client.post(
+            f"{BASE}/jobs/{job_id}/power-nodes/{d1['id']}/feeds",
+            json={"parent_id": d2["id"], "feed_connector": "schuko"},
+            headers=auth_headers,
+        )
+        assert feed.status_code == 201, feed.text
+        assert feed.json()["parent_id"] == d2["id"]
+        feed_id = feed.json()["id"]
+
+        nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=auth_headers)).json()
+        merged = next(n for n in nodes if n["id"] == d1["id"])
+        assert len(merged["feeds"]) == 1
+        assert merged["feeds"][0]["parent_id"] == d2["id"]
+        assert merged["parent_id"] == source["id"]
+
+        summary = (
+            await client.get(f"{BASE}/jobs/{job_id}/rigging/summary", headers=auth_headers)
+        ).json()
+        evaluated = next(n for n in summary["nodes"] if n["id"] == d1["id"])
+        assert set(evaluated["parent_ids"]) == {source["id"], d2["id"]}
+        assert evaluated["powered"] is True
+
+        # A merged feed must use a connector that is an output of the parent.
+        bad_connector = await client.post(
+            f"{BASE}/jobs/{job_id}/power-nodes/{d1['id']}/feeds",
+            json={"parent_id": d2["id"], "feed_connector": "cee32_3p"},
+            headers=auth_headers,
+        )
+        assert bad_connector.status_code == 422
+
+        # A feedback loop must be rejected.
+        cycle = await client.post(
+            f"{BASE}/jobs/{job_id}/power-nodes/{d2['id']}/feeds",
+            json={"parent_id": d1["id"], "feed_connector": "schuko"},
+            headers=auth_headers,
+        )
+        assert cycle.status_code == 422
+
+        # Removing the merged feed leaves the node on its primary parent only.
+        removed = await client.delete(
+            f"{BASE}/jobs/{job_id}/power-nodes/{d1['id']}/feeds/{feed_id}",
+            headers=auth_headers,
+        )
+        assert removed.status_code == 204, removed.text
+        after = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=auth_headers)).json()
+        back = next(n for n in after if n["id"] == d1["id"])
+        assert back["feeds"] == []
+        assert back["parent_id"] == source["id"]

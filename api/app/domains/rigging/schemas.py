@@ -43,6 +43,8 @@ class PowerNodeBase(BaseModel):
     active: bool = True
     venue_outlet_id: UUID | None = None
     device_id: UUID | None = None
+    x_cm: float | None = None
+    y_cm: float | None = None
     notes: str = ""
 
 
@@ -61,7 +63,28 @@ class PowerNodeUpdate(BaseModel):
     active: bool | None = None
     venue_outlet_id: UUID | None = None
     device_id: UUID | None = None
+    x_cm: float | None = None
+    y_cm: float | None = None
     notes: str | None = None
+
+
+class PowerNodeFeedBase(BaseModel):
+    parent_id: UUID
+    feed_connector: str = ""
+    phase: Literal["L1", "L2", "L3"] | None = None
+
+
+class PowerNodeFeedCreate(PowerNodeFeedBase):
+    pass
+
+
+class PowerNodeFeedRead(PowerNodeFeedBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID
+    node_id: UUID
+    position: int = 0
 
 
 class PowerNodeRead(PowerNodeBase):
@@ -71,6 +94,7 @@ class PowerNodeRead(PowerNodeBase):
     job_id: UUID
     parent_id: UUID | None = None
     position: int = 0
+    feeds: list[PowerNodeFeedRead] = []
 
 
 class LoadRead(BaseModel):

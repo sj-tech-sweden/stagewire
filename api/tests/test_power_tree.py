@@ -1,6 +1,6 @@
 import app.main  # noqa: F401  (registers every model for the test schema)
 from app.domains.rigging.connectors import CONNECTORS, catalog, known
-from app.domains.rigging.power_tree import Load, Node, Output, evaluate
+from app.domains.rigging.power_tree import Feed, Load, Node, Output, evaluate
 
 
 def _source(**kw) -> Node:
@@ -8,13 +8,15 @@ def _source(**kw) -> Node:
         "id": "src",
         "kind": "source",
         "name": "Mains",
-        "parent_id": None,
         "feed_connector": "cee63_3p",
         "phase": None,
         "outputs": (Output("cee32_3p", 2),),
         "rating_amps": 63.0,
     }
-    return Node(**{**base, **kw})
+    data = {**base, **kw}
+    parent_id = data.pop("parent_id", None)
+    feeds = (Feed(parent_id, data["feed_connector"], data.get("phase")),) if parent_id else ()
+    return Node(feeds=feeds, **data)
 
 
 def _distro(**kw) -> Node:
@@ -22,13 +24,15 @@ def _distro(**kw) -> Node:
         "id": "d1",
         "kind": "distro",
         "name": "Distro A",
-        "parent_id": "src",
         "feed_connector": "cee32_3p",
         "phase": None,
         "outputs": (Output("schuko", 4, "L1"), Output("powercon", 4, "L2")),
         "rating_amps": None,
     }
-    return Node(**{**base, **kw})
+    data = {**base, **kw}
+    parent_id = data.pop("parent_id", "src")
+    feeds = (Feed(parent_id, data["feed_connector"], data.get("phase")),) if parent_id else ()
+    return Node(feeds=feeds, **data)
 
 
 def test_catalog_has_the_default_connectors_and_socapex_circuits():
@@ -141,3 +145,49 @@ def test_installation_wiring_with_a_rating_is_checked_like_any_node():
     )
     assert shared.nodes["src"]["percent"] == 34.8
     assert shared.nodes["src"]["status"] == "ok"
+
+
+def test_a_merged_node_is_powered_when_any_feed_is_live():
+    src1 = _source(id="s1", name="S1", rating_amps=63.0, outputs=(Output("cee32_3p", 2),))
+    src2 = _source(
+        id="s2", name="S2", rating_amps=63.0, active=False, outputs=(Output("cee32_3p", 2),)
+    )
+    node = Node(
+        id="m",
+        kind="distro",
+        name="Merge",
+        feed_connector="cee32_3p",
+        feeds=(Feed("s1", "cee32_3p"), Feed("s2", "cee32_3p")),
+        outputs=(),
+        rating_amps=None,
+        active=True,
+    )
+    result = evaluate([src1, src2, node], [])
+    assert result.nodes["m"]["powered"] is True
+    assert result.nodes["m"]["parent_ids"] == ["s1", "s2"]
+
+    dead = evaluate(
+        [
+            _source(id="s1", active=False, rating_amps=63.0, outputs=(Output("cee32_3p", 2),)),
+            _source(id="s2", active=False, rating_amps=63.0, outputs=(Output("cee32_3p", 2),)),
+            node,
+        ],
+        [],
+    )
+    assert dead.nodes["m"]["powered"] is False
+
+
+def test_a_feed_must_plug_into_an_output_of_its_parent():
+    src = _source(outputs=(Output("cee32_3p", 2),))
+    node = Node(
+        id="m",
+        kind="distro",
+        name="Merge",
+        feed_connector="schuko",
+        feeds=(Feed("src", "schuko"),),
+        outputs=(),
+        rating_amps=None,
+        active=True,
+    )
+    result = evaluate([src, node], [])
+    assert any("schuko is not an output of Mains" in e for e in result.errors)

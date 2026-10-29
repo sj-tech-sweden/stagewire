@@ -50,7 +50,7 @@
       <template #avatar>
         <q-icon name="cable" />
       </template>
-      {{ pendingOutletId ? t('stagePlot.outletSelected') : t('stagePlot.connectPowerHint') }}
+      {{ pendingSource ? t('stagePlot.sourceSelected') : t('stagePlot.connectPowerHint') }}
       <template #action>
         <q-btn
           flat
@@ -203,6 +203,19 @@
                   <q-icon name="add" />
                 </q-item-section>
                 <q-item-section>{{ t('stagePlot.custom') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-ripple
+                clickable
+                @click="outletDialog = true"
+              >
+                <q-item-section avatar>
+                  <q-icon
+                    name="electrical_services"
+                    color="#FFEE58"
+                  />
+                </q-item-section>
+                <q-item-section>{{ t('stagePlot.addOutlet') }}</q-item-section>
               </q-item>
             </q-list>
           </q-card-section>
@@ -584,6 +597,10 @@
                 v-model="showPowerCables"
                 :label="t('stagePlot.showPowerCables')"
               />
+              <q-toggle
+                v-model="showPowerNodes"
+                :label="t('stagePlot.showPowerNodes')"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -775,6 +792,14 @@
                   <v-circle :config="outletDotConfig" />
                   <v-text :config="outletGlyphConfig" />
                   <v-text :config="outletNameConfig(o)" />
+                </v-group>
+                <v-group
+                  v-for="pn in visiblePowerNodes"
+                  :key="'pn' + pn.id"
+                  :config="powerNodeConfig(pn)"
+                >
+                  <v-rect :config="powerNodeRectConfig(pn)" />
+                  <v-text :config="powerNodeLabelConfig(pn)" />
                 </v-group>
                 <v-transformer
                   ref="trRef"
@@ -2114,7 +2139,7 @@ function onStageClick(e) {
     return;
   }
   if (connectPowerMode.value) {
-    if (e.target === e.target.getStage()) pendingOutletId.value = null;
+    if (e.target === e.target.getStage()) pendingSource.value = null;
     return;
   }
   if (e.target === e.target.getStage()) {
@@ -2815,78 +2840,130 @@ const showOutlets = ref(savedToggle('sw_stage_outlets', true));
 watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringify(v)));
 const showPowerCables = ref(savedToggle('sw_stage_power_cables', true));
 watch(showPowerCables, (v) => localStorage.setItem('sw_stage_power_cables', JSON.stringify(v)));
+const showPowerNodes = ref(savedToggle('sw_stage_power_nodes', true));
+watch(showPowerNodes, (v) => localStorage.setItem('sw_stage_power_nodes', JSON.stringify(v)));
 
-// Power-connect flow: click an outlet, then click a device element to wire it.
+// Power-connect flow: pick a source (an outlet, a power node, or a plotted device), then pick a
+// target. A device target becomes a distro node (carrying the device) fed from the source; a power
+// node target is fed from the source. If the target already has a parent, the new connection is
+// added as an extra (merged) feed.
 const connectPowerMode = ref(false);
-const pendingOutletId = ref(null);
+const pendingSource = ref(null);
 function toggleConnect() {
   connectPowerMode.value = !connectPowerMode.value;
-  pendingOutletId.value = null;
+  pendingSource.value = null;
 }
 function cancelConnect() {
   connectPowerMode.value = false;
-  pendingOutletId.value = null;
+  pendingSource.value = null;
 }
 function onOutletClick(o) {
   if (!connectPowerMode.value) return;
-  pendingOutletId.value = pendingOutletId.value === o.id ? null : o.id;
-  if (pendingOutletId.value) $q.notify({ message: t('stagePlot.outletSelected'), color: 'info' });
+  pendingSource.value =
+    pendingSource.value?.type === 'outlet' && pendingSource.value.id === o.id
+      ? null
+      : { type: 'outlet', id: o.id };
+  if (pendingSource.value) $q.notify({ message: t('stagePlot.outletSelected'), color: 'info' });
 }
-// Clicking a device element while in connect mode wires it to the pending outlet;
-// otherwise it selects the element as usual.
+function onPowerNodeClick(node) {
+  if (connectPowerMode.value && pendingSource.value) {
+    connectToNode(node);
+    return;
+  }
+  selectedPowerNodeId.value = selectedPowerNodeId.value === node.id ? null : node.id;
+}
 function onElementClick(elId) {
-  if (connectPowerMode.value && pendingOutletId.value) {
-    connectDeviceToOutlet(elId, pendingOutletId.value);
+  if (connectPowerMode.value && pendingSource.value) {
+    connectTargetElement(elId);
     return;
   }
   select(elId);
 }
-async function connectDeviceToOutlet(elId, outletId) {
+async function resolveParentId(source) {
+  if (!source) return null;
+  if (source.type === 'node') return source.id;
+  const outlet = powerOutlets.value.find((o) => o.id === source.id);
+  if (!outlet) return null;
+  let src = powerNodes.value.find((n) => n.kind === 'source' && n.venue_outlet_id === source.id);
+  if (!src) {
+    const res = await api.post(`/jobs/${jobId}/power-nodes`, {
+      kind: 'source',
+      venue_outlet_id: source.id,
+      feed_connector: outlet.connector,
+      rating_amps: outlet.rating_amps ?? null,
+      outputs: [{ connector: outlet.connector, count: 1 }],
+      name: outlet.name || 'Outlet',
+    });
+    src = res.data;
+  }
+  return src.id;
+}
+async function wireChildToParent(childId, parentId) {
+  const child = powerNodes.value.find((n) => n.id === childId);
+  if (!child) return;
+  if (!child.parent_id) {
+    await api.patch(`/jobs/${jobId}/power-nodes/${childId}`, { parent_id: parentId });
+    return;
+  }
+  if (child.parent_id === parentId) return;
+  if ((child.feeds || []).some((f) => f.parent_id === parentId)) return;
+  const parent = powerNodes.value.find((n) => n.id === parentId);
+  const connector = parent?.outputs?.[0]?.connector || child.feed_connector || 'schuko';
+  await api.post(`/jobs/${jobId}/power-nodes/${childId}/feeds`, {
+    parent_id: parentId,
+    feed_connector: connector,
+  });
+}
+async function wireDeviceToParent(elId, parentId) {
   const el = store.elements.find((e) => e.id === elId);
   if (!el || !el.linked_device_id) {
     $q.notify({ message: t('stagePlot.linkDeviceFirst'), color: 'warning' });
     return;
   }
-  const outlet = powerOutlets.value.find((o) => o.id === outletId);
-  if (!outlet) return;
-  try {
-    let sourceId = null;
-    const existing = powerNodes.value.find(
-      (n) => n.kind === 'source' && n.venue_outlet_id === outletId,
-    );
-    if (existing) {
-      sourceId = existing.id;
-    } else {
-      const srcRes = await api.post(`/jobs/${jobId}/power-nodes`, {
-        kind: 'source',
-        venue_outlet_id: outletId,
-        feed_connector: outlet.connector,
-        rating_amps: outlet.rating_amps ?? null,
-        outputs: [{ connector: outlet.connector, count: 1 }],
-        name: outlet.name || 'Outlet',
-      });
-      sourceId = srcRes.data.id;
-    }
-    const dup = powerNodes.value.find(
-      (n) => n.parent_id === sourceId && n.device_id === el.linked_device_id,
-    );
-    if (dup) {
-      $q.notify({ message: t('stagePlot.alreadyConnected'), color: 'warning' });
-      pendingOutletId.value = null;
-      connectPowerMode.value = false;
-      return;
-    }
-    await api.post(`/jobs/${jobId}/power-nodes`, {
+  const parent = powerNodes.value.find((n) => n.id === parentId);
+  const connector = parent?.outputs?.[0]?.connector || 'schuko';
+  let node = powerNodes.value.find((n) => n.device_id === el.linked_device_id);
+  if (!node) {
+    const res = await api.post(`/jobs/${jobId}/power-nodes`, {
       kind: 'distro',
-      parent_id: sourceId,
+      parent_id: parentId,
       device_id: el.linked_device_id,
-      feed_connector: outlet.connector,
-      rating_amps: outlet.rating_amps ?? null,
+      feed_connector: connector,
+      rating_amps: null,
       name: devicesStore.byId(el.linked_device_id)?.name || 'Device',
     });
-    const deviceName = devicesStore.byId(el.linked_device_id)?.name || 'Device';
-    $q.notify({ message: t('stagePlot.connectedToOutlet', { device: deviceName }), color: 'positive' });
-    pendingOutletId.value = null;
+    node = res.data;
+  } else {
+    await wireChildToParent(node.id, parentId);
+  }
+}
+async function connectToNode(targetNode) {
+  const parentId = await resolveParentId(pendingSource.value);
+  if (!parentId) return;
+  if (parentId === targetNode.id) {
+    $q.notify({ message: t('stagePlot.cannotFeedSelf'), color: 'warning' });
+    return;
+  }
+  try {
+    await wireChildToParent(targetNode.id, parentId);
+    $q.notify({ message: t('stagePlot.powerConnected'), color: 'positive' });
+    pendingSource.value = null;
+    connectPowerMode.value = false;
+    await loadLights();
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  }
+}
+async function connectTargetElement(elId) {
+  const parentId = await resolveParentId(pendingSource.value);
+  if (!parentId) return;
+  try {
+    await wireDeviceToParent(elId, parentId);
+    $q.notify({ message: t('stagePlot.powerConnected'), color: 'positive' });
+    pendingSource.value = null;
     connectPowerMode.value = false;
     await loadLights();
   } catch (err) {
@@ -3042,51 +3119,55 @@ const POWER_STATUS_COLOR = {
   unpowered: '#9E9E9E',
   unrated: '#FFA726',
 };
+// Where a power node sits on the plot, in cm. A node with no saved position falls back to its venue
+// outlet (for sources) or the stage centre.
+function nodePos(node) {
+  if (node.x_cm != null && node.y_cm != null) return { x: node.x_cm, y: node.y_cm };
+  if (node.kind === 'source' && node.venue_outlet_id) {
+    const o = powerOutlets.value.find((x) => x.id === node.venue_outlet_id);
+    if (o && o.x_cm != null) return { x: o.x_cm, y: o.y_cm };
+  }
+  return null;
+}
+function nodeDisplayPos(node) {
+  return nodePos(node) || { x: stageW.value / 2, y: stageH.value / 2 };
+}
+// The cable endpoint for a node: the centre of its plotted device if it stands for one, otherwise
+// its position on the plot.
+function nodeAnchor(node) {
+  if (node.device_id) {
+    const c = placedCentre(node.device_id);
+    if (c) return { x: c.x, y: c.y };
+  }
+  const p = nodePos(node);
+  if (p) return { x: (stageX.value + p.x) * pxPerCm.value, y: (stageY.value + p.y) * pxPerCm.value };
+  return null;
+}
+// One cable per power-tree edge (primary parent and every merged feed). The cable runs from the
+// feeding node to the fed node, so the whole tree reads as a graph on the plot.
 const powerCables = computed(() => {
   const byId = Object.fromEntries(powerNodes.value.map((n) => [n.id, n]));
   const rows = [];
   for (const node of powerNodes.value) {
-    if (!node.device_id || !node.parent_id) continue;
-    const to = placedCentre(node.device_id);
-    if (!to) continue;
-    const parent = byId[node.parent_id];
-    if (!parent) continue;
-    let from = null;
-    let fromDeviceId = null;
-    if (parent.device_id) {
-      from = placedCentre(parent.device_id);
-      fromDeviceId = parent.device_id;
-    } else if (parent.kind === 'source' && parent.venue_outlet_id) {
-      const outlet = powerOutlets.value.find((o) => o.id === parent.venue_outlet_id);
-      if (outlet && outlet.x_cm != null) {
-        from = {
-          x: (stageX.value + outlet.x_cm) * pxPerCm.value,
-          y: (stageY.value + outlet.y_cm) * pxPerCm.value,
-        };
-      }
+    const parents = [node.parent_id, ...(node.feeds || []).map((f) => f.parent_id)];
+    const childAnchor = nodeAnchor(node);
+    if (!childAnchor) continue;
+    for (const pid of parents) {
+      if (!pid) continue;
+      const parent = byId[pid];
+      if (!parent) continue;
+      const parentAnchor = nodeAnchor(parent);
+      if (!parentAnchor) continue;
+      rows.push({
+        key: `pc:${node.id}:${pid}`,
+        points: [parentAnchor.x, parentAnchor.y, childAnchor.x, childAnchor.y],
+        status: powerStatusById.value[node.id] || 'ok',
+      });
     }
-    if (!from) continue;
-    rows.push({
-      key: `pc:${node.id}`,
-      points: [from.x, from.y, to.x, to.y],
-      status: powerStatusById.value[node.id] || 'ok',
-      fromDeviceId,
-      toDeviceId: node.device_id,
-    });
   }
   return rows;
 });
-// A power cable follows its plotted devices: it is hidden when the light (or other) category of
-// either end is hidden, so turning off Lighting also hides the power to the fixtures.
-const visiblePowerCables = computed(() =>
-  showPowerCables.value
-    ? powerCables.value.filter(
-        (r) =>
-          endpointVisible(null, r.toDeviceId) &&
-          (r.fromDeviceId ? endpointVisible(null, r.fromDeviceId) : true),
-      )
-    : [],
-);
+const visiblePowerCables = computed(() => (showPowerCables.value ? powerCables.value : []));
 function powerCableConfig(row) {
   return {
     points: row.points,
@@ -3122,6 +3203,61 @@ async function onOutletDragEnd(o, e) {
   const y = round1(e.target.y() / pxPerCm.value - stageY.value);
   try {
     await api.patch(`/venues/${job.value.venue_id}/power-outlets/${o.id}`, { x_cm: x, y_cm: y });
+    await loadLights();
+  } catch {
+    await loadLights();
+  }
+}
+
+// Power nodes draw on the plot as a graph, so the whole tree is visible where it is used. They are
+// draggable to reposition; a node keeps its place through x_cm/y_cm.
+const POWER_NODE_W = 70;
+const POWER_NODE_H = 30;
+const selectedPowerNodeId = ref(null);
+function nodeStatusColor(node) {
+  const s = powerStatusById.value[node.id] || 'ok';
+  return POWER_STATUS_COLOR[s] || '#9E9E9E';
+}
+const visiblePowerNodes = computed(() => (showPowerNodes.value ? powerNodes.value : []));
+function powerNodeConfig(node) {
+  const p = nodeDisplayPos(node);
+  return {
+    x: (stageX.value + p.x) * pxPerCm.value - POWER_NODE_W / 2,
+    y: (stageY.value + p.y) * pxPerCm.value - POWER_NODE_H / 2,
+    name: 'powernode',
+    nodeId: node.id,
+    draggable: !!job.value?.venue_id,
+    onClick: () => onPowerNodeClick(node),
+    onTap: () => onPowerNodeClick(node),
+    ondragend: (e) => onPowerNodeDragEnd(node, e),
+  };
+}
+function powerNodeRectConfig(node) {
+  return {
+    width: POWER_NODE_W,
+    height: POWER_NODE_H,
+    cornerRadius: 5,
+    fill: selectedPowerNodeId.value === node.id ? '#263238' : '#1c2327',
+    stroke: nodeStatusColor(node),
+    strokeWidth: selectedPowerNodeId.value === node.id ? 3 : 2,
+  };
+}
+function powerNodeLabelConfig(node) {
+  return {
+    text: node.name || node.kind,
+    fontSize: 11,
+    x: 6,
+    y: 9,
+    width: POWER_NODE_W - 12,
+    ellipsis: true,
+    fill: '#eee',
+  };
+}
+async function onPowerNodeDragEnd(node, e) {
+  const x = round1((e.target.x() + POWER_NODE_W / 2) / pxPerCm.value - stageX.value);
+  const y = round1((e.target.y() + POWER_NODE_H / 2) / pxPerCm.value - stageY.value);
+  try {
+    await api.patch(`/jobs/${jobId}/power-nodes/${node.id}`, { x_cm: x, y_cm: y });
     await loadLights();
   } catch {
     await loadLights();

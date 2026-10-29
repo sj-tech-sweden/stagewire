@@ -29,13 +29,22 @@ class Output:
 
 
 @dataclass(frozen=True)
+class Feed:
+    """A single feed from a parent node. A node may have several (a merge)."""
+
+    parent_id: str
+    connector: str
+    phase: str | None = None
+
+
+@dataclass(frozen=True)
 class Node:
     id: str
     kind: str  # "source" | "distro" | "breakout"
     name: str
-    parent_id: str | None
-    feed_connector: str
-    phase: str | None
+    feeds: tuple[Feed, ...] = ()
+    feed_connector: str = ""
+    phase: str | None = None
     outputs: tuple[Output, ...] = ()
     rating_amps: float | None = None
     active: bool = True
@@ -85,26 +94,26 @@ def evaluate(nodes: list[Node], loads: list[Load]) -> Evaluation:
     by_id = {n.id: n for n in nodes}
     children: dict[str, list[Node]] = {}
     for node in nodes:
-        if node.parent_id:
-            children.setdefault(node.parent_id, []).append(node)
+        for feed in node.feeds:
+            children.setdefault(feed.parent_id, []).append(node)
 
-    # Structural checks: each child must plug into a declared output, and no output may be
+    # Structural checks: each feed must plug into a declared output, and no output may be
     # used by more children and loads than it has.
     used: dict[tuple[str, str], int] = {}
     for node in nodes:
-        if node.kind != "source" and node.parent_id is None:
+        if node.kind != "source" and not node.feeds:
             result.errors.append(f"{node.name}: not connected to a source")
-        if node.parent_id:
-            parent = by_id.get(node.parent_id)
+        for feed in node.feeds:
+            parent = by_id.get(feed.parent_id)
             if parent is None:
                 result.errors.append(f"{node.name}: parent is missing")
                 continue
-            if _output_for(parent, node.feed_connector) is None:
+            if _output_for(parent, feed.connector) is None:
                 result.errors.append(
-                    f"{node.name}: {node.feed_connector} is not an output of {parent.name}"
+                    f"{node.name}: {feed.connector} is not an output of {parent.name}"
                 )
             else:
-                key = (parent.id, node.feed_connector)
+                key = (parent.id, feed.connector)
                 used[key] = used.get(key, 0) + 1
     for load in loads:
         if load.node_id is None:
@@ -135,10 +144,11 @@ def evaluate(nodes: list[Node], loads: list[Load]) -> Evaluation:
             return False
         if node.kind == "source":
             value = node.active
-        elif node.parent_id and node.parent_id in by_id:
-            value = node.active and is_powered(by_id[node.parent_id], seen | {node.id})
         else:
-            value = False
+            parents = [by_id[f.parent_id] for f in node.feeds if f.parent_id in by_id]
+            value = bool(parents) and node.active and any(
+                is_powered(p, seen | {node.id}) for p in parents
+            )
         powered[node.id] = value
         return value
 
@@ -165,7 +175,10 @@ def evaluate(nodes: list[Node], loads: list[Load]) -> Evaluation:
             output = _output_for(node, load.connector)
             add(acc, spread(load.watts or 0.0, output.phase if output else None))
         for child in children.get(node.id, []):
-            output = _output_for(node, child.feed_connector)
+            feed = next((f for f in child.feeds if f.parent_id == node.id), None)
+            if feed is None:
+                continue
+            output = _output_for(node, feed.connector)
             add(
                 acc,
                 spread(
@@ -188,7 +201,8 @@ def evaluate(nodes: list[Node], loads: list[Load]) -> Evaluation:
             "id": node.id,
             "name": node.name,
             "kind": node.kind,
-            "parent_id": node.parent_id,
+            "parent_id": node.feeds[0].parent_id if node.feeds else None,
+            "parent_ids": [f.parent_id for f in node.feeds],
             "feed_connector": node.feed_connector,
             "powered": powered[node.id],
             "watts": {p: round(watts[p], 1) for p in PHASES},

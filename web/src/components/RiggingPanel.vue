@@ -539,6 +539,64 @@
             :disable="editForm.kind === 'source'"
             :label="t('rigging.fedFrom')"
           />
+          <div class="text-subtitle2 q-mt-sm">
+            {{ t('rigging.extraFeeds') }}
+          </div>
+          <div
+            v-if="editingNode && editingNode.feeds && editingNode.feeds.length"
+            class="q-gutter-y-xs"
+          >
+            <div
+              v-for="f in editingNode.feeds"
+              :key="f.id"
+              class="row items-center q-gutter-xs"
+            >
+              <div class="col text-body2">
+                {{ nodeName(f.parent_id) }} · {{ connectorLabel(f.feed_connector) }}
+              </div>
+              <q-btn
+                flat
+                dense
+                round
+                icon="delete"
+                color="negative"
+                :aria-label="t('app.actions.delete')"
+                @click="removeFeed(f.id)"
+              />
+            </div>
+          </div>
+          <div class="text-caption text-grey-7 q-mb-xs">
+            {{ t('rigging.extraFeedsHint') }}
+          </div>
+          <div class="row q-gutter-xs items-end">
+            <q-select
+              v-model="newFeed.parent_id"
+              :options="feedParentOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              class="col"
+              :label="t('rigging.fedFrom')"
+            />
+            <q-select
+              v-model="newFeed.feed_connector"
+              :options="connectorOptions"
+              emit-value
+              map-options
+              dense
+              class="col"
+              :label="t('rigging.feedConnector')"
+            />
+            <q-btn
+              flat
+              dense
+              icon="add"
+              :label="t('rigging.addFeed')"
+              :disable="!newFeed.parent_id || !newFeed.feed_connector"
+              @click="addFeed"
+            />
+          </div>
           <div class="row q-gutter-sm">
             <q-select
               v-model="editForm.feed_connector"
@@ -724,14 +782,16 @@ const activeOptions = [
   { value: true, label: t('rigging.stateOn') },
   { value: false, label: t('rigging.stateOff') },
 ];
-// A node cannot hang from itself or from anything below it.
+// A node cannot hang from itself or from anything below it. A node is "below" another when it is
+// fed by it through the primary parent or through any merged feed.
 const editParentOptions = computed(() => {
   const blocked = new Set([editingId.value]);
   let grew = true;
   while (grew) {
     grew = false;
     for (const n of nodes.value) {
-      if (n.parent_id && blocked.has(n.parent_id) && !blocked.has(n.id)) {
+      const parents = [n.parent_id, ...((n.feeds || []).map((f) => f.parent_id))];
+      if (parents.some((p) => p && blocked.has(p)) && !blocked.has(n.id)) {
         blocked.add(n.id);
         grew = true;
       }
@@ -741,6 +801,42 @@ const editParentOptions = computed(() => {
     .filter((n) => !blocked.has(n.id))
     .map((n) => ({ value: n.id, label: n.name || '—' }));
 });
+
+// The node currently being edited (reactive to reloads after a feed change).
+const editingNode = computed(() => nodes.value.find((n) => n.id === editingId.value) || null);
+
+// Extra (merged) feeds: parents the node is already fed by are not offered again.
+const feedParentOptions = computed(() => {
+  const excluded = new Set([editingId.value]);
+  if (editingNode.value?.parent_id) excluded.add(editingNode.value.parent_id);
+  for (const f of editingNode.value?.feeds || []) excluded.add(f.parent_id);
+  return editParentOptions.value.filter((o) => !excluded.has(o.value));
+});
+
+const newFeed = reactive({ parent_id: null, feed_connector: null });
+
+function nodeName(id) {
+  return nodes.value.find((n) => n.id === id)?.name || '—';
+}
+
+async function addFeed() {
+  if (!editingId.value || !newFeed.parent_id || !newFeed.feed_connector) return;
+  await run(async () => {
+    await api.post(`/jobs/${jobId}/power-nodes/${editingId.value}/feeds`, {
+      parent_id: newFeed.parent_id,
+      feed_connector: newFeed.feed_connector,
+    });
+    newFeed.parent_id = null;
+    newFeed.feed_connector = null;
+  });
+}
+
+async function removeFeed(feedId) {
+  if (!editingId.value) return;
+  await run(async () => {
+    await api.delete(`/jobs/${jobId}/power-nodes/${editingId.value}/feeds/${feedId}`);
+  });
+}
 
 const kindOptions = [
   { value: 'source', label: t('rigging.kindSource') },

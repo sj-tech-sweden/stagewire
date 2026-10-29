@@ -53,4 +53,31 @@ class PowerNode(Base):
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    x_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    y_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class PowerNodeFeed(Base):
+    """An extra (merged) feed: a node may be powered from several parents.
+
+    The node's own ``parent_id`` is its primary feed; each ``PowerNodeFeed`` is an
+    additional parent. A node is powered when any of its feeds is live, and its
+    downstream load is spread equally across all live feeds.
+    """
+
+    __tablename__ = "power_node_feeds"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    )
+    node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("power_nodes.id", ondelete="CASCADE"), index=True
+    )
+    parent_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("power_nodes.id", ondelete="CASCADE"), index=True
+    )
+    feed_connector: Mapped[str] = mapped_column(String(64), default="")
+    phase: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

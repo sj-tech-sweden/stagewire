@@ -9,7 +9,7 @@ from app.domains.audio.device_specs import effective_value, resolve_device_physi
 from app.domains.lighting import service as lighting_service
 from app.domains.rigging import power_tree
 from app.domains.rigging.calc import WeightLoad
-from app.domains.rigging.models import PowerNode, RiggingPoint
+from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
 from app.domains.venues.models import VenuePowerOutlet
 
 
@@ -97,24 +97,37 @@ def weight_loads(rows: list[LoadRow]) -> list[WeightLoad]:
     return [WeightLoad(r.label, r.weight_kg, r.rigging_point_id) for r in rows]
 
 
-def to_tree_nodes(nodes: list[PowerNode]) -> list[power_tree.Node]:
-    return [
-        power_tree.Node(
-            id=str(n.id),
-            kind=n.kind,
-            name=n.name or n.kind,
-            parent_id=str(n.parent_id) if n.parent_id else None,
-            feed_connector=n.feed_connector,
-            phase=n.phase,
-            outputs=tuple(
-                power_tree.Output(o["connector"], int(o["count"]), o.get("phase"))
-                for o in (n.outputs or [])
-            ),
-            rating_amps=n.rating_amps,
-            active=n.active,
+def to_tree_nodes(
+    nodes: list[PowerNode], feeds: list[PowerNodeFeed] | None = None
+) -> list[power_tree.Node]:
+    feeds = feeds or []
+    feeds_by_node: dict[str, list[PowerNodeFeed]] = {}
+    for f in feeds:
+        feeds_by_node.setdefault(str(f.node_id), []).append(f)
+    tree_nodes = []
+    for n in nodes:
+        node_feeds = []
+        if n.parent_id:
+            node_feeds.append(power_tree.Feed(str(n.parent_id), n.feed_connector, n.phase))
+        for f in feeds_by_node.get(str(n.id), []):
+            node_feeds.append(power_tree.Feed(str(f.parent_id), f.feed_connector, f.phase))
+        tree_nodes.append(
+            power_tree.Node(
+                id=str(n.id),
+                kind=n.kind,
+                name=n.name or n.kind,
+                feeds=tuple(node_feeds),
+                feed_connector=n.feed_connector,
+                phase=n.phase,
+                outputs=tuple(
+                    power_tree.Output(o["connector"], int(o["count"]), o.get("phase"))
+                    for o in (n.outputs or [])
+                ),
+                rating_amps=n.rating_amps,
+                active=n.active,
+            )
         )
-        for n in nodes
-    ]
+    return tree_nodes
 
 
 def to_tree_loads(rows: list[LoadRow]) -> list[power_tree.Load]:
@@ -159,6 +172,13 @@ async def get_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> PowerNode |
         select(PowerNode).where(PowerNode.id == node_id, PowerNode.job_id == job_id)
     )
     return result.scalars().first()
+
+
+async def list_feeds(db: AsyncSession, job_id: UUID) -> list[PowerNodeFeed]:
+    result = await db.execute(
+        select(PowerNodeFeed).where(PowerNodeFeed.job_id == job_id).order_by(PowerNodeFeed.position)
+    )
+    return list(result.scalars().all())
 
 
 async def get_outlet(db: AsyncSession, venue_id: UUID | None, outlet_id: UUID):
