@@ -134,3 +134,10 @@ class PhaseLoadRead(BaseModel):
     L2: float
     L3: float
     imbalance_pct: float
+
+
+class BackfillRead(BaseModel):
+    devices: int
+    edges: int
+    skipped: int
+    notes: list[str] = []

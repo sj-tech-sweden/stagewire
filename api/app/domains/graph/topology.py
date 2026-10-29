@@ -153,24 +153,28 @@ def validate_edge(
                 "channel_count",
                 f"{owner['name']}:{port['id']} has {capacity} channels, edge needs {channels}",
             )
-    sport_cap, dport_cap = sport.get("channels"), dport.get("channels")
-    if sport_cap is not None and dport_cap is not None and int(sport_cap) != int(dport_cap):
-        add(
-            "channel_count",
-            f"Port channel counts differ ({sport_cap} vs {dport_cap}); use a breakout device",
-        )
     others = [e for e in siblings if str(e.get("id")) != str(edge.get("id"))]
-    if any(
-        str(e["dst_device_id"]) == str(dst["id"]) and e["dst_port"] == edge["dst_port"]
+    on_dst = [
+        e
         for e in others
-    ):
-        add("port_in_use", f"{dst['name']}:{edge['dst_port']} already has a source")
-    fanout = sum(
-        1
+        if str(e["dst_device_id"]) == str(dst["id"]) and e["dst_port"] == edge["dst_port"]
+    ]
+    dst_cap = dport.get("channels")
+    if dst_cap is None:
+        if on_dst:
+            add("port_in_use", f"{dst['name']}:{edge['dst_port']} already has a source")
+    elif sum(int(e.get("channels") or 1) for e in on_dst) + channels > int(dst_cap):
+        add("port_in_use", f"{dst['name']}:{edge['dst_port']} has no free channels left")
+    on_src = [
+        e
         for e in others
         if str(e["src_device_id"]) == str(src["id"]) and e["src_port"] == edge["src_port"]
-    )
-    if fanout >= int(sport.get("max_connections") or 1):
+    ]
+    src_cap = sport.get("channels")
+    if src_cap is not None:
+        if sum(int(e.get("channels") or 1) for e in on_src) + channels > int(src_cap):
+            add("port_in_use", f"{src['name']}:{edge['src_port']} has no free channels left")
+    elif len(on_src) >= int(sport.get("max_connections") or 1):
         add("port_in_use", f"{src['name']}:{edge['src_port']} is at its connection limit")
     return issues
 

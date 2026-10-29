@@ -9,7 +9,7 @@ from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
-from app.domains.graph import schemas, topology
+from app.domains.graph import backfill, schemas, topology
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -382,3 +382,12 @@ async def request_stockwire_booking(
     if device.stockwire_request_status == "failed":
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Stockwire rejected the request")
     return device
+
+
+@router.post("/backfill", response_model=schemas.BackfillRead)
+async def backfill_graph(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schemas.BackfillRead:
+    await _require_job(db, job_id)
+    result = await backfill.backfill_job(db, job_id)
+    return schemas.BackfillRead(
+        devices=result.devices, edges=result.edges, skipped=result.skipped, notes=result.notes
+    )

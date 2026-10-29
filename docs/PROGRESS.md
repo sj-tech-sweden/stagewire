@@ -20,7 +20,9 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 3 | Pinia graph store + WS deltas + merge utils | **Done** |
 | 4 | Quasar UI: `JobWorkspaceView`, `MultiDomainPatchDrawer`, `StockwireCatalogDrawer`, inspector, layer HUD | **Not started** |
 | 5 | Mode A/B switching UI (store state + `placeUnplaced` exist, no view) | **Not started** |
-| 6 | Backfill existing audio/lighting/video/power rows into the graph, then repoint routers, reports, exports | **Not started** (the big one) |
+| 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
+| 6b | Backfill video chains and audio **output** chains | **Not started** |
+| 6c | Repoint routers, reports, exports, stage plot to read the graph, one domain at a time | **Not started** (the big one) |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
 ## What exists
@@ -46,6 +48,16 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 - `src/pages/JobDetailPage.vue`: routes `graph.*` WS events into the graph store.
 - Tests: `web/e2e/unit/graph.spec.ts` (4 cases). `eslint .` clean, `quasar build` succeeds.
 
+## Backfill mapping (phase 6a, decisions made)
+
+- Legacy connector group `{direction, connector, count}` becomes **one port** (`in-xlr3`, `channels=count`). Edges carry used channel numbers in `attributes`.
+- Port validation is capacity based: edges on a port may sum up to its `channels`; a port without `channels` accepts one edge (outputs: up to `max_connections`).
+- Each audio channel row becomes a `kind="channel"` source device; each patch point becomes an edge from the previous hop to the device.
+- `AudioDevice` -> `GraphDevice` (domain guessed: fixture_type -> lighting, video fields -> video, else audio). A lighting fixture or power node linked to a device is merged into that device's `attributes`; unlinked ones become their own devices.
+- DMX steps -> `dmx` edges (root steps hang off the universe source device, `attributes.universe`); power parent/extra feeds -> `power` edges with phase; fixture `power_node_id` -> power edge.
+- Every row/edge gets `legacy_ref` (`table:id`); re-running only adds what is new. Edits made in the graph are not overwritten (existing refs are skipped), and nothing is ever deleted by the backfill.
+- Not mapped yet: video chains (`video_patch_points`, `video_output_patch_points`) and audio output chains (`output_patch_points`; direction of the chain vs console needs confirming).
+
 ## Conflict resolution: how it works
 
 1. Client sends `expected_revision` = revision of the row it last saw.
@@ -60,7 +72,7 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 ## Next steps (suggested order)
 
 1. ~~Conflict dialog~~ done.
-2. **Phase 6 backfill** before any UI depends on the graph: Alembic data migration (or a one-off service) mapping `AudioDevice`, channel patch points/outputs, `LightingFixture` + `DmxStep`, video inputs/outputs/patch points, `PowerNode`/feeds into `GraphDevice`/`ConnectionEdge`, filling `legacy_ref` as `"<table>:<id>"` so it is idempotent. Then repoint each domain router/service/report/exporter one domain at a time, keeping its tests green.
+2. **Phase 6b/6c**: map video chains and audio outputs in `app/domains/graph/backfill.py`, then repoint each domain router/service/report/exporter at the graph one domain at a time, keeping its tests green. Backfill must run for existing jobs (call the endpoint per job or add a startup/CLI loop) before any reader switches over.
 3. **UI** (all must follow AGENTS.md §10, phones stack panes and tables become cards):
    - `JobWorkspaceView.vue`: master-detail split, header Mode A/B switch using `graphStore.mode`; entering canvas mode calls `placeUnplaced` and PATCHes positions.
    - `MultiDomainPatchDrawer.vue`: tabs Audio / DMX / Power / Video over `devicesByDomain`, `q-table` with virtual scroll, card list on `$q.screen.lt.sm`.
