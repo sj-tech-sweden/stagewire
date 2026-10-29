@@ -40,6 +40,17 @@ export default {
       hint: 'Du kan lägga till fler språk i src/i18n/locales.',
     },
   },
+  conflictDialog: {
+    title: 'Redigeringskonflikt',
+    body: 'Någon annan ändrade detta medan du redigerade. Välj vilket värde som ska behållas för varje fält.',
+    field: 'Fält',
+    mine: 'Din ändring',
+    theirs: 'Deras ändring',
+    keepMine: 'Behåll min',
+    keepTheirs: 'Behåll deras',
+    apply: 'Tillämpa',
+    discard: 'Släng mina ändringar',
+  },
   common: {
     all: 'Alla',
     required: 'Obligatoriskt',

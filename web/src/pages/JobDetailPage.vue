@@ -1,5 +1,10 @@
 <template>
   <q-page class="q-pa-md">
+    <ConflictDialog
+      :conflict="store.conflict || graphStore.conflict"
+      @resolve="resolveConflict"
+      @discard="discardConflict"
+    />
     <div
       v-if="jobError"
       class="text-center q-mt-xl text-grey"
@@ -2157,6 +2162,7 @@ import { useStagePlotStore } from '@/stores/stageplot'
 import { useVenuesStore } from '@/stores/venues'
 import { useVideoStore } from '@/stores/video'
 import { useGraphStore } from '@/stores/graph'
+import ConflictDialog from '@/components/ConflictDialog.vue'
 import VideoListEditor from '@/components/VideoListEditor.vue'
 import { chainNodes, elementsByChannel } from '@/utils/patchFlow'
 import { channelColor, channelTextColor, INSTRUMENT_GROUP_KEYS } from '@/utils/instrumentGroups'
@@ -3596,6 +3602,20 @@ const flowTree = computed(() => {
 
 function formatDate(value) {
   return new Date(value).toLocaleString()
+}
+
+async function resolveConflict(resolution) {
+  try {
+    if (store.conflict) await store.resolveConflict(resolution)
+    else await graphStore.resolveConflict(resolution)
+  } catch {
+    /* a fresh conflict, if any, reopens the dialog */
+  }
+}
+
+function discardConflict() {
+  store.clearConflict()
+  graphStore.clearConflict()
 }
 
 let ws = null

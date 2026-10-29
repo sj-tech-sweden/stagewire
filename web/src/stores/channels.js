@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
+import { threeWayMerge } from '@/utils/graph';
+
+let autoMerging = false;
 
 export const useChannelsStore = defineStore('channels', {
   state: () => ({
@@ -109,8 +112,8 @@ export const useChannelsStore = defineStore('channels', {
         this.conflict = null;
         return data;
       } catch (error) {
-        this.recordConflict(error, 'channel', { jobId, id }, payload);
-        throw error;
+        this.recordConflict(error, 'channel', { jobId, id }, payload, current);
+        return this.autoMerge(error);
       }
     },
     async deleteChannel(jobId, id) {
@@ -152,8 +155,9 @@ export const useChannelsStore = defineStore('channels', {
           'channel-patch-point',
           { jobId, channelId, pointId },
           payload,
+          current,
         );
-        throw error;
+        return this.autoMerge(error);
       }
     },
     async deletePatchPoint(jobId, channelId, pointId) {
@@ -235,8 +239,8 @@ export const useChannelsStore = defineStore('channels', {
         this.conflict = null;
         return data;
       } catch (error) {
-        this.recordConflict(error, 'output', { jobId, listId, outputId }, payload);
-        throw error;
+        this.recordConflict(error, 'output', { jobId, listId, outputId }, payload, current);
+        return this.autoMerge(error);
       }
     },
     async deleteOutput(jobId, listId, outputId) {
@@ -284,8 +288,9 @@ export const useChannelsStore = defineStore('channels', {
           'output-patch-point',
           { jobId, listId, outputId, pointId },
           payload,
+          current,
         );
-        throw error;
+        return this.autoMerge(error);
       }
     },
     async deleteOutputPoint(jobId, listId, outputId, pointId) {
@@ -363,7 +368,7 @@ export const useChannelsStore = defineStore('channels', {
       else this.lists.push(list);
       if (!this.selectedListId) this.selectedListId = list.id;
     },
-    recordConflict(error, entityType, ids, draft) {
+    recordConflict(error, entityType, ids, draft, base) {
       const detail = error.response?.data?.detail;
       if (error.response?.status !== 409 || detail?.code !== 'revision_conflict') return;
       const current = detail.current;
@@ -375,13 +380,34 @@ export const useChannelsStore = defineStore('channels', {
       if (entityType === 'output-patch-point' && current) {
         this.upsertOutputPointInOutput(ids.listId, ids.outputId, current);
       }
-      this.conflict = { entityType, ids, draft, current };
+      const conflicts = draft ? threeWayMerge(base, draft, current).conflicts : [];
+      this.conflict = { entityType, ids, draft, base, current, conflicts };
     },
-    async reapplyConflict() {
+    // Edits to fields nobody else touched are replayed once on the new revision;
+    // anything else stays in `conflict` for the user to settle.
+    async autoMerge(error) {
+      const conflict = this.conflict;
+      if (!conflict?.draft || conflict.conflicts.length || autoMerging) throw error;
+      autoMerging = true;
+      try {
+        return await this.resolveConflict({});
+      } finally {
+        autoMerging = false;
+      }
+    },
+    // resolution maps each conflicting field to 'mine' or 'theirs'.
+    async resolveConflict(resolution = {}) {
       const conflict = this.conflict;
       if (!conflict?.current || !conflict.draft) return;
+      const draft = Object.fromEntries(
+        Object.entries(conflict.draft).filter(
+          ([field]) =>
+            !conflict.conflicts.some((c) => c.field === field) || resolution[field] === 'mine',
+        ),
+      );
       this.conflict = null;
-      const { entityType, ids, draft } = conflict;
+      if (Object.keys(draft).length === 0) return conflict.current;
+      const { entityType, ids } = conflict;
       if (entityType === 'channel') return this.updateChannel(ids.jobId, ids.id, draft);
       if (entityType === 'channel-patch-point') {
         return this.updatePatchPoint(ids.jobId, ids.channelId, ids.pointId, draft);
@@ -390,13 +416,7 @@ export const useChannelsStore = defineStore('channels', {
         return this.updateOutput(ids.jobId, ids.listId, ids.outputId, draft);
       }
       if (entityType === 'output-patch-point') {
-        return this.updateOutputPoint(
-          ids.jobId,
-          ids.listId,
-          ids.outputId,
-          ids.pointId,
-          draft,
-        );
+        return this.updateOutputPoint(ids.jobId, ids.listId, ids.outputId, ids.pointId, draft);
       }
     },
     clearConflict() {

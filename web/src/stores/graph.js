@@ -112,6 +112,7 @@ export const useGraphStore = defineStore('graph', {
         if (!hit || resolution[field] === 'mine') changes[field] = value;
       }
       this.conflict = null;
+      if (Object.keys(changes).length === 0) return conflict.current;
       const { entityType, ids } = conflict;
       return entityType === 'device'
         ? this.updateDevice(ids.jobId, ids.id, changes, conflict.current)

@@ -55,11 +55,11 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 5. Overlapping fields: `store.conflict` holds `{base, draft, current, conflicts[]}`; the UI must show a mine/theirs choice per field and call `resolveConflict({field: 'mine'|'theirs'})`.
 6. Deletes of a stale row also 409, so nobody silently deletes someone else's edit. Deleting a device deletes its edges explicitly (sqlite in tests does not enforce `ON DELETE CASCADE`).
 
-Gaps: the audio `channels` store only does steps 1-3 and 5 (no auto-merge yet; reuse `threeWayMerge`). There is no conflict dialog component. Collaborative text fields (notes) still last-merge by field, not by character.
+`web/src/components/ConflictDialog.vue` renders `conflicts[]` for both the channels and graph stores (mounted in `JobDetailPage.vue`, en/sv strings under `conflictDialog`); the channels store now auto-merges too. Gaps: the store-level retry and dialog flow have no automated test yet (only `threeWayMerge` is unit-tested); add a Playwright spec with a mocked 409 against the running stack. Collaborative text fields (notes) still last-merge by field, not by character.
 
 ## Next steps (suggested order)
 
-1. **Conflict dialog** component bound to `graphStore.conflict` and `channelsStore.conflict`; switch the channels store to `threeWayMerge`.
+1. ~~Conflict dialog~~ done.
 2. **Phase 6 backfill** before any UI depends on the graph: Alembic data migration (or a one-off service) mapping `AudioDevice`, channel patch points/outputs, `LightingFixture` + `DmxStep`, video inputs/outputs/patch points, `PowerNode`/feeds into `GraphDevice`/`ConnectionEdge`, filling `legacy_ref` as `"<table>:<id>"` so it is idempotent. Then repoint each domain router/service/report/exporter one domain at a time, keeping its tests green.
 3. **UI** (all must follow AGENTS.md §10, phones stack panes and tables become cards):
    - `JobWorkspaceView.vue`: master-detail split, header Mode A/B switch using `graphStore.mode`; entering canvas mode calls `placeUnplaced` and PATCHes positions.

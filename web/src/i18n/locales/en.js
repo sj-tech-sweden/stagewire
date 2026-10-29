@@ -40,6 +40,17 @@ export default {
       hint: 'You can add more languages in src/i18n/locales.',
     },
   },
+  conflictDialog: {
+    title: 'Edit conflict',
+    body: 'Someone else changed this while you were editing. Choose which value to keep for each field.',
+    field: 'Field',
+    mine: 'Your change',
+    theirs: 'Their change',
+    keepMine: 'Keep mine',
+    keepTheirs: 'Keep theirs',
+    apply: 'Apply',
+    discard: 'Discard my changes',
+  },
   common: {
     all: 'All',
     required: 'Required',
