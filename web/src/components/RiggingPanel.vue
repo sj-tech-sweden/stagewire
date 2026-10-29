@@ -222,6 +222,7 @@
                 dense
                 class="col"
                 :label="t('rigging.venueOutlet')"
+                :hint="t('rigging.venueOutletHint')"
               />
               <q-input
                 v-model.number="newNode.rating_amps"

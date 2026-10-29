@@ -77,12 +77,11 @@
         >
           {{ t('dmxChain.noSteps') }}
         </div>
-        <DmxStepNode
-          v-for="step in u.steps"
-          :key="step.id"
-          :step="step"
+        <DmxFlowDiagram
+          :steps="u.steps"
+          :universe-number="u.number"
+          @edit="openStep(u, null, $event)"
           @add-child="openStep(u, $event)"
-          @edit="openStep(u, $event.id, $event)"
           @delete="removeStep(u, $event)"
         />
         <q-btn
@@ -174,23 +173,70 @@
           <q-select
             v-if="stepForm.kind === 'fixture'"
             v-model="stepForm.fixture_id"
-            :options="fixtureOptions"
+            :options="availableFixtureOptions"
             emit-value
             map-options
             clearable
             dense
             :label="t('dmxChain.stepFixture')"
           />
-          <q-select
-            v-else
-            v-model="stepForm.device_id"
-            :options="deviceOptions"
-            emit-value
-            map-options
-            clearable
-            dense
-            :label="t('dmxChain.stepDevice')"
-          />
+          <template v-else>
+            <q-select
+              v-model="stepForm.device_id"
+              :options="availableDeviceOptions"
+              emit-value
+              map-options
+              clearable
+              dense
+              :label="t('dmxChain.stepDevice')"
+            />
+            <div class="row items-center q-gutter-xs">
+              <q-btn
+                v-if="!newDevice.open"
+                flat
+                dense
+                no-caps
+                icon="add"
+                :label="t('dmxChain.newDevice')"
+                @click="newDevice.open = true"
+              />
+              <template v-else>
+                <q-input
+                  v-model="newDevice.name"
+                  dense
+                  class="col"
+                  :label="t('dmxChain.deviceName')"
+                  @keyup.enter="createDevice"
+                />
+                <q-select
+                  v-model="newDevice.device_type"
+                  :options="deviceTypeOptions"
+                  use-input
+                  new-value-mode="add"
+                  dense
+                  clearable
+                  class="col"
+                  :label="t('dmxChain.deviceType')"
+                />
+                <q-btn
+                  flat
+                  dense
+                  icon="check"
+                  color="primary"
+                  :aria-label="t('dmxChain.confirmDevice')"
+                  :disable="!newDevice.name"
+                  @click="createDevice"
+                />
+                <q-btn
+                  flat
+                  dense
+                  icon="close"
+                  :aria-label="t('app.actions.cancel')"
+                  @click="newDevice.open = false"
+                />
+              </template>
+            </div>
+          </template>
           <div class="row q-gutter-sm">
             <q-input
               v-model="stepForm.in_port"
@@ -233,7 +279,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
-import DmxStepNode from '@/components/DmxStepNode.vue';
+import DmxFlowDiagram from '@/components/DmxFlowDiagram.vue';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -253,6 +299,46 @@ const deviceOptions = computed(() =>
 const fixtureOptions = computed(() =>
   fixtures.value.map((f) => ({ value: f.id, label: f.device_name || t('dmxChain.kindFixture') })),
 );
+
+// Fixtures/devices already used as steps in the active universe are hidden
+// from the add-step picker so the same device cannot be added twice.
+// A DMX step serialises a fixture's `device_id` (not its fixture id), so we
+// map the used device ids back to fixture ids to filter the fixture picker.
+const fixtureIdByDevice = computed(() => {
+  const m = {};
+  for (const f of fixtures.value) m[f.device_id] = f.id;
+  return m;
+});
+const usedFixtureIds = computed(() => {
+  const set = new Set();
+  if (activeUniverse.value) {
+    for (const s of flatten(activeUniverse.value.steps)) {
+      if (s.kind === 'fixture' && s.device_id) {
+        const fid = fixtureIdByDevice.value[s.device_id];
+        if (fid) set.add(fid);
+      }
+    }
+  }
+  return set;
+});
+const usedDeviceIds = computed(() => {
+  const set = new Set();
+  if (activeUniverse.value) {
+    for (const s of flatten(activeUniverse.value.steps)) {
+      if (s.kind === 'device' && s.device_id) set.add(s.device_id);
+    }
+  }
+  return set;
+});
+
+const availableFixtureOptions = computed(() => {
+  const current = stepTarget.value?.kind === 'fixture' ? fixtureIdByDevice.value[stepTarget.value.device_id] : null;
+  return fixtureOptions.value.filter((o) => !usedFixtureIds.value.has(o.value) || o.value === current);
+});
+const availableDeviceOptions = computed(() => {
+  const current = stepTarget.value?.kind === 'device' ? stepTarget.value.device_id : null;
+  return deviceOptions.value.filter((o) => !usedDeviceIds.value.has(o.value) || o.value === current);
+});
 
 async function loadAll() {
   loading.value = true;
@@ -356,6 +442,26 @@ const stepForm = reactive({
   connector: '',
 });
 
+const deviceTypeOptions = ['split', 'distro', 'processor', 'node', 'other'];
+const newDevice = reactive({ open: false, name: '', device_type: 'split' });
+
+async function createDevice() {
+  if (!newDevice.name) return;
+  try {
+    const res = await api.post(`/jobs/${props.jobId}/devices`, {
+      name: newDevice.name,
+      device_type: newDevice.device_type || 'other',
+    });
+    await loadAll();
+    stepForm.device_id = res.data.id;
+    newDevice.open = false;
+    newDevice.name = '';
+    newDevice.device_type = 'split';
+  } catch (err) {
+    error.value = err.response?.data?.detail || t('common.errorOccurred');
+  }
+}
+
 const stepParentOptions = computed(() => {
   const opts = [{ value: null, label: t('dmxChain.root') }];
   if (!activeUniverse.value) return opts;
@@ -402,6 +508,13 @@ async function saveStep() {
       );
     } else {
       await api.post(`/jobs/${props.jobId}/dmx-universes/${activeUniverse.value.id}/steps`, body);
+    }
+    // Link the fixture's universe to the chain's universe so the selector in the
+    // fixture patch reflects where it now lives in the DMX chain.
+    if (stepForm.kind === 'fixture' && stepForm.fixture_id) {
+      await api.patch(`/jobs/${props.jobId}/fixtures/${stepForm.fixture_id}`, {
+        universe: activeUniverse.value.number,
+      });
     }
     stepDialog.value = false;
     await loadAll();

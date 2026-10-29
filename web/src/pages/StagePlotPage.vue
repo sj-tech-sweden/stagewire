@@ -42,6 +42,25 @@
       </template>
     </q-banner>
 
+    <q-banner
+      v-if="connectPowerMode"
+      class="bg-primary text-white q-mb-md rounded-borders"
+      dense
+    >
+      <template #avatar>
+        <q-icon name="cable" />
+      </template>
+      {{ pendingOutletId ? t('stagePlot.outletSelected') : t('stagePlot.connectPowerHint') }}
+      <template #action>
+        <q-btn
+          flat
+          color="white"
+          :label="t('stagePlot.connectPowerDone')"
+          @click="cancelConnect"
+        />
+      </template>
+    </q-banner>
+
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-3">
         <q-card
@@ -540,6 +559,26 @@
                 v-if="job?.venue_id"
                 v-model="showOutlets"
                 :label="t('stagePlot.showOutlets')"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                dense
+                no-caps
+                icon="outlet"
+                color="primary"
+                outline
+                :label="t('stagePlot.addOutlet')"
+                @click="outletDialog = true"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                dense
+                no-caps
+                icon="cable"
+                :color="connectPowerMode ? 'primary' : 'grey-7'"
+                :outline="!connectPowerMode"
+                :label="t('stagePlot.connectPower')"
+                @click="toggleConnect"
               />
               <q-toggle
                 v-model="showPowerCables"
@@ -1165,6 +1204,50 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="outletDialog">
+      <q-card style="min-width: 320px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('stagePlot.addOutletTitle') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input
+            v-model="outletForm.name"
+            :label="t('stagePlot.outletName')"
+            dense
+            autofocus
+            @keyup.enter="placeOutlet"
+          />
+          <q-select
+            v-model="outletForm.connector"
+            :options="connectorOptions"
+            emit-value
+            map-options
+            use-input
+            new-value-mode="add"
+            :label="t('stagePlot.outletConnector')"
+            dense
+            clearable
+          />
+          <div class="text-caption text-grey-7">
+            {{ t('stagePlot.placeOutlet') }}
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            color="primary"
+            :label="t('stagePlot.addOutlet')"
+            :disable="!outletForm.name || !outletForm.connector"
+            :loading="placingOutlet"
+            @click="placeOutlet"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -1739,8 +1822,8 @@ function groupConfig(el) {
     y: (stageY.value + el.position_y) * pxPerCm.value,
     rotation: el.rotation,
     draggable: true,
-    onclick: () => select(el.id),
-    ontap: () => select(el.id),
+    onclick: () => onElementClick(el.id),
+    ontap: () => onElementClick(el.id),
     ondragend: (e) => onDragEnd(el, e),
     ontransform: (e) => keepLabelsUpright(e.target),
     ontransformend: (e) => onTransformEnd(el, e),
@@ -2020,6 +2103,10 @@ function onStageClick(e) {
   }
   if (rerouteKey.value) {
     addWaypoint(e);
+    return;
+  }
+  if (connectPowerMode.value) {
+    if (e.target === e.target.getStage()) pendingOutletId.value = null;
     return;
   }
   if (e.target === e.target.getStage()) {
@@ -2721,6 +2808,132 @@ watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringif
 const showPowerCables = ref(savedToggle('sw_stage_power_cables', true));
 watch(showPowerCables, (v) => localStorage.setItem('sw_stage_power_cables', JSON.stringify(v)));
 
+// Power-connect flow: click an outlet, then click a device element to wire it.
+const connectPowerMode = ref(false);
+const pendingOutletId = ref(null);
+function toggleConnect() {
+  connectPowerMode.value = !connectPowerMode.value;
+  pendingOutletId.value = null;
+}
+function cancelConnect() {
+  connectPowerMode.value = false;
+  pendingOutletId.value = null;
+}
+function onOutletClick(o) {
+  if (!connectPowerMode.value) return;
+  pendingOutletId.value = pendingOutletId.value === o.id ? null : o.id;
+  if (pendingOutletId.value) $q.notify({ message: t('stagePlot.outletSelected'), color: 'info' });
+}
+// Clicking a device element while in connect mode wires it to the pending outlet;
+// otherwise it selects the element as usual.
+function onElementClick(elId) {
+  if (connectPowerMode.value && pendingOutletId.value) {
+    connectDeviceToOutlet(elId, pendingOutletId.value);
+    return;
+  }
+  select(elId);
+}
+async function connectDeviceToOutlet(elId, outletId) {
+  const el = store.elements.find((e) => e.id === elId);
+  if (!el || !el.linked_device_id) {
+    $q.notify({ message: t('stagePlot.linkDeviceFirst'), color: 'warning' });
+    return;
+  }
+  const outlet = powerOutlets.value.find((o) => o.id === outletId);
+  if (!outlet) return;
+  if (!outlet.connector) {
+    $q.notify({ message: t('stagePlot.connectorRequired'), color: 'warning' });
+    return;
+  }
+  try {
+    let sourceId = null;
+    const existing = powerNodes.value.find(
+      (n) => n.kind === 'source' && n.venue_outlet_id === outletId,
+    );
+    if (existing) {
+      sourceId = existing.id;
+    } else {
+      const srcRes = await api.post(`/jobs/${jobId}/power-nodes`, {
+        kind: 'source',
+        venue_outlet_id: outletId,
+        feed_connector: outlet.connector,
+        outputs: [{ connector: outlet.connector, count: 1 }],
+        name: outlet.name || 'Outlet',
+      });
+      sourceId = srcRes.data.id;
+    }
+    const dup = powerNodes.value.find(
+      (n) => n.parent_id === sourceId && n.device_id === el.linked_device_id,
+    );
+    if (dup) {
+      $q.notify({ message: t('stagePlot.alreadyConnected'), color: 'warning' });
+      pendingOutletId.value = null;
+      connectPowerMode.value = false;
+      return;
+    }
+    await api.post(`/jobs/${jobId}/power-nodes`, {
+      kind: 'distro',
+      parent_id: sourceId,
+      device_id: el.linked_device_id,
+      feed_connector: outlet.connector,
+      name: devicesStore.byId(el.linked_device_id)?.name || 'Device',
+    });
+    const deviceName = devicesStore.byId(el.linked_device_id)?.name || 'Device';
+    $q.notify({ message: t('stagePlot.connectedToOutlet', { device: deviceName }), color: 'positive' });
+    pendingOutletId.value = null;
+    connectPowerMode.value = false;
+    await loadLights();
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  }
+}
+
+// Add-outlet dialog: create a venue outlet at the centre of the stage, then it is
+// draggable on the plot like the others.
+const outletDialog = ref(false);
+const placingOutlet = ref(false);
+const connectorOptions = [
+  { label: 'Schuko 16 A', value: 'schuko' },
+  { label: 'CEE 16 A 1-phase', value: 'cee16' },
+  { label: 'CEE 16 A 3-phase', value: 'cee16_3p' },
+  { label: 'CEE 32 A 3-phase', value: 'cee32_3p' },
+  { label: 'CEE 63 A 3-phase', value: 'cee63_3p' },
+  { label: 'CEE 125 A 3-phase', value: 'cee125_3p' },
+  { label: 'powerCON 20 A', value: 'powercon' },
+  { label: 'powerCON TRUE1', value: 'powercon_true1' },
+  { label: 'Socapex 19-pin', value: 'socapex' },
+  { label: 'Fixed install 1-phase', value: 'install_1p' },
+  { label: 'Fixed install 3-phase', value: 'install_3p' },
+];
+const outletForm = reactive({ name: '', connector: '' });
+async function placeOutlet() {
+  if (!outletForm.name || !outletForm.connector || !job.value?.venue_id) return;
+  placingOutlet.value = true;
+  try {
+    await api.post(`/venues/${job.value.venue_id}/power-outlets`, {
+      name: outletForm.name,
+      connector: outletForm.connector,
+      x_cm: Math.round(stageW.value / 2),
+      y_cm: Math.round(stageH.value / 2),
+    });
+    outletDialog.value = false;
+    outletForm.name = '';
+    outletForm.connector = '';
+    await loadLights();
+    $q.notify({ message: t('stagePlot.outletPlaced'), color: 'positive' });
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  } finally {
+    placingOutlet.value = false;
+  }
+}
+
 async function loadLights() {
   try {
     const [universes, outlets, nodesRes, summaryRes] = await Promise.all([
@@ -2885,7 +3098,10 @@ function outletConfig(o) {
   return {
     x: (stageX.value + o.x_cm) * pxPerCm.value,
     y: (stageY.value + o.y_cm) * pxPerCm.value,
+    name: 'outlet',
+    outletId: o.id,
     draggable: !!job.value?.venue_id,
+    onclick: () => onOutletClick(o),
     ondragend: (e) => onOutletDragEnd(o, e),
   };
 }
