@@ -111,6 +111,58 @@ class StockwireClient:
             response.raise_for_status()
             return response.json()
 
+    async def search_catalog(
+        self,
+        *,
+        q: str | None = None,
+        categories: list[str] | None = None,
+        manufacturers: list[str] | None = None,
+        attributes: dict[str, str] | None = None,
+        available_from: str | None = None,
+        available_to: str | None = None,
+        job_id: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> dict:
+        """Faceted global catalog search (``GET /api/v1/inventory/search``).
+
+        Not limited to items booked on the job; ``job_id`` only lets the upstream flag
+        which hits are already booked. Contract is unverified, see docs/PROGRESS.md.
+        """
+        params: dict[str, object] = {"skip": skip, "limit": limit}
+        if q:
+            params["q"] = q
+        if categories:
+            params["category"] = categories
+        if manufacturers:
+            params["manufacturer"] = manufacturers
+        for key, value in (attributes or {}).items():
+            params[f"attr.{key}"] = value
+        if available_from:
+            params["available_from"] = available_from
+        if available_to:
+            params["available_to"] = available_to
+        if job_id:
+            params["job_id"] = job_id
+        async with httpx.AsyncClient(
+            base_url=self.base_url, headers=self._headers(), timeout=15.0
+        ) as client:
+            response = await client.get("/api/v1/inventory/search", params=params)
+            response.raise_for_status()
+            return response.json()
+
+    async def list_child_devices(self, case_device_id: int | str) -> list[dict]:
+        """Contents of a case/rack (``GET /api/v1/inventory/devices?case_device_id=``)."""
+        async with httpx.AsyncClient(
+            base_url=self.base_url, headers=self._headers(), timeout=15.0
+        ) as client:
+            response = await client.get(
+                "/api/v1/inventory/devices", params={"case_device_id": case_device_id}
+            )
+            response.raise_for_status()
+            body = response.json()
+            return body if isinstance(body, list) else body.get("items", [])
+
     async def get_product(self, product_id: int | str) -> dict:
         async with httpx.AsyncClient(
             base_url=self.base_url, headers=self._headers(), timeout=15.0

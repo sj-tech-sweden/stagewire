@@ -2156,6 +2156,7 @@ import { useDevicesStore } from '@/stores/devices'
 import { useStagePlotStore } from '@/stores/stageplot'
 import { useVenuesStore } from '@/stores/venues'
 import { useVideoStore } from '@/stores/video'
+import { useGraphStore } from '@/stores/graph'
 import VideoListEditor from '@/components/VideoListEditor.vue'
 import { chainNodes, elementsByChannel } from '@/utils/patchFlow'
 import { channelColor, channelTextColor, INSTRUMENT_GROUP_KEYS } from '@/utils/instrumentGroups'
@@ -2183,6 +2184,7 @@ const jobError = ref(null)
 const reportDialog = ref(false)
 const split = ref(28)
 const videoStore = useVideoStore()
+const graphStore = useGraphStore()
 const view = ref(['video', 'lights', 'rigging'].includes(route.query.view) ? route.query.view : 'sound')
 const viewOptions = [
   { label: t('video.views.sound'), value: 'sound', icon: 'graphic_eq' },
@@ -3613,7 +3615,8 @@ function connectWs() {
         job.value = event.payload
         return
       }
-      store.applyRealtimeEvent(event)
+      if (event.type?.startsWith('graph.')) graphStore.applyRealtimeEvent(event)
+      else store.applyRealtimeEvent(event)
     } catch {
       /* ignore malformed frames */
     }

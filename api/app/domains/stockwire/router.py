@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -80,6 +80,52 @@ async def search_products(
             skip=skip,
             limit=limit,
         )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/catalog/search")
+async def search_catalog(
+    q: str | None = None,
+    category: list[str] | None = Query(default=None),
+    manufacturer: list[str] | None = Query(default=None),
+    attr: list[str] | None = Query(default=None, description="key:value spec filters"),
+    available_from: str | None = None,
+    available_to: str | None = None,
+    job_id: str | None = None,
+    skip: int = 0,
+    limit: int = 50,
+    db=Depends(get_db),
+) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": [], "total": 0, "facets": {}}
+    attributes = dict(pair.split(":", 1) for pair in attr or [] if ":" in pair)
+    try:
+        return await sw.search_catalog(
+            q=q,
+            categories=category,
+            manufacturers=manufacturer,
+            attributes=attributes,
+            available_from=available_from,
+            available_to=available_to,
+            job_id=job_id,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/catalog/cases/{case_device_id}/children")
+async def case_children(case_device_id: str, db=Depends(get_db)) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": []}
+    try:
+        return {"items": await sw.list_child_devices(case_device_id)}
     except Exception as exc:  # noqa: BLE001
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
