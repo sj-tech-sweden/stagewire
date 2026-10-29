@@ -162,6 +162,12 @@ class AudioDevice(Base):
     throw_ratio_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     throw_ratio_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     image_aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    power_watts: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fixture_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    footprint_channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_gel: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
@@ -214,6 +220,13 @@ class StagePlotElement(Base):
     image_url: Mapped[str] = mapped_column(String(1024), default="")
     coverage_angle_h: Mapped[float] = mapped_column(Float, default=0.0)
     coverage_distance_m: Mapped[float] = mapped_column(Float, default=0.0)
+    rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    power_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    power_connector: Mapped[str] = mapped_column(String(64), default="")
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 

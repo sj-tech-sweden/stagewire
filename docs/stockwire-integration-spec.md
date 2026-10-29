@@ -105,6 +105,36 @@ precedence rules as §3.6. The names are proposed and can change to match your c
 
 Throw ratio is distance ÷ image width, as usually given in projector specifications. Some specifications instead give a throw distance table for a screen size; tell us if that is what you have. Lens shift is not used yet, so it is not requested.
 
+### 3.8 Device weight and power (read by Stagewire)
+
+Stagewire reads these top-level fields on the product linked to any device (sound, video, lighting
+or other), `GET /inventory/products/{id}`. They are already on products, so no `specs` entry is
+needed and nothing is duplicated. They are used for rigging and power planning.
+
+- `weight_kg`: weight of one unit, kilograms. A decimal string such as `"5.550"` or a number is
+  accepted; `null` means unknown.
+- `power_consumption_watts`: power draw of one unit, watts, as a number. `null` means unknown.
+
+A Stockwire value overrides the value entered on the Stagewire device, and the device shows which
+source is in use. Each field falls back on its own: a product with a weight but no power still
+uses the power entered on the device. An unreachable product falls back to the manual values.
+
+The same product also carries `height_cm`, `width_cm` and `depth_cm`. Stagewire does not read them
+yet; they are the natural source for fixture and truss footprints when the rigging plot is built.
+
+### 3.9 Fixture products (read by Stagewire)
+
+Stagewire adds a fixture type from a fixture product, `GET /inventory/products/{id}`. It reads:
+
+- `name`, `manufacturer` (top level): the fixture type's name and maker.
+- `specs.lt_fixture_type`: the fixture category, for example `PAR`.
+- `specs.channel_modes`: one entry per DMX mode, `{"name": "1", "footprint": 1}`. Footprint is the
+  number of DMX channels that mode uses. All modes are imported.
+- `weight_kg` and `power_consumption_watts` (top level), as in §3.8.
+
+Fields that duplicate these (for example `specs.lt_power_w`, `specs.lt_dmx_channels`) are ignored.
+A later import of the same product updates its modes and values rather than adding a second type.
+
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
 stockwire-rental will call these (key from §3.2):
@@ -142,6 +172,8 @@ stockwire-rental will call these (key from §3.2):
 - [ ] Ensure `POST /api/v1/jobs/{job_id}/requirements` exists and matches Stagewire's addition item.
 - [ ] Add mixer I/O counts to product model + list filter (inputs/outputs).
 - [ ] Expose the camera, lens and projector `specs` fields in §3.6 and §3.7 on products (values as numbers).
+- [x] Fixture products expose `name`, `manufacturer`, `specs.lt_fixture_type` and `specs.channel_modes` (§3.9). Nothing to add.
+- [x] Weight and power are already top-level product fields (`weight_kg`, `power_consumption_watts`), so they are read from there (§3.8). Nothing to add.
 - [ ] Document the signed deeplink token scheme (HMAC) and a resolver endpoint.
 - [ ] Add an OpenAPI note + a small integration test that pings a mock Stagewire base URL.
 

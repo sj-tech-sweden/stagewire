@@ -11,7 +11,11 @@ from app.core.db import get_db
 from app.domains.audio import schemas, service
 from app.domains.audio.camera_specs import resolve_camera_specs
 from app.domains.audio.coverage import coverage_grid, sector_for
-from app.domains.audio.device_specs import resolve_device_io
+from app.domains.audio.device_specs import (
+    effective_value,
+    resolve_device_io,
+    resolve_device_physical,
+)
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
@@ -806,9 +810,14 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
         for d in devices
         if d.stockwire_product_id and d.device_type in IO_DEVICE_TYPES
     }
-    fetch = await stockwire_product_fetcher(db) if device_product else None
+    physical_product = {
+        str(d.id): d.stockwire_product_id for d in devices if d.stockwire_product_id
+    }
+    fetch = await stockwire_product_fetcher(db) if physical_product else None
     specs = await resolve_device_io(device_product, fetch)
+    physical = await resolve_device_physical(physical_product, fetch)
     return {
+        "physical": physical,
         "channels": channels,
         "outputs": outputs,
         "lists": lists,
@@ -838,9 +847,16 @@ async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> Non
 def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
     read = schemas.AudioDeviceRead.model_validate(device)
     read.patch_point_count = len(device.patch_points)
+    key = str(device.id)
+    phys = ctx["physical"].get(key, {})
+    read.weight_kg_effective, read.weight_source = effective_value(
+        phys.get("weight_kg"), device.weight_kg
+    )
+    read.power_watts_effective, read.power_source = effective_value(
+        phys.get("power_watts"), device.power_watts
+    )
     if device.device_type not in IO_DEVICE_TYPES:
         return read
-    key = str(device.id)
     sw = ctx["specs"].get(key, {})
     if device.device_type in VIDEO_DEVICE_TYPES:
         input_default = ctx["video_inputs"].get(key, 0)

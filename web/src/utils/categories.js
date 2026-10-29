@@ -1,6 +1,6 @@
 // Stage-plot categories. Elements are sorted by their type; anything else is sorted by
 // the device it is linked to, so a camera or a switcher on the plot shows with video.
-export const CATEGORIES = ['sound', 'video', 'stage', 'other'];
+export const CATEGORIES = ['sound', 'video', 'light', 'stage', 'other'];
 
 const ELEMENT_CATEGORY = {
   performer: 'stage',
@@ -20,6 +20,10 @@ const ELEMENT_CATEGORY = {
   switcher: 'video',
   screen: 'video',
   projector: 'video',
+  moving_light: 'light',
+  static_light: 'light',
+  led_fixture: 'light',
+  hazer: 'light',
 };
 
 const DEVICE_CATEGORY = {
@@ -43,6 +47,7 @@ const DEVICE_CATEGORY = {
   computer: 'video',
   screen: 'video',
   projector: 'video',
+  fixture: 'light',
 };
 
 // Network equipment and patchbays can carry any of the signals, so they sit under Other.

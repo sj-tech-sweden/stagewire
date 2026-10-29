@@ -42,6 +42,25 @@
       </template>
     </q-banner>
 
+    <q-banner
+      v-if="connectPowerMode"
+      class="bg-primary text-white q-mb-md rounded-borders"
+      dense
+    >
+      <template #avatar>
+        <q-icon name="cable" />
+      </template>
+      {{ pendingSource ? t('stagePlot.sourceSelected') : t('stagePlot.connectPowerHint') }}
+      <template #action>
+        <q-btn
+          flat
+          color="white"
+          :label="t('stagePlot.connectPowerDone')"
+          @click="cancelConnect"
+        />
+      </template>
+    </q-banner>
+
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-3">
         <q-card
@@ -184,6 +203,19 @@
                   <q-icon name="add" />
                 </q-item-section>
                 <q-item-section>{{ t('stagePlot.custom') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-ripple
+                clickable
+                @click="outletDialog = true"
+              >
+                <q-item-section avatar>
+                  <q-icon
+                    name="electrical_services"
+                    color="#FFEE58"
+                  />
+                </q-item-section>
+                <q-item-section>{{ t('stagePlot.addOutlet') }}</q-item-section>
               </q-item>
             </q-list>
           </q-card-section>
@@ -536,6 +568,29 @@
                 v-model="showProjectorCoverage"
                 :label="t('stagePlot.showProjectorCoverage')"
               />
+              <q-toggle
+                v-if="job?.venue_id"
+                v-model="showOutlets"
+                :label="t('stagePlot.showOutlets')"
+              />
+              <q-btn
+                v-if="job?.venue_id"
+                dense
+                no-caps
+                icon="cable"
+                :color="connectPowerMode ? 'primary' : 'grey-7'"
+                :outline="!connectPowerMode"
+                :label="t('stagePlot.connectPower')"
+                @click="toggleConnect"
+              />
+              <q-toggle
+                v-model="showPowerCables"
+                :label="t('stagePlot.showPowerCables')"
+              />
+              <q-toggle
+                v-model="showPowerNodes"
+                :label="t('stagePlot.showPowerNodes')"
+              />
               <q-btn
                 v-for="c in categoryOptions"
                 :key="c.value"
@@ -672,6 +727,16 @@
                   :config="cableConfig(row)"
                 />
                 <v-line
+                  v-for="row in visibleDmxRows"
+                  :key="'dmx' + row.key"
+                  :config="dmxConfig(row)"
+                />
+                <v-line
+                  v-for="row in visiblePowerCables"
+                  :key="'pc' + row.key"
+                  :config="powerCableConfig(row)"
+                />
+                <v-line
                   v-if="drawingWay && drawPoints.length"
                   :config="drawConfig"
                 />
@@ -708,6 +773,23 @@
                     v-if="linkedSummary(el)"
                     :config="linkedTextConfig(el)"
                   />
+                </v-group>
+                <v-group
+                  v-for="o in visibleOutlets"
+                  :key="'outlet' + o.id"
+                  :config="outletConfig(o)"
+                >
+                  <v-circle :config="outletDotConfig" />
+                  <v-text :config="outletGlyphConfig" />
+                  <v-text :config="outletNameConfig(o)" />
+                </v-group>
+                <v-group
+                  v-for="pn in visiblePowerNodes"
+                  :key="'pn' + pn.id"
+                  :config="powerNodeConfig(pn)"
+                >
+                  <v-rect :config="powerNodeRectConfig(pn)" />
+                  <v-text :config="powerNodeLabelConfig(pn)" />
                 </v-group>
                 <v-transformer
                   ref="trRef"
@@ -1137,6 +1219,58 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="outletDialog">
+      <q-card style="min-width: 320px; max-width: 95vw">
+        <q-card-section class="text-h6">
+          {{ t('stagePlot.addOutletTitle') }}
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input
+            v-model="outletForm.name"
+            :label="t('stagePlot.outletName')"
+            dense
+            autofocus
+            @keyup.enter="placeOutlet"
+          />
+          <q-select
+            v-model="outletForm.connector"
+            :options="connectorOptions"
+            emit-value
+            map-options
+            use-input
+            new-value-mode="add"
+            :label="t('stagePlot.outletConnector')"
+            dense
+            clearable
+          />
+          <q-input
+            v-model="outletForm.rating_amps"
+            type="number"
+            :label="t('stagePlot.outletRating')"
+            :hint="outletNeedsRating ? t('stagePlot.ratingNeeded') : ''"
+            dense
+            class="q-mt-sm"
+          />
+          <div class="text-caption text-grey-7">
+            {{ t('stagePlot.placeOutlet') }}
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('app.actions.cancel')"
+          />
+          <q-btn
+            color="primary"
+            :label="t('stagePlot.addOutlet')"
+            :disable="!outletForm.name || !outletForm.connector || (outletNeedsRating && !outletForm.rating_amps)"
+            :loading="placingOutlet"
+            @click="placeOutlet"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -1259,6 +1393,42 @@ const palette = {
     deviceType: 'projector',
     createDevice: true,
   },
+  movingLight: {
+    labelKey: 'stagePlot.types.movingLight',
+    icon: 'light_mode',
+    color: '#FFCA28',
+    w: 40,
+    h: 30,
+    deviceType: 'fixture',
+    createDevice: true,
+  },
+  staticLight: {
+    labelKey: 'stagePlot.types.staticLight',
+    icon: 'highlight',
+    color: '#FFA726',
+    w: 36,
+    h: 24,
+    deviceType: 'fixture',
+    createDevice: true,
+  },
+  ledFixture: {
+    labelKey: 'stagePlot.types.ledFixture',
+    icon: 'view_week',
+    color: '#FFEE58',
+    w: 90,
+    h: 22,
+    deviceType: 'fixture',
+    createDevice: true,
+  },
+  hazer: {
+    labelKey: 'stagePlot.types.hazer',
+    icon: 'cloud',
+    color: '#BDBDBD',
+    w: 30,
+    h: 30,
+    deviceType: 'fixture',
+    createDevice: true,
+  },
   mixer: {
     labelKey: 'stagePlot.types.mixer',
     icon: 'tune',
@@ -1378,19 +1548,35 @@ const cameraViewMode = ref(savedCoverageView.cameraMode === 'chosen' ? 'chosen' 
 watch([showSoundCoverage, showCameraCoverage, showProjectorCoverage, cameraViewMode], ([sound, camera, projector, mode]) => {
   localStorage.setItem(COVERAGE_VIEW_KEY, JSON.stringify({ sound, camera, projector, cameraMode: mode }));
 });
+// Categories that existed before 'light' was added. A legacy (unversioned) saved set is
+// migrated by keeping the user's choices and adding any category that did not exist yet, so
+// 'light' defaults visible for returning users; the result is then upgraded to the versioned
+// format. Once versioned, the saved set is respected exactly, so hiding a category sticks.
+const KNOWN_CATEGORIES = ['sound', 'video', 'stage', 'other'];
+const CATEGORY_STORE_VERSION = 2;
 const categoryOptions = CATEGORIES.map((c) => ({ value: c, label: t(`stagePlot.categories.${c}`) }));
 const categoryStorageKey = computed(() => `sw_stage_categories_${jobId}`);
 const visibleCategories = ref([...CATEGORIES]);
 watch(categoryStorageKey, (key) => {
   try {
-    const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    visibleCategories.value = Array.isArray(saved) ? saved : [...CATEGORIES];
+    const raw = JSON.parse(localStorage.getItem(key) || 'null');
+    if (Array.isArray(raw)) {
+      const set = new Set(raw);
+      const cats = CATEGORIES.filter((c) => set.has(c) || !KNOWN_CATEGORIES.includes(c));
+      visibleCategories.value = cats;
+      localStorage.setItem(key, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats }));
+    } else if (raw && Array.isArray(raw.cats) && raw.v === CATEGORY_STORE_VERSION) {
+      visibleCategories.value = CATEGORIES.filter((c) => raw.cats.includes(c));
+    } else {
+      visibleCategories.value = [...CATEGORIES];
+      localStorage.setItem(key, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats: [...CATEGORIES] }));
+    }
   } catch {
     visibleCategories.value = [...CATEGORIES];
   }
 }, { immediate: true });
 watch(visibleCategories, (value) => {
-  localStorage.setItem(categoryStorageKey.value, JSON.stringify(value));
+  localStorage.setItem(categoryStorageKey.value, JSON.stringify({ v: CATEGORY_STORE_VERSION, cats: value }));
 });
 function toggleCategory(category) {
   visibleCategories.value = visibleCategories.value.includes(category)
@@ -1659,8 +1845,8 @@ function groupConfig(el) {
     y: (stageY.value + el.position_y) * pxPerCm.value,
     rotation: el.rotation,
     draggable: true,
-    onclick: () => select(el.id),
-    ontap: () => select(el.id),
+    onclick: () => onElementClick(el.id),
+    ontap: () => onElementClick(el.id),
     ondragend: (e) => onDragEnd(el, e),
     ontransform: (e) => keepLabelsUpright(e.target),
     ontransformend: (e) => onTransformEnd(el, e),
@@ -1940,6 +2126,10 @@ function onStageClick(e) {
   }
   if (rerouteKey.value) {
     addWaypoint(e);
+    return;
+  }
+  if (connectPowerMode.value) {
+    if (e.target === e.target.getStage()) pendingSource.value = null;
     return;
   }
   if (e.target === e.target.getStage()) {
@@ -2623,6 +2813,451 @@ async function loadChannels() {
 }
 
 const cablesVisible = ref(true);
+const DMX_COLORS = ['#EF5350', '#42A5F5', '#66BB6A', '#FFA726', '#AB47BC', '#26C6DA', '#FFEE58', '#8D6E63'];
+const dmxUniverses = ref([]);
+const powerOutlets = ref([]);
+const powerNodes = ref([]);
+const powerStatusById = ref({});
+function savedToggle(key, fallback) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    return typeof saved === 'boolean' ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+const showOutlets = ref(savedToggle('sw_stage_outlets', true));
+watch(showOutlets, (v) => localStorage.setItem('sw_stage_outlets', JSON.stringify(v)));
+const showPowerCables = ref(savedToggle('sw_stage_power_cables', true));
+watch(showPowerCables, (v) => localStorage.setItem('sw_stage_power_cables', JSON.stringify(v)));
+const showPowerNodes = ref(savedToggle('sw_stage_power_nodes', true));
+watch(showPowerNodes, (v) => localStorage.setItem('sw_stage_power_nodes', JSON.stringify(v)));
+
+// Power-connect flow: pick a source (an outlet, a power node, or a plotted device), then pick a
+// target. A device target becomes a distro node (carrying the device) fed from the source; a power
+// node target is fed from the source. If the target already has a parent, the new connection is
+// added as an extra (merged) feed.
+const connectPowerMode = ref(false);
+const pendingSource = ref(null);
+function toggleConnect() {
+  connectPowerMode.value = !connectPowerMode.value;
+  pendingSource.value = null;
+}
+function cancelConnect() {
+  connectPowerMode.value = false;
+  pendingSource.value = null;
+}
+function onOutletClick(o) {
+  if (!connectPowerMode.value) return;
+  pendingSource.value =
+    pendingSource.value?.type === 'outlet' && pendingSource.value.id === o.id
+      ? null
+      : { type: 'outlet', id: o.id };
+  if (pendingSource.value) $q.notify({ message: t('stagePlot.outletSelected'), color: 'info' });
+}
+function onPowerNodeClick(node) {
+  if (connectPowerMode.value && pendingSource.value) {
+    connectToNode(node);
+    return;
+  }
+  selectedPowerNodeId.value = selectedPowerNodeId.value === node.id ? null : node.id;
+}
+function onElementClick(elId) {
+  if (connectPowerMode.value && pendingSource.value) {
+    connectTargetElement(elId);
+    return;
+  }
+  select(elId);
+}
+async function resolveParentId(source) {
+  if (!source) return null;
+  if (source.type === 'node') return source.id;
+  const outlet = powerOutlets.value.find((o) => o.id === source.id);
+  if (!outlet) return null;
+  let src = powerNodes.value.find((n) => n.kind === 'source' && n.venue_outlet_id === source.id);
+  if (!src) {
+    const res = await api.post(`/jobs/${jobId}/power-nodes`, {
+      kind: 'source',
+      venue_outlet_id: source.id,
+      feed_connector: outlet.connector,
+      rating_amps: outlet.rating_amps ?? null,
+      outputs: [{ connector: outlet.connector, count: 1 }],
+      name: outlet.name || 'Outlet',
+    });
+    src = res.data;
+    // Keep the local store in sync so downstream lookups (e.g. the connector
+    // and rating a device node inherits from this source) resolve correctly.
+    powerNodes.value.push(src);
+  }
+  return src.id;
+}
+async function wireChildToParent(childId, parentId) {
+  const child = powerNodes.value.find((n) => n.id === childId);
+  if (!child) return;
+  if (!child.parent_id) {
+    await api.patch(`/jobs/${jobId}/power-nodes/${childId}`, { parent_id: parentId });
+    return;
+  }
+  if (child.parent_id === parentId) return;
+  if ((child.feeds || []).some((f) => f.parent_id === parentId)) return;
+  const parent = powerNodes.value.find((n) => n.id === parentId);
+  const connector = parent?.outputs?.[0]?.connector || child.feed_connector || 'schuko';
+  await api.post(`/jobs/${jobId}/power-nodes/${childId}/feeds`, {
+    parent_id: parentId,
+    feed_connector: connector,
+  });
+}
+async function wireDeviceToParent(elId, parentId) {
+  const el = store.elements.find((e) => e.id === elId);
+  if (!el || !el.linked_device_id) {
+    $q.notify({ message: t('stagePlot.linkDeviceFirst'), color: 'warning' });
+    return;
+  }
+  const parent = powerNodes.value.find((n) => n.id === parentId);
+  const connector = parent?.outputs?.[0]?.connector || 'schuko';
+  let node = powerNodes.value.find((n) => n.device_id === el.linked_device_id);
+  if (!node) {
+    const res = await api.post(`/jobs/${jobId}/power-nodes`, {
+      kind: 'distro',
+      parent_id: parentId,
+      device_id: el.linked_device_id,
+      feed_connector: connector,
+      // A device fed from a fixed-install (rated) source inherits that rating;
+      // a connector that "needs_rating" cannot be created with a null rating.
+      rating_amps: parent?.rating_amps ?? null,
+      name: devicesStore.byId(el.linked_device_id)?.name || 'Device',
+    });
+    node = res.data;
+  } else {
+    await wireChildToParent(node.id, parentId);
+  }
+}
+async function connectToNode(targetNode) {
+  const parentId = await resolveParentId(pendingSource.value);
+  if (!parentId) return;
+  if (parentId === targetNode.id) {
+    $q.notify({ message: t('stagePlot.cannotFeedSelf'), color: 'warning' });
+    return;
+  }
+  try {
+    await wireChildToParent(targetNode.id, parentId);
+    $q.notify({ message: t('stagePlot.powerConnected'), color: 'positive' });
+    pendingSource.value = null;
+    connectPowerMode.value = false;
+    await loadLights();
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  }
+}
+async function connectTargetElement(elId) {
+  const parentId = await resolveParentId(pendingSource.value);
+  if (!parentId) return;
+  try {
+    await wireDeviceToParent(elId, parentId);
+    $q.notify({ message: t('stagePlot.powerConnected'), color: 'positive' });
+    pendingSource.value = null;
+    connectPowerMode.value = false;
+    await loadLights();
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  }
+}
+
+// Add-outlet dialog: create a venue outlet at the centre of the stage, then it is
+// draggable on the plot like the others.
+const outletDialog = ref(false);
+const placingOutlet = ref(false);
+const connectorOptions = [
+  { label: 'Schuko 16 A', value: 'schuko' },
+  { label: 'CEE 16 A 1-phase', value: 'cee16' },
+  { label: 'CEE 16 A 3-phase', value: 'cee16_3p' },
+  { label: 'CEE 32 A 3-phase', value: 'cee32_3p' },
+  { label: 'CEE 63 A 3-phase', value: 'cee63_3p' },
+  { label: 'CEE 125 A 3-phase', value: 'cee125_3p' },
+  { label: 'powerCON 20 A', value: 'powercon' },
+  { label: 'powerCON TRUE1', value: 'powercon_true1' },
+  { label: 'Socapex 19-pin', value: 'socapex' },
+  { label: 'Fixed install 1-phase', value: 'install_1p' },
+  { label: 'Fixed install 3-phase', value: 'install_3p' },
+];
+// Fixed-install connectors carry no fixed rating, so the node must be rated by hand.
+const RATED_OUTLET_CONNECTORS = ['install_1p', 'install_3p'];
+const outletForm = reactive({ name: '', connector: '', rating_amps: null });
+const outletNeedsRating = computed(() => RATED_OUTLET_CONNECTORS.includes(outletForm.connector));
+async function placeOutlet() {
+  if (!outletForm.name || !outletForm.connector || !job.value?.venue_id) return;
+  if (outletNeedsRating.value && !outletForm.rating_amps) return;
+  placingOutlet.value = true;
+  try {
+    await api.post(`/venues/${job.value.venue_id}/power-outlets`, {
+      name: outletForm.name,
+      connector: outletForm.connector,
+      rating_amps: outletForm.rating_amps ? Number(outletForm.rating_amps) : null,
+      x_cm: Math.round(stageW.value / 2),
+      y_cm: Math.round(stageH.value / 2),
+    });
+    outletDialog.value = false;
+    outletForm.name = '';
+    outletForm.connector = '';
+    outletForm.rating_amps = null;
+    await loadLights();
+    $q.notify({ message: t('stagePlot.outletPlaced'), color: 'positive' });
+  } catch (err) {
+    $q.notify({
+      message: err.response?.data?.detail || t('common.errorOccurred'),
+      color: 'negative',
+    });
+  } finally {
+    placingOutlet.value = false;
+  }
+}
+
+async function loadLights() {
+  try {
+    const [universes, outlets, nodesRes, summaryRes] = await Promise.all([
+      api.get(`/jobs/${jobId}/dmx-universes`),
+      api.get(`/jobs/${jobId}/power-outlets`),
+      api.get(`/jobs/${jobId}/power-nodes`),
+      api.get(`/jobs/${jobId}/rigging/summary`),
+    ]);
+    dmxUniverses.value = universes.data;
+    powerOutlets.value = outlets.data;
+    powerNodes.value = nodesRes.data;
+    powerStatusById.value = Object.fromEntries(
+      (summaryRes.data.nodes || []).map((n) => [n.id, n.status]),
+    );
+  } catch {
+    dmxUniverses.value = [];
+    powerOutlets.value = [];
+    powerNodes.value = [];
+    powerStatusById.value = {};
+  }
+}
+
+// Where a device is on the plot, in pixels: its element's centre. Devices with no element on
+// the plot have no position, so their DMX lines are not drawn.
+function placedCentre(deviceId) {
+  if (!deviceId) return null;
+  const el = store.elements.find((e) => e.linked_device_id === deviceId);
+  if (!el) return null;
+  const [cx, cy] = elementCentre(el);
+  return {
+    el,
+    x: (stageX.value + cx) * pxPerCm.value,
+    y: (stageY.value + cy) * pxPerCm.value,
+  };
+}
+
+// One line per DMX step: from the universe's source to its first steps, then from each step
+// to the steps it feeds. Each line takes the universe's colour.
+const dmxRows = computed(() => {
+  const rows = [];
+  dmxUniverses.value.forEach((u, ui) => {
+    const color = DMX_COLORS[ui % DMX_COLORS.length];
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        const from = placedCentre(node.device_id);
+        const to = placedCentre(child.device_id);
+        if (from && to) {
+          rows.push({
+            key: `${u.id}:${node.id || 'source'}:${child.id}`,
+            color,
+            points: [from.x, from.y, to.x, to.y],
+            fromElementId: from.el.id,
+            toElementId: to.el.id,
+            fromDeviceId: node.device_id,
+            toDeviceId: child.device_id,
+          });
+        }
+        walk(child);
+      }
+    };
+    walk({ id: null, device_id: u.source_device_id, children: u.steps || [] });
+  });
+  return rows;
+});
+// A DMX line follows its endpoints: it is hidden when either end's category is hidden, so
+// turning off the Lighting category also hides the fixtures' DMX lines.
+const visibleDmxRows = computed(() =>
+  dmxRows.value.filter(
+    (r) =>
+      endpointVisible(r.fromElementId, r.fromDeviceId) &&
+      endpointVisible(r.toElementId, r.toDeviceId),
+  ),
+);
+function dmxConfig(row) {
+  return {
+    points: row.points,
+    stroke: row.color,
+    strokeWidth: 2,
+    dash: [6, 4],
+    lineCap: 'round',
+    opacity: 0.9,
+    listening: false,
+  };
+}
+
+// Power cables: one per power-tree edge that feeds a device on the plot. The cable runs from
+// the feeding node's device (or, for a source, its venue outlet) to the fed device. Nodes that
+// do not stand for a plotted device have no endpoint here, so those edges are not drawn.
+// Colour follows the fed node's load status (green/amber/red/grey).
+const POWER_STATUS_COLOR = {
+  ok: '#66BB6A',
+  warn: '#FFA726',
+  over: '#EF5350',
+  unpowered: '#9E9E9E',
+  unrated: '#FFA726',
+};
+// Where a power node sits on the plot, in cm. A node with no saved position falls back to its venue
+// outlet (for sources) or the stage centre.
+function nodePos(node) {
+  if (node.x_cm != null && node.y_cm != null) return { x: node.x_cm, y: node.y_cm };
+  if (node.kind === 'source' && node.venue_outlet_id) {
+    const o = powerOutlets.value.find((x) => x.id === node.venue_outlet_id);
+    if (o && o.x_cm != null) return { x: o.x_cm, y: o.y_cm };
+  }
+  return null;
+}
+function nodeDisplayPos(node) {
+  return nodePos(node) || { x: stageW.value / 2, y: stageH.value / 2 };
+}
+// The cable endpoint for a node: the centre of its plotted device if it stands for one, otherwise
+// its position on the plot.
+function nodeAnchor(node) {
+  if (node.device_id) {
+    const c = placedCentre(node.device_id);
+    if (c) return { x: c.x, y: c.y };
+  }
+  const p = nodePos(node);
+  if (p) return { x: (stageX.value + p.x) * pxPerCm.value, y: (stageY.value + p.y) * pxPerCm.value };
+  return null;
+}
+// One cable per power-tree edge (primary parent and every merged feed). The cable runs from the
+// feeding node to the fed node, so the whole tree reads as a graph on the plot.
+const powerCables = computed(() => {
+  const byId = Object.fromEntries(powerNodes.value.map((n) => [n.id, n]));
+  const rows = [];
+  for (const node of powerNodes.value) {
+    const parents = [node.parent_id, ...(node.feeds || []).map((f) => f.parent_id)];
+    const childAnchor = nodeAnchor(node);
+    if (!childAnchor) continue;
+    for (const pid of parents) {
+      if (!pid) continue;
+      const parent = byId[pid];
+      if (!parent) continue;
+      const parentAnchor = nodeAnchor(parent);
+      if (!parentAnchor) continue;
+      rows.push({
+        key: `pc:${node.id}:${pid}`,
+        points: [parentAnchor.x, parentAnchor.y, childAnchor.x, childAnchor.y],
+        status: powerStatusById.value[node.id] || 'ok',
+      });
+    }
+  }
+  return rows;
+});
+const visiblePowerCables = computed(() => (showPowerCables.value ? powerCables.value : []));
+function powerCableConfig(row) {
+  return {
+    points: row.points,
+    stroke: POWER_STATUS_COLOR[row.status] || '#9E9E9E',
+    strokeWidth: 3,
+    opacity: 0.85,
+    listening: false,
+  };
+}
+
+// Venue power outlets, at their saved place on the plot. They can be dragged to move them.
+const visibleOutlets = computed(() =>
+  showOutlets.value ? powerOutlets.value.filter((o) => o.x_cm != null && o.y_cm != null) : [],
+);
+const outletDotConfig = { radius: 9, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 };
+const outletGlyphConfig = { text: 'PWR', fontSize: 7, x: -9, y: -3.5, width: 18, align: 'center', fill: '#333' };
+function outletNameConfig(o) {
+  return { text: o.name || o.connector || '', fontSize: 10, x: 12, y: -5, fill: '#ddd' };
+}
+function outletConfig(o) {
+  return {
+    x: (stageX.value + o.x_cm) * pxPerCm.value,
+    y: (stageY.value + o.y_cm) * pxPerCm.value,
+    name: 'outlet',
+    outletId: o.id,
+    draggable: !!job.value?.venue_id,
+    onclick: () => onOutletClick(o),
+    ondragend: (e) => onOutletDragEnd(o, e),
+  };
+}
+async function onOutletDragEnd(o, e) {
+  const x = round1(e.target.x() / pxPerCm.value - stageX.value);
+  const y = round1(e.target.y() / pxPerCm.value - stageY.value);
+  try {
+    await api.patch(`/venues/${job.value.venue_id}/power-outlets/${o.id}`, { x_cm: x, y_cm: y });
+    await loadLights();
+  } catch {
+    await loadLights();
+  }
+}
+
+// Power nodes draw on the plot as a graph, so the whole tree is visible where it is used. They are
+// draggable to reposition; a node keeps its place through x_cm/y_cm.
+const POWER_NODE_W = 70;
+const POWER_NODE_H = 30;
+const selectedPowerNodeId = ref(null);
+function nodeStatusColor(node) {
+  const s = powerStatusById.value[node.id] || 'ok';
+  return POWER_STATUS_COLOR[s] || '#9E9E9E';
+}
+const visiblePowerNodes = computed(() => (showPowerNodes.value ? powerNodes.value : []));
+function powerNodeConfig(node) {
+  const p = nodeDisplayPos(node);
+  return {
+    x: (stageX.value + p.x) * pxPerCm.value - POWER_NODE_W / 2,
+    y: (stageY.value + p.y) * pxPerCm.value - POWER_NODE_H / 2,
+    name: 'powernode',
+    nodeId: node.id,
+    draggable: !!job.value?.venue_id,
+    onClick: () => onPowerNodeClick(node),
+    onTap: () => onPowerNodeClick(node),
+    ondragend: (e) => onPowerNodeDragEnd(node, e),
+  };
+}
+function powerNodeRectConfig(node) {
+  return {
+    width: POWER_NODE_W,
+    height: POWER_NODE_H,
+    cornerRadius: 5,
+    fill: selectedPowerNodeId.value === node.id ? '#263238' : '#1c2327',
+    stroke: nodeStatusColor(node),
+    strokeWidth: selectedPowerNodeId.value === node.id ? 3 : 2,
+  };
+}
+function powerNodeLabelConfig(node) {
+  return {
+    text: node.name || node.kind,
+    fontSize: 11,
+    x: 6,
+    y: 9,
+    width: POWER_NODE_W - 12,
+    ellipsis: true,
+    fill: '#eee',
+  };
+}
+async function onPowerNodeDragEnd(node, e) {
+  const x = round1((e.target.x() + POWER_NODE_W / 2) / pxPerCm.value - stageX.value);
+  const y = round1((e.target.y() + POWER_NODE_H / 2) / pxPerCm.value - stageY.value);
+  try {
+    await api.patch(`/jobs/${jobId}/power-nodes/${node.id}`, { x_cm: x, y_cm: y });
+    await loadLights();
+  } catch {
+    await loadLights();
+  }
+}
 const selectedCableKey = ref(null);
 const rerouteKey = ref(null);
 const drawingWay = ref(false);
@@ -2999,6 +3634,7 @@ onMounted(() => {
   loadChannels();
   devicesStore.fetchDevices(jobId);
   store.fetchElements(jobId);
+  loadLights();
 });
 </script>
 

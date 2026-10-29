@@ -16,4 +16,12 @@
 - [x] Stage plot reports and the report layout preview draw cables, cableways, audience, speaker, camera and projector coverage the same way as the plot.
 - [ ] Pixel map and LED wall for the video suite.
 - [ ] Stockwire fields for projectors (`proj_throw_ratio_min/max`, `proj_aspect_ratio`), pending agreement in `docs/stockwire-integration-spec.md` §3.7.
-- [ ] Lighting and rigging (Phase 3).
+- [x] Lighting fixture patch: universe, address, fixture type, mode, footprint, location, gel, purpose; DMX overlap and channel 512 checks; CSV and MVR import; device weight and power, with Stockwire values.
+- [x] Lighting fixtures on the stage plot and in a registry-seeded fixture patch PDF (EN/SV).
+- [x] Rigging and power (Phase 3b), shared with sound and video: trusses with weight capacity, a power tree (source, distros, breakouts) with connector checks, phase balance and status, on a Rigging & power tab.
+- [x] Venue power outlets saved on the venue; a power source can be tied to one.
+- [x] DMX cables drawn on the stage plot, following their fixtures; venue power outlets drawn as draggable points.
+- [ ] The power tree drawn on the stage plot.
+- [ ] Rigging drawn on the stage plot itself (truss positions and hung loads).
+- [x] Stockwire fixture products: name, maker, channel modes and weight become a fixture type (spec §3.9).
+- [x] DMX chains per universe: a signal-flow editor on the Lights tab builds each universe's tree of steps (source → fixtures/devices, with branching) on top of the existing API.

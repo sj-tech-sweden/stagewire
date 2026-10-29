@@ -304,6 +304,73 @@
               />
             </div>
           </div>
+          <div class="q-gutter-sm">
+            <div class="text-caption">
+              {{ t('devices.physicalHint') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="editForm.weight_kg"
+                type="number"
+                min="0"
+                step="0.1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.weight')"
+                :hint="physicalHint(editTarget, 'weight_kg_effective', 'weight_source')"
+              />
+              <q-input
+                v-model.number="editForm.power_watts"
+                type="number"
+                min="0"
+                step="1"
+                clearable
+                dense
+                class="col"
+                :label="t('devices.power')"
+                :hint="physicalHint(editTarget, 'power_watts_effective', 'power_source')"
+              />
+            </div>
+          </div>
+          <div
+            v-if="editForm.device_type === 'fixture'"
+            class="q-gutter-sm"
+          >
+            <div class="text-caption">
+              {{ t('devices.fixtureHint') }}
+            </div>
+            <q-input
+              v-model="editForm.fixture_type"
+              :label="t('devices.fixtureType')"
+              dense
+              clearable
+            />
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model="editForm.channel_mode"
+                :label="t('devices.channelMode')"
+                dense
+                clearable
+                class="col"
+              />
+              <q-input
+                v-model.number="editForm.footprint_channels"
+                type="number"
+                min="1"
+                dense
+                clearable
+                class="col"
+                :label="t('devices.footprint')"
+              />
+            </div>
+            <q-input
+              v-model="editForm.default_gel"
+              :label="t('devices.defaultGel')"
+              dense
+              clearable
+            />
+          </div>
           <div
             v-if="['camera', 'lens'].includes(editForm.device_type)"
             class="q-gutter-sm"
@@ -579,9 +646,17 @@ const DEVICE_TYPES = [
   'recorder',
   'screen',
   'projector',
+  'fixture',
   'other',
 ];
 const ioDeviceTypes = ['mixer', 'switcher', 'router', 'multiviewer'];
+function physicalHint(device, valueKey, sourceKey) {
+  if (device?.[sourceKey] === 'stockwire') {
+    return t('devices.stockwireInUse', { value: device[valueKey] });
+  }
+  if (device?.[sourceKey] === 'manual') return t('devices.manualInUse');
+  return t('devices.notSet');
+}
 function ioSourceHint(device, side) {
   const source = side === 'input' ? device?.input_source : device?.output_source;
   const count = side === 'input' ? device?.input_default : device?.output_default;
@@ -619,6 +694,12 @@ const editForm = reactive({
   throw_ratio_min: null,
   throw_ratio_max: null,
   image_aspect_ratio: null,
+  weight_kg: null,
+  power_watts: null,
+  fixture_type: '',
+  channel_mode: '',
+  footprint_channels: null,
+  default_gel: '',
 });
 const directionOptions = [
   { value: 'in', label: t('devices.directionIn') },
@@ -774,6 +855,12 @@ function openEdit(device) {
   editForm.throw_ratio_min = device.throw_ratio_min ?? null;
   editForm.throw_ratio_max = device.throw_ratio_max ?? null;
   editForm.image_aspect_ratio = device.image_aspect_ratio ?? null;
+  editForm.weight_kg = device.weight_kg ?? null;
+  editForm.power_watts = device.power_watts ?? null;
+  editForm.fixture_type = device.fixture_type ?? '';
+  editForm.channel_mode = device.channel_mode ?? '';
+  editForm.footprint_channels = device.footprint_channels ?? null;
+  editForm.default_gel = device.default_gel ?? '';
   editDialog.value = true;
 }
 async function saveEdit() {

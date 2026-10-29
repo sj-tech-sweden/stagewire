@@ -66,3 +66,31 @@ class VenuePropagate(BaseModel):
 
 class VenuePropagateResult(BaseModel):
     updated: int
+
+
+class VenuePowerOutletBase(BaseModel):
+    name: str = ""
+    connector: str = ""
+    rating_amps: float | None = None
+    x_cm: float | None = None
+    y_cm: float | None = None
+    notes: str = ""
+
+
+class VenuePowerOutletCreate(VenuePowerOutletBase):
+    pass
+
+
+class VenuePowerOutletUpdate(BaseModel):
+    name: str | None = None
+    connector: str | None = None
+    x_cm: float | None = None
+    y_cm: float | None = None
+    notes: str | None = None
+
+
+class VenuePowerOutletRead(VenuePowerOutletBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    venue_id: UUID

@@ -167,6 +167,61 @@ SQLite test suite.
 - In a patch step, typing the name of an existing device chooses it; a device created
   from a step is chosen at once.
 
+## Lighting: DMX fixture patch
+
+- The fixture patch is one row per fixture: universe, DMX address, fixture type, channel
+  mode, footprint (channels), location or truss position, gel or colour, purpose and notes.
+  Open it from the job's **Lights** tab, next to Sound, Video and Rigging & power.
+- A fixture type can be added from a **Stockwire** fixture product (**Add type from
+  Stockwire**): its name, maker, all its channel modes and its weight are copied in.
+  Importing the same product again updates that type. See
+  `docs/stockwire-integration-spec.md` §3.9.
+- A fixture takes a **fixture type** from the job's library and one of its **channel modes**.
+  Typing a new name in either box adds it to the library; the mode's footprint sets the
+  fixture's footprint. A type can have several modes, and an MVR import keeps every mode
+  its GDTF file defines. A type also holds a manual weight and power, used for loads on the
+  rigging tab when the device gives no value.
+- Before saving, the address field warns when the fixture's run would share channels with
+  another fixture in its universe, or run past channel 512. The **Pick from grid** popup
+  shows the same: the run is drawn in place, clashing channels are red, and the fixture's
+  current address is outlined in amber while you choose.
+- The fixture patch is reported from the **Reports** page like any other report
+  (`lighting.fixture-patch`).
+- A row can be linked to a fixture device by typing its name. Typing a new name creates
+  the device. The device's fixture type, mode, footprint and gel fill empty row fields.
+- The patch flags a **DMX overlap** when two fixtures in the same universe share a channel,
+  and **past channel 512** when a footprint runs beyond its universe.
+- **Import** reads a CSV (one row per fixture, headers as on the patch sheet; `;` or `,`
+  separators) or an MVR file (My Virtual Rig, exported by Capture 2021 or later, MA,
+  Vectorworks or WYSIWYG). From MVR the address, position (its truss or position name, or
+  coordinates), mode and footprint come from the scene and the GDTF file it names. Imports
+  replace the fixtures of an earlier import unless that is switched off.
+- Weight and power are device values for rigging and power planning. A Stockwire product
+  value (`weight_kg`, `power_consumption_watts` on the product) overrides the value entered
+  on the device, field by field; see `docs/stockwire-integration-spec.md` §3.8.
+
+## Rigging & power
+
+- The **Rigging & power** tab is shared by sound, video and lighting. Trusses (hanging
+  points) have a weight capacity.
+- **Power is a tree.** The top is a source: mains (a CEE or Socapex feed) or a **venue
+  outlet** saved on the venue. Distros and breakouts hang below it. Each node has a feed
+  connector and a list of outputs (connector, count, and optionally one phase L1-L3). A child
+  plugs into an output of the same connector, so a 32 A three-phase feed cannot go straight
+  into a Schuko outlet: it needs a distro in between. An output cannot take more children and
+  loads than it has.
+- Connectors that are checked: Schuko 16 A, CEE 16 A (1- and 3-phase), CEE 32, 63 and 125 A
+  three-phase, powerCON, powerCON TRUE1 and Socapex (six 16 A circuits).
+- A fixture or plot element plugs into an output of a node, with its connector. Its
+  watts go to that output's phase, or are shared over L1-L3 when the output has no phase.
+- Amps per phase are watts over 230 V. A node's status is OK below 80 % of its rating
+  (its own rating, or its feed connector's amps), warn from 80 %, and over above 100 %.
+  Switching a source off marks everything below it as unpowered.
+- Venue outlets are saved per venue (with a connector and a stage plot position); a job's
+  source can be tied to one of them.
+- The summary shows the weight on each truss against its capacity, the amps and status of
+  every node, and the power status of every load.
+
 ## Cables and cableways
 
 - Cables are derived from the sound and video chains, from speaker outputs, and from
@@ -174,6 +229,17 @@ SQLite test suite.
   around the audience area unless the detour is much longer, and can be fixed with
   manual waypoints or hidden.
 - Cables are grouped by length class and by connector, with a CSV export.
+
+## DMX cables and power outlets on the stage plot
+
+- The DMX chain of each universe is drawn as dashed lines between the devices on the plot,
+  coloured by universe: from the console to the first steps, and from each step to the steps
+  it feeds. A line is drawn only when both devices have an element on the plot.
+- A line follows its ends: turning off the **stage** category hides the fixtures and their DMX
+  lines together. There is no separate DMX toggle.
+- Venue power outlets are drawn as **PWR** markers at their saved place on the plot, when the
+  job has a venue. Drag a marker to move it; the position is saved on the venue, in the same
+  plot coordinates as the elements. The **Power outlets** toggle hides them.
 
 ## Reports and the stage plot in PDF
 
@@ -210,6 +276,7 @@ Migrations are reviewed before commit; see `AGENTS.md` for the Alembic workflow.
 - **Phase 2 (in progress)**: Video suite — video inputs, outputs, patch chains with
   ports and splits, signal flow, cameras, lenses, projectors and screens are in. The
   pixel map / LED wall is not.
-- **Phase 3 (prep)**: Lighting & rigging — DMX fixture patch, rigging & power plot.
-
-Domain folders for video and lighting exist as stubs for later phases.
+- **Phase 3 (in progress)**: Lighting & rigging. The fixture patch, fixtures on the stage
+  plot, the fixture patch PDF and the rigging & power tab are in. Rigging & power is shared
+  with sound and video. Still open: a rigging plot drawing on the stage plot itself and
+  Stockwire fixture profile fields.

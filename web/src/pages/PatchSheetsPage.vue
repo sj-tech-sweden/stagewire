@@ -658,6 +658,7 @@ const DEVICE_TYPES = [
   'recorder',
   'screen',
   'projector',
+  'fixture',
   'other',
 ]
 const deviceTypeOptions = DEVICE_TYPES.map((v) => ({
