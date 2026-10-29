@@ -61,14 +61,14 @@ async def test_device_crud_and_linking(auth_headers):
 
         unlink = await client.patch(
             f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",
-            json={"device_id": None},
+            json={"device_id": None, "expected_revision": 1},
             headers=auth_headers,
         )
         assert unlink.status_code == 422, unlink.text
 
         upd = await client.patch(
             f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",
-            json={"device_id": dev_id},
+            json={"device_id": dev_id, "expected_revision": 1},
             headers=auth_headers,
         )
         assert upd.status_code == 200, upd.text
@@ -106,6 +106,7 @@ async def test_device_crud_and_linking(auth_headers):
 
         gone = await client.delete(
             f"{BASE}/jobs/{job_id}/channels/{channel_id}/patch-points/{point_id}",
+            params={"expected_revision": upd.json()["revision"]},
             headers=auth_headers,
         )
         assert gone.status_code == 204, gone.text

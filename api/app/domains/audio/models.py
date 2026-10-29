@@ -117,6 +117,9 @@ class AudioChannelPatch(Base):
     stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     stand_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     stand_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    __mapper_args__ = {"version_id_col": revision}
 
     channel_list: Mapped[ChannelList] = relationship(back_populates="channels")
     patch_points: Mapped[list["ChannelPatchPoint"]] = relationship(
@@ -246,7 +249,9 @@ class ChannelPatchPoint(Base):
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
+    __mapper_args__ = {"version_id_col": revision}
     channel: Mapped[AudioChannelPatch] = relationship(back_populates="patch_points")
     device: Mapped["AudioDevice"] = relationship(back_populates="patch_points")
 
@@ -264,7 +269,9 @@ class ChannelListOutput(Base):
     connector: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str] = mapped_column(String(2000), default="")
     color_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
+    __mapper_args__ = {"version_id_col": revision}
     channel_list: Mapped[ChannelList] = relationship(back_populates="outputs")
     points: Mapped[list["OutputPatchPoint"]] = relationship(
         back_populates="output",
@@ -294,7 +301,9 @@ class OutputPatchPoint(Base):
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
+    __mapper_args__ = {"version_id_col": revision}
     output: Mapped[ChannelListOutput] = relationship(back_populates="points")
     device: Mapped["AudioDevice"] = relationship(back_populates="output_points")
 

@@ -8,6 +8,7 @@ export const useChannelsStore = defineStore('channels', {
     selectedListId: null,
     loading: false,
     error: null,
+    conflict: null,
   }),
   getters: {
     selectedList: (state) => state.lists.find((l) => l.id === state.selectedListId) || null,
@@ -98,14 +99,32 @@ export const useChannelsStore = defineStore('channels', {
       return data;
     },
     async updateChannel(jobId, id, payload) {
-      const { data } = await api.patch(`/jobs/${jobId}/channels/${id}`, payload);
-      const idx = this.channels.findIndex((c) => c.id === id);
-      if (idx !== -1) this.channels[idx] = data;
-      return data;
+      const current = this.channels.find((channel) => channel.id === id);
+      try {
+        const { data } = await api.patch(`/jobs/${jobId}/channels/${id}`, {
+          ...payload,
+          expected_revision: current?.revision,
+        });
+        this.upsertChannel(data);
+        this.conflict = null;
+        return data;
+      } catch (error) {
+        this.recordConflict(error, 'channel', { jobId, id }, payload);
+        throw error;
+      }
     },
     async deleteChannel(jobId, id) {
-      await api.delete(`/jobs/${jobId}/channels/${id}`);
+      const current = this.channels.find((channel) => channel.id === id);
+      try {
+        await api.delete(`/jobs/${jobId}/channels/${id}`, {
+          params: { expected_revision: current?.revision },
+        });
+      } catch (error) {
+        this.recordConflict(error, 'channel-delete', { jobId, id }, null);
+        throw error;
+      }
       this.channels = this.channels.filter((c) => c.id !== id);
+      this.conflict = null;
     },
     async createPatchPoint(jobId, channelId, payload) {
       const { data } = await api.post(
@@ -116,34 +135,82 @@ export const useChannelsStore = defineStore('channels', {
       return data;
     },
     async updatePatchPoint(jobId, channelId, pointId, payload) {
-      const { data } = await api.patch(
-        `/jobs/${jobId}/channels/${channelId}/patch-points/${pointId}`,
-        payload,
-      );
-      this.upsertPatchPointInChannel(channelId, data);
-      return data;
+      const current = this.channels
+        .find((channel) => channel.id === channelId)
+        ?.patch_points?.find((point) => point.id === pointId);
+      try {
+        const { data } = await api.patch(
+          `/jobs/${jobId}/channels/${channelId}/patch-points/${pointId}`,
+          { ...payload, expected_revision: current?.revision },
+        );
+        this.upsertPatchPointInChannel(channelId, data);
+        this.conflict = null;
+        return data;
+      } catch (error) {
+        this.recordConflict(
+          error,
+          'channel-patch-point',
+          { jobId, channelId, pointId },
+          payload,
+        );
+        throw error;
+      }
     },
     async deletePatchPoint(jobId, channelId, pointId) {
-      await api.delete(
-        `/jobs/${jobId}/channels/${channelId}/patch-points/${pointId}`,
-      );
+      const current = this.channels
+        .find((channel) => channel.id === channelId)
+        ?.patch_points?.find((point) => point.id === pointId);
+      try {
+        await api.delete(`/jobs/${jobId}/channels/${channelId}/patch-points/${pointId}`, {
+          params: { expected_revision: current?.revision },
+        });
+      } catch (error) {
+        this.recordConflict(
+          error,
+          'channel-patch-point-delete',
+          { jobId, channelId, pointId },
+          null,
+        );
+        throw error;
+      }
       const ch = this.channels.find((c) => c.id === channelId);
       if (ch && Array.isArray(ch.patch_points)) {
         ch.patch_points = ch.patch_points.filter((p) => p.id !== pointId);
       }
+      this.conflict = null;
     },
     upsertChannel(channel) {
       const idx = this.channels.findIndex((c) => c.id === channel.id);
       if (!Array.isArray(channel.patch_points)) channel.patch_points = [];
-      if (idx !== -1) this.channels[idx] = channel;
+      if (idx !== -1) {
+        const current = this.channels[idx];
+        const patchPoints = this.mergeVersionedRows(current.patch_points, channel.patch_points);
+        this.channels[idx] =
+          channel.revision < current.revision
+            ? { ...current, patch_points: patchPoints }
+            : { ...channel, patch_points: patchPoints };
+      }
       else this.channels.push(channel);
+    },
+    mergeVersionedRows(currentRows = [], incomingRows = []) {
+      const incomingById = new Map(incomingRows.map((row) => [row.id, row]));
+      const merged = currentRows
+        .filter((row) => incomingById.has(row.id))
+        .map((row) => {
+          const incoming = incomingById.get(row.id);
+          return incoming.revision >= row.revision ? incoming : row;
+        });
+      const currentIds = new Set(currentRows.map((row) => row.id));
+      return [...merged, ...incomingRows.filter((row) => !currentIds.has(row.id))];
     },
     upsertPatchPointInChannel(channelId, point) {
       const ch = this.channels.find((c) => c.id === channelId);
       if (!ch) return;
       if (!Array.isArray(ch.patch_points)) ch.patch_points = [];
       const idx = ch.patch_points.findIndex((p) => p.id === point.id);
-      if (idx !== -1) ch.patch_points[idx] = point;
+      if (idx !== -1) {
+        if (point.revision >= ch.patch_points[idx].revision) ch.patch_points[idx] = point;
+      }
       else ch.patch_points.push(point);
       ch.patch_points.sort((a, b) => (a.position || 0) - (b.position || 0));
     },
@@ -156,21 +223,39 @@ export const useChannelsStore = defineStore('channels', {
       return data;
     },
     async updateOutput(jobId, listId, outputId, payload) {
-      const { data } = await api.patch(
-        `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}`,
-        payload,
-      );
-      this.upsertOutputInList(listId, data);
-      return data;
+      const current = this.lists
+        .find((list) => list.id === listId)
+        ?.outputs?.find((output) => output.id === outputId);
+      try {
+        const { data } = await api.patch(
+          `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}`,
+          { ...payload, expected_revision: current?.revision },
+        );
+        this.upsertOutputInList(listId, data);
+        this.conflict = null;
+        return data;
+      } catch (error) {
+        this.recordConflict(error, 'output', { jobId, listId, outputId }, payload);
+        throw error;
+      }
     },
     async deleteOutput(jobId, listId, outputId) {
-      await api.delete(
-        `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}`,
-      );
+      const current = this.lists
+        .find((list) => list.id === listId)
+        ?.outputs?.find((output) => output.id === outputId);
+      try {
+        await api.delete(`/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}`, {
+          params: { expected_revision: current?.revision },
+        });
+      } catch (error) {
+        this.recordConflict(error, 'output-delete', { jobId, listId, outputId }, null);
+        throw error;
+      }
       const list = this.lists.find((l) => l.id === listId);
       if (list && Array.isArray(list.outputs)) {
         list.outputs = list.outputs.filter((o) => o.id !== outputId);
       }
+      this.conflict = null;
     },
     async createOutputPoint(jobId, listId, outputId, payload) {
       const { data } = await api.post(
@@ -181,23 +266,54 @@ export const useChannelsStore = defineStore('channels', {
       return data;
     },
     async updateOutputPoint(jobId, listId, outputId, pointId, payload) {
-      const { data } = await api.patch(
-        `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}/points/${pointId}`,
-        payload,
-      );
-      this.upsertOutputPointInOutput(listId, outputId, data);
-      return data;
+      const current = this.lists
+        .find((list) => list.id === listId)
+        ?.outputs?.find((output) => output.id === outputId)
+        ?.points?.find((point) => point.id === pointId);
+      try {
+        const { data } = await api.patch(
+          `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}/points/${pointId}`,
+          { ...payload, expected_revision: current?.revision },
+        );
+        this.upsertOutputPointInOutput(listId, outputId, data);
+        this.conflict = null;
+        return data;
+      } catch (error) {
+        this.recordConflict(
+          error,
+          'output-patch-point',
+          { jobId, listId, outputId, pointId },
+          payload,
+        );
+        throw error;
+      }
     },
     async deleteOutputPoint(jobId, listId, outputId, pointId) {
-      await api.delete(
-        `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}/points/${pointId}`,
-      );
+      const current = this.lists
+        .find((list) => list.id === listId)
+        ?.outputs?.find((output) => output.id === outputId)
+        ?.points?.find((point) => point.id === pointId);
+      try {
+        await api.delete(
+          `/jobs/${jobId}/channel-lists/${listId}/outputs/${outputId}/points/${pointId}`,
+          { params: { expected_revision: current?.revision } },
+        );
+      } catch (error) {
+        this.recordConflict(
+          error,
+          'output-patch-point-delete',
+          { jobId, listId, outputId, pointId },
+          null,
+        );
+        throw error;
+      }
       const list = this.lists.find((l) => l.id === listId);
       if (list && Array.isArray(list.outputs)) {
         const out = list.outputs.find((o) => o.id === outputId);
         if (out && Array.isArray(out.points)) {
           out.points = out.points.filter((p) => p.id !== pointId);
         }
+        this.conflict = null;
       }
     },
     upsertOutputInList(listId, output) {
@@ -205,7 +321,14 @@ export const useChannelsStore = defineStore('channels', {
       if (!list) return;
       if (!Array.isArray(list.outputs)) list.outputs = [];
       const idx = list.outputs.findIndex((o) => o.id === output.id);
-      if (idx !== -1) list.outputs[idx] = output;
+      if (idx !== -1) {
+        const current = list.outputs[idx];
+        const points = this.mergeVersionedRows(current.points, output.points);
+        list.outputs[idx] =
+          output.revision < current.revision
+            ? { ...current, points }
+            : { ...output, points };
+      }
       else list.outputs.push(output);
       list.outputs.sort((a, b) => (a.position || 0) - (b.position || 0));
     },
@@ -217,15 +340,67 @@ export const useChannelsStore = defineStore('channels', {
       if (!out) return;
       if (!Array.isArray(out.points)) out.points = [];
       const idx = out.points.findIndex((p) => p.id === point.id);
-      if (idx !== -1) out.points[idx] = point;
+      if (idx !== -1) {
+        if (point.revision >= out.points[idx].revision) out.points[idx] = point;
+      }
       else out.points.push(point);
       out.points.sort((a, b) => (a.position || 0) - (b.position || 0));
     },
     upsertList(list) {
       const idx = this.lists.findIndex((l) => l.id === list.id);
-      if (idx !== -1) this.lists[idx] = list;
+      if (idx !== -1) {
+        const current = this.lists[idx];
+        const outputs = this.mergeVersionedRows(current.outputs || [], list.outputs || []).map(
+          (output) => {
+            const previous = current.outputs?.find((row) => row.id === output.id);
+            return previous
+              ? { ...output, points: this.mergeVersionedRows(previous.points, output.points) }
+              : output;
+          },
+        );
+        this.lists[idx] = { ...list, outputs };
+      }
       else this.lists.push(list);
       if (!this.selectedListId) this.selectedListId = list.id;
+    },
+    recordConflict(error, entityType, ids, draft) {
+      const detail = error.response?.data?.detail;
+      if (error.response?.status !== 409 || detail?.code !== 'revision_conflict') return;
+      const current = detail.current;
+      if (entityType === 'channel' && current) this.upsertChannel(current);
+      if (entityType === 'channel-patch-point' && current) {
+        this.upsertPatchPointInChannel(ids.channelId, current);
+      }
+      if (entityType === 'output' && current) this.upsertOutputInList(ids.listId, current);
+      if (entityType === 'output-patch-point' && current) {
+        this.upsertOutputPointInOutput(ids.listId, ids.outputId, current);
+      }
+      this.conflict = { entityType, ids, draft, current };
+    },
+    async reapplyConflict() {
+      const conflict = this.conflict;
+      if (!conflict?.current || !conflict.draft) return;
+      this.conflict = null;
+      const { entityType, ids, draft } = conflict;
+      if (entityType === 'channel') return this.updateChannel(ids.jobId, ids.id, draft);
+      if (entityType === 'channel-patch-point') {
+        return this.updatePatchPoint(ids.jobId, ids.channelId, ids.pointId, draft);
+      }
+      if (entityType === 'output') {
+        return this.updateOutput(ids.jobId, ids.listId, ids.outputId, draft);
+      }
+      if (entityType === 'output-patch-point') {
+        return this.updateOutputPoint(
+          ids.jobId,
+          ids.listId,
+          ids.outputId,
+          ids.pointId,
+          draft,
+        );
+      }
+    },
+    clearConflict() {
+      this.conflict = null;
     },
     removeListLocal(listId) {
       this.lists = this.lists.filter((l) => l.id !== listId);

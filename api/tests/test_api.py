@@ -92,9 +92,11 @@ async def test_create_and_list_job(auth_headers: dict) -> None:
                 "performer_name": "Alex",
                 "wireless_pack": "Beltpack 2",
                 "wireless_frequency": "518.125 MHz",
+                "expected_revision": 1,
             },
         )
         assert updated.status_code == 200
+        assert updated.json()["revision"] == 2
         assert updated.json()["device"] == "SM58"
         assert updated.json()["performer_name"] == "Alex"
         assert updated.json()["wireless_pack"] == "Beltpack 2"
@@ -138,9 +140,12 @@ async def test_create_and_list_job(auth_headers: dict) -> None:
             == "Alex stage plot edit"
         )
 
+        current_revision = next(
+            item for item in channel_after_plot_edit.json() if item["id"] == channel.json()["id"]
+        )["revision"]
         channel_name_edit = await client.patch(
             f"{BASE}/jobs/{job_id}/channels/{channel.json()['id']}",
-            json={"performer_name": "Alex channel edit"},
+            json={"performer_name": "Alex channel edit", "expected_revision": current_revision},
         )
         assert channel_name_edit.status_code == 200
         channel_list_after_edit = await client.get(

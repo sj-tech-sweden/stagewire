@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
+from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio import schemas, service
 from app.domains.audio.camera_specs import resolve_camera_specs
 from app.domains.audio.coverage import coverage_grid, sector_for
@@ -262,7 +263,15 @@ async def update_channel(
     channel = await service.get_channel(db, channel_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
-    channel = await service.update_channel(db, channel, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    channel = await run_versioned_write(
+        db,
+        channel,
+        payload.expected_revision,
+        schemas.AudioChannelPatchRead,
+        lambda: service.update_channel(db, channel, data),
+        lambda: service.get_channel(db, channel_id),
+    )
     channel = await service.get_channel(db, channel.id)
     read = schemas.AudioChannelPatchRead.model_validate(channel)
     list_obj = await service.get_channel_list(db, channel.channel_list_id)
@@ -274,13 +283,21 @@ async def update_channel(
 async def delete_channel(
     job_id: UUID,
     channel_id: UUID,
+    expected_revision: int = Query(ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     channel = await service.get_channel(db, channel_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
     list_obj = await service.get_channel_list(db, channel.channel_list_id)
-    await service.delete_channel(db, channel)
+    await run_versioned_delete(
+        db,
+        channel,
+        expected_revision,
+        schemas.AudioChannelPatchRead,
+        lambda: service.delete_channel(db, channel),
+        lambda: service.get_channel(db, channel_id),
+    )
     await publish_job_event(list_obj.job_id, "channel.delete", {"id": str(channel_id)})
 
 
@@ -340,14 +357,21 @@ async def update_patch_point(
     point = await service.get_patch_point(db, point_id)
     if point is None or point.channel_id != channel_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
     if "device_id" in data:
         if data["device_id"] is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "A patch point must be linked to a device"
             )
         data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
-    point = await service.update_patch_point(db, point, data)
+    point = await run_versioned_write(
+        db,
+        point,
+        payload.expected_revision,
+        schemas.ChannelPatchPointRead,
+        lambda: service.update_patch_point(db, point, data),
+        lambda: service.get_patch_point(db, point_id),
+    )
     channel = await service.get_channel(db, channel_id)
     await _publish_channel(db, channel)
     return schemas.ChannelPatchPointRead.model_validate(point)
@@ -358,6 +382,7 @@ async def delete_patch_point(
     job_id: UUID,
     channel_id: UUID,
     point_id: UUID,
+    expected_revision: int = Query(ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     if await service.get_job(db, job_id) is None:
@@ -366,7 +391,14 @@ async def delete_patch_point(
     if point is None or point.channel_id != channel_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
     channel = await service.get_channel(db, channel_id)
-    await service.delete_patch_point(db, point)
+    await run_versioned_delete(
+        db,
+        point,
+        expected_revision,
+        schemas.ChannelPatchPointRead,
+        lambda: service.delete_patch_point(db, point),
+        lambda: service.get_patch_point(db, point_id),
+    )
     await _publish_channel(db, channel)
 
 
@@ -420,7 +452,15 @@ async def update_output(
     output = await service.get_output(db, output_id)
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
-    output = await service.update_output(db, output, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    output = await run_versioned_write(
+        db,
+        output,
+        payload.expected_revision,
+        schemas.ChannelListOutputRead,
+        lambda: service.update_output(db, output, data),
+        lambda: service.get_output(db, output_id),
+    )
     await _publish_list(db, job_id, list_id)
     return schemas.ChannelListOutputRead.model_validate(output)
 
@@ -430,6 +470,7 @@ async def delete_output(
     job_id: UUID,
     list_id: UUID,
     output_id: UUID,
+    expected_revision: int = Query(ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     if await service.get_job(db, job_id) is None:
@@ -437,7 +478,14 @@ async def delete_output(
     output = await service.get_output(db, output_id)
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
-    await service.delete_output(db, output)
+    await run_versioned_delete(
+        db,
+        output,
+        expected_revision,
+        schemas.ChannelListOutputRead,
+        lambda: service.delete_output(db, output),
+        lambda: service.get_output(db, output_id),
+    )
     await _publish_list(db, job_id, list_id)
 
 
@@ -486,7 +534,7 @@ async def update_output_point(
     point = await service.get_output_point(db, point_id)
     if point is None or point.output_id != output_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
     if "device_id" in data:
         if data["device_id"] is None:
             raise HTTPException(
@@ -494,7 +542,14 @@ async def update_output_point(
                 "Every output point must be linked to a device",
             )
         data["point_type"] = await _linked_device_type(db, job_id, data["device_id"])
-    point = await service.update_output_point(db, point, data)
+    point = await run_versioned_write(
+        db,
+        point,
+        payload.expected_revision,
+        schemas.OutputPatchPointRead,
+        lambda: service.update_output_point(db, point, data),
+        lambda: service.get_output_point(db, point_id),
+    )
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
 
@@ -508,6 +563,7 @@ async def delete_output_point(
     list_id: UUID,
     output_id: UUID,
     point_id: UUID,
+    expected_revision: int = Query(ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     if await service.get_job(db, job_id) is None:
@@ -515,7 +571,14 @@ async def delete_output_point(
     point = await service.get_output_point(db, point_id)
     if point is None or point.output_id != output_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
-    await service.delete_output_point(db, point)
+    await run_versioned_delete(
+        db,
+        point,
+        expected_revision,
+        schemas.OutputPatchPointRead,
+        lambda: service.delete_output_point(db, point),
+        lambda: service.get_output_point(db, point_id),
+    )
     await _publish_list(db, job_id, list_id)
 
 

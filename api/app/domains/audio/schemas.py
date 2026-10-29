@@ -93,6 +93,7 @@ class AudioChannelPatchCreate(AudioChannelPatchBase):
 
 class AudioChannelPatchUpdate(AudioChannelPatchBase):
     channel_number: int | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class AudioChannelPatchRead(AudioChannelPatchBase):
@@ -100,6 +101,7 @@ class AudioChannelPatchRead(AudioChannelPatchBase):
 
     id: UUID
     channel_list_id: UUID
+    revision: int
     patch_points: list["ChannelPatchPointRead"] = []
 
 
@@ -119,6 +121,7 @@ class ChannelPatchPointCreate(ChannelPatchPointBase):
 class ChannelPatchPointUpdate(ChannelPatchPointBase):
     position: int | None = None
     point_type: str | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class ChannelPatchPointRead(ChannelPatchPointBase):
@@ -126,6 +129,7 @@ class ChannelPatchPointRead(ChannelPatchPointBase):
 
     id: UUID
     channel_id: UUID
+    revision: int
 
 
 class OutputPatchPointBase(BaseModel):
@@ -147,6 +151,7 @@ class OutputPatchPointCreate(OutputPatchPointBase):
 class OutputPatchPointUpdate(OutputPatchPointBase):
     position: int | None = None
     point_type: str | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class OutputPatchPointRead(OutputPatchPointBase):
@@ -154,6 +159,7 @@ class OutputPatchPointRead(OutputPatchPointBase):
 
     id: UUID
     output_id: UUID
+    revision: int
 
 
 class ChannelListOutputBase(BaseModel):
@@ -175,6 +181,7 @@ class ChannelListOutputUpdate(ChannelListOutputBase):
     connector: str | None = None
     notes: str | None = None
     color_code: str | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class ChannelListOutputRead(ChannelListOutputBase):
@@ -182,6 +189,7 @@ class ChannelListOutputRead(ChannelListOutputBase):
 
     id: UUID
     channel_list_id: UUID
+    revision: int
     points: list[OutputPatchPointRead] = []
 
 
