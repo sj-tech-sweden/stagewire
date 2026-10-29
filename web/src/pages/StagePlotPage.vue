@@ -577,16 +577,6 @@
                 v-if="job?.venue_id"
                 dense
                 no-caps
-                icon="outlet"
-                color="primary"
-                outline
-                :label="t('stagePlot.addOutlet')"
-                @click="outletDialog = true"
-              />
-              <q-btn
-                v-if="job?.venue_id"
-                dense
-                no-caps
                 icon="cable"
                 :color="connectPowerMode ? 'primary' : 'grey-7'"
                 :outline="!connectPowerMode"
@@ -2895,6 +2885,9 @@ async function resolveParentId(source) {
       name: outlet.name || 'Outlet',
     });
     src = res.data;
+    // Keep the local store in sync so downstream lookups (e.g. the connector
+    // and rating a device node inherits from this source) resolve correctly.
+    powerNodes.value.push(src);
   }
   return src.id;
 }
@@ -2929,7 +2922,9 @@ async function wireDeviceToParent(elId, parentId) {
       parent_id: parentId,
       device_id: el.linked_device_id,
       feed_connector: connector,
-      rating_amps: null,
+      // A device fed from a fixed-install (rated) source inherits that rating;
+      // a connector that "needs_rating" cannot be created with a null rating.
+      rating_amps: parent?.rating_amps ?? null,
       name: devicesStore.byId(el.linked_device_id)?.name || 'Device',
     });
     node = res.data;

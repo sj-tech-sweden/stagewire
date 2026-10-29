@@ -80,7 +80,7 @@ test('a device can be wired to an outlet via connect power on the stage plot', a
 
   // Enter connect mode and click the outlet, then the device element.
   await page.getByRole('button', { name: 'Connect power' }).click();
-  await expect(page.getByText('Click an outlet')).toBeVisible();
+  await expect(page.getByText('Pick a source')).toBeVisible();
 
   // The stage plot renders at a fixed 0.7 scale with no stage offset, so the
   // outlet (centre) and the Wash element map to these canvas pixels.
@@ -91,7 +91,7 @@ test('a device can be wired to an outlet via connect power on the stage plot', a
   const devicePt = { x: (300 + 20) * SCALE, y: (100 + 15) * SCALE };
 
   await page.mouse.click(box.x + outletPt.x, box.y + outletPt.y);
-  await expect(page.getByText('Outlet selected').first()).toBeVisible();
+  await expect(page.getByText('Source selected').first()).toBeVisible();
 
   await page.mouse.click(box.x + devicePt.x, box.y + devicePt.y);
 
@@ -135,7 +135,7 @@ test('a rated-connector outlet can be wired to a device via connect power', asyn
   await expect(page.getByText('Connect power', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Connect power' }).click();
-  await expect(page.getByText('Click an outlet')).toBeVisible();
+  await expect(page.getByText('Pick a source')).toBeVisible();
 
   const SCALE = 0.7;
   const canvas = page.locator('.konvajs-content canvas');
@@ -144,7 +144,7 @@ test('a rated-connector outlet can be wired to a device via connect power', asyn
   const devicePt = { x: (300 + 20) * SCALE, y: (100 + 15) * SCALE };
 
   await page.mouse.click(box.x + outletPt.x, box.y + outletPt.y);
-  await expect(page.getByText('Outlet selected').first()).toBeVisible();
+  await expect(page.getByText('Source selected').first()).toBeVisible();
 
   await page.mouse.click(box.x + devicePt.x, box.y + devicePt.y);
 

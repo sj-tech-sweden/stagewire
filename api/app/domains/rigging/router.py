@@ -251,8 +251,26 @@ async def update_node(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "A node cannot hang from itself"
             )
-        changed["parent_id"] = str(changed["parent_id"]) if changed["parent_id"] else None
-    tree = [dc_replace(n, **changed) if n.id == str(node.id) else n for n in tree]
+        parent_id_value = str(changed["parent_id"]) if changed["parent_id"] else None
+    else:
+        parent_id_value = node.parent_id
+    # power_tree.Node models the parent through `feeds`, not a `parent_id` column, so
+    # rebuild the node's feeds (primary feed + extra merge feeds) for the evaluation tree.
+    node_extra_feeds = [f for f in feeds if str(f.node_id) == str(node.id)]
+    new_feeds: list[power_tree.Feed] = []
+    if parent_id_value is not None:
+        new_feeds.append(
+            power_tree.Feed(
+                str(parent_id_value),
+                changed.get("feed_connector", node.feed_connector),
+                changed.get("phase", node.phase),
+            )
+        )
+    for f in node_extra_feeds:
+        new_feeds.append(power_tree.Feed(str(f.parent_id), f.feed_connector, f.phase))
+    replace_fields = {k: v for k, v in changed.items() if k != "parent_id"}
+    replace_fields["feeds"] = tuple(new_feeds)
+    tree = [dc_replace(n, **replace_fields) if n.id == str(node.id) else n for n in tree]
     if "name" in changed:
         names = (changed["name"], node.name)
     else:
@@ -266,9 +284,7 @@ async def update_node(
     return await _read_node(db, node)
 
 
-def _descendant_ids(
-    nodes: list[PowerNode], feeds: list[PowerNodeFeed], node_id: str
-) -> set[str]:
+def _descendant_ids(nodes: list[PowerNode], feeds: list[PowerNodeFeed], node_id: str) -> set[str]:
     children: dict[str, list[str]] = {}
     for n in nodes:
         if n.parent_id:
@@ -291,9 +307,7 @@ async def delete_node(job_id: UUID, node_id: UUID, db: AsyncSession = Depends(ge
     node = await _found(await service.get_node(db, job_id, node_id), "Power node not found")
     nodes = await service.list_nodes(db, job_id)
     feeds = await service.list_feeds(db, job_id)
-    if any(n.parent_id == node.id for n in nodes) or any(
-        f.parent_id == node.id for f in feeds
-    ):
+    if any(n.parent_id == node.id for n in nodes) or any(f.parent_id == node.id for f in feeds):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Move or remove the nodes fed from this one first"
         )
@@ -328,9 +342,7 @@ async def add_feed(
     nodes = await service.list_nodes(db, job_id)
     feeds = await service.list_feeds(db, job_id)
     if str(parent.id) in _descendant_ids(nodes, feeds, str(node.id)) | {str(node.id)}:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "A node cannot hang from itself"
-        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A node cannot hang from itself")
     if not connectors.known(payload.feed_connector):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown connector {payload.feed_connector}"

@@ -146,8 +146,10 @@ def evaluate(nodes: list[Node], loads: list[Load]) -> Evaluation:
             value = node.active
         else:
             parents = [by_id[f.parent_id] for f in node.feeds if f.parent_id in by_id]
-            value = bool(parents) and node.active and any(
-                is_powered(p, seen | {node.id}) for p in parents
+            value = (
+                bool(parents)
+                and node.active
+                and any(is_powered(p, seen | {node.id}) for p in parents)
             )
         powered[node.id] = value
         return value

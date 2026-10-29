@@ -38,6 +38,18 @@ module.exports = function (/* ctx */) {
       host: '0.0.0.0',
       port: 9010,
       open: false,
+      // Proxy API calls to the backend so the browser talks same-origin and
+      // never trips CORS preflights during local dev / E2E. The browser calls
+      // http://localhost:9010/api/v1/... (same origin as the dev server) and
+      // Vite forwards /api to the API service. `API_PROXY_TARGET` lets the
+      // target be overridden (e.g. for a different network alias).
+      proxy: {
+        '/api': {
+          target: process.env.API_PROXY_TARGET || 'http://api:8010',
+          changeOrigin: true,
+          ws: true,
+        },
+      },
     },
 
     sourceFiles: {
