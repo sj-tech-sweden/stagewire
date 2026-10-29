@@ -579,7 +579,8 @@ export default {
     connectedToOutlet: 'Kopplade {device} till uttaget.',
     linkDeviceFirst: 'Länka först det här elementet till en enhet (markera det och välj Länkad enhet).',
     alreadyConnected: 'Den enheten är redan kopplad till det här uttaget.',
-    connectorRequired: 'Ge uttaget en kontakt så att det går att koppla.',
+    outletRating: 'Märkström (A)',
+    ratingNeeded: 'Fast installation har ingen fast märkning — ange slingans ström i ampere.',
     highlightChannel: 'Markera på scenkarta',
     types: {
       screen: 'Duk',

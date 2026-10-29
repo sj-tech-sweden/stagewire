@@ -233,3 +233,33 @@ test('the DMX flow is drawn as a node-and-line diagram', async ({ page, request 
   await expect(diagram.locator('.dmx-flow-node')).toHaveCount(2);
   await expect(uniCard.locator('svg.dmx-flow-arrows line')).not.toHaveCount(0);
 });
+
+test('reopening a fixture step for edit keeps the linked fixture selected', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E DMX Edit ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Console', device_type: 'mixer' });
+  await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Robin', device_type: 'fixture' });
+  await post(request, headers, `/jobs/${jobId}/fixtures`, { device_name: 'Robin', dmx_address: 1, footprint: 8 });
+
+  await page.goto(`/jobs/${jobId}?view=lights`);
+  page.on('dialog', (d) => d.accept());
+  await expect(page.getByText('DMX chain', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add universe' }).click();
+  await page.getByLabel('Universe number').fill('1');
+  await selectOption(page, 'Source device', 'Console');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const uniCard = page.locator('.q-card', { hasText: 'Uni 1' });
+
+  await uniCard.getByRole('button', { name: 'Add step', exact: true }).click();
+  await selectOption(page, 'Fixture', 'Robin');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(uniCard).toContainText('Robin');
+
+  // Reopen the fixture step for editing by clicking its node. The Fixture picker
+  // must show "Robin" (it must map the device id back to the fixture id).
+  await uniCard.locator('.dmx-flow-node', { hasText: 'Robin' }).click();
+  await expect(page.getByLabel('Fixture')).toHaveAttribute('value', 'Robin');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+});

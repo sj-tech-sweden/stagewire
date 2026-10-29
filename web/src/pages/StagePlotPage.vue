@@ -1228,6 +1228,14 @@
             dense
             clearable
           />
+          <q-input
+            v-model="outletForm.rating_amps"
+            type="number"
+            :label="t('stagePlot.outletRating')"
+            :hint="outletNeedsRating ? t('stagePlot.ratingNeeded') : ''"
+            dense
+            class="q-mt-sm"
+          />
           <div class="text-caption text-grey-7">
             {{ t('stagePlot.placeOutlet') }}
           </div>
@@ -1241,7 +1249,7 @@
           <q-btn
             color="primary"
             :label="t('stagePlot.addOutlet')"
-            :disable="!outletForm.name || !outletForm.connector"
+            :disable="!outletForm.name || !outletForm.connector || (outletNeedsRating && !outletForm.rating_amps)"
             :loading="placingOutlet"
             @click="placeOutlet"
           />
@@ -2841,10 +2849,6 @@ async function connectDeviceToOutlet(elId, outletId) {
   }
   const outlet = powerOutlets.value.find((o) => o.id === outletId);
   if (!outlet) return;
-  if (!outlet.connector) {
-    $q.notify({ message: t('stagePlot.connectorRequired'), color: 'warning' });
-    return;
-  }
   try {
     let sourceId = null;
     const existing = powerNodes.value.find(
@@ -2857,6 +2861,7 @@ async function connectDeviceToOutlet(elId, outletId) {
         kind: 'source',
         venue_outlet_id: outletId,
         feed_connector: outlet.connector,
+        rating_amps: outlet.rating_amps ?? null,
         outputs: [{ connector: outlet.connector, count: 1 }],
         name: outlet.name || 'Outlet',
       });
@@ -2876,6 +2881,7 @@ async function connectDeviceToOutlet(elId, outletId) {
       parent_id: sourceId,
       device_id: el.linked_device_id,
       feed_connector: outlet.connector,
+      rating_amps: outlet.rating_amps ?? null,
       name: devicesStore.byId(el.linked_device_id)?.name || 'Device',
     });
     const deviceName = devicesStore.byId(el.linked_device_id)?.name || 'Device';
@@ -2908,20 +2914,26 @@ const connectorOptions = [
   { label: 'Fixed install 1-phase', value: 'install_1p' },
   { label: 'Fixed install 3-phase', value: 'install_3p' },
 ];
-const outletForm = reactive({ name: '', connector: '' });
+// Fixed-install connectors carry no fixed rating, so the node must be rated by hand.
+const RATED_OUTLET_CONNECTORS = ['install_1p', 'install_3p'];
+const outletForm = reactive({ name: '', connector: '', rating_amps: null });
+const outletNeedsRating = computed(() => RATED_OUTLET_CONNECTORS.includes(outletForm.connector));
 async function placeOutlet() {
   if (!outletForm.name || !outletForm.connector || !job.value?.venue_id) return;
+  if (outletNeedsRating.value && !outletForm.rating_amps) return;
   placingOutlet.value = true;
   try {
     await api.post(`/venues/${job.value.venue_id}/power-outlets`, {
       name: outletForm.name,
       connector: outletForm.connector,
+      rating_amps: outletForm.rating_amps ? Number(outletForm.rating_amps) : null,
       x_cm: Math.round(stageW.value / 2),
       y_cm: Math.round(stageH.value / 2),
     });
     outletDialog.value = false;
     outletForm.name = '';
     outletForm.connector = '';
+    outletForm.rating_amps = null;
     await loadLights();
     $q.notify({ message: t('stagePlot.outletPlaced'), color: 'positive' });
   } catch (err) {

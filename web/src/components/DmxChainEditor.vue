@@ -484,7 +484,9 @@ function openStep(u, parentId, step) {
   stepForm.parent_id = step ? step.parent_id || null : parentId || null;
   stepForm.kind = step ? (step.kind === 'fixture' ? 'fixture' : 'device') : 'fixture';
   stepForm.device_id = step ? (step.kind === 'device' ? step.device_id : null) : null;
-  stepForm.fixture_id = step ? (step.kind === 'fixture' ? step.device_id : null) : null;
+  // A fixture step serialises its `device_id` (not its fixture id), so map back to the
+  // fixture id the picker expects.
+  stepForm.fixture_id = step && step.kind === 'fixture' ? (fixtureIdByDevice.value[step.device_id] || null) : null;
   stepForm.in_port = step ? step.in_port || '' : '';
   stepForm.out_port = step ? step.out_port || '' : '';
   stepForm.connector = step ? step.connector || '' : '';

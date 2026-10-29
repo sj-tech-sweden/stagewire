@@ -579,7 +579,8 @@ export default {
     connectedToOutlet: 'Connected {device} to the outlet.',
     linkDeviceFirst: 'Link this element to a device first (select it and choose Linked device).',
     alreadyConnected: 'That device is already wired to this outlet.',
-    connectorRequired: 'Give the outlet a connector so it can be wired.',
+    outletRating: 'Rating (A)',
+    ratingNeeded: 'Fixed-install connectors carry no fixed rating — enter the circuit rating in amps.',
     highlightChannel: 'Highlight on stage plot',
     types: {
       screen: 'Screen',

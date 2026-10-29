@@ -71,6 +71,7 @@ class VenuePropagateResult(BaseModel):
 class VenuePowerOutletBase(BaseModel):
     name: str = ""
     connector: str = ""
+    rating_amps: float | None = None
     x_cm: float | None = None
     y_cm: float | None = None
     notes: str = ""

@@ -47,6 +47,7 @@ class VenuePowerOutlet(Base):
     )
     name: Mapped[str] = mapped_column(String(255), default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
+    rating_amps: Mapped[float | None] = mapped_column(Float, nullable=True)
     x_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     y_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
