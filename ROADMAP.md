@@ -24,4 +24,4 @@
 - [ ] The power tree drawn on the stage plot.
 - [ ] Rigging drawn on the stage plot itself (truss positions and hung loads).
 - [x] Stockwire fixture products: name, maker, channel modes and weight become a fixture type (spec §3.9).
-- [ ] DMX chains per universe and power chains per fixture: the data and API are in; the signal-flow editor is not.
+- [x] DMX chains per universe: a signal-flow editor on the Lights tab builds each universe's tree of steps (source → fixtures/devices, with branching) on top of the existing API.

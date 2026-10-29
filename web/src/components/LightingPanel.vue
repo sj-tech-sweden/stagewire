@@ -411,6 +411,7 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <DmxChainEditor :job-id="jobId" />
   </div>
 </template>
 
@@ -421,6 +422,7 @@ import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import DmxGrid from '@/components/DmxGrid.vue';
+import DmxChainEditor from '@/components/DmxChainEditor.vue';
 import { clashesFor, firstFreeAddress } from '@/utils/dmx';
 
 const props = defineProps({
