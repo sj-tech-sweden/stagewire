@@ -21,7 +21,7 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 4 | Quasar UI: `JobWorkspaceView`, `MultiDomainPatchDrawer`, `StockwireCatalogDrawer`, inspector, layer HUD | **Not started** |
 | 5 | Mode A/B switching UI (store state + `placeUnplaced` exist, no view) | **Not started** |
 | 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
-| 6b | Backfill video chains and audio **output** chains | **Not started** |
+| 6b | Backfill video chains and audio **output** chains | **Done** |
 | 6c | Repoint routers, reports, exports, stage plot to read the graph, one domain at a time | **Not started** (the big one) |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
@@ -56,7 +56,10 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 - `AudioDevice` -> `GraphDevice` (domain guessed: fixture_type -> lighting, video fields -> video, else audio). A lighting fixture or power node linked to a device is merged into that device's `attributes`; unlinked ones become their own devices.
 - DMX steps -> `dmx` edges (root steps hang off the universe source device, `attributes.universe`); power parent/extra feeds -> `power` edges with phase; fixture `power_node_id` -> power edge.
 - Every row/edge gets `legacy_ref` (`table:id`); re-running only adds what is new. Edits made in the graph are not overwritten (existing refs are skipped), and nothing is ever deleted by the backfill.
-- Not mapped yet: video chains (`video_patch_points`, `video_output_patch_points`) and audio output chains (`output_patch_points`; direction of the chain vs console needs confirming).
+- Audio outputs: first patch point is the console (confirmed). `ChannelListOutput` becomes a `kind="output"` bus node: console -> bus -> rest of chain. A point's parent is `parent_id`, else the previous point; points whose parent is the console hang off the bus.
+- Video inputs: each `VideoInput` is a `kind="video_input"` source node feeding its linear chain. `input_port` names the input port on that step's device; `source_port` names the output port on the parent step's device (ports are created on demand).
+- Video outputs: parent via `parent_id` only; leaves of the tree feed a `kind="video_destination"` node whose input port `channels` equals the number of leaves.
+- `parallel` on output points is kept in edge attributes only; it does not change topology.
 
 ## Conflict resolution: how it works
 

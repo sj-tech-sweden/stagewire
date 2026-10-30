@@ -8,11 +8,14 @@ from app.domains.audio.models import (
     AudioChannelPatch,
     AudioDevice,
     ChannelList,
+    ChannelListOutput,
     ChannelPatchPoint,
+    OutputPatchPoint,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
 from app.domains.rigging.models import PowerNode, PowerNodeFeed
+from app.domains.video.models import VideoInputList
 
 FAN_OUT = 64
 
@@ -117,6 +120,27 @@ class Backfill:
             new["max_connections"] = FAN_OUT
         device.ports = [*device.ports, new]
         return new["id"]
+
+    @classmethod
+    def named_port(
+        cls, device: GraphDevice, direction: str, signal: str, name: str, connector: str = ""
+    ) -> str:
+        if not name:
+            return cls.port(device, direction, signal, connector)
+        for p in device.ports:
+            if p["id"] == name and p["direction"] == direction:
+                return name
+        pid = name if all(p["id"] != name for p in device.ports) else f"{name}-{direction}"
+        new = {
+            "id": pid,
+            "direction": direction,
+            "signal": signal,
+            "connector": connector.lower() or None,
+        }
+        if direction == "out":
+            new["max_connections"] = FAN_OUT
+        device.ports = [*device.ports, new]
+        return pid
 
     def edge(
         self,
@@ -237,6 +261,193 @@ class Backfill:
                     },
                 )
                 prev, prev_port = target, self.port(target, "out", "audio", point.connector)
+
+    async def audio_outputs(self) -> None:
+        outputs = (
+            await self.db.scalars(
+                select(ChannelListOutput)
+                .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
+                .where(ChannelList.job_id == self.job_id)
+            )
+        ).all()
+        points = (
+            await self.db.scalars(
+                select(OutputPatchPoint)
+                .where(OutputPatchPoint.output_id.in_([o.id for o in outputs]))
+                .order_by(OutputPatchPoint.position)
+            )
+        ).all()
+        by_output: dict[uuid.UUID, list[OutputPatchPoint]] = {}
+        for point in points:
+            if point.device_id:
+                by_output.setdefault(point.output_id, []).append(point)
+        for output in outputs:
+            bus = self.device(
+                f"channel_list_outputs:{output.id}",
+                domain="audio",
+                kind="output",
+                name=output.name,
+                notes=output.notes or "",
+                position=output.position,
+                attributes={
+                    "mode": output.mode,
+                    "color_code": output.color_code,
+                    "channel_list_id": str(output.channel_list_id),
+                },
+                ports=[
+                    {"id": "in", "direction": "in", "signal": "audio"},
+                    {
+                        "id": "out",
+                        "direction": "out",
+                        "signal": "audio",
+                        "max_connections": FAN_OUT,
+                    },
+                ],
+            )
+            chain = by_output.get(output.id, [])
+            by_id = {p.id: p for p in chain}
+            console = self.devices.get(f"audio_devices:{chain[0].device_id}") if chain else None
+            if console is not None:
+                self.edge(
+                    f"channel_list_outputs:{output.id}",
+                    "audio",
+                    console,
+                    self.port(console, "out", "audio", output.connector or ""),
+                    bus,
+                    "in",
+                    attributes={"connector": output.connector},
+                )
+            for index, point in enumerate(chain):
+                if index == 0:
+                    continue
+                parent = by_id.get(point.parent_id) if point.parent_id else chain[index - 1]
+                target = self.devices.get(f"audio_devices:{point.device_id}")
+                if parent is None or target is None or parent.device_id == point.device_id:
+                    continue
+                src = (
+                    bus
+                    if parent is chain[0]
+                    else self.devices.get(f"audio_devices:{parent.device_id}")
+                )
+                if src is None:
+                    continue
+                self.edge(
+                    f"output_patch_points:{point.id}",
+                    "audio",
+                    src,
+                    "out" if src is bus else self.port(src, "out", "audio", point.connector),
+                    target,
+                    self.port(target, "in", "audio", point.connector),
+                    attributes={
+                        "output_id": str(output.id),
+                        "patch_label": point.patch_label,
+                        "bus_connector": point.bus_connector,
+                        "parallel": point.parallel,
+                    },
+                )
+
+    async def video(self) -> None:
+        lists = (
+            await self.db.scalars(
+                select(VideoInputList).where(VideoInputList.job_id == self.job_id)
+            )
+        ).all()
+        for vlist in lists:
+            for vin in vlist.inputs:
+                source = self.device(
+                    f"video_inputs:{vin.id}",
+                    domain="video",
+                    kind="video_input",
+                    name=vin.source_label or f"Input {vin.input_number}",
+                    notes=vin.notes or "",
+                    position=vin.input_number,
+                    attributes={
+                        "input_number": vin.input_number,
+                        "source_type": vin.source_type,
+                        "list_id": str(vlist.id),
+                    },
+                    ports=[
+                        {
+                            "id": "out",
+                            "direction": "out",
+                            "signal": "video",
+                            "connector": (vin.connector or "").lower() or None,
+                        }
+                    ],
+                )
+                prev = source
+                for point in vin.patch_points:
+                    target = self.devices.get(f"audio_devices:{point.device_id}")
+                    if target is None or target is prev:
+                        continue
+                    self.edge(
+                        f"video_patch_points:{point.id}",
+                        "video",
+                        prev,
+                        "out"
+                        if prev is source
+                        else self.named_port(
+                            prev, "out", "video", point.source_port, point.connector
+                        ),
+                        target,
+                        self.named_port(target, "in", "video", point.input_port, point.connector),
+                        attributes={
+                            "patch_label": point.patch_label,
+                            "input_number": vin.input_number,
+                        },
+                    )
+                    prev = target
+            for vout in vlist.outputs:
+                self._video_output(vlist, vout)
+
+    def _video_output(self, vlist: VideoInputList, vout) -> None:
+        dest_ref = f"video_outputs:{vout.id}"
+        points = [p for p in vout.patch_points if p.device_id]
+        leaves = {p.id for p in points} - {p.parent_id for p in points if p.parent_id}
+        dest = self.device(
+            dest_ref,
+            domain="video",
+            kind="video_destination",
+            name=vout.destination_label or vout.name or f"Output {vout.output_number}",
+            notes=vout.notes or "",
+            position=vout.output_number,
+            attributes={"output_number": vout.output_number, "list_id": str(vlist.id)},
+            ports=[
+                {
+                    "id": "in",
+                    "direction": "in",
+                    "signal": "video",
+                    "connector": (vout.connector or "").lower() or None,
+                    "channels": max(1, len(leaves)),
+                }
+            ],
+        )
+        by_id = {p.id: p for p in points}
+        for point in points:
+            target = self.devices.get(f"audio_devices:{point.device_id}")
+            parent = by_id.get(point.parent_id) if point.parent_id else None
+            if parent is not None and target is not None and parent.device_id != point.device_id:
+                src = self.devices.get(f"audio_devices:{parent.device_id}")
+                if src is not None:
+                    self.edge(
+                        f"video_output_patch_points:{point.id}",
+                        "video",
+                        src,
+                        self.named_port(src, "out", "video", point.source_port, point.connector),
+                        target,
+                        self.named_port(target, "in", "video", point.input_port, point.connector),
+                        attributes={"patch_label": point.patch_label, "output_id": str(vout.id)},
+                    )
+            if point.id in leaves and target is not None:
+                self.edge(
+                    f"video_outputs.dest:{point.id}",
+                    "video",
+                    target,
+                    self.port(target, "out", "video", point.connector),
+                    dest,
+                    "in",
+                    attributes={"output_id": str(vout.id)},
+                )
 
     async def lighting(self) -> None:
         fixtures = (
@@ -400,13 +611,15 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     """Copy a job's legacy audio/lighting/power rows into the unified graph.
 
     Idempotent: rows and edges carry a ``legacy_ref`` so a second run only adds what is new.
-    Video chains and audio output chains are not mapped yet (see docs/PROGRESS.md).
+    Audio output chains hang off a bus node fed by the first patch point (the console).
     """
     builder = Backfill(db, job_id)
     await builder.load_existing()
     await builder.audio_devices()
     await builder.power()
     await builder.channels()
+    await builder.audio_outputs()
+    await builder.video()
     await builder.lighting()
     await db.commit()
     return builder.result
