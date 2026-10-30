@@ -23,6 +23,11 @@
             :config="coverageConfig"
           />
           <v-line
+            v-for="shape in shapeLines"
+            :key="shape.id"
+            :config="shape.config"
+          />
+          <v-line
             v-if="audienceLine"
             :config="audienceLine"
           />
@@ -68,8 +73,8 @@
         >
           <v-rect
             :config="{
-              width: boxFor(device, zoom).w,
-              height: boxFor(device, zoom).h,
+              width: box(device).w,
+              height: box(device).h,
               cornerRadius: 4,
               dash: isPlotElement(device) ? [6, 3] : undefined,
               fill: fillFor(device),
@@ -79,12 +84,12 @@
           />
           <v-text
             :config="{
-              x: 6,
-              y: 6,
-              width: Math.max(8, boxFor(device, zoom).w - 12),
-              height: Math.max(8, boxFor(device, zoom).h - 12),
-              text: device.name,
-              fontSize: 12,
+              x: 4,
+              y: 3,
+              width: Math.max(8, box(device).w - 8),
+              height: Math.max(8, box(device).h - 6),
+              text: box(device).w >= 40 ? device.name : '',
+              fontSize: Math.min(12, Math.max(8, Math.round(box(device).h * 0.4))),
               fill: '#FFFFFF',
               ellipsis: true,
               wrap: 'none',
@@ -99,6 +104,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
+import { objectColor } from '@/utils/plotObjects';
 import { SIGNAL_COLOR, boxFor, centerOf, isPlotElement, needsBookingRequest } from '@/utils/workspace';
 
 // ``frame`` (see utils/plotFrame.js) is the venue/stage the gear sits in. Without it the canvas is
@@ -110,10 +116,12 @@ const props = defineProps({
   showOutlets: { type: Boolean, default: true },
   showAudience: { type: Boolean, default: true },
   coverageImage: { type: Object, default: null },
+  shapes: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
   zoom: { type: Number, default: 0.8 },
+  deviceScale: { type: Number, default: 1 },
   connectMode: { type: Boolean, default: false },
 });
 const emit = defineEmits(['select', 'move', 'connect']);
@@ -135,7 +143,7 @@ let observer = null;
 
 const bg = computed(() => ($q.dark.isActive ? '#0C1114' : '#F5F5F5'));
 const DOMAIN_FILL = { audio: '#2E7D32', lighting: '#8D6E00', video: '#00697F', power: '#8E0012', other: '#455A64' };
-const fillFor = (device) => DOMAIN_FILL[device.domain] || DOMAIN_FILL.other;
+const fillFor = (device) => objectColor(device) || DOMAIN_FILL[device.domain] || DOMAIN_FILL.other;
 const strokeFor = (device) => (needsBookingRequest(device) ? '#FFC107' : 'rgba(255,255,255,0.25)');
 
 const origin = computed(() => ({ x: props.frame?.stageX || 0, y: props.frame?.stageY || 0 }));
@@ -167,6 +175,21 @@ const coverageConfig = computed(() => ({
   height: props.frame.height * props.zoom,
   listening: false,
 }));
+// Camera and projector views arrive in stage-relative cm; they are drawn at the stage offset.
+const shapeLines = computed(() =>
+  props.shapes.map((shape) => ({
+    id: shape.id,
+    config: {
+      points: shape.points.flatMap(([x, y]) => [(x + origin.value.x) * props.zoom, (y + origin.value.y) * props.zoom]),
+      closed: shape.closed,
+      fill: shape.fill,
+      stroke: shape.stroke,
+      strokeWidth: shape.strokeWidth,
+      dash: shape.dash,
+      listening: false,
+    },
+  })),
+);
 const audienceLine = computed(() => {
   const polygon = props.frame?.audience || [];
   if (!props.showAudience || polygon.length < 3) return null;
@@ -191,8 +214,9 @@ const outletMarks = computed(() =>
     : [],
 );
 
+const box = (device) => boxFor(device, props.zoom, props.deviceScale);
 const center = (device) => {
-  const [x, y] = centerOf(device, props.zoom);
+  const [x, y] = centerOf(device, props.zoom, props.deviceScale);
   return [x + origin.value.x * props.zoom, y + origin.value.y * props.zoom];
 };
 const placed = computed(() => new Map(props.devices.map((d) => [d.id, d])));
@@ -257,6 +281,7 @@ onBeforeUnmount(() => observer?.disconnect());
 .canvas-host {
   width: 100%;
   overflow: auto;
+  max-height: 75vh;
   border-radius: 4px;
   touch-action: none;
 }

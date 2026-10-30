@@ -4,6 +4,13 @@
       v-model="reportDialog"
       :job-id="jobId"
     />
+    <StageVenueDialog
+      v-model="stageVenueOpen"
+      :job-id="jobId"
+      :frame="plotFrame.frame.value"
+      @saved="stageVenueSaved"
+      @error="(err) => $q.notify({ type: 'negative', message: errorText(err) })"
+    />
     <ConflictDialog
       :conflict="graph.conflict"
       @resolve="(r) => graph.resolveConflict(r).catch(() => {})"
@@ -220,6 +227,60 @@
               <q-btn
                 dense
                 no-caps
+                icon="aspect_ratio"
+                :label="t('workspace.gearSize')"
+              >
+                <q-menu>
+                  <div class="q-pa-md">
+                    <q-slider
+                      v-model="deviceScale"
+                      :min="0.4"
+                      :max="3"
+                      :step="0.1"
+                      style="width: 180px"
+                      label
+                      data-testid="gear-size"
+                    />
+                  </div>
+                </q-menu>
+              </q-btn>
+              <q-btn
+                dense
+                no-caps
+                icon="crop_free"
+                :label="t('workspace.stageVenue')"
+                data-testid="edit-stage-venue"
+                @click="stageVenueOpen = true"
+              />
+              <q-btn-dropdown
+                dense
+                no-caps
+                icon="category"
+                :label="t('workspace.addObject')"
+                data-testid="add-object"
+              >
+                <q-list>
+                  <q-item
+                    v-for="object in OBJECT_TYPES"
+                    :key="object.type"
+                    v-close-popup
+                    clickable
+                    :data-testid="`add-object-${object.type}`"
+                    @click="addObject(object)"
+                  >
+                    <q-item-section avatar>
+                      <q-icon
+                        :name="object.icon"
+                        :style="{ color: object.color }"
+                      />
+                    </q-item-section>
+                    <q-item-section>{{ objectLabel(object) }}</q-item-section>
+                  </q-item>
+                </q-list>
+              </q-btn-dropdown>
+              <q-btn
+                dense
+                no-caps
                 icon="power"
                 :color="plotFrame.show.outlets.value ? 'primary' : undefined"
                 :label="t('workspace.layerOutlets')"
@@ -243,6 +304,36 @@
                 :label="t('workspace.layerCoverage')"
                 data-testid="layer-coverage"
                 @click="plotFrame.show.coverage.value = !plotFrame.show.coverage.value"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="videocam"
+                :color="plotFrame.show.camera.value ? 'primary' : undefined"
+                :label="t('workspace.layerCamera')"
+                data-testid="layer-camera"
+                @click="plotFrame.show.camera.value = !plotFrame.show.camera.value"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="cast"
+                :color="plotFrame.show.projector.value ? 'primary' : undefined"
+                :label="t('workspace.layerProjector')"
+                data-testid="layer-projector"
+                @click="plotFrame.show.projector.value = !plotFrame.show.projector.value"
+              />
+              <q-btn-toggle
+                v-if="plotFrame.show.camera.value"
+                v-model="plotFrame.cameraMode.value"
+                dense
+                no-caps
+                unelevated
+                toggle-color="primary"
+                :options="[
+                  { label: t('stagePlot.cameraViewRange'), value: 'range' },
+                  { label: t('stagePlot.cameraViewChosen'), value: 'chosen' },
+                ]"
               />
             </q-btn-group>
             <div
@@ -269,11 +360,13 @@
               :edges="canvasEdges"
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
+              :device-scale="deviceScale"
               :frame="plotFrame.frame.value"
               :outlets="plotFrame.outlets.value"
               :show-outlets="plotFrame.show.outlets.value"
               :show-audience="plotFrame.show.audience.value"
               :coverage-image="plotFrame.coverageImage.value"
+              :shapes="viewShapes"
               :connect-mode="connectMode"
               @select="select"
               @move="move"
@@ -359,9 +452,13 @@
 
 <script setup>
 import { isRevisionConflict } from '@/utils/graph';
+import StageVenueDialog from '@/components/StageVenueDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
+import { elementsFromGraph, legacyId } from '@/utils/graphLegacy';
 import { usePlotFrame } from '@/composables/usePlotFrame';
-import { fitZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
+import { OBJECT_TYPES } from '@/utils/plotObjects';
+import { useStagePlotStore } from '@/stores/stageplot';
+import { fitWidthZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
 import { computed, onMounted, ref, watch, reactive } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -421,6 +518,7 @@ const modeTabs = computed(() => [
   { label: t('workspace.modePower'), value: 'power', icon: 'bolt' },
 ]);
 const zoom = ref(0.3);
+const deviceScale = ref(1);
 const plotFrame = usePlotFrame(jobId);
 const connectMode = ref(false);
 const plugins = ref([]);
@@ -455,6 +553,12 @@ const unplacedGear = computed(() =>
       (d.canvas_x_cm == null || d.canvas_y_cm == null),
   ),
 );
+// Camera and projector views of the placed plot elements (see utils/plotViews.js).
+const viewShapes = computed(() => {
+  const elements = elementsFromGraph(graph.devices, graph.edges);
+  const byLegacy = new Map(graph.devices.map((d) => [legacyId(d), d]));
+  return plotFrame.viewShapes(elements, (el) => byLegacy.get(el.linked_device_id)?.attributes || null);
+});
 const canvasEdges = computed(() =>
   graph.edges.filter((e) => e.signal !== 'link' && layers[SIGNAL_LAYER[e.signal]] !== false),
 );
@@ -579,7 +683,7 @@ async function onProductDrop(event) {
 
 function fitCanvas() {
   const width = document.querySelector('[data-testid="workspace-canvas"]')?.clientWidth || 800;
-  zoom.value = fitZoom(plotFrame.frame.value, width, 520);
+  zoom.value = fitWidthZoom(plotFrame.frame.value, width);
 }
 
 async function placeGear(device) {
@@ -616,6 +720,33 @@ async function exportList(list, plugin) {
 
 const importInput = ref(null);
 const reportDialog = ref(false);
+const stageVenueOpen = ref(false);
+const stagePlot = useStagePlotStore();
+const objectLabel = (object) => (object.labelKey ? t(object.labelKey, object.label || object.type) : object.label);
+
+async function stageVenueSaved() {
+  await plotFrame.load();
+  fitCanvas();
+}
+
+// A plot object (performer, table, riser, ...) is a plot element: it has a position and size and
+// can be linked to a channel or device, but it is not gear. It is placed in the middle of the stage.
+async function addObject(object) {
+  const centre = stageCentre(plotFrame.frame.value, Math.max(object.w, object.h));
+  try {
+    const created = await stagePlot.createElement(jobId, {
+      element_type: object.type,
+      label: objectLabel(object),
+      position_x: centre.x,
+      position_y: centre.y,
+      width_cm: object.w,
+      height_cm: object.h,
+    });
+    graph.selectedDeviceId = stagePlot.nodeOf(created.id)?.id || null;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
 
 // Import brings in what was made elsewhere: today a fixture patch (CSV, or an MVR export from
 // Capture, MA, Vectorworks or WYSIWYG). Fixtures land in the lights editor like added ones.
@@ -682,7 +813,10 @@ watch(
       .join('|'),
   () => {
     clearTimeout(coverageTimer);
-    coverageTimer = setTimeout(() => plotFrame.loadCoverage(), 400);
+    coverageTimer = setTimeout(() => {
+      plotFrame.loadCoverage();
+      plotFrame.loadCameraSpecs();
+    }, 400);
   },
 );
 

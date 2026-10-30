@@ -141,8 +141,10 @@ export const VIRTUAL_KINDS = new Set([
 
 export const isVirtual = (device) => VIRTUAL_KINDS.has(device.kind);
 
-export const BOX_W = 96;
-export const BOX_H = 40;
+// Gear is drawn as a box in cm on the plot (a plot element has its own width and height); the
+// size can be set per device (attributes width_cm/height_cm) and scaled for the whole canvas.
+export const DEVICE_BOX_CM = { w: 60, h: 30 };
+const MIN_BOX_PX = { w: 28, h: 16 };
 
 export const isPlotElement = (device) => device.kind === 'plot_element';
 
@@ -155,18 +157,19 @@ export function devicesShownAsElements(edges) {
   );
 }
 
-export function boxFor(device, zoom) {
-  if (!isPlotElement(device)) return { w: BOX_W, h: BOX_H };
+export function boxFor(device, zoom, scale = 1) {
   const attrs = device.attributes || {};
+  const fallback = isPlotElement(device) ? { w: 60, h: 60 } : DEVICE_BOX_CM;
+  const factor = isPlotElement(device) ? 1 : scale;
   return {
-    w: Math.max(24, (attrs.width_cm || 60) * zoom),
-    h: Math.max(16, (attrs.height_cm || 60) * zoom),
+    w: Math.max(MIN_BOX_PX.w, (attrs.width_cm || fallback.w) * factor * zoom),
+    h: Math.max(MIN_BOX_PX.h, (attrs.height_cm || fallback.h) * factor * zoom),
   };
 }
 
 // Plot elements rotate about their top-left corner, like Konva groups do.
-export function centerOf(device, zoom) {
-  const { w, h } = boxFor(device, zoom);
+export function centerOf(device, zoom, scale = 1) {
+  const { w, h } = boxFor(device, zoom, scale);
   const theta = ((device.canvas_rotation || 0) * Math.PI) / 180;
   return [
     device.canvas_x_cm * zoom + (w / 2) * Math.cos(theta) - (h / 2) * Math.sin(theta),

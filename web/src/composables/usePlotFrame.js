@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue';
 import { api } from '@/boot/api';
 import { buildCoverageCanvas, frameFromJob } from '@/utils/plotFrame';
+import { cameraShapes, projectorShapes } from '@/utils/plotViews';
 
 const saved = (key, fallback) => {
   try {
@@ -23,7 +24,11 @@ export function usePlotFrame(jobId) {
     outlets: ref(saved('sw_ws_outlets', true)),
     audience: ref(saved('sw_ws_audience', true)),
     coverage: ref(saved('sw_ws_coverage', false)),
+    camera: ref(saved('sw_ws_camera', false)),
+    projector: ref(saved('sw_ws_projector', false)),
   };
+  const cameraMode = ref(saved('sw_ws_camera_mode', 'range'));
+  const cameraSpecs = ref({});
   for (const [name, flag] of Object.entries(show)) {
     watch(flag, (value) => {
       try {
@@ -62,9 +67,57 @@ export function usePlotFrame(jobId) {
     } catch (err) {
       console.error('Failed to load the stage frame', err);
     }
-    await loadCoverage();
+    await Promise.all([loadCoverage(), loadCameraSpecs()]);
   }
 
+  // Camera specs (sensor, focal range) are looked up per plot element on the server.
+  async function loadCameraSpecs() {
+    if (!show.camera.value) return;
+    try {
+      cameraSpecs.value = (await api.get(`/jobs/${jobId}/camera-specs`)).data || {};
+    } catch (err) {
+      console.error('Failed to load camera specs', err);
+    }
+  }
+
+  // The venue area, in stage-relative cm, that cones are clipped to.
+  const box = computed(() => ({
+    minX: -frame.value.stageX,
+    minY: -frame.value.stageY,
+    maxX: frame.value.width - frame.value.stageX,
+    maxY: frame.value.height - frame.value.stageY,
+  }));
+
+  // `elements` are the plot elements in the plot page's shape (see elementsFromGraph) and
+  // `deviceOf` finds the device an element is linked to (projectors read their throw from it).
+  function viewShapes(elements, deviceOf) {
+    return [
+      ...(show.camera.value
+        ? cameraShapes({ elements, specs: cameraSpecs.value, mode: cameraMode.value, box: box.value })
+        : []),
+      ...(show.projector.value ? projectorShapes({ elements, deviceOf, box: box.value }) : []),
+    ];
+  }
+
+  watch(cameraMode, (value) => {
+    try {
+      localStorage.setItem('sw_ws_camera_mode', JSON.stringify(value));
+    } catch {
+      // storage can be blocked
+    }
+  });
   watch(show.coverage, loadCoverage);
-  return { job, frame, outlets, coverageImage, show, load, loadCoverage };
+  watch(show.camera, loadCameraSpecs);
+  return {
+    job,
+    frame,
+    outlets,
+    coverageImage,
+    show,
+    cameraMode,
+    load,
+    loadCoverage,
+    loadCameraSpecs,
+    viewShapes,
+  };
 }

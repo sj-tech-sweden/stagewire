@@ -816,3 +816,51 @@ test('the power flow takes extension cords, editable breakouts, outlets as sourc
   await page.getByTestId('plug-all-go').click();
   await expect(page.getByTestId('plug-all')).toHaveCount(0);
 });
+
+test('the stage and venue are edited on the canvas, plot objects are added and a performer is linked to a channel', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Plot ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Lead vocal' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await page.getByTestId('edit-stage-venue').click();
+  await page.getByTestId('stage-width').fill('12');
+  await page.getByTestId('venue-width').fill('20');
+  await page.getByTestId('venue-height').fill('15');
+  await page.getByTestId('stage-venue-save').click();
+  const job = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}`, { headers })).json()) as Record<string, number>;
+  await expect.poll(async () => [(await job()).stage_width_cm, (await job()).venue_width_cm, (await job()).venue_height_cm]).toEqual([1200, 2000, 1500]);
+
+  await page.getByTestId('add-object').click();
+  await page.getByTestId('add-object-performer').click();
+  const elements = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json()) as {
+      element_type: string;
+      linked_channel_id: string | null;
+      width_cm: number;
+    }[];
+  await expect.poll(async () => (await elements()).map((e) => e.element_type)).toEqual(['performer']);
+  await expect(page.getByTestId('element-inspector')).toBeVisible();
+
+  await page.getByTestId('element-channel').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Lead vocal' }).click();
+  await expect.poll(async () => (await elements())[0]?.linked_channel_id).not.toBeNull();
+
+  // gear size is set per device and as a whole
+  await page.getByTestId('inspector-width').fill('120');
+  await page.getByTestId('inspector-width').press('Enter');
+  await expect.poll(async () => (await elements())[0]?.width_cm).toBe(120);
+
+  const specs = page.waitForResponse((res) => res.url().includes('/camera-specs'));
+  await page.getByTestId('layer-camera').click();
+  await specs;
+  await page.getByTestId('layer-projector').click();
+  await page.getByTestId('layer-coverage').click();
+});

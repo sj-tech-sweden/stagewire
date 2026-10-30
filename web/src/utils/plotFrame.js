@@ -42,6 +42,11 @@ export function fitZoom(frame, hostWidth, hostHeight, margin = 16) {
   return Math.min(2, Math.max(0.05, Math.round(zoom * 1000) / 1000));
 }
 
+// Zoom that makes the frame as wide as the host. A tall venue then scrolls vertically instead of
+// shrinking the gear until it cannot be read.
+export const fitWidthZoom = (frame, hostWidth, margin = 16) =>
+  Math.min(2, Math.max(0.05, Math.round(((hostWidth - margin) / Math.max(1, frame.width)) * 1000) / 1000));
+
 // Where a screen position (relative to the canvas) lands in stage-relative cm, snapped to a grid.
 export function stagePosition(px, py, zoom, frame, grid = 10) {
   const snap = (v) => Math.round(v / grid) * grid;

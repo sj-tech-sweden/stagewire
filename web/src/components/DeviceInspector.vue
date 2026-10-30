@@ -28,6 +28,72 @@
         class="q-mb-sm"
         @change="(v) => save({ notes: v })"
       />
+      <div
+        v-if="device.kind === 'plot_element'"
+        class="q-mb-sm"
+        data-testid="element-inspector"
+      >
+        <q-input
+          :model-value="device.canvas_rotation"
+          dense
+          outlined
+          type="number"
+          class="q-mb-sm"
+          :label="t('stagePlot.rotation')"
+          @change="(v) => save({ canvas_rotation: Number(v) || 0 })"
+        />
+        <q-select
+          :model-value="elementLinks.linked_channel_id"
+          dense
+          outlined
+          clearable
+          emit-value
+          map-options
+          class="q-mb-sm"
+          :options="channelOptions"
+          :label="t('stagePlot.linkChannel')"
+          data-testid="element-channel"
+          @update:model-value="(v) => linkElement({ linked_channel_id: v || null })"
+        />
+        <q-select
+          :model-value="elementLinks.linked_device_id"
+          dense
+          outlined
+          clearable
+          emit-value
+          map-options
+          :options="gearOptions"
+          :label="t('workspace.linkMic')"
+          data-testid="element-device"
+          @update:model-value="(v) => linkElement({ linked_device_id: v || null })"
+        />
+      </div>
+      <div class="row q-col-gutter-sm q-mb-sm">
+        <q-input
+          :model-value="device.attributes?.width_cm"
+          class="col-6"
+          dense
+          outlined
+          type="number"
+          min="5"
+          :label="t('workspace.plotWidth')"
+          :placeholder="String(DEVICE_BOX_CM.w)"
+          data-testid="inspector-width"
+          @change="(v) => save({ attributes: { width_cm: v === '' ? null : Number(v) } })"
+        />
+        <q-input
+          :model-value="device.attributes?.height_cm"
+          class="col-6"
+          dense
+          outlined
+          type="number"
+          min="5"
+          :label="t('workspace.plotHeight')"
+          :placeholder="String(DEVICE_BOX_CM.h)"
+          data-testid="inspector-height"
+          @change="(v) => save({ attributes: { height_cm: v === '' ? null : Number(v) } })"
+        />
+      </div>
       <div class="text-caption text-grey-6 q-mb-sm">
         {{ device.domain }} · {{ device.kind || '—' }}
       </div>
@@ -186,7 +252,10 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
-import { DOMAIN_SIGNAL, needsBookingRequest } from '@/utils/workspace';
+import { useStagePlotStore } from '@/stores/stageplot';
+import { legacyId } from '@/utils/graphLegacy';
+import { isPlotElement, isVirtual } from '@/utils/workspace';
+import { DEVICE_BOX_CM, DOMAIN_SIGNAL, needsBookingRequest } from '@/utils/workspace';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -197,6 +266,32 @@ const emit = defineEmits(['request-booking', 'remove']);
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const stagePlot = useStagePlotStore();
+
+// A plot object links to a channel (a performer's name goes onto it) and to a device (the
+// microphone or other gear they use). Links are set by legacy id, through the plot store.
+const elementLinks = computed(() => {
+  if (props.device?.kind !== 'plot_element') return {};
+  return stagePlot.elements.find((e) => e.id === legacyId(props.device)) || {};
+});
+const channelOptions = computed(() =>
+  graph.devices
+    .filter((d) => d.kind === 'channel')
+    .sort((a, b) => (a.attributes.channel_number || 0) - (b.attributes.channel_number || 0))
+    .map((d) => ({ value: legacyId(d), label: `${d.attributes.channel_number || ''} ${d.name}`.trim() })),
+);
+const gearOptions = computed(() =>
+  graph.devices
+    .filter((d) => !isVirtual(d) && !isPlotElement(d))
+    .map((d) => ({ value: legacyId(d), label: d.name })),
+);
+async function linkElement(links) {
+  try {
+    await stagePlot.updateElement(props.jobId, legacyId(props.device), links);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+  }
+}
 const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 });
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });

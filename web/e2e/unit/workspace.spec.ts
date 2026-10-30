@@ -149,7 +149,10 @@ test('plot elements are drawn at their real size and rotate about their top-left
     attributes: { width_cm: 200, height_cm: 100 },
   };
   expect(boxFor(element, 0.5)).toEqual({ w: 100, h: 50 });
-  expect(boxFor({ kind: 'mixer' }, 0.5)).toEqual({ w: 96, h: 40 });
+  // gear is 60 x 30 cm unless sized, never smaller than a tappable minimum, and scales as a whole
+  expect(boxFor({ kind: 'mixer' }, 1)).toEqual({ w: 60, h: 30 });
+  expect(boxFor({ kind: 'mixer' }, 0.1)).toEqual({ w: 28, h: 16 });
+  expect(boxFor({ kind: 'mixer', attributes: { width_cm: 100, height_cm: 40 } }, 1, 0.5)).toEqual({ w: 50, h: 20 });
   const [x, y] = centerOf(element, 1);
   expect(Math.round(x)).toBe(50);
   expect(Math.round(y)).toBe(150);
