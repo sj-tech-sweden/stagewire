@@ -864,3 +864,56 @@ test('the stage and venue are edited on the canvas, plot objects are added and a
   await page.getByTestId('layer-projector').click();
   await page.getByTestId('layer-coverage').click();
 });
+
+test('a device is created from a Stockwire product with its connectors and power inlet', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Product import ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 55, name: 'Stage box 32', sku: 'SB32', category: 'Audio' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/55/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 55,
+        name: 'Stage box 32',
+        connector_groups: [
+          { connector: 'xlr3', direction: 'in', count: 32, signal: 'audio' },
+          { connector: 'dante', direction: 'both', count: 1, signal: null },
+        ],
+        power_inlet: 'iec_c13',
+        weight_kg: 14,
+        power_watts: 60,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-from-stockwire').click();
+  await page.keyboard.type('stage');
+  await page.locator('.q-menu .q-item', { hasText: 'Stage box 32' }).click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Stage box 32');
+  await expect(page.getByTestId('power-inlet')).toHaveValue('IEC C13');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as {
+      name: string;
+      weight_kg: number;
+      power_inlet: string;
+      stockwire_product_id: string;
+      ports: { direction: string; connector: string; count: number }[];
+    }[];
+  await expect.poll(async () => (await legacy())[0]?.stockwire_product_id).toBe('55');
+  const device = (await legacy())[0];
+  expect([device.weight_kg, device.power_inlet]).toEqual([14, 'iec_c13']);
+  expect(device.ports).toEqual(
+    expect.arrayContaining([
+      { direction: 'in', connector: 'xlr3', count: 32 },
+      { direction: 'in', connector: 'dante', count: 1 },
+      { direction: 'out', connector: 'dante', count: 1 },
+    ]),
+  );
+});

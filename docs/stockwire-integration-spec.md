@@ -135,6 +135,33 @@ Stagewire adds a fixture type from a fixture product, `GET /inventory/products/{
 Fields that duplicate these (for example `specs.lt_power_w`, `specs.lt_dmx_channels`) are ignored.
 A later import of the same product updates its modes and values rather than adding a second type.
 
+### 3.10 Connector specs (read by Stagewire)
+
+Stagewire builds a device's connectors from the product it is imported from (the catalog drag and
+drop, and "From Stockwire" in the device dialog). The fields live in the product's `specs` object,
+`GET /inventory/products/{id}`; all are optional.
+
+- `specs.connectors`: a list of connector groups. Each group is
+  `{"connector": "xlr3", "direction": "in", "count": 8, "signal": "audio"}`:
+  - `connector` (required): the connector kind. Use one of Stagewire's kinds where it fits: `xlr3`,
+    `xlr5`, `trs`, `speakon`, `dante`, `aes50`, `madi`, `avb`, `ethernet`, `ethercon`, `fiber`,
+    `sdi`, `hdmi`, `displayport`, `bnc`, `usb`, `dmx`, `powercon`, `schuko`, `cee16`. Any other
+    text is kept as given (lower-cased) and is added to Stagewire's shared list of connector kinds.
+  - `direction`: `in`, `out` or `both` (a bidirectional connector such as Dante or Ethernet).
+    Missing or unknown counts as `both`.
+  - `count`: how many of that connector, a whole number from 1 (default 1).
+  - `signal` (optional): `audio`, `video`, `dmx`, `power` or `data`.
+  The older form, a plain list of names such as `["sdi", "hdmi"]`, is still read: each name is one
+  bidirectional connector.
+- `specs.power_inlet`: how the product takes mains: `iec_c13`, `attached_schuko` (a fixed cable
+  with a Schuko plug), `powercon`, `cee16` or `other`. Stagewire assumes `iec_c13` when it is
+  missing.
+- `specs.inputs` / `specs.outputs` keep their meaning from §3.1 (total counts).
+
+Stagewire also exposes what it read, for checking an integration: `GET /api/v1/stockwire/products/{id}/device-specs`
+returns `connector_groups`, `power_inlet`, `inputs`, `outputs`, `weight_kg` and `power_watts` for a
+product exactly as an import would use them.
+
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
 stockwire-rental will call these (key from §3.2):
@@ -173,6 +200,7 @@ stockwire-rental will call these (key from §3.2):
 - [ ] Add mixer I/O counts to product model + list filter (inputs/outputs).
 - [ ] Expose the camera, lens and projector `specs` fields in §3.6 and §3.7 on products (values as numbers).
 - [x] Fixture products expose `name`, `manufacturer`, `specs.lt_fixture_type` and `specs.channel_modes` (§3.9). Nothing to add.
+- [ ] Expose `specs.connectors` (groups, §3.10) and `specs.power_inlet` on products so imports bring their connectors and power inlet.
 - [x] Weight and power are already top-level product fields (`weight_kg`, `power_consumption_watts`), so they are read from there (§3.8). Nothing to add.
 - [ ] Document the signed deeplink token scheme (HMAC) and a resolver endpoint.
 - [ ] Add an OpenAPI note + a small integration test that pings a mock Stagewire base URL.

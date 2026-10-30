@@ -1116,6 +1116,8 @@ export default {
     directionIn: 'In',
     directionOut: 'Out',
     directionBoth: 'Both',
+    fromStockwire: 'From Stockwire',
+    fromStockwireHint: 'Pick a product: its connectors, power inlet, weight and power are copied in.',
     direction: 'Direction',
     inputs: 'Inputs',
     outputs: 'Outputs',

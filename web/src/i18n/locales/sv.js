@@ -1116,6 +1116,8 @@ export default {
     directionIn: 'In',
     directionOut: 'Ut',
     directionBoth: 'Båda',
+    fromStockwire: 'Från Stockwire',
+    fromStockwireHint: 'Välj en produkt: kontakter, strömintag, vikt och effekt kopieras in.',
     direction: 'Riktning',
     inputs: 'Ingångar',
     outputs: 'Utgångar',

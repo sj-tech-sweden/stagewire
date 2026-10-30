@@ -11,6 +11,13 @@
         </div>
       </q-card-section>
       <q-card-section class="q-pt-none q-gutter-sm">
+        <StockwireProductPicker
+          :model-value="null"
+          :label="t('devices.fromStockwire')"
+          :hint="t('devices.fromStockwireHint')"
+          data-testid="device-from-stockwire"
+          @update:model-value="importProduct"
+        />
         <div class="row q-col-gutter-sm">
           <q-input
             v-model="form.name"
@@ -290,6 +297,8 @@
 <script setup>
 import { computed, reactive, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import { api } from '@/boot/api';
 import { useI18n } from 'vue-i18n';
 import {
   CAMERA_TYPES,
@@ -299,6 +308,7 @@ import {
   POWER_INLETS,
   addConnector,
   deviceForm,
+  fillFormFromSpecs,
 } from '@/utils/workspace';
 
 const props = defineProps({
@@ -309,6 +319,18 @@ const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const form = reactive(deviceForm(null));
 const typeOptions = computed(() => DEVICE_TYPES.map((v) => ({ value: v, label: t(`devices.types.${v}`) })));
+
+// Picking a Stockwire product brings in its connectors, power inlet, weight and power (see
+// docs/stockwire-integration-spec.md section 3.10); nothing is lost if the product has none.
+async function importProduct(product) {
+  if (!product || typeof product !== 'object') return;
+  try {
+    const { data } = await api.get(`/stockwire/products/${product.id}/device-specs`);
+    fillFormFromSpecs(form, product, data);
+  } catch {
+    fillFormFromSpecs(form, product, {});
+  }
+}
 
 watch(
   () => props.modelValue,

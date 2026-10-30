@@ -144,6 +144,26 @@ async def case_children(case_device_id: str, db=Depends(get_db)) -> dict:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
 
 
+@router.get("/products/{product_id}/device-specs")
+async def get_device_specs(product_id: int | str, db=Depends(get_db)) -> dict:
+    """What an import needs from a product: its connector groups, power inlet, I/O counts, weight
+    and power, read with the tolerant rules in ``audio/device_specs.py``."""
+    from app.domains.audio.device_specs import product_io_specs, product_physical_specs
+
+    try:
+        sw = await _stockwire_client(db)
+        product = await sw.get_product(product_id)
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+    return {
+        "id": product.get("id"),
+        "name": product.get("name"),
+        **product_io_specs(product),
+        **product_physical_specs(product),
+    }
+
+
 @router.get("/products/{product_id}")
 async def get_product(product_id: int | str, db=Depends(get_db)) -> dict:
     try:

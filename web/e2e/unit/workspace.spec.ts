@@ -21,6 +21,8 @@ import {
   videoChainNames,
   videoRowsOf,
   addConnector,
+  connectorGroupsFromProduct,
+  fillFormFromSpecs,
   expandGroups,
   CONNECTOR_PRESETS,
   powerTreeRows,
@@ -427,4 +429,39 @@ test('extension cords are suggested for feeds longer than the threshold, rounded
   expect(found.map((f) => [f.node.id, f.metres, f.length])).toEqual([['far', 13, 15]]);
   expect(longFeeds(nodes, [{ id: 'o1', x_cm: 0, y_cm: 0 }], 1).map((f) => f.node.id)).toEqual(['far', 'near']);
   expect(POWER_INLETS[0].value).toBe('iec_c13');
+});
+
+test('a Stockwire product brings its connector groups, power inlet and ports, in both spec forms', () => {
+  const groups = connectorGroupsFromProduct({
+    specs: {
+      connectors: [
+        'SDI',
+        { connector: 'XLR3', direction: 'output', count: 8, signal: 'audio' },
+        { type: 'dante' },
+        { name: ' ' },
+      ],
+    },
+  });
+  expect(groups).toEqual([
+    { direction: 'both', connector: 'sdi', count: 1, signal: null },
+    { direction: 'out', connector: 'xlr3', count: 8, signal: 'audio' },
+    { direction: 'both', connector: 'dante', count: 1, signal: null },
+  ]);
+  const device = deviceFromProduct({
+    id: 9,
+    name: 'Rack mixer',
+    category: 'Video > Switchers',
+    specs: { power_inlet: 'IEC_C13', connectors: ['sdi', { connector: 'xlr3', direction: 'in', count: 4, signal: 'audio' }] },
+  });
+  expect(device.attributes.power_inlet).toBe('iec_c13');
+  expect(device.ports.map((p) => [p.direction, p.connector, p.channels, p.signal])).toEqual([
+    ['in', 'sdi', 1, 'video'],
+    ['out', 'sdi', 1, 'video'],
+    ['in', 'xlr3', 4, 'audio'],
+  ]);
+  expect(connectorGroupsFromProduct({})).toEqual([]);
+  const form = { name: '', ports: [], power_inlet: null, weight_kg: null, power_w: null };
+  fillFormFromSpecs(form, { id: 3, name: 'Amp' }, { connector_groups: [{ connector: 'speakon', direction: 'out', count: 2 }], power_inlet: 'powercon', weight_kg: 12 });
+  expect(form).toMatchObject({ name: 'Amp', power_inlet: 'powercon', weight_kg: 12, stockwire_product_id: '3' });
+  expect(form.ports).toEqual([{ direction: 'out', connector: 'speakon', count: 2 }]);
 });

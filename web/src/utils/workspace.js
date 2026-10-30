@@ -23,16 +23,48 @@ export function domainForCategory(category) {
   return hit ? hit[0] : 'other';
 }
 
+const PRODUCT_DIRECTIONS = { in: 'in', input: 'in', out: 'out', output: 'out', both: 'both', io: 'both', bidirectional: 'both' };
+
+// Connector groups from a Stockwire product's specs.connectors, the same tolerant reading as
+// api/app/domains/audio/device_specs.py (see docs/stockwire-integration-spec.md section 3.10): a
+// list of names, or of {connector, direction, count}. Returns editor groups (direction in, out or both).
+export function connectorGroupsFromProduct(product) {
+  const raw = product?.specs?.connectors;
+  if (!Array.isArray(raw)) return [];
+  const groups = [];
+  for (const entry of raw) {
+    const item = typeof entry === 'string' ? { connector: entry } : entry;
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.connector || item.type || item.name || '').trim().toLowerCase();
+    if (!name) continue;
+    const count = Number.parseInt(item.count, 10);
+    groups.push({
+      direction: PRODUCT_DIRECTIONS[String(item.direction || '').toLowerCase()] || 'both',
+      connector: name,
+      count: count >= 1 ? count : 1,
+      signal: ['audio', 'video', 'dmx', 'power', 'data'].includes(item.signal) ? item.signal : null,
+    });
+  }
+  return groups;
+}
+
 export function deviceFromProduct(product, { parentId = null } = {}) {
   const attributes = {};
   if (product.power_consumption_watts) attributes.power_w = Number(product.power_consumption_watts);
   if (product.weight_kg) attributes.weight_kg = Number(product.weight_kg);
+  const inlet = String(product.specs?.power_inlet || '').trim().toLowerCase();
+  if (inlet) attributes.power_inlet = inlet;
+  const domain = domainForCategory(product.category);
   return {
-    domain: domainForCategory(product.category),
+    domain,
     kind: product.category || '',
     name: product.name || product.sku || 'Item',
     attributes,
-    ports: [],
+    ports: portsFromGroups(
+      connectorGroupsFromProduct(product).map((g) => ({ ...g, signal: g.signal || DOMAIN_SIGNAL[domain] || 'audio' })),
+      [],
+      '',
+    ),
     case_parent_id: parentId,
     stockwire_product_id: product.id != null ? String(product.id) : null,
     stockwire_product_name: product.name || null,
@@ -437,7 +469,7 @@ export function portsFromGroups(groups, existing, type) {
     return {
       id,
       direction: g.direction,
-      signal,
+      signal: g.signal || signal,
       connector: g.connector ? g.connector.toLowerCase() : null,
       channels: g.count || null,
     };
@@ -478,6 +510,8 @@ export function deviceForm(node) {
     device_type: node?.kind || 'other',
     notes: node?.notes || '',
     ports: portGroups(node?.ports).map((g) => ({ ...g })),
+    stockwire_product_id: node?.stockwire_product_id ?? null,
+    stockwire_product_name: node?.stockwire_product_name ?? null,
   };
   for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) form[key] = attrs[key] ?? null;
   return form;
@@ -496,6 +530,9 @@ export function devicePatch(node, form) {
     notes: form.notes,
     attributes,
     ports: portsFromGroups(form.ports, node.ports, form.device_type),
+    ...(form.stockwire_product_id !== (node.stockwire_product_id ?? null)
+      ? { stockwire_product_id: form.stockwire_product_id, stockwire_product_name: form.stockwire_product_name }
+      : {}),
   };
 }
 
@@ -507,6 +544,10 @@ export function deviceCreateBody(form) {
     notes: form.notes,
     ports: expandGroups(form.ports.filter((p) => p.connector || p.count)),
   };
+  if (form.stockwire_product_id) {
+    body.stockwire_product_id = form.stockwire_product_id;
+    body.stockwire_product_name = form.stockwire_product_name;
+  }
   const map = { power_w: 'power_watts' };
   for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) {
     const value = form[key];
@@ -644,4 +685,24 @@ export function longFeeds(nodes, outlets, thresholdM = 5) {
     if (metres > thresholdM) out.push({ node, parent, metres: Math.round(metres * 10) / 10, length: cordFor(metres) });
   }
   return out.sort((a, b) => b.metres - a.metres);
+}
+
+// Fill a device form from /stockwire/products/{id}/device-specs and the picked product: name, the
+// connectors (added to what is there with the usual "same connector raises the count" rule), the
+// power inlet, weight and power. Fields the product does not give are left as they are.
+export function fillFormFromSpecs(form, product, specs) {
+  form.name = form.name || product.name || specs.name || '';
+  form.stockwire_product_id = product.id != null ? String(product.id) : null;
+  form.stockwire_product_name = product.name || null;
+  for (const group of specs.connector_groups || []) {
+    form.ports = addConnector(form.ports, {
+      connector: group.connector,
+      direction: group.direction,
+      count: group.count,
+    });
+  }
+  if (specs.power_inlet) form.power_inlet = specs.power_inlet;
+  if (specs.weight_kg) form.weight_kg = specs.weight_kg;
+  if (specs.power_watts) form.power_w = specs.power_watts;
+  return form;
 }

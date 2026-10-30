@@ -3,7 +3,15 @@
 Field contract (Stockwire product ``specs`` object, all optional):
 - ``inputs``: number of inputs.
 - ``outputs``: number of outputs.
-- ``connectors``: list of connector names, for example ``["sdi", "hdmi"]``.
+- ``connectors``: the connectors of the product. Either a list of names, for example
+  ``["sdi", "hdmi"]`` (each counts as one bidirectional connector), or a list of groups
+  ``{"connector": "xlr3", "direction": "in" | "out" | "both", "count": 8, "signal": "audio"}``
+  (``count`` defaults to 1, ``signal`` is optional). Names are the Stagewire connector kinds
+  (xlr3, xlr5, trs, speakon, dante, aes50, madi, avb, ethernet, ethercon, fiber, sdi, hdmi,
+  displayport, bnc, usb, dmx, powercon, schuko, cee16) or any text; an unknown name is kept as
+  typed and joins the shared connector list when imported.
+- ``power_inlet``: how the product takes mains (``iec_c13``, ``attached_schuko``, ``powercon``,
+  ``cee16`` or ``other``).
 
 A manual override on the device wins, then these values, then the patch list.
 """
@@ -24,13 +32,57 @@ def _count(value: Any) -> int | None:
     return number if number >= 0 else None
 
 
+DIRECTIONS = {
+    "in": "in",
+    "input": "in",
+    "out": "out",
+    "output": "out",
+    "both": "both",
+    "io": "both",
+    "bidirectional": "both",
+}
+SIGNALS = {"audio", "video", "dmx", "power", "data"}
+
+
+def product_connector_groups(product: dict | None) -> list[dict]:
+    """The product's connectors as ``{connector, direction, count, signal}`` groups.
+
+    Reads both forms of ``specs.connectors`` (see the module docstring). Entries that name no
+    connector are dropped; an unknown direction counts as ``both`` and a bad count as 1.
+    """
+    raw = ((product or {}).get("specs") or {}).get("connectors")
+    if not isinstance(raw, list):
+        return []
+    groups: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            entry = {"connector": entry}
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("connector") or entry.get("type") or entry.get("name") or "").strip()
+        if not name:
+            continue
+        signal = str(entry.get("signal") or "").lower()
+        groups.append(
+            {
+                "connector": name.lower(),
+                "direction": DIRECTIONS.get(str(entry.get("direction") or "").lower(), "both"),
+                "count": _count(entry.get("count")) or 1,
+                "signal": signal if signal in SIGNALS else None,
+            }
+        )
+    return groups
+
+
 def product_io_specs(product: dict | None) -> dict:
     specs = (product or {}).get("specs") or {}
-    connectors = specs.get("connectors") or []
+    groups = product_connector_groups(product)
     return {
         "inputs": _count(specs.get("inputs")),
         "outputs": _count(specs.get("outputs")),
-        "connectors": [str(c) for c in connectors if c] if isinstance(connectors, list) else [],
+        "connectors": [g["connector"] for g in groups],
+        "connector_groups": groups,
+        "power_inlet": str(specs.get("power_inlet") or "").strip().lower() or None,
     }
 
 
