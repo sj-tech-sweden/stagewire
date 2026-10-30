@@ -127,6 +127,14 @@
                 flat
                 dense
                 round
+                icon="account_tree"
+                :aria-label="t('workspace.showFlow')"
+                @click="openFlow(row, section.kind)"
+              />
+              <q-btn
+                flat
+                dense
+                round
                 color="negative"
                 icon="delete"
                 :aria-label="t('workspace.remove')"
@@ -223,6 +231,15 @@
                 data-testid="edit-video-chain"
                 @click="openChain(slot.row, section.kind)"
               />
+              <q-btn
+                flat
+                dense
+                round
+                icon="account_tree"
+                :aria-label="t('workspace.showFlow')"
+                data-testid="show-video-flow"
+                @click="openFlow(slot.row, section.kind)"
+              />
             </q-td>
           </template>
           <template #body-cell-actions="slot">
@@ -245,6 +262,12 @@
       </div>
     </template>
 
+    <ChainFlowDialog
+      v-model="flowOpen"
+      :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
+      :steps="flowSteps"
+      @edit="editFromFlow"
+    />
     <ChainDialog
       v-model="chainOpen"
       :title="chainTitle"
@@ -264,8 +287,9 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
-import { isPlotElement, isVirtual, videoChainForm, videoChainNames, videoRowsOf } from '@/utils/workspace';
+import { flowTree, isPlotElement, isVirtual, videoChainForm, videoChainNames, videoRowsOf } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();
@@ -382,6 +406,23 @@ async function fill() {
   } catch (err) {
     failed(err);
   }
+}
+
+const flowOpen = ref(false);
+const flowSteps = ref([]);
+
+// A video output starts one branch per step without a parent; an input is one line of devices.
+function openFlow(node, kind) {
+  chainNode.value = node;
+  chainKind.value = kind;
+  flowSteps.value = flowTree(node.name, videoChainForm(node, graph.edges, graph.devices), graph.devices, {
+    separateRoots: kind === 'video_output',
+  });
+  flowOpen.value = true;
+}
+function editFromFlow() {
+  flowOpen.value = false;
+  openChain(chainNode.value, chainKind.value);
 }
 
 function openChain(node, kind) {

@@ -56,7 +56,7 @@
         v-for="n in layout.nodes"
         :key="n.node.id"
         class="dmx-flow-node"
-        :class="n.node.kind === 'fixture' ? 'is-fixture' : 'is-device'"
+        :class="n.node.kind === 'fixture' || n.node.kind === 'source' ? 'is-fixture' : 'is-device'"
         :style="nodeStyle(n)"
         @click="$emit('edit', n.node)"
       >
@@ -67,6 +67,7 @@
           {{ subLabel(n.node) }}
         </div>
         <q-btn
+          v-if="!readonly"
           class="dmx-flow-add"
           round
           dense
@@ -77,6 +78,7 @@
           @click.stop="$emit('add-child', n.node.id)"
         />
         <q-btn
+          v-if="!readonly"
           class="dmx-flow-del"
           round
           dense
@@ -98,6 +100,8 @@ import { useI18n } from 'vue-i18n';
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   universeNumber: { type: Number, default: 0 },
+  // a read-only diagram has no add/delete buttons (used for chains edited elsewhere)
+  readonly: { type: Boolean, default: false },
 });
 
 defineEmits(['edit', 'add-child', 'delete']);
@@ -129,6 +133,7 @@ function truncate(value, max = 18) {
 function subLabel(node) {
   const bits = [];
   if (node.kind === 'fixture') bits.push(t('dmxChain.kindFixture'));
+  else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
   else bits.push(t('dmxChain.kindDevice'));
   if (node.in_port) bits.push(`in ${node.in_port}`);
   if (node.out_port) bits.push(`out ${node.out_port}`);

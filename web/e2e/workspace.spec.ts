@@ -420,6 +420,14 @@ test('a channel list is built in the channel list editor and ends up in the expo
   await page.getByTestId('chain-save').click();
   await expect(row.getByTestId('edit-chain')).toContainText('Stagebox A');
 
+  // the chain is also shown as a signal flow diagram, with a way back to editing it
+  await row.getByTestId('show-flow').click();
+  await expect(page.getByTestId('chain-flow')).toContainText('Kick');
+  await expect(page.getByTestId('chain-flow')).toContainText('Stagebox A');
+  await page.getByTestId('flow-edit-chain').click();
+  await expect(page.getByTestId('chain-save')).toBeVisible();
+  await page.getByTestId('chain-save').click();
+
   await expect
     .poll(async () => {
       const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json();
@@ -643,6 +651,9 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   await page.keyboard.press('Enter');
   await page.getByTestId('chain-save').click();
   await expect(row.getByTestId('edit-video-chain')).toContainText('Switcher A');
+  await row.getByTestId('show-video-flow').click();
+  await expect(page.getByTestId('chain-flow')).toContainText('Switcher A');
+  await page.keyboard.press('Escape');
 
   const legacy = async () =>
     (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json()) as {

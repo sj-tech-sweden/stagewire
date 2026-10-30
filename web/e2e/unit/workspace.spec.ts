@@ -21,6 +21,7 @@ import {
   videoChainNames,
   videoRowsOf,
   addConnector,
+  flowTree,
   connectorGroupsFromProduct,
   fillFormFromSpecs,
   expandGroups,
@@ -464,4 +465,25 @@ test('a Stockwire product brings its connector groups, power inlet and ports, in
   fillFormFromSpecs(form, { id: 3, name: 'Amp' }, { connector_groups: [{ connector: 'speakon', direction: 'out', count: 2 }], power_inlet: 'powercon', weight_kg: 12 });
   expect(form).toMatchObject({ name: 'Amp', power_inlet: 'powercon', weight_kg: 12, stockwire_product_id: '3' });
   expect(form.ports).toEqual([{ direction: 'out', connector: 'speakon', count: 2 }]);
+});
+
+test('a chain becomes a flow tree: a line of devices, with branches and separate roots where the chain has them', () => {
+  const devices = [
+    { id: 'a', name: 'Stagebox' },
+    { id: 'b', name: 'Console' },
+    { id: 'c', name: 'Amp' },
+    { id: 'd', name: 'Spk' },
+  ];
+  const line = flowTree('Kick', [{ device_id: 'a', connector: 'XLR' }, { device_id: 'b' }], devices);
+  expect(line).toHaveLength(1);
+  expect(line[0]).toMatchObject({ label: 'Kick', kind: 'source' });
+  expect(line[0].children[0]).toMatchObject({ label: 'Stagebox', connector: 'XLR' });
+  expect(line[0].children[0].children[0].label).toBe('Console');
+
+  const branching = flowTree('Main', [{ device_id: 'b' }, { device_id: 'c', parent_index: 0 }, { device_id: 'd', parent_index: 0 }], devices);
+  expect(branching[0].children[0].children.map((n) => n.label)).toEqual(['Amp', 'Spk']);
+
+  const roots = flowTree('Out', [{ device_id: 'a' }, { device_id: 'b' }], devices, { separateRoots: true });
+  expect(roots[0].children.map((n) => n.label)).toEqual(['Stagebox', 'Console']);
+  expect(flowTree('', [{ device_id: 'a' }], devices)[0].label).toBe('Stagebox');
 });

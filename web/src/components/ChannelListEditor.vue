@@ -113,6 +113,14 @@
               flat
               dense
               round
+              icon="account_tree"
+              :aria-label="t('workspace.showFlow')"
+              @click="openFlow(ch, 'channel')"
+            />
+            <q-btn
+              flat
+              dense
+              round
               color="negative"
               icon="delete"
               :aria-label="t('workspace.remove')"
@@ -230,6 +238,15 @@
               data-testid="edit-chain"
               @click="openChain(slot.row, 'channel')"
             />
+            <q-btn
+              flat
+              dense
+              round
+              icon="account_tree"
+              :aria-label="t('workspace.showFlow')"
+              data-testid="show-flow"
+              @click="openFlow(slot.row, 'channel')"
+            />
           </q-td>
         </template>
         <template #body-cell-actions="slot">
@@ -294,6 +311,15 @@
                 flat
                 dense
                 round
+                icon="account_tree"
+                :aria-label="t('workspace.showFlow')"
+                data-testid="show-output-flow"
+                @click="openFlow(out, 'output')"
+              />
+              <q-btn
+                flat
+                dense
+                round
                 color="negative"
                 icon="delete"
                 :aria-label="t('workspace.remove')"
@@ -310,6 +336,12 @@
       </q-list>
     </template>
 
+    <ChainFlowDialog
+      v-model="flowOpen"
+      :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
+      :steps="flowSteps"
+      @edit="editFromFlow"
+    />
     <ChainDialog
       v-model="chainOpen"
       :title="chainTitle"
@@ -328,10 +360,12 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
   chainForm,
   chainSteps,
+  flowTree,
   channelsOf,
   isPlotElement,
   isVirtual,
@@ -425,6 +459,21 @@ async function addOutput() {
   } catch (err) {
     failed(err);
   }
+}
+
+const flowOpen = ref(false);
+const flowSteps = ref([]);
+
+// The chain as a diagram; its branches follow the parent of each step (outputs branch).
+function openFlow(node, kind) {
+  chainNode.value = node;
+  chainKind.value = kind;
+  flowSteps.value = flowTree(node.name, chainForm(node, graph.edges, graph.devices), graph.devices);
+  flowOpen.value = true;
+}
+function editFromFlow() {
+  flowOpen.value = false;
+  openChain(chainNode.value, chainKind.value);
 }
 
 function openChain(node, kind) {

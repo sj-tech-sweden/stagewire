@@ -706,3 +706,27 @@ export function fillFormFromSpecs(form, product, specs) {
   if (specs.power_watts) form.power_w = specs.power_watts;
   return form;
 }
+
+// A chain as a tree for the flow diagram: the source (channel, input or output) first, then the
+// devices. `steps` are chain-dialog steps (chainForm / videoChainForm). A step takes its signal
+// from `parent_index`; without one it follows the previous step, except in a video output where
+// a step without a parent starts its own branch (`separateRoots`).
+export function flowTree(sourceLabel, steps, devices, { separateRoots = false } = {}) {
+  const nodes = steps.map((step, i) => ({
+    id: `step-${i}`,
+    label: devices.find((d) => d.id === step.device_id)?.name || '?',
+    kind: 'device',
+    in_port: step.in_port || step.input_port || '',
+    out_port: step.out_port || step.source_port || '',
+    connector: step.connector || '',
+    children: [],
+  }));
+  const roots = [];
+  steps.forEach((step, i) => {
+    let parent = step.parent_index;
+    if (parent == null && !separateRoots && i > 0) parent = i - 1;
+    (parent == null ? roots : nodes[parent].children).push(nodes[i]);
+  });
+  if (!sourceLabel) return roots;
+  return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
+}
