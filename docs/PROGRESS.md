@@ -90,6 +90,19 @@ Each reader exists next to its legacy twin, produces the same output, and has a 
 
 Remaining on the legacy path: job summary, fixture patch, stage plot (elements) and video sheet report contexts; `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side); and all writers.
 
+## Review of the branch (code-review, 2026-10-30) and what changed
+
+Fixed (each has a regression test in `tests/test_graph_review_fixes.py` / `test_stockwire_catalog.py`):
+- `graph_edited` was set by every graph PATCH (canvas drags, mirrored fields) and then blocked pruning, leaving ghost nodes after legacy deletes. It is now set only when a PATCH changes something sync would overwrite and the mirror does not write back (`mirror.device_needs_protection` / `edge_needs_protection`), and **prune ignores it**: existence follows the legacy editors.
+- A legacy twin created for a graph-only device (to put it in a chain) was empty, so the next sync reset the node's kind and ports. The twin now carries kind (if a known device type), ports, specs and notes.
+- `PATCH` replaced `attributes` wholesale and wiped `legacy_ref`/`chain`/`list_id`; attributes now merge.
+- Overlapping syncs could duplicate rows: syncs are serialised per job (in-process lock plus a Postgres advisory lock).
+- `plot_elements()`/`plot_links()` loaded every job's patch points; now one job-scoped, cached query.
+- Graph PATCH/DELETE wrote the legacy row before the version check; the graph row is flushed first so a stale edit fails before legacy changes (delete rolls back if the legacy twin refuses).
+- Batch-created plot elements now get their legacy row; the channels store no longer replays a stale conflict after an unrelated error; Stockwire pages are cached for 60 s, product lookups run concurrently, and `truncated` is reported when the 2000-row cap cuts a list short.
+
+Deliberately kept: the legacy report contexts and `derive_cables`/`routed_cable_paths` are the parity oracle for the graph versions until the legacy tables are dropped (M9), then they go.
+
 ## Plot elements and cables on the graph (phase 6e)
 
 - **Elements are nodes.** Each legacy plot element is a `kind="plot_element"` node (`legacy_ref stage_plot_elements:<id>`): `canvas_x/y/rotation` = position/rotation, `attributes` = element type, size, image, coverage, focal length, power connector, `label`, rigging point id. Its legacy links are `link` edges (`src_port "link"`, `dst_port = role`, `attributes {role, legacy_target}` where `legacy_target` is the legacy id, patch-point and output-point links included): roles `channel`, `device`, `patch_point`, `output_point`, `video_input`, `lens`, `power_node`. `link` is a signal like the others but is skipped by default traces and never validated.

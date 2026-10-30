@@ -16,7 +16,9 @@ from app.domains.graph.backfill import (
     DEVICE_SPEC_FIELDS,
     ELEMENT_FIELDS,
     ELEMENT_LINKS,
+    MIRRORED_EDGE_TABLES,
     OUTPUT_FIELDS,
+    OWNED_ATTRS,
     backfill_job,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -439,3 +441,78 @@ async def create_element_twin(db: AsyncSession, job_id: UUID, data: dict) -> UUI
     fields["rotation"] = data.get("canvas_rotation") or 0.0
     element = await service.create_plot_element(db, job_id, fields)
     return element.id
+
+
+KNOWN_DEVICE_TYPES = {
+    "digital_stagebox",
+    "analog_stagebox",
+    "mixer",
+    "split",
+    "network",
+    "direct",
+    "switcher",
+    "router",
+    "multiviewer",
+    "camera",
+    "lens",
+    "ptz_camera",
+    "computer",
+    "patchbay",
+    "converter",
+    "encoder",
+    "recorder",
+    "screen",
+    "projector",
+    "fixture",
+    "other",
+}
+DERIVED_DEVICE_FIELDS = (
+    "name",
+    "notes",
+    "position",
+    "kind",
+    "domain",
+    "attributes",
+    "ports",
+    "stockwire_product_id",
+    "stockwire_product_name",
+)
+
+
+def device_needs_protection(device: GraphDevice, data: dict) -> bool:
+    """Does this PATCH change something sync would otherwise overwrite from the legacy row?
+
+    Fields the mirror writes back to the legacy row never need protecting, and neither do canvas
+    fields (sync does not set them). Rows without a legacy twin are never synced.
+    """
+    target = legacy_target(device)
+    if target is None:
+        return False
+    table = target[0]
+    if table not in OWNED_ATTRS:
+        return any(key in data for key in DERIVED_DEVICE_FIELDS)
+    if "ports" in data and table != "audio_devices":
+        return True
+    attrs = data.get("attributes")
+    if attrs is None:
+        return False
+    owned = OWNED_ATTRS[table]
+    old = device.attributes or {}
+    merged = {**old, **attrs}
+    return any(merged.get(k) != old.get(k) for k in merged if k not in owned)
+
+
+def edge_needs_protection(edge: ConnectionEdge, data: dict) -> bool:
+    if "phase" in data:
+        return True
+    ref = (edge.attributes or {}).get("legacy_ref")
+    if not ref or ref.partition(":")[0] in MIRRORED_EDGE_TABLES:
+        return False
+    return "attributes" in data
+
+
+def merged_attributes(row: GraphDevice | ConnectionEdge, data: dict) -> dict:
+    """PATCH keeps the keys it does not mention (legacy_ref, chain, list_id, ...)."""
+    if data.get("attributes") is None:
+        return data
+    return {**data, "attributes": {**(row.attributes or {}), **data["attributes"]}}

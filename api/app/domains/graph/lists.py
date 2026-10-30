@@ -19,7 +19,12 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.graph import schemas
 from app.domains.graph.backfill import backfill_job
-from app.domains.graph.mirror import _publish_list, legacy_target
+from app.domains.graph.mirror import (
+    KNOWN_DEVICE_TYPES,
+    _audio_device_changes,
+    _publish_list,
+    legacy_target,
+)
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 
 router = APIRouter(
@@ -133,18 +138,21 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
         return target[1]
     if node.kind in ("channel", "output", "channel_list", "plot_element"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
-    device = await service.create_device(
-        db,
-        job_id,
+    changes = _audio_device_changes(
         {
             "name": node.name,
-            "device_type": "other",
+            "notes": node.notes,
+            "position": node.position,
+            "kind": node.kind if node.kind in KNOWN_DEVICE_TYPES else None,
+            "attributes": node.attributes,
+            "ports": node.ports,
             "stockwire_product_id": node.stockwire_product_id,
             "stockwire_product_name": node.stockwire_product_name,
-        },
+        }
     )
+    changes.setdefault("device_type", "other")
+    device = await service.create_device(db, job_id, changes)
     node.legacy_ref = f"audio_devices:{device.id}"
-    node.graph_edited = True
     await db.commit()
     return device.id
 

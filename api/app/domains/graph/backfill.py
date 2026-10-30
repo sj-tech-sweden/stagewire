@@ -1,8 +1,9 @@
+import asyncio
 import copy
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import (
@@ -203,6 +204,7 @@ class Backfill:
         self.loaded_edges: set[str] = set()
         self.loaded_revisions: dict[uuid.UUID, int] = {}
         self.new_edges: list[ConnectionEdge] = []
+        self._point_devices: tuple[dict, dict] | None = None
         self.edge_updates: list[tuple[ConnectionEdge, dict]] = []
         self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
@@ -701,16 +703,12 @@ class Backfill:
             self.edge_rows[edge.attributes["legacy_ref"]] = edge
 
     async def prune(self) -> None:
-        """Remove untouched graph rows whose legacy source no longer exists."""
-        gone_edges = [
-            self.edge_rows[ref]
-            for ref in self.loaded_edges - self.seen_edges
-            if not self.edge_rows[ref].graph_edited
-        ]
+        """Remove graph rows whose legacy source is gone: existence follows the legacy editors."""
+        gone_edges = [self.edge_rows[ref] for ref in self.loaded_edges - self.seen_edges]
         gone_devices = {
             self.devices[ref].id: self.devices[ref]
             for ref in self.loaded_devices - self.seen_devices
-            if ref in self.devices and not self.devices[ref].graph_edited
+            if ref in self.devices
         }
         if not gone_edges and not gone_devices:
             return
@@ -738,6 +736,24 @@ class Backfill:
         ]
         self.result.removed = len(doomed) + len(gone_devices)
 
+    async def point_devices(self) -> tuple[dict, dict]:
+        """Patch point id -> device id for this job's input and output chains (cached)."""
+        if self._point_devices is None:
+            inputs = await self.db.execute(
+                select(ChannelPatchPoint.id, ChannelPatchPoint.device_id)
+                .join(AudioChannelPatch, ChannelPatchPoint.channel_id == AudioChannelPatch.id)
+                .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
+                .where(ChannelList.job_id == self.job_id, ChannelPatchPoint.device_id.is_not(None))
+            )
+            outputs = await self.db.execute(
+                select(OutputPatchPoint.id, OutputPatchPoint.device_id)
+                .join(ChannelListOutput, OutputPatchPoint.output_id == ChannelListOutput.id)
+                .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
+                .where(ChannelList.job_id == self.job_id, OutputPatchPoint.device_id.is_not(None))
+            )
+            self._point_devices = (dict(inputs.all()), dict(outputs.all()))
+        return self._point_devices
+
     async def plot_elements(self) -> None:
         """Stage plot elements become ``plot_element`` nodes; their links become ``link`` edges."""
         elements = (
@@ -745,16 +761,7 @@ class Backfill:
                 select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
             )
         ).all()
-        point_device = {
-            p.id: p.device_id
-            for p in (await self.db.scalars(select(ChannelPatchPoint))).all()
-            if p.device_id
-        }
-        out_device = {
-            p.id: p.device_id
-            for p in (await self.db.scalars(select(OutputPatchPoint))).all()
-            if p.device_id
-        }
+        point_device, out_device = await self.point_devices()
         for el in elements:
             node = self.device(
                 f"stage_plot_elements:{el.id}",
@@ -823,16 +830,7 @@ class Backfill:
                 select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
             )
         ).all()
-        point_device = {
-            p.id: p.device_id
-            for p in (await self.db.scalars(select(ChannelPatchPoint))).all()
-            if p.device_id
-        }
-        out_device = {
-            p.id: p.device_id
-            for p in (await self.db.scalars(select(OutputPatchPoint))).all()
-            if p.device_id
-        }
+        point_device, out_device = await self.point_devices()
 
         def node(ref: str):
             return self.devices.get(ref) if ref in self.seen_devices else None
@@ -1022,7 +1020,25 @@ class Backfill:
         )
 
 
+_JOB_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
+
+
 async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
+    """Sync one job into the graph, one sync at a time per job.
+
+    Two overlapping syncs would both miss the rows the other is about to insert and create
+    duplicates, so syncs queue on a per-job lock (in this process) and on a Postgres advisory
+    lock (across workers, held until the sync commits).
+    """
+    lock = _JOB_LOCKS.setdefault(job_id, asyncio.Lock())
+    async with lock:
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            key = job_id.int & 0x7FFFFFFFFFFFFFFF
+            await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
+        return await _backfill_job_locked(db, job_id)
+
+
+async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     """Sync a job's legacy audio/lighting/video/power rows into the unified graph.
 
     Rows and edges carry a ``legacy_ref``. A run adds what is new, refreshes graph rows that

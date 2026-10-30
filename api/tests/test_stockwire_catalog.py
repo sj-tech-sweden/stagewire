@@ -111,3 +111,18 @@ async def test_cases_are_devices_that_other_devices_point_at():
     cases = await client().list_cases()
     assert {(c["id"], c["child_count"]) for c in cases} == {(99, 2), (5, 1)}
     assert {c["id"]: c["name"] for c in cases}[99] == "Matrix"
+
+
+@pytest.mark.asyncio
+async def test_search_reports_when_the_catalog_was_cut_short():
+    def handler_many(request: httpx.Request) -> httpx.Response:
+        skip = int(request.url.params.get("skip", 0))
+        page = [{"id": skip + i, "name": f"P{skip + i}"} for i in range(200)]
+        return httpx.Response(200, json={"items": page, "total": 5000, "has_more": True})
+
+    sw = StockwireClient(
+        base_url="http://sw.test", token="t", transport=httpx.MockTransport(handler_many)
+    )
+    result = await sw.search_catalog(limit=5)
+    assert result["truncated"] is True and result["total"] == 2000
+    assert (await client().search_catalog())["truncated"] is False

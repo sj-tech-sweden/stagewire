@@ -106,7 +106,14 @@ async def create_devices_batch(
     await _require_job(db, job_id)
     if len(payload) > MAX_BATCH:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} devices")
-    devices = [GraphDevice(job_id=job_id, **item.model_dump()) for item in payload]
+    devices = []
+    for item in payload:
+        fields = item.model_dump()
+        device = GraphDevice(job_id=job_id, **fields)
+        if device.kind == "plot_element":
+            element_id = await mirror.create_element_twin(db, job_id, fields)
+            device.legacy_ref = f"stage_plot_elements:{element_id}"
+        devices.append(device)
     db.add_all(devices)
     await db.commit()
     for device in devices:
@@ -126,10 +133,13 @@ async def update_device(
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
 
     async def apply() -> GraphDevice:
-        mirrored = await mirror.device_to_legacy(db, job_id, device, data)
-        for key, value in data.items():
+        protect = mirror.device_needs_protection(device, data)
+        for key, value in mirror.merged_attributes(device, data).items():
             setattr(device, key, value)
-        device.graph_edited = True
+        if protect:
+            device.graph_edited = True
+        await db.flush()  # the version check fails here, before the legacy row is touched
+        mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         await db.commit()
         if mirrored:
             await backfill.backfill_job(db, job_id)
@@ -162,10 +172,15 @@ async def delete_device(
     removed_edges = [str(e.id) for e in touching]
 
     async def remove() -> None:
-        await mirror.delete_device_twin(db, job_id, device)
         for edge in touching:
             await db.delete(edge)
         await db.delete(device)
+        await db.flush()
+        try:
+            await mirror.delete_device_twin(db, job_id, device)
+        except HTTPException:
+            await db.rollback()
+            raise
         await db.commit()
 
     await run_versioned_delete(
@@ -247,10 +262,13 @@ async def update_edge(
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
 
     async def apply() -> ConnectionEdge:
-        mirrored = await mirror.edge_to_legacy(db, job_id, edge, data)
-        for key, value in data.items():
+        protect = mirror.edge_needs_protection(edge, data)
+        for key, value in mirror.merged_attributes(edge, data).items():
             setattr(edge, key, value)
-        edge.graph_edited = True
+        if protect:
+            edge.graph_edited = True
+        await db.flush()
+        mirrored = await mirror.edge_to_legacy(db, job_id, edge, data)
         await db.commit()
         if mirrored:
             await backfill.backfill_job(db, job_id)
@@ -283,8 +301,9 @@ async def delete_edge(
     edge = await _edge(db, job_id, edge_id)
 
     async def remove() -> None:
-        mirrored = await mirror.delete_edge_twin(db, job_id, edge)
         await db.delete(edge)
+        await db.flush()
+        mirrored = await mirror.delete_edge_twin(db, job_id, edge)
         await db.commit()
         if mirrored:
             await backfill.backfill_job(db, job_id)

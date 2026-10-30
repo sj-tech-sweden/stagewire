@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import httpx
 
 from app.core.config import get_settings
@@ -20,6 +23,10 @@ def rental_job_payload(job) -> dict:
     return payload
 
 
+CACHE_TTL_SECONDS = 60.0
+_PAGE_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+
+
 class StockwireClient:
     """Thin async client for the Stockwire Rental API."""
 
@@ -30,6 +37,7 @@ class StockwireClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._transport = transport
+        self.truncated = False
         settings = get_settings()
         self.base_url = (base_url or settings.stockwire_api_base_url).rstrip("/")
         self.token = token or settings.stockwire_api_token
@@ -126,7 +134,15 @@ class StockwireClient:
         )
 
     async def _all_pages(self, path: str, params: dict[str, object], cap: int = 2000) -> list[dict]:
-        """Collect every page of a list endpoint (``{items, total, has_more}`` envelope)."""
+        """Collect every page of a list endpoint (``{items, total, has_more}`` envelope).
+
+        Results are cached for a minute (typeahead searches would otherwise refetch the whole
+        catalog per keystroke); ``self.truncated`` is set when the cap cuts the list short.
+        """
+        key = (self.base_url, hash(self.token), path, tuple(sorted(params.items())))
+        cached = _PAGE_CACHE.get(key) if self._transport is None else None
+        if cached and time.monotonic() - cached[0] < CACHE_TTL_SECONDS:
+            return cached[1]
         rows: list[dict] = []
         async with self._client() as client:
             while len(rows) < cap:
@@ -139,7 +155,21 @@ class StockwireClient:
                 rows.extend(page)
                 if not page or isinstance(body, list) or not body.get("has_more"):
                     break
+            else:
+                self.truncated = True
+        if self._transport is None:
+            _PAGE_CACHE[key] = (time.monotonic(), rows)
         return rows
+
+    async def _product_names(self, product_ids: set[str]) -> dict[str, dict]:
+        async with self._client() as client:
+
+            async def fetch(pid: str) -> tuple[str, dict | None]:
+                response = await client.get(f"/api/v1/inventory/products/{pid}")
+                return pid, response.json() if response.status_code == 200 else None
+
+            found = await asyncio.gather(*(fetch(pid) for pid in product_ids))
+        return {pid: body for pid, body in found if body is not None}
 
     async def booked_quantities(self, stockwire_job_id: str | int) -> dict[str, int]:
         """product_id -> quantity required on a rental job.
@@ -219,6 +249,7 @@ class StockwireClient:
             "total": len(items),
             "facets": facets,
             "availability": {"date_range_supported": False},
+            "truncated": self.truncated,
         }
 
     async def list_cases(self) -> list[dict]:
@@ -233,11 +264,10 @@ class StockwireClient:
                 key = str(row["case_device_id"])
                 counts[key] = counts.get(key, 0) + 1
         cases = [r for r in rows if str(r.get("id")) in counts]
-        names: dict[str, str | None] = {}
-        async with self._client() as client:
-            for pid in {str(r["product_id"]) for r in cases if r.get("product_id")}:
-                response = await client.get(f"/api/v1/inventory/products/{pid}")
-                names[pid] = response.json().get("name") if response.status_code == 200 else None
+        products = await self._product_names(
+            {str(r["product_id"]) for r in cases if r.get("product_id")}
+        )
+        names = {pid: body.get("name") for pid, body in products.items()}
         return [
             {
                 "id": case["id"],
@@ -256,12 +286,9 @@ class StockwireClient:
         """
         rows = await self._all_pages("/api/v1/inventory/devices", {})
         children = [r for r in rows if str(r.get("case_device_id")) == str(case_device_id)]
-        products: dict[str, dict] = {}
-        async with self._client() as client:
-            for pid in {str(r["product_id"]) for r in children if r.get("product_id")}:
-                response = await client.get(f"/api/v1/inventory/products/{pid}")
-                if response.status_code == 200:
-                    products[pid] = response.json()
+        products = await self._product_names(
+            {str(r["product_id"]) for r in children if r.get("product_id")}
+        )
         return [
             {
                 **child,

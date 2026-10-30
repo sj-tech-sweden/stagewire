@@ -87,13 +87,16 @@ async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_head
         devices = (await _graph(client, auth_headers, job_id))["devices"]
         node = next(d for d in devices if d["name"] == "Kick")
         power = next(d for d in devices if d["name"] == "Mains")
-        for row, changes in ((node, {"canvas_x_cm": 120}), (power, {"name": "Mains (graph)"})):
+        for row, changes, protected in (
+            (node, {"canvas_x_cm": 120}, False),
+            (power, {"name": "Mains (graph)"}, True),
+        ):
             res = await client.patch(
                 f"{BASE}/jobs/{job_id}/graph/devices/{row['id']}",
                 json={**changes, "expected_revision": row["revision"]},
                 headers=auth_headers,
             )
-            assert res.json()["graph_edited"] is True
+            assert res.json()["graph_edited"] is protected
 
         async with db_mod.SessionLocal() as db:
             row = await db.get(AudioChannelPatch, kick)

@@ -369,6 +369,7 @@ export const useChannelsStore = defineStore('channels', {
       if (!this.selectedListId) this.selectedListId = list.id;
     },
     recordConflict(error, entityType, ids, draft, base) {
+      this.conflict = null;
       const detail = error.response?.data?.detail;
       if (error.response?.status !== 409 || detail?.code !== 'revision_conflict') return;
       const current = detail.current;
