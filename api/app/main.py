@@ -11,6 +11,7 @@ from app.core.security import add_cors
 from app.domains.audio.router import router as audio_router
 from app.domains.audio.ws import router as audio_ws_router
 from app.domains.auth.router import router as auth_router
+from app.domains.graph.lists import router as graph_lists_router
 from app.domains.graph.router import router as graph_router
 from app.domains.lighting.router import router as lighting_router
 from app.domains.reports.router import router as reports_router
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(audio_ws_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
+    app.include_router(graph_lists_router, prefix="/api/v1")
     app.include_router(lighting_router, prefix="/api/v1")
     app.include_router(reports_router, prefix="/api/v1")
     app.include_router(rigging_router, prefix="/api/v1")
