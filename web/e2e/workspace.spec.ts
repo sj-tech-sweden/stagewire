@@ -19,6 +19,12 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
 const dataRows = (page: Page) =>
   page.getByTestId('workspace-table').locator('tbody tr').filter({ has: page.locator('input') });
 
+// Fit the plot and read the zoom it settled on, so pixel positions can be derived from cm.
+async function fittedZoom(page: Page) {
+  await page.getByTestId('canvas-fit').click();
+  return Number(await page.getByTestId('workspace-canvas').getAttribute('data-zoom'));
+}
+
 async function seedGraph(page: Page, request: APIRequestContext) {
   await login(page);
   const headers = await authedHeaders(page);
@@ -47,29 +53,38 @@ async function seedGraph(page: Page, request: APIRequestContext) {
   return { jobId, headers, mic, box };
 }
 
-test('the workspace opens as a canvas, places unplaced devices and keeps data when switching to the list', async ({
+test('the workspace opens as a canvas with the stage and venue; only placed gear is on the plot', async ({
   page,
   request,
 }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const { jobId, headers, mic } = await seedGraph(page, request);
+  const frameLoaded = page.waitForResponse((res) => res.url().endsWith(`/jobs/${jobId}/power-outlets`));
   await page.goto(`/jobs/${jobId}/workspace`);
+  await frameLoaded;
 
   await expect(page.getByTestId('workspace-canvas')).toBeVisible();
-  await expect.poll(async () => {
-    const graph = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
-    return graph.devices.every((d: { canvas_x_cm: number | null }) => d.canvas_x_cm !== null);
-  }).toBe(true);
+  const graphOf = async () => (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  await expect(page.getByTestId('place-gear')).toHaveCount(2);
+  expect((await graphOf()).devices.every((d: { canvas_x_cm: number | null }) => d.canvas_x_cm === null)).toBe(true);
 
-  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
+  await page.getByTestId('place-gear').filter({ hasText: 'Lead mic' }).click();
+  await expect(page.getByTestId('place-gear')).toHaveCount(1);
+  await expect
+    .poll(async () => (await graphOf()).devices.find((d: { id: string }) => d.id === mic.id).canvas_x_cm)
+    .not.toBeNull();
+
+  await page.getByTestId('layer-coverage').click();
+  await page.getByTestId('layer-outlets').click();
+  await page.getByTestId('canvas-fit').click();
+
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
   await expect(page.getByTestId('workspace-table')).toBeVisible();
   await expect(dataRows(page)).toHaveCount(2);
   await expect(page.getByRole('button', { name: /request to add to stockwire job booking/i })).toBeVisible();
 
-  const graph = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
-  const kept = graph.devices.find((d: { id: string }) => d.id === mic.id);
+  const kept = (await graphOf()).devices.find((d: { id: string }) => d.id === mic.id);
   expect(kept.stockwire_product_id).toBe('4242');
-  expect(kept.canvas_x_cm).not.toBeNull();
 });
 
 test('the patch drawer lists connections per domain and the inspector shows the trace', async ({ page, request }) => {
@@ -84,7 +99,7 @@ test('the patch drawer lists connections per domain and the inspector shows the 
   await page.getByTestId('patch-tab-power').click();
   await expect(page.getByText(/no connections in this domain yet|inga kopplingar/i)).toBeVisible();
 
-  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
   await dataRows(page).first().locator('td').nth(1).click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Lead mic');
 });
@@ -107,7 +122,7 @@ test('on a phone the list becomes cards and the catalog is full screen', async (
   const { jobId } = await seedGraph(page, request);
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
 
   await expect(page.getByTestId('workspace-table')).toHaveCount(0);
   await expect(page.getByText('Lead mic').first()).toBeVisible();
@@ -153,9 +168,10 @@ test('dragging from one device to another with the connect tool creates a connec
 
   await page.getByTestId('connect-tool').click();
   const box = (await canvas.boundingBox())!;
-  // zoom is 0.8; each device box is 96x40 px with its top-left at (cm * 0.8)
-  const from = { x: box.x + 100 * 0.8 + 48, y: box.y + 100 * 0.8 + 20 };
-  const to = { x: box.x + 500 * 0.8 + 48, y: box.y + 100 * 0.8 + 20 };
+  const zoom = await fittedZoom(page);
+  // each device box is 96x40 px with its top-left at (cm * zoom)
+  const from = { x: box.x + 100 * zoom + 48, y: box.y + 100 * zoom + 20 };
+  const to = { x: box.x + 500 * zoom + 48, y: box.y + 100 * zoom + 20 };
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move((from.x + to.x) / 2, from.y, { steps: 5 });
@@ -210,9 +226,10 @@ test('catalog items can be dragged onto the canvas and cases are picked from a l
     (d: { name: string }) => d.name === 'Dragged Spot',
   );
   expect(dropped).toMatchObject({ domain: 'lighting', stockwire_product_id: '7' });
-  // drop point (400, 300) px at zoom 0.8, snapped to the 10 cm grid
-  expect(Math.abs(dropped.canvas_x_cm - 500)).toBeLessThanOrEqual(10);
-  expect(Math.abs(dropped.canvas_y_cm - 375)).toBeLessThanOrEqual(10);
+  // drop point (400, 300) px at the canvas zoom, relative to the stage and snapped to the 10 cm grid
+  const zoom = await fittedZoom(page);
+  expect(Math.abs(dropped.canvas_x_cm - 400 / zoom)).toBeLessThanOrEqual(10);
+  expect(Math.abs(dropped.canvas_y_cm - 300 / zoom)).toBeLessThanOrEqual(10);
 
   await page.getByText(/add case contents|lägg till kåpans innehåll/i).click();
   await page.getByTestId('case-select').click();
@@ -291,7 +308,7 @@ test('renaming a channel in the workspace list updates the channel list, and the
   });
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
   const row = dataRows(page).first();
   await expect(row.locator('input').first()).toHaveValue('Kick');
   await row.locator('input').first().fill('Kick In');
@@ -344,7 +361,7 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
   const canvas = page.getByTestId('workspace-canvas');
   await expect(canvas).toBeVisible();
   const area = (await canvas.boundingBox())!;
-  const zoom = 0.8;
+  const zoom = await fittedZoom(page);
   // element: top-left (100,100) cm, 100x50 cm -> 80x40 px; grab it near its middle
   const grab = { x: area.x + 100 * zoom + 40, y: area.y + 100 * zoom + 20 };
   await page.mouse.move(grab.x, grab.y);
@@ -357,10 +374,12 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
       const rows = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json();
       return Math.round(rows.find((r: { id: string }) => r.id === element.id).position_x);
     })
-    .toBe(175);
+    .toBe(Math.round(100 + 60 / zoom));
 
   await page.getByTestId('connect-tool').click();
-  const from = { x: area.x + 175 * zoom + 40, y: area.y + 150 * zoom + 20 };
+  const movedX = 100 + 60 / zoom;
+  const movedY = 100 + 40 / zoom;
+  const from = { x: area.x + movedX * zoom + 40, y: area.y + movedY * zoom + 20 };
   const to = { x: area.x + 600 * zoom + 48, y: area.y + 100 * zoom + 20 };
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
@@ -423,8 +442,15 @@ test('a device is created and edited in the device editor, with ports and camera
   await page.getByTestId('device-name').fill('PTZ 1');
   await page.getByTestId('device-type').click();
   await page.locator('.q-menu .q-item', { hasText: /^PTZ camera$/ }).click();
+  await page.getByTestId('connector-preset').filter({ hasText: /SDI in$/ }).click();
+  await page.getByTestId('connector-preset').filter({ hasText: /SDI in$/ }).click();
+  await page.getByTestId('connector-preset').filter({ hasText: /Dante$/ }).click();
   await page.getByTestId('add-port').click();
-  await page.getByTestId('port-connector').first().fill('SDI');
+  await page.getByTestId('port-direction').last().click();
+  await page.locator('.q-menu .q-item', { hasText: /^Out$/ }).click();
+  await page.getByTestId('port-connector').last().click();
+  await page.getByTestId('port-connector').last().fill('speakon');
+  await page.keyboard.press('Enter');
   await page.getByLabel(/sensor width/i).fill('9.6');
   await page.getByTestId('device-save').click();
 
@@ -433,7 +459,16 @@ test('a device is created and edited in the device editor, with ports and camera
   await expect.poll(async () => (await legacy())?.device_type).toBe('ptz_camera');
   const created = await legacy();
   expect(created.sensor_width_mm).toBe(9.6);
-  expect(created.ports).toEqual([{ direction: 'in', connector: 'SDI', count: 1 }]);
+  // the same preset twice raises the count, a bidirectional connector is stored as an in and an out
+  expect(created.ports).toEqual(
+    expect.arrayContaining([
+      { direction: 'in', connector: 'sdi', count: 2 },
+      { direction: 'in', connector: 'dante', count: 1 },
+      { direction: 'out', connector: 'dante', count: 1 },
+      { direction: 'out', connector: 'speakon', count: 1 },
+    ]),
+  );
+  expect(created.ports).toHaveLength(4);
 
   await expect(page.getByTestId('device-table').locator('tbody input').first()).toHaveValue('PTZ 1');
   await page.getByTestId('edit-device').click();

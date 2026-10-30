@@ -20,6 +20,9 @@ import {
   videoChainForm,
   videoChainNames,
   videoRowsOf,
+  addConnector,
+  expandGroups,
+  CONNECTOR_PRESETS,
   powerTreeRows,
   outputsLabel,
   loadStatusColor,
@@ -374,4 +377,32 @@ test('the power tree is listed under its parents and orphans are still shown', (
   expect(loadStatusColor('over')).toBe('negative');
   expect(loadStatusColor('whatever')).toBe('grey');
   expect(isVirtual({ kind: 'rigging_point' })).toBe(true);
+});
+
+test('a connector preset adds a group, or raises the count of the same connector and direction', () => {
+  const xlrIn = CONNECTOR_PRESETS.find((p) => p.label === 'XLR ×8 in')!;
+  const once = addConnector([], xlrIn);
+  expect(once).toEqual([{ direction: 'in', connector: 'xlr3', count: 8 }]);
+  expect(addConnector(once, xlrIn)[0].count).toBe(16);
+  const out = addConnector(once, { connector: 'xlr3', direction: 'out', count: 8 });
+  expect(out).toHaveLength(2);
+});
+
+test('a bidirectional connector is two ports and shows as one group again', () => {
+  const groups = [{ direction: 'both', connector: 'dante', count: 1 }];
+  const ports = portsFromGroups(groups, [], 'mixer');
+  expect(ports.map((p) => [p.direction, p.connector, p.channels])).toEqual([
+    ['in', 'dante', 1],
+    ['out', 'dante', 1],
+  ]);
+  expect(new Set(ports.map((p) => p.id)).size).toBe(2);
+  expect(portGroups(ports)).toEqual([{ direction: 'both', connector: 'dante', count: 1 }]);
+  expect(expandGroups(groups).map((g) => g.direction)).toEqual(['in', 'out']);
+  // different counts are two different groups, not a bidirectional one
+  expect(
+    portGroups([
+      { id: 'a', direction: 'in', connector: 'xlr3', channels: 8 },
+      { id: 'b', direction: 'out', connector: 'xlr3', channels: 4 },
+    ]),
+  ).toHaveLength(2);
 });

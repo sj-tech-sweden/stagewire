@@ -165,21 +165,78 @@
                 dense
                 icon="remove"
                 aria-label="zoom out"
-                @click="zoom = Math.max(0.3, zoom - 0.1)"
+                @click="zoom = Math.max(0.05, zoom / 1.2)"
               />
               <q-btn
                 dense
                 icon="add"
                 aria-label="zoom in"
-                @click="zoom = Math.min(2, zoom + 0.1)"
+                @click="zoom = Math.min(2, zoom * 1.2)"
+              />
+              <q-btn
+                dense
+                icon="fit_screen"
+                aria-label="fit"
+                data-testid="canvas-fit"
+                @click="fitCanvas"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="power"
+                :color="plotFrame.show.outlets.value ? 'primary' : undefined"
+                :label="t('workspace.layerOutlets')"
+                data-testid="layer-outlets"
+                @click="plotFrame.show.outlets.value = !plotFrame.show.outlets.value"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="groups"
+                :color="plotFrame.show.audience.value ? 'primary' : undefined"
+                :label="t('workspace.layerAudience')"
+                data-testid="layer-audience"
+                @click="plotFrame.show.audience.value = !plotFrame.show.audience.value"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="surround_sound"
+                :color="plotFrame.show.coverage.value ? 'primary' : undefined"
+                :label="t('workspace.layerCoverage')"
+                data-testid="layer-coverage"
+                @click="plotFrame.show.coverage.value = !plotFrame.show.coverage.value"
               />
             </q-btn-group>
+            <div
+              v-if="unplacedGear.length"
+              class="row items-center q-gutter-xs q-mb-xs full-width"
+              data-testid="unplaced-gear"
+            >
+              <span class="text-caption text-grey-6">{{ t('workspace.notOnPlot') }}</span>
+              <q-chip
+                v-for="gear in unplacedGear"
+                :key="gear.id"
+                dense
+                clickable
+                icon="add_location_alt"
+                data-testid="place-gear"
+                @click="placeGear(gear)"
+              >
+                {{ gear.name }}
+              </q-chip>
+            </div>
             <WorkspaceCanvas
               class="full-width"
               :devices="canvasDevices"
               :edges="canvasEdges"
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
+              :frame="plotFrame.frame.value"
+              :outlets="plotFrame.outlets.value"
+              :show-outlets="plotFrame.show.outlets.value"
+              :show-audience="plotFrame.show.audience.value"
+              :coverage-image="plotFrame.coverageImage.value"
               :connect-mode="connectMode"
               @select="select"
               @move="move"
@@ -265,6 +322,8 @@
 
 <script setup>
 import { isRevisionConflict } from '@/utils/graph';
+import { usePlotFrame } from '@/composables/usePlotFrame';
+import { fitZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
 import { computed, onMounted, ref, watch, reactive } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -276,7 +335,6 @@ import {
   PRODUCT_MIME,
   deviceFromProduct,
   devicesShownAsElements,
-  dropPosition,
   isPlotElement,
   isVirtual,
   linkRoleFor,
@@ -315,7 +373,8 @@ const jobId = String(route.params.jobId);
 const job = ref(null);
 const catalogOpen = ref(false);
 const importing = ref(false);
-const zoom = ref(0.8);
+const zoom = ref(0.3);
+const plotFrame = usePlotFrame(jobId);
 const connectMode = ref(false);
 const plugins = ref([]);
 const layers = reactive({ audio: true, lighting: true, video: true, power: true });
@@ -335,6 +394,18 @@ const canvasDevices = computed(() =>
       !shownAsElements.value.has(d.id) &&
       d.canvas_x_cm != null &&
       d.canvas_y_cm != null,
+  ),
+);
+// Gear is on the stage plot once it has a position. Anything else is offered as a chip to place,
+// so the canvas never shows gear that is not part of the plot.
+const unplacedGear = computed(() =>
+  graph.devices.filter(
+    (d) =>
+      visibleOnLayers(d, layers) &&
+      !isVirtual(d) &&
+      !isPlotElement(d) &&
+      !shownAsElements.value.has(d.id) &&
+      (d.canvas_x_cm == null || d.canvas_y_cm == null),
   ),
 );
 const canvasEdges = computed(() =>
@@ -369,7 +440,6 @@ async function switchMode(mode) {
   } catch {
     /* storage unavailable */
   }
-  if (mode === 'canvas') await graph.placeUnplacedDevices(jobId).catch(() => {});
 }
 
 async function move({ id, x, y }) {
@@ -442,7 +512,12 @@ async function onProductDrop(event) {
     const payloads = products.map((product, index) => {
       const device = deviceFromProduct(product);
       if (rect && graph.mode === 'canvas') {
-        const at = dropPosition(event.clientX + index * 20, event.clientY + index * 20, rect, zoom.value);
+        const at = stagePosition(
+          event.clientX + index * 20 - rect.left,
+          event.clientY + index * 20 - rect.top,
+          zoom.value,
+          plotFrame.frame.value,
+        );
         device.canvas_x_cm = at.x;
         device.canvas_y_cm = at.y;
       }
@@ -452,6 +527,24 @@ async function onProductDrop(event) {
     $q.notify({ type: 'positive', message: t('workspace.added', { n: created.length }) });
   } catch (err) {
     $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+
+function fitCanvas() {
+  const width = document.querySelector('[data-testid="workspace-canvas"]')?.clientWidth || 800;
+  zoom.value = fitZoom(plotFrame.frame.value, width, 520);
+}
+
+async function placeGear(device) {
+  const centre = stageCentre(plotFrame.frame.value);
+  const offset = (graph.devices.filter((d) => d.canvas_x_cm != null).length % 5) * 20;
+  try {
+    await graph.updateDevice(jobId, device.id, {
+      canvas_x_cm: centre.x + offset,
+      canvas_y_cm: centre.y + offset,
+    });
+  } catch (err) {
+    if (!isRevisionConflict(err)) $q.notify({ type: 'negative', message: errorText(err) });
   }
 }
 
@@ -482,7 +575,6 @@ async function importLegacy() {
       type: 'positive',
       message: t('workspace.importDone', { devices: result.devices, edges: result.edges }),
     });
-    if (graph.mode === 'canvas') await graph.placeUnplacedDevices(jobId);
     scheduleChecks();
   } catch (err) {
     $q.notify({ type: 'negative', message: errorText(err) });
@@ -525,6 +617,20 @@ watch(
   () => scheduleChecks(),
 );
 
+// Coverage comes from the placed speakers and cameras, so it is recomputed when they change.
+let coverageTimer = null;
+watch(
+  () =>
+    graph.devices
+      .filter((d) => d.canvas_x_cm != null)
+      .map((d) => [d.id, d.canvas_x_cm, d.canvas_y_cm, d.canvas_rotation, d.revision].join(':'))
+      .join('|'),
+  () => {
+    clearTimeout(coverageTimer);
+    coverageTimer = setTimeout(() => plotFrame.loadCoverage(), 400);
+  },
+);
+
 onMounted(async () => {
   try {
     const { data } = await api.get(`/jobs/${jobId}`);
@@ -538,8 +644,8 @@ onMounted(async () => {
     graph.setMode('canvas');
   }
   graph.selectedDeviceId = null;
-  await graph.fetchGraph(jobId);
-  if (graph.mode === 'canvas') await graph.placeUnplacedDevices(jobId).catch(() => {});
+  await Promise.all([graph.fetchGraph(jobId), plotFrame.load()]);
+  fitCanvas();
   scheduleChecks();
   socket.connect();
 });

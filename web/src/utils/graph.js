@@ -50,19 +50,5 @@ export function threeWayMerge(base, mine, theirs) {
   return { merged, conflicts };
 }
 
-export function placeUnplaced(devices, { originX = 100, originY = 100, step = 120, perRow = 6 }) {
-  let slot = 0;
-  return devices.map((device) => {
-    if (device.canvas_x_cm != null && device.canvas_y_cm != null) return device;
-    const placed = {
-      ...device,
-      canvas_x_cm: originX + (slot % perRow) * step,
-      canvas_y_cm: originY + Math.floor(slot / perRow) * step,
-    };
-    slot += 1;
-    return placed;
-  });
-}
-
 export const isRevisionConflict = (error) =>
   error?.response?.status === 409 && error.response?.data?.detail?.code === 'revision_conflict';

@@ -60,7 +60,12 @@ stockwire-rental (8000 / 9000 / 5432 / 6379).
 
 ## 5. Code style
 
-- Python: `ruff` (lint + format). Type-hint everything. No comments unless asked.
+- Python: `ruff` (lint + format). Type-hint everything.
+- **Comment the why and the how.** Write comments and docstrings that explain how a piece
+  works and why it is shaped that way (invariants, ordering constraints, sync/mirror rules,
+  non-obvious edge cases, what a legacy field maps to). They are for the next developer or
+  LLM agent who has to change the code without the history. Do not narrate what a line
+  obviously does, and keep comments true: update them in the same change as the code.
 - Frontend: ESLint + Prettier as configured by Quasar; `<script setup>` SFCs.
 - Commits: conventional commits (`feat:`, `fix:`, `chore:`, …) — release-please derives
   versions and changelogs from them.

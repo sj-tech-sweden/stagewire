@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
-import { applyGraphEvent, isRevisionConflict, placeUnplaced, threeWayMerge } from '@/utils/graph';
+import { applyGraphEvent, isRevisionConflict, threeWayMerge } from '@/utils/graph';
 import { isVirtual } from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
@@ -181,23 +181,6 @@ export const useGraphStore = defineStore('graph', {
       const { data } = await api.post(`${base(jobId)}/backfill`);
       await this.fetchGraph(jobId);
       return data;
-    },
-    // Mode B -> A: give every unplaced device a default spot, keeping all other data.
-    async placeUnplacedDevices(jobId) {
-      const before = new Map(this.devices.map((d) => [d.id, d]));
-      const placed = placeUnplaced(
-        this.devices.filter((d) => !isVirtual(d)),
-        {},
-      );
-      for (const device of placed) {
-        const old = before.get(device.id);
-        if (old.canvas_x_cm == null || old.canvas_y_cm == null) {
-          await this.updateDevice(jobId, device.id, {
-            canvas_x_cm: device.canvas_x_cm,
-            canvas_y_cm: device.canvas_y_cm,
-          });
-        }
-      }
     },
     async createList(jobId, payload) {
       const { data } = await api.post(`${base(jobId)}/lists`, payload);

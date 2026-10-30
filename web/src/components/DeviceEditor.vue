@@ -147,7 +147,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import DeviceDialog from '@/components/DeviceDialog.vue';
-import { deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
+import { connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();
@@ -174,7 +174,7 @@ const effective = (device) => graph.effective[device.id];
 const typeLabel = (device) => (device.kind ? t(`devices.types.${device.kind}`, device.kind) : '');
 const portsLabel = (device) =>
   portGroups(device.ports)
-    .map((g) => `${g.direction === 'in' ? '↓' : '↑'}${g.count || ''} ${g.connector}`.trim())
+    .map((g) => `${{ in: '↓', out: '↑', both: '↕' }[g.direction]}${g.count || ''} ${connectorLabel(g.connector)}`.trim())
     .join(', ');
 
 const refresh = () => graph.fetchEffective(props.jobId).catch(() => {});

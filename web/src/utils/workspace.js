@@ -322,18 +322,109 @@ export function signalForType(type) {
 
 const slug = (connector) => String(connector || '').toLowerCase() || 'x';
 
-// Connector groups the editor shows: the ports that carry a connector or a channel count.
-export const portGroups = (ports) =>
-  (ports || [])
+// A connector group is what the editor shows for a device's connectors: a direction ('in', 'out'
+// or 'both'), a connector type and how many of them. The graph has no bidirectional port, so a
+// 'both' group is stored as two ports (one in, one out) with the same connector and count, and
+// shown as one group again when a matching in/out pair is found.
+export const CONNECTOR_CHOICES = [
+  { value: 'xlr3', label: 'XLR 3-pin' },
+  { value: 'xlr5', label: 'XLR 5-pin' },
+  { value: 'trs', label: 'TRS / jack' },
+  { value: 'speakon', label: 'Speakon' },
+  { value: 'dante', label: 'Dante' },
+  { value: 'aes50', label: 'AES50' },
+  { value: 'madi', label: 'MADI' },
+  { value: 'avb', label: 'AVB' },
+  { value: 'ethernet', label: 'Ethernet (RJ45)' },
+  { value: 'ethercon', label: 'etherCON' },
+  { value: 'fiber', label: 'Fibre' },
+  { value: 'sdi', label: 'SDI' },
+  { value: 'hdmi', label: 'HDMI' },
+  { value: 'displayport', label: 'DisplayPort' },
+  { value: 'bnc', label: 'BNC' },
+  { value: 'usb', label: 'USB' },
+  { value: 'dmx', label: 'DMX (XLR 5)' },
+  { value: 'powercon', label: 'powerCON' },
+  { value: 'schuko', label: 'Schuko' },
+  { value: 'cee16', label: 'CEE 16 A' },
+];
+
+// One-tap additions for the connector editor. Adding one that already exists adds to its count.
+export const CONNECTOR_PRESETS = [
+  { label: 'XLR ×8 in', connector: 'xlr3', direction: 'in', count: 8 },
+  { label: 'XLR ×8 out', connector: 'xlr3', direction: 'out', count: 8 },
+  { label: 'Speakon ×4 out', connector: 'speakon', direction: 'out', count: 4 },
+  { label: 'Dante', connector: 'dante', direction: 'both', count: 1 },
+  { label: 'AES50', connector: 'aes50', direction: 'both', count: 1 },
+  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1 },
+  { label: 'SDI in', connector: 'sdi', direction: 'in', count: 1 },
+  { label: 'SDI out', connector: 'sdi', direction: 'out', count: 1 },
+  { label: 'HDMI in', connector: 'hdmi', direction: 'in', count: 1 },
+  { label: 'HDMI out', connector: 'hdmi', direction: 'out', count: 1 },
+  { label: 'DMX in', connector: 'dmx', direction: 'in', count: 1 },
+  { label: 'DMX out', connector: 'dmx', direction: 'out', count: 1 },
+  { label: 'powerCON in', connector: 'powercon', direction: 'in', count: 1 },
+  { label: 'powerCON out', connector: 'powercon', direction: 'out', count: 1 },
+];
+
+export const connectorLabel = (value) =>
+  CONNECTOR_CHOICES.find((c) => c.value === String(value || '').toLowerCase())?.label || value || '';
+
+// Add a preset to a list of groups: bump the count of the same connector and direction, else append.
+export function addConnector(groups, preset) {
+  const key = String(preset.connector).toLowerCase();
+  const hit = groups.find(
+    (g) => String(g.connector).toLowerCase() === key && g.direction === preset.direction,
+  );
+  if (!hit) return [...groups, { direction: preset.direction, connector: key, count: preset.count }];
+  return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + preset.count } : g));
+}
+
+// Connector groups the editor shows: the ports that carry a connector or a channel count, with a
+// matching in/out pair folded into one 'both' group.
+export function portGroups(ports) {
+  const groups = (ports || [])
     .filter((p) => p.connector || p.channels)
     .map((p) => ({ direction: p.direction, connector: p.connector || '', count: p.channels || 0 }));
+  const folded = [];
+  const used = new Set();
+  groups.forEach((g, i) => {
+    if (used.has(i)) return;
+    const mate = groups.findIndex(
+      (o, j) =>
+        j > i &&
+        !used.has(j) &&
+        o.direction !== g.direction &&
+        o.connector === g.connector &&
+        o.count === g.count,
+    );
+    if (mate === -1) {
+      folded.push(g);
+    } else {
+      used.add(mate);
+      folded.push({ ...g, direction: 'both' });
+    }
+  });
+  return folded;
+}
+
+// Groups as plain in/out groups (a 'both' group becomes two), the form the create endpoint takes.
+export const expandGroups = (groups) =>
+  groups.flatMap((g) =>
+    g.direction === 'both'
+      ? [
+          { ...g, direction: 'in' },
+          { ...g, direction: 'out' },
+        ]
+      : [g],
+  );
 
 // Graph ports for a set of connector groups, keeping the device's own generic ports as they are.
 export function portsFromGroups(groups, existing, type) {
   const generic = (existing || []).filter((p) => !p.connector && !p.channels);
   const seen = new Set(generic.map((p) => p.id));
   const signal = signalForType(type);
-  const fromGroups = groups.map((g) => {
+  const fromGroups = expandGroups(groups).map((g) => {
     const base = `${g.direction}-${slug(g.connector)}`;
     let id = base;
     for (let n = 2; seen.has(id); n += 1) id = `${base}-${n}`;
@@ -399,7 +490,7 @@ export function deviceCreateBody(form) {
     name: form.name,
     device_type: form.device_type,
     notes: form.notes,
-    ports: form.ports.filter((p) => p.connector || p.count),
+    ports: expandGroups(form.ports.filter((p) => p.connector || p.count)),
   };
   const map = { power_w: 'power_watts' };
   for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) {
