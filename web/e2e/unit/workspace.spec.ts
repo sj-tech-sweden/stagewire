@@ -3,6 +3,8 @@ import {
   catalogQuery,
   deviceFromProduct,
   boxFor,
+  fixturesOf,
+  isFixtureNode,
   deviceCreateBody,
   deviceForm,
   devicePatch,
@@ -239,4 +241,16 @@ test('a device form round-trips into a patch that clears emptied fields and keep
   const body = deviceCreateBody({ ...form, power_w: 120, ports: [{ direction: 'out', connector: 'SDI', count: 2 }] });
   expect(body).toMatchObject({ name: 'Cam', device_type: 'camera', power_watts: 120, focal_min_mm: '4.3' });
   expect(body).not.toHaveProperty('max_distance_m');
+});
+
+test('fixtures are found by their DMX patch and listed by universe then address', () => {
+  const devices = [
+    { id: 'a', name: 'B', kind: 'fixture', attributes: { universe: 2, dmx_address: 1 } },
+    { id: 'b', name: 'A', kind: 'other', attributes: { universe: 1, dmx_address: 30 } },
+    { id: 'c', name: 'C', kind: 'fixture', attributes: { universe: 1, dmx_address: 1 } },
+    { id: 'd', name: 'Desk', kind: 'mixer', attributes: {} },
+    { id: 'e', name: 'Spot', kind: 'plot_element', attributes: { universe: 1 } },
+  ];
+  expect(isFixtureNode(devices[3])).toBe(false);
+  expect(fixturesOf(devices).map((d) => d.id)).toEqual(['c', 'b', 'a']);
 });

@@ -52,6 +52,10 @@ export default {
     discard: 'Discard my changes',
   },
   workspace: {
+    modeLights: 'Lights',
+    addFixture: 'Add fixture',
+    addFixtures: 'Add {n} fixtures',
+    noFixtures: 'No fixtures yet. Add one; it gets the first free DMX address.',
     modeDevices: 'Devices',
     noGear: 'No devices yet. Create one or add gear from the catalog.',
     deviceInUse: 'Move or delete the patch points on this device first',

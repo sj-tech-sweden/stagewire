@@ -52,6 +52,10 @@ export default {
     discard: 'Släng mina ändringar',
   },
   workspace: {
+    modeLights: 'Ljus',
+    addFixture: 'Lägg till armatur',
+    addFixtures: 'Lägg till {n} armaturer',
+    noFixtures: 'Inga armaturer än. Lägg till en; den får första lediga DMX-adress.',
     modeDevices: 'Enheter',
     noGear: 'Inga enheter än. Skapa en eller lägg till utrustning från katalogen.',
     deviceInUse: 'Flytta eller ta bort patchpunkterna på enheten först',

@@ -361,3 +361,26 @@ export function deviceCreateBody(form) {
 }
 
 export const isGear = (device) => !isVirtual(device) && !isPlotElement(device);
+
+// A node that is a fixture: its own fixture node, or a device that carries a DMX patch.
+export const isFixtureNode = (device) =>
+  device.kind === 'fixture' ||
+  device.attributes?.universe != null ||
+  device.attributes?.dmx_address != null;
+
+export const fixtureView = (node) => ({
+  id: node.id,
+  universe: node.attributes?.universe ?? null,
+  dmx_address: node.attributes?.dmx_address ?? null,
+  footprint: node.attributes?.footprint ?? null,
+});
+
+export const fixturesOf = (devices) =>
+  devices
+    .filter((d) => isFixtureNode(d) && !isPlotElement(d))
+    .sort(
+      (a, b) =>
+        (a.attributes?.universe ?? 1e9) - (b.attributes?.universe ?? 1e9) ||
+        (a.attributes?.dmx_address ?? 1e9) - (b.attributes?.dmx_address ?? 1e9) ||
+        a.name.localeCompare(b.name),
+    );

@@ -230,6 +230,11 @@ export const useGraphStore = defineStore('graph', {
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
+    async createFixture(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/fixtures`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
     async fetchEffective(jobId) {
       const { data } = await api.get(`${base(jobId)}/effective`);
       this.effective = data;
@@ -247,7 +252,7 @@ export const useGraphStore = defineStore('graph', {
       return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
-      this.mode = ['list', 'lists', 'devices'].includes(mode) ? mode : 'canvas';
+      this.mode = ['list', 'lists', 'devices', 'lights'].includes(mode) ? mode : 'canvas';
     },
   },
 });

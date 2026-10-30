@@ -441,3 +441,40 @@ test('a device is created and edited in the device editor, with ports and camera
   await page.getByTestId('device-save').click();
   await expect.poll(async () => (await legacy()).max_distance_m).toBe(40);
 });
+
+test('fixtures are patched in the lights editor and DMX overlaps are flagged', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Lights ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(lights|ljus)$/i).click();
+
+  await page.getByTestId('add-fixture').click();
+  await expect(page.getByTestId('fixture-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(1);
+  await page.getByTestId('add-fixture').click();
+  const rows = page.getByTestId('fixture-table').locator('tbody tr').filter({ has: page.locator('input') });
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByTestId('dmx-conflict')).toHaveCount(0);
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixtures`, { headers })).json()) as {
+      dmx_address: number;
+      dmx_conflict: boolean;
+    }[];
+  await expect.poll(async () => (await legacy()).map((f) => f.dmx_address).sort()).toEqual([1, 2]);
+
+  // footprints of 4 on addresses 1 and 2 overlap
+  for (const [index, footprint] of [[0, '4'], [1, '4']] as const) {
+    const field = rows.nth(index).getByTestId('fixture-footprint');
+    await field.fill(footprint);
+    await field.press('Enter');
+  }
+  await expect(page.getByTestId('dmx-conflict')).toHaveCount(2);
+  await expect.poll(async () => (await legacy()).every((f) => f.dmx_conflict)).toBe(true);
+
+  const address = rows.nth(1).getByTestId('fixture-dmx_address');
+  await address.fill('20');
+  await address.press('Enter');
+  await expect(page.getByTestId('dmx-conflict')).toHaveCount(0);
+});

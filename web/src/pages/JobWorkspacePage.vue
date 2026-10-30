@@ -35,6 +35,7 @@
           { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
           { label: t('workspace.modeLists'), value: 'lists', icon: 'queue_music' },
           { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
+          { label: t('workspace.modeLights'), value: 'lights', icon: 'lightbulb' },
         ]"
         data-testid="mode-toggle"
         @update:model-value="switchMode"
@@ -134,7 +135,7 @@
         @drop.prevent="onProductDrop"
       >
         <q-banner
-          v-if="!graph.devices.length && !graph.loading && !['lists', 'devices'].includes(graph.mode)"
+          v-if="!graph.devices.length && !graph.loading && !['lists', 'devices', 'lights'].includes(graph.mode)"
           class="bg-grey-9 text-white rounded-borders"
         >
           {{ t('workspace.empty') }}
@@ -188,6 +189,10 @@
           />
           <DeviceEditor
             v-else-if="graph.mode === 'devices'"
+            :job-id="jobId"
+          />
+          <LightsEditor
+            v-else-if="graph.mode === 'lights'"
             :job-id="jobId"
           />
           <WorkspaceTable
@@ -273,6 +278,7 @@ import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import StockwireCatalogDrawer from '@/components/StockwireCatalogDrawer.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import DeviceEditor from '@/components/DeviceEditor.vue';
+import LightsEditor from '@/components/LightsEditor.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import WorkspaceTable from '@/components/WorkspaceTable.vue';
 
