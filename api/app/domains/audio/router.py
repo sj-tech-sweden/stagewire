@@ -31,12 +31,18 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.graph import readers as graph_readers
 from app.domains.graph.backfill import backfill_job
+from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.graph.models import GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 from app.domains.video import service as video_service
 
-router = APIRouter(prefix="/jobs", tags=["audio:jobs"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/jobs",
+    tags=["audio:jobs"],
+    dependencies=[Depends(get_current_user)],
+    route_class=MirrorToGraphRoute,
+)
 
 MAX_COVERAGE_CELLS_PER_AXIS = 500
 

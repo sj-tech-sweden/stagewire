@@ -75,26 +75,37 @@ async def test_sync_refreshes_untouched_rows_and_is_a_no_op_when_nothing_changed
 
 
 @pytest.mark.asyncio
-async def test_sync_never_overwrites_rows_edited_in_the_graph(auth_headers):
+async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_headers):
+    from app.domains.rigging.models import PowerNode
+
     job_id, (kick, _) = await _seed()
+    async with db_mod.SessionLocal() as db:
+        db.add(PowerNode(job_id=job_id, kind="source", name="Mains"))
+        await db.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await _sync(client, auth_headers, job_id)
         devices = (await _graph(client, auth_headers, job_id))["devices"]
         node = next(d for d in devices if d["name"] == "Kick")
-        res = await client.patch(
-            f"{BASE}/jobs/{job_id}/graph/devices/{node['id']}",
-            json={"name": "Kick (graph)", "expected_revision": node["revision"]},
-            headers=auth_headers,
-        )
-        assert res.json()["graph_edited"] is True
+        power = next(d for d in devices if d["name"] == "Mains")
+        for row, changes in ((node, {"canvas_x_cm": 120}), (power, {"name": "Mains (graph)"})):
+            res = await client.patch(
+                f"{BASE}/jobs/{job_id}/graph/devices/{row['id']}",
+                json={**changes, "expected_revision": row["revision"]},
+                headers=auth_headers,
+            )
+            assert res.json()["graph_edited"] is True
 
         async with db_mod.SessionLocal() as db:
             row = await db.get(AudioChannelPatch, kick)
             row.source_label = "Kick (legacy)"
             await db.commit()
         await _sync(client, auth_headers, job_id)
-        names = {d["name"] for d in (await _graph(client, auth_headers, job_id))["devices"]}
-        assert "Kick (graph)" in names and "Kick (legacy)" not in names
+        devices = (await _graph(client, auth_headers, job_id))["devices"]
+        by_name = {d["name"]: d for d in devices}
+        # channels are mirrored both ways: legacy-owned fields flow in, graph-only ones stay
+        assert by_name["Kick (legacy)"]["canvas_x_cm"] == 120
+        # power nodes are not mirrored yet: the graph edit wins
+        assert "Mains (graph)" in by_name and "Mains" not in by_name
 
 
 @pytest.mark.asyncio

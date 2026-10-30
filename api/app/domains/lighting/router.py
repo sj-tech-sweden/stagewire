@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.auth.deps import get_current_user
+from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting import chains, importers, schemas, service
 from app.domains.lighting.models import (
     DmxStep,
@@ -17,7 +18,9 @@ from app.domains.lighting.models import (
 )
 from app.domains.rigging import service as rigging_service
 
-router = APIRouter(tags=["lighting"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["lighting"], dependencies=[Depends(get_current_user)], route_class=MirrorToGraphRoute
+)
 
 IMPORT_FORMATS = {".csv": importers.parse_csv, ".mvr": importers.parse_mvr}
 

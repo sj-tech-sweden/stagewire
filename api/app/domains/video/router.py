@@ -7,6 +7,7 @@ from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.audio.models import AudioDevice
 from app.domains.auth.deps import get_current_user
+from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.video import schemas, service
 from app.domains.video.models import (
     VideoInput,
@@ -16,7 +17,9 @@ from app.domains.video.models import (
     VideoPatchPoint,
 )
 
-router = APIRouter(tags=["video"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["video"], dependencies=[Depends(get_current_user)], route_class=MirrorToGraphRoute
+)
 
 
 async def _job_or_404(db: AsyncSession, job_id: UUID) -> None:

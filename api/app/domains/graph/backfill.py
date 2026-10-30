@@ -41,6 +41,42 @@ CHANNEL_FIELDS = (
 )
 OUTPUT_FIELDS = ("mode", "connector", "color_code")
 
+# Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
+# the graph even when the twin was edited there, because graph edits are mirrored back at once.
+OWNED_ATTRS: dict[str, set[str]] = {
+    "audio_channel_patches": {*CHANNEL_FIELDS, "list_id", "channel_list_id"},
+    "audio_channel_lists": {
+        "mixer_product_id",
+        "mixer_product_name",
+        "mixer_inputs",
+        "mixer_buses",
+    },
+    "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
+    "audio_devices": {
+        "device_type",
+        "weight_kg",
+        "power_w",
+        "input_override",
+        "output_override",
+        "fixture_type",
+        "channel_mode",
+        "footprint_channels",
+        "default_gel",
+    },
+}
+OWNED_DEVICE_FIELDS = (
+    "name",
+    "notes",
+    "position",
+    "stockwire_product_id",
+    "stockwire_product_name",
+)
+MIRRORED_EDGE_TABLES = {"channel_patch_points", "output_patch_points", "channel_list_outputs"}
+
+
+def _table(ref: str) -> str:
+    return ref.partition(":")[0]
+
 
 @dataclass
 class BackfillResult:
@@ -50,6 +86,10 @@ class BackfillResult:
     updated: int = 0
     removed: int = 0
     notes: list[str] = field(default_factory=list)
+    changed_devices: list[uuid.UUID] = field(default_factory=list)
+    changed_edges: list[uuid.UUID] = field(default_factory=list)
+    removed_devices: list[tuple[uuid.UUID, list[uuid.UUID]]] = field(default_factory=list)
+    removed_edges: list[uuid.UUID] = field(default_factory=list)
 
 
 def _domain_for(device: AudioDevice) -> str:
@@ -88,6 +128,7 @@ def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
 def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False) -> dict:
     attrs = {
         "chain": str(chain_root.id),
+        "point_id": str(point.id),
         "position": point.position,
         "point_type": getattr(point, "point_type", None),
         "connector": point.connector or "",
@@ -146,6 +187,20 @@ class Backfill:
                             copy.deepcopy(value) if value else ({} if key == "attributes" else [])
                         )
                     setattr(existing, key, value)
+            elif _table(ref) in OWNED_ATTRS:
+                table = _table(ref)
+                for key in OWNED_DEVICE_FIELDS:
+                    if key in fields:
+                        setattr(existing, key, fields[key])
+                attrs = {
+                    k: v for k, v in existing.attributes.items() if k not in OWNED_ATTRS[table]
+                }
+                owned_new = fields.get("attributes") or {}
+                attrs.update({k: v for k, v in owned_new.items() if k in OWNED_ATTRS[table]})
+                existing.attributes = attrs
+                if table == "audio_devices":
+                    existing.kind, existing.domain = fields["kind"], fields["domain"]
+                    existing.ports = copy.deepcopy(fields.get("ports") or [])
             self.result.skipped += 1
             return existing
         device = GraphDevice(id=uuid.uuid4(), job_id=self.job_id, legacy_ref=ref, **fields)
@@ -216,21 +271,20 @@ class Backfill:
         self.seen_edges.add(ref)
         if ref in self.edge_refs:
             existing = self.edge_rows.get(ref)
-            if existing is not None and not existing.graph_edited:
-                self.edge_updates.append(
-                    (
-                        existing,
-                        {
-                            "signal": signal,
-                            "src_device_id": src.id,
-                            "src_port": sport,
-                            "dst_device_id": dst.id,
-                            "dst_port": dport,
-                            "phase": phase if phase in ("L1", "L2", "L3") else None,
-                            "attributes": {"legacy_ref": ref, **(attributes or {})},
-                        },
-                    )
-                )
+            if existing is not None and (
+                not existing.graph_edited or _table(ref) in MIRRORED_EDGE_TABLES
+            ):
+                values = {
+                    "signal": signal,
+                    "src_device_id": src.id,
+                    "src_port": sport,
+                    "dst_device_id": dst.id,
+                    "dst_port": dport,
+                    "attributes": {"legacy_ref": ref, **(attributes or {})},
+                }
+                if not existing.graph_edited:
+                    values["phase"] = phase if phase in ("L1", "L2", "L3") else None
+                self.edge_updates.append((existing, values))
             self.result.skipped += 1
             return
         self.edge_refs.add(ref)
@@ -572,6 +626,8 @@ class Backfill:
         await self.db.flush()
         for edge, values in self.edge_updates:
             for key, value in values.items():
+                if key == "attributes" and edge.graph_edited:
+                    value = {**edge.attributes, **value}
                 setattr(edge, key, value)
         self.db.add_all(self.new_edges)
         await self.db.flush()
@@ -603,8 +659,17 @@ class Backfill:
         for edge in doomed.values():
             await self.db.delete(edge)
         await self.db.flush()
-        for device in gone_devices.values():
+        for device_id, device in gone_devices.items():
+            touching = [
+                e.id for e in doomed.values() if device_id in (e.src_device_id, e.dst_device_id)
+            ]
+            self.result.removed_devices.append((device_id, touching))
             await self.db.delete(device)
+        self.result.removed_edges = [
+            e.id
+            for e in doomed.values()
+            if e.src_device_id not in gone_devices and e.dst_device_id not in gone_devices
+        ]
         self.result.removed = len(doomed) + len(gone_devices)
 
     async def plot_links(self) -> None:
@@ -842,10 +907,49 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         await builder.plot_links()
         await builder.prune()
     await db.flush()
-    builder.result.updated = sum(
-        1
-        for row in [*builder.devices.values(), *builder.edge_rows.values()]
-        if row.id in builder.loaded_revisions and row.revision != builder.loaded_revisions[row.id]
-    )
+    result = builder.result
+    for row in [*builder.devices.values(), *builder.edge_rows.values()]:
+        is_new = row.id not in builder.loaded_revisions
+        changed = not is_new and row.revision != builder.loaded_revisions[row.id]
+        if is_new or changed:
+            target = (
+                result.changed_devices if isinstance(row, GraphDevice) else result.changed_edges
+            )
+            target.append(row.id)
+        if changed:
+            result.updated += 1
     await db.commit()
-    return builder.result
+    await publish_changes(db, job_id, result)
+    return result
+
+
+async def publish_changes(db: AsyncSession, job_id: uuid.UUID, result: BackfillResult) -> None:
+    """Tell open workspaces what a sync changed (nothing is sent when nothing changed)."""
+    if not (
+        result.changed_devices
+        or result.changed_edges
+        or result.removed_devices
+        or result.removed_edges
+    ):
+        return
+    from app.domains.audio.ws import publish_job_event
+    from app.domains.graph import schemas
+
+    for device_id in dict.fromkeys(result.changed_devices):
+        device = await db.get(GraphDevice, device_id)
+        if device is not None:
+            payload = schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+            await publish_job_event(job_id, "graph.device.upsert", payload)
+    for edge_id in dict.fromkeys(result.changed_edges):
+        edge = await db.get(ConnectionEdge, edge_id)
+        if edge is not None:
+            payload = schemas.ConnectionEdgeRead.model_validate(edge).model_dump(mode="json")
+            await publish_job_event(job_id, "graph.edge.upsert", payload)
+    for edge_id in result.removed_edges:
+        await publish_job_event(job_id, "graph.edge.delete", {"id": str(edge_id)})
+    for device_id, edge_ids in result.removed_devices:
+        await publish_job_event(
+            job_id,
+            "graph.device.delete",
+            {"id": str(device_id), "edge_ids": [str(e) for e in edge_ids]},
+        )
