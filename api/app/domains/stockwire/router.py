@@ -85,6 +85,27 @@ async def search_products(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
 
 
+@router.get("/own-products")
+async def own_products(
+    search: str | None = None,
+    category_id: list[int] | None = Query(default=None),
+    skip: int = 0,
+    limit: int = 20,
+    db=Depends(get_db),
+) -> dict:
+    """Own equipment: products that have devices, the device count being the quantity."""
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": [], "total": 0}
+    try:
+        return await sw.search_own_products(
+            q=search, category_ids=category_id, skip=skip, limit=limit
+        )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
 @router.get("/catalog/search")
 async def search_catalog(
     q: str | None = None,

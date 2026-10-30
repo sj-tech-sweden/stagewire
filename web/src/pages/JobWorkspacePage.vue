@@ -391,6 +391,7 @@
               :shapes="viewShapes"
               :connect-mode="connectMode"
               @pan="(p) => (pan = p)"
+              @move-outlet="moveOutlet"
               @select="select"
               @move="move"
               @connect="connectDevices"
@@ -649,6 +650,18 @@ async function plugIntoOutlet(srcId, outletId) {
   } catch (err) {
     $q.notify({ type: 'negative', message: errorText(err) });
   }
+}
+
+// Outlets belong to the venue; moving one on the map saves its place for every job in that venue.
+async function moveOutlet({ id, x, y }) {
+  const venueId = plotFrame.job.value?.venue_id;
+  if (!venueId) return;
+  try {
+    await api.patch(`/venues/${venueId}/power-outlets/${id}`, { x_cm: x, y_cm: y });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+  await plotFrame.load();
 }
 
 async function connectDevices({ srcId, dstId }) {

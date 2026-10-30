@@ -162,6 +162,20 @@ Stagewire also exposes what it read, for checking an integration: `GET /api/v1/s
 returns `connector_groups`, `power_inlet`, `inputs`, `outputs`, `weight_kg` and `power_watts` for a
 product exactly as an import would use them.
 
+### 3.11 Own equipment and availability (read by Stagewire)
+
+The stand and channel source pickers list the company's **own equipment**, not rental-in products:
+`GET /inventory/products?exclude_rental=true`, keeping the products that have at least one
+`GET /inventory/devices` row (`product_id`). The **quantity of a product is its number of devices**
+(`device_count`; Stagewire shows it as "x12" and uses it as `available_qty`). Stagewire exposes this as
+`GET /api/v1/stockwire/own-products?search=&category_id=&limit=`.
+
+Planned (not built in stockwire-rental yet): an availability call for a date or several dates, so
+the quantity can be the number free on those dates instead of the device count, for example
+`GET /inventory/products/availability?product_ids=1,2,3&dates=2026-11-05,2026-11-06` returning
+`{product_id: {date: free_quantity}}`. Stagewire will call it from `search_own_products` and the
+catalog drawer's availability filter (`availability.date_range_supported`) once it exists.
+
 ## 4. Endpoints Stagewire exposes (for the reverse direction)
 
 stockwire-rental will call these (key from §3.2):

@@ -36,6 +36,14 @@ export const useStockwireStore = defineStore('stockwire', {
       const { data } = await api.get('/stockwire/products', { params });
       return data;
     },
+    // Own equipment: products that have devices, with the device count as quantity.
+    async searchOwnProducts(params = {}) {
+      const { data } = await api.get('/stockwire/own-products', {
+        params,
+        paramsSerializer: { indexes: null },
+      });
+      return data;
+    },
     async jobDeeplink(jobId) {
       const { data } = await api.get(`/stockwire/jobs/${jobId}/deeplink`);
       return data.url;

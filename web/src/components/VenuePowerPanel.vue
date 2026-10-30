@@ -136,6 +136,36 @@
             :label="t('workspace.powerRating')"
             @change="(v) => saveOutlet(outlet, { rating_amps: v === '' ? null : Number(v) })"
           />
+          <q-input
+            :model-value="outlet.x_cm"
+            class="col-4 col-sm-2"
+            dense
+            outlined
+            type="number"
+            :label="t('workspace.outletX')"
+            data-testid="venue-outlet-x"
+            @change="(v) => saveOutlet(outlet, { x_cm: v === '' ? null : Number(v) })"
+          />
+          <q-input
+            :model-value="outlet.y_cm"
+            class="col-4 col-sm-2"
+            dense
+            outlined
+            type="number"
+            :label="t('workspace.outletY')"
+            data-testid="venue-outlet-y"
+            @change="(v) => saveOutlet(outlet, { y_cm: v === '' ? null : Number(v) })"
+          />
+          <q-btn
+            v-if="outlet.x_cm == null || outlet.y_cm == null"
+            flat
+            dense
+            no-caps
+            icon="add_location_alt"
+            :label="t('workspace.placeOutlet')"
+            data-testid="venue-outlet-place"
+            @click="saveOutlet(outlet, { x_cm: 100, y_cm: 100 })"
+          />
           <q-btn
             flat
             dense
@@ -211,7 +241,7 @@ const addGroup = () =>
 const saveGroup = (group, changes) => run(() => api.patch(`/venues/${venueId.value}/power-groups/${group.id}`, changes));
 const removeGroup = (group) => run(() => api.delete(`/venues/${venueId.value}/power-groups/${group.id}`));
 const addOutlet = () =>
-  run(() => api.post(`/venues/${venueId.value}/power-outlets`, { name: `${t('workspace.venueOutlet')} ${outlets.value.length + 1}`, connector: 'schuko' }));
+  run(() => api.post(`/venues/${venueId.value}/power-outlets`, { name: `${t('workspace.venueOutlet')} ${outlets.value.length + 1}`, connector: 'schuko', x_cm: 100, y_cm: 100 }));
 const saveOutlet = (outlet, changes) => run(() => api.patch(`/venues/${venueId.value}/power-outlets/${outlet.id}`, changes));
 const removeOutlet = (outlet) => run(() => api.delete(`/venues/${venueId.value}/power-outlets/${outlet.id}`));
 

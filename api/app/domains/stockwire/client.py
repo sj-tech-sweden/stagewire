@@ -252,6 +252,45 @@ class StockwireClient:
             "truncated": self.truncated,
         }
 
+    async def search_own_products(
+        self,
+        *,
+        q: str | None = None,
+        category_ids: list[int] | None = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> dict:
+        """Products of the company's own equipment, each with how many devices it has.
+
+        ``GET /inventory/products`` lists everything, including rental-in products
+        (``exclude_rental`` leaves those out). Own equipment is a product with devices in
+        ``/inventory/devices``, and its quantity is the number of those devices. The upstream has
+        no availability for a date yet, so ``available_qty`` is the device count for now; a date
+        range can replace it once Stockwire exposes one (see docs/stockwire-integration-spec.md).
+        """
+        params: dict[str, object] = {"exclude_rental": True}
+        if q:
+            params["search"] = q
+        products = await self._all_pages("/api/v1/inventory/products", params)
+        devices = await self._all_pages("/api/v1/inventory/devices", {})
+        counts: dict[str, int] = {}
+        for device in devices:
+            if device.get("product_id") is not None:
+                key = str(device["product_id"])
+                counts[key] = counts.get(key, 0) + 1
+        wanted = set(category_ids or [])
+        items = [
+            {
+                **product,
+                "device_count": counts[str(product.get("id"))],
+                "available_qty": counts[str(product.get("id"))],
+            }
+            for product in products
+            if counts.get(str(product.get("id")))
+            and (not wanted or product.get("category_id") in wanted)
+        ]
+        return {"items": items[skip : skip + limit], "total": len(items)}
+
     async def list_cases(self) -> list[dict]:
         """Devices that contain other devices (Stockwire has no "is a case" flag).
 

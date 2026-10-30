@@ -192,17 +192,20 @@
             />
           </q-td>
         </template>
-        <template
-          v-for="field in ['device']"
-          #[`body-cell-${field}`]="slot"
-          :key="field"
-        >
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.attributes[field]"
-              dense
+        <template #body-cell-device="slot">
+          <q-td
+            :props="slot"
+            style="min-width: 160px; max-width: 200px"
+          >
+            <StockwireProductPicker
+              :model-value="sourceOf(slot.row)"
+              own
+              :local-items="gearItems"
+              :label="t('channels.fieldDevice')"
+              :hint="''"
               borderless
-              @change="(v) => saveAttr(slot.row, field, v)"
+              data-testid="source-picker"
+              @update:model-value="(p) => setSource(slot.row, p)"
             />
           </q-td>
         </template>
@@ -214,6 +217,7 @@
             <StockwireProductPicker
               :model-value="standOf(slot.row)"
               gear-type="stand"
+              own
               :label="t('stockwire.selectStand')"
               :hint="''"
               borderless
@@ -538,6 +542,24 @@ const setStand = (node, product) =>
       stand_product_name: product?.name || null,
       stand_type: product?.name || '',
     },
+  });
+
+// The source of a channel (the device or microphone it comes from) is something already in the
+// job, one of the company's own Stockwire products, or a name typed in.
+const gearItems = computed(() =>
+  graph.devices
+    .filter((d) => !isVirtual(d) && !isPlotElement(d))
+    .map((d) => ({ id: d.id, name: d.name, stockwire_product_id: d.stockwire_product_id })),
+);
+const sourceOf = (node) => {
+  const name = node.attributes.device || node.stockwire_product_name;
+  return name ? { id: node.stockwire_product_id || null, name } : null;
+};
+const setSource = (node, pick) =>
+  save(node, {
+    attributes: { device: pick?.name || '' },
+    stockwire_product_id: pick?.id ? String(pick.id) : null,
+    stockwire_product_name: pick?.id ? pick.name : null,
   });
 
 const syncing = ref(false);

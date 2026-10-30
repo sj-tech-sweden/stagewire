@@ -126,3 +126,14 @@ async def test_search_reports_when_the_catalog_was_cut_short():
     result = await sw.search_catalog(limit=5)
     assert result["truncated"] is True and result["total"] == 2000
     assert (await client().search_catalog())["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_own_products_are_products_with_devices_and_the_device_count_is_the_quantity():
+    result = await client().search_own_products()
+    assert {p["id"]: p["device_count"] for p in result["items"]} == {1: 3, 2: 1, 3: 2}
+    assert all(p["available_qty"] == p["device_count"] for p in result["items"])
+    narrowed = await client().search_own_products(q="sm")
+    assert [p["name"] for p in narrowed["items"]] == ["SM58"]
+    assert (await client().search_own_products(limit=1))["total"] == 3
+    assert len((await client().search_own_products(limit=1))["items"]) == 1

@@ -4,6 +4,7 @@ from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text, 
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+from app.domains.venues import models as venue_models  # noqa: F401  (FK target tables)
 
 
 class RiggingPoint(Base):

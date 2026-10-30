@@ -37,7 +37,8 @@
           <v-group
             v-for="outlet in outletMarks"
             :key="outlet.id"
-            :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y }"
+            :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y, draggable: !connectMode && !panning }"
+            @dragend="(e) => onOutletDrop(outlet, e)"
           >
             <v-circle :config="{ radius: connectMode ? 11 : 7, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 }" />
             <v-text :config="{ text: outlet.label, fontSize: 10, x: 14, y: -5, fill: '#ddd', listening: false }" />
@@ -129,7 +130,7 @@ const props = defineProps({
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect', 'pan']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet']);
 
 const $q = useQuasar();
 const host = ref(null);
@@ -293,6 +294,15 @@ function endLink() {
   const fromId = link.from.id;
   link.from = null;
   if (targetId && targetId !== fromId) emit('connect', { srcId: fromId, dstId: targetId });
+}
+
+// An outlet dragged to a new spot is saved on the venue (stage-relative cm, like gear).
+function onOutletDrop(outlet, event) {
+  emit('move-outlet', {
+    id: outlet.id,
+    x: Math.round(event.target.x() / props.zoom - origin.value.x),
+    y: Math.round(event.target.y() / props.zoom - origin.value.y),
+  });
 }
 
 function onDrop(device, event) {

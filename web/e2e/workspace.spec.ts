@@ -1036,9 +1036,13 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Sound ${Date.now()}` })).id as string;
   await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
-  await page.route('**/api/v1/stockwire/products?*', (route) =>
-    route.fulfill({ json: { items: [{ id: 301, name: 'Boom stand', sku: 'BS1', category: 'Stands' }], total: 1 } }),
+  // the pickers list the company's own equipment, with the number of devices as quantity
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({
+      json: { items: [{ id: 301, name: 'Boom stand', sku: 'BS1', category: 'Stands', device_count: 12 }], total: 1 },
+    }),
   );
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Wireless pack A', device_type: 'other' });
   let synced = 0;
   await page.route(`**/api/v1/jobs/${jobId}/sync-stockwire`, (route) => {
     synced += 1;
@@ -1067,8 +1071,17 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
   const row = page.getByTestId('channel-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
   await row.getByTestId('stand-picker').first().click();
   await page.keyboard.type('boom');
+  await expect(page.locator('.q-menu .q-item', { hasText: '×12' })).toBeVisible();
   await page.locator('.q-menu .q-item', { hasText: 'Boom stand' }).click();
   await expect.poll(async () => (await lists())[0]?.channels[0]?.stand_product_name).toBe('Boom stand');
+
+  // the source is picked from what is already in the job (or the own equipment), not typed
+  await row.getByTestId('source-picker').first().click();
+  await page.keyboard.type('wireless');
+  await page.locator('.q-menu .q-item', { hasText: 'Wireless pack A' }).click();
+  await expect
+    .poll(async () => ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]?.channels[0]?.device)
+    .toBe('Wireless pack A');
 
   await page.getByTestId('sync-stockwire').click();
   await expect.poll(() => synced).toBe(1);
@@ -1144,4 +1157,35 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
   await page.getByTestId('new-power-name').fill('Rack distro');
   await page.getByTestId('new-power-parent').click();
   await expect(page.locator('.q-menu .q-item', { hasText: 'SL 2' })).toBeVisible();
+});
+
+test('an outlet is moved on the map and its position is edited in the venue power panel', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const venue = await post(request, headers, '/venues', { name: `Hall ${Date.now()}` });
+  const outlet = await post(request, headers, `/venues/${venue.id}/power-outlets`, { name: 'SL 1', connector: 'schuko', x_cm: 600, y_cm: 200 });
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Outlet ${Date.now()}` })).id as string;
+  await request.put(`${API_BASE}/api/v1/jobs/${jobId}/venue`, { headers, data: { venue_id: venue.id } });
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Amp', device_type: 'other' });
+  const outletRow = async () =>
+    ((await (await request.get(`${API_BASE}/api/v1/venues/${venue.id}/power-outlets`, { headers })).json()) as any[]).find((o) => o.id === outlet.id);
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('canvas-fit').click();
+  const canvas = page.getByTestId('workspace-canvas');
+  const box = (await canvas.boundingBox())!;
+  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 50 * zoom, from.y + 40 * zoom, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.abs((await outletRow()).x_cm - 650) <= 3 && Math.abs((await outletRow()).y_cm - 240) <= 3).toBe(true);
+
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('venue-power').click();
+  await page.getByTestId('venue-outlet-x').fill('300');
+  await page.getByTestId('venue-outlet-x').press('Enter');
+  await expect.poll(async () => (await outletRow()).x_cm).toBe(300);
 });
