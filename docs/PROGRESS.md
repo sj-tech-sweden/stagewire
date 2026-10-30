@@ -61,7 +61,9 @@ Route `/jobs/:jobId/workspace` (`web/src/pages/JobWorkspacePage.vue`, opened fro
 - Real-time: the page opens its own job WebSocket (`useJobSocket`) and applies `graph.*` events.
 - Tests: `web/e2e/unit/workspace.spec.ts` (helpers), `web/e2e/workspace.spec.ts` (Playwright flows incl. a 390px phone viewport).
 
-Known gaps: no drag-to-connect on the canvas (connections are made in the inspector); no edge selection on the canvas; case detection needs a device id typed in (Stockwire exposes no "is a case" flag on products); catalog drag-and-drop is not implemented (click/multi-select only); the per-phase limit is hard-coded; the legacy job page and stage plot do not read the graph yet (phase 6c).
+Added after the first version: **drag-to-connect** (connect tool in the canvas header; drag from one device to another, ports are auto-picked by `suggestPorts`, rejected connections show the validator's issues with a "connect anyway" action; works with touch because the drop target is hit-tested from the pointer position), **catalog drag-and-drop** (items, or the whole selection, can be dragged onto the canvas or list on screens wider than a phone; the drawer is non-modal there; phones keep click/multi-select), **case picker** (`GET /stockwire/catalog/cases` lists devices that other devices point at via `case_device_id`, since Stockwire has no case flag), and a **real phase limit** (`/power-load` returns `limit_w` = sum of power-source `rating_amps` x 230 V, 16 A fallback).
+
+Known gaps: no edge selection on the canvas; dropping several catalog items offsets them by 20 px each; the legacy job page, stage plot, reports and exports do not read the graph yet (phase 6c).
 
 ## Backfill mapping (phase 6a, decisions made)
 

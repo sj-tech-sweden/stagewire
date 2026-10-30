@@ -189,3 +189,20 @@ def phase_loads(
         dst = devices.get(str(edge["dst_device_id"]))
         loads[edge["phase"]] += float(((dst or {}).get("attributes") or {}).get("power_w") or 0)
     return loads
+
+
+VOLTS = 230.0
+DEFAULT_PHASE_AMPS = 16.0
+
+
+def phase_limit_w(devices: Mapping[str, Mapping[str, Any]]) -> float:
+    """Per-phase wattage the job's power sources can deliver (amps per phase x 230 V).
+
+    Source ratings add up; with no rated source the limit falls back to a 16 A feed.
+    """
+    amps = sum(
+        float((d.get("attributes") or {}).get("rating_amps") or 0)
+        for d in devices.values()
+        if d.get("domain") == "power" and d.get("kind") == "source"
+    )
+    return (amps or DEFAULT_PHASE_AMPS) * VOLTS

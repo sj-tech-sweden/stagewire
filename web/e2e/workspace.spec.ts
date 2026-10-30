@@ -118,3 +118,140 @@ test('on a phone the list becomes cards and the catalog is full screen', async (
   const box = await page.getByTestId('catalog-search').boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
 });
+
+async function seedPair(page: Page, request: APIRequestContext) {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Connect ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const mic = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Lead mic',
+    canvas_x_cm: 100,
+    canvas_y_cm: 100,
+    ports: [{ id: 'out', direction: 'out', signal: 'audio', connector: 'xlr3' }],
+  });
+  const box = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Stagebox',
+    canvas_x_cm: 500,
+    canvas_y_cm: 100,
+    ports: [{ id: 'in', direction: 'in', signal: 'audio', connector: 'xlr3', channels: 32 }],
+  });
+  return { jobId, headers, mic, box };
+}
+
+const graphOf = async (request: APIRequestContext, headers: Record<string, string>, jobId: string) =>
+  (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+
+test('dragging from one device to another with the connect tool creates a connection', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const { jobId, headers } = await seedPair(page, request);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+
+  await page.getByTestId('connect-tool').click();
+  const box = (await canvas.boundingBox())!;
+  // zoom is 0.8; each device box is 96x40 px with its top-left at (cm * 0.8)
+  const from = { x: box.x + 100 * 0.8 + 48, y: box.y + 100 * 0.8 + 20 };
+  const to = { x: box.x + 500 * 0.8 + 48, y: box.y + 100 * 0.8 + 20 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, from.y, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => (await graphOf(request, headers, jobId)).edges.length)
+    .toBe(1);
+  const edge = (await graphOf(request, headers, jobId)).edges[0];
+  expect(edge).toMatchObject({ signal: 'audio', src_port: 'out', dst_port: 'in' });
+});
+
+test('catalog items can be dragged onto the canvas and cases are picked from a list', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const { jobId, headers } = await seedPair(page, request);
+  await page.route('**/api/v1/stockwire/catalog/search*', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          { id: 7, name: 'Dragged Spot', category: 'Moving lights', manufacturer: 'Elation', available_qty: 3, booked: false, booked_qty: 0 },
+        ],
+        total: 1,
+        facets: { category: { 'Moving lights': 1 }, manufacturer: { Elation: 1 } },
+        availability: { date_range_supported: false },
+      },
+    }),
+  );
+  await page.route('**/api/v1/stockwire/catalog/cases', (route) =>
+    route.fulfill({ json: { items: [{ id: 55, name: 'Rack case', asset_tag: 'C-55', child_count: 2 }] } }),
+  );
+  await page.route('**/api/v1/stockwire/catalog/cases/55/children', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          { id: 551, product: { id: 1, name: 'Receiver A', category: 'Wireless audio' } },
+          { id: 552, product: { id: 1, name: 'Receiver B', category: 'Wireless audio' } },
+        ],
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('open-catalog').click();
+  await expect(page.getByTestId('catalog-item')).toHaveCount(1);
+
+  const canvas = page.getByTestId('workspace-canvas');
+  await page.getByTestId('catalog-item').dragTo(canvas, { targetPosition: { x: 400, y: 300 } });
+  await expect
+    .poll(async () => (await graphOf(request, headers, jobId)).devices.map((d: { name: string }) => d.name))
+    .toContain('Dragged Spot');
+  const dropped = (await graphOf(request, headers, jobId)).devices.find(
+    (d: { name: string }) => d.name === 'Dragged Spot',
+  );
+  expect(dropped).toMatchObject({ domain: 'lighting', stockwire_product_id: '7' });
+  // drop point (400, 300) px at zoom 0.8, snapped to the 10 cm grid
+  expect(Math.abs(dropped.canvas_x_cm - 500)).toBeLessThanOrEqual(10);
+  expect(Math.abs(dropped.canvas_y_cm - 375)).toBeLessThanOrEqual(10);
+
+  await page.getByText(/add case contents|lägg till kåpans innehåll/i).click();
+  await page.getByTestId('case-select').click();
+  await page.getByRole('option', { name: /rack case/i }).click();
+  await page.getByRole('button', { name: /add case and contents|lägg till kåpa/i }).click();
+  await expect
+    .poll(async () => (await graphOf(request, headers, jobId)).devices.filter((d: { case_parent_id: string | null }) => d.case_parent_id).length)
+    .toBe(2);
+});
+
+test('the phase chips use the rating of the power sources', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Phase ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const source = await post(request, headers, `${g}/devices`, {
+    domain: 'power',
+    kind: 'source',
+    name: 'Mains',
+    attributes: { rating_amps: 32 },
+    ports: [{ id: 'out', direction: 'out', signal: 'power', max_connections: 4 }],
+  });
+  const load = await post(request, headers, `${g}/devices`, {
+    domain: 'lighting',
+    name: 'Wash',
+    attributes: { power_w: 6000 },
+    ports: [{ id: 'in', direction: 'in', signal: 'power' }],
+  });
+  await post(request, headers, `${g}/edges`, {
+    signal: 'power',
+    src_device_id: source.id,
+    src_port: 'out',
+    dst_device_id: load.id,
+    dst_port: 'in',
+    phase: 'L1',
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  const chip = page.getByTestId('phase-L1');
+  await expect(chip).toContainText('6000 W');
+  await expect(chip).toHaveClass(/bg-warning/);
+});

@@ -31,6 +31,8 @@ DEVICES = [
     {"id": 11, "product_id": 2, "case_device_id": 99},
     {"id": 12, "product_id": 3, "case_device_id": 99},
     {"id": 13, "product_id": 1, "case_device_id": 5},
+    {"id": 99, "product_id": 3, "case_device_id": None},
+    {"id": 5, "product_id": 1, "case_device_id": None},
 ]
 REQUIREMENTS = [
     {"job_id": 7, "product_id": 1, "quantity_required": 2},
@@ -102,3 +104,10 @@ async def test_case_children_are_selected_client_side_with_product_summary():
     assert [c["id"] for c in children] == [11, 12]
     assert children[0]["product"]["name"] == "e935"
     assert await client().list_child_devices(12345) == []
+
+
+@pytest.mark.asyncio
+async def test_cases_are_devices_that_other_devices_point_at():
+    cases = await client().list_cases()
+    assert {(c["id"], c["child_count"]) for c in cases} == {(99, 2), (5, 1)}
+    assert {c["id"]: c["name"] for c in cases}[99] == "Matrix"

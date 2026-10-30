@@ -52,6 +52,8 @@ export default {
     discard: 'Släng mina ändringar',
   },
   workspace: {
+    connectTool: 'Kopplingsverktyg',
+    noFreePorts: 'Inga lediga matchande portar mellan {from} och {to}',
     title: 'Arbetsyta',
     back: 'Tillbaka till jobbet',
     modeCanvas: 'Scenplan',

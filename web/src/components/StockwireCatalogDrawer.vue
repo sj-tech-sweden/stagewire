@@ -3,6 +3,7 @@
     :model-value="modelValue"
     :position="$q.screen.lt.sm ? 'standard' : 'right'"
     :maximized="$q.screen.lt.sm"
+    :seamless="$q.screen.gt.xs"
     full-height
     @update:model-value="(v) => emit('update:modelValue', v)"
   >
@@ -115,6 +116,8 @@
             v-ripple
             clickable
             data-testid="catalog-item"
+            :draggable="$q.screen.gt.xs"
+            @dragstart="(e) => onDragStart(e, item)"
             @click="store.toggle(item.id)"
           >
             <q-item-section avatar>
@@ -148,15 +151,19 @@
         dense
         icon="inventory_2"
         :label="t('workspace.caseTitle')"
+        @show="loadCases"
       >
         <div class="row q-pa-sm q-col-gutter-sm items-center">
-          <q-input
+          <q-select
             v-model="caseId"
             class="col"
             dense
             outlined
-            type="number"
+            emit-value
+            map-options
+            :options="caseOptions"
             :label="t('workspace.caseId')"
+            data-testid="case-select"
           />
           <q-btn
             color="primary"
@@ -190,7 +197,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useCatalogStore } from '@/stores/catalog';
 import { useGraphStore } from '@/stores/graph';
-import { deviceFromProduct } from '@/utils/workspace';
+import { PRODUCT_MIME, deviceFromProduct } from '@/utils/workspace';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -203,7 +210,8 @@ const { t } = useI18n();
 const $q = useQuasar();
 const store = useCatalogStore();
 const graph = useGraphStore();
-const caseId = ref('');
+const caseId = ref(null);
+const caseOptions = ref([]);
 const adding = ref(false);
 
 const run = () => store.search(props.stockwireJobId);
@@ -214,6 +222,24 @@ watch(
     if (open) run();
   },
 );
+
+async function loadCases() {
+  try {
+    const cases = await store.cases();
+    caseOptions.value = cases.map((c) => ({
+      label: `${c.name || c.asset_tag} (${c.child_count})`,
+      value: c.id,
+    }));
+  } catch {
+    caseOptions.value = [];
+  }
+}
+
+function onDragStart(event, item) {
+  const payload = store.selected[item.id] ? store.selectedItems : [item];
+  event.dataTransfer.setData(PRODUCT_MIME, JSON.stringify(payload));
+  event.dataTransfer.effectAllowed = 'copy';
+}
 
 function selectVisible() {
   const next = { ...store.selected };
@@ -250,7 +276,7 @@ async function addCase() {
     const parent = await graph.createDevice(props.jobId, {
       domain: 'other',
       kind: 'case',
-      name: `Case ${caseId.value}`,
+      name: caseOptions.value.find((o) => o.value === caseId.value)?.label.replace(/ \(\d+\)$/, '') || `Case ${caseId.value}`,
       stockwire_device_id: String(caseId.value),
       ports: [],
       attributes: {},
@@ -265,7 +291,7 @@ async function addCase() {
       ),
     );
     $q.notify({ type: 'positive', message: t('workspace.added', { n: created.length + 1 }) });
-    caseId.value = '';
+    caseId.value = null;
   } catch (err) {
     $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
   } finally {

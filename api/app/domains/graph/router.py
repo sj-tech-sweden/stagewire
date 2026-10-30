@@ -335,7 +335,9 @@ async def power_load(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schema
     loads = topology.phase_loads(devices, [_as_dict(e) for e in await _all_edges(db, job_id)])
     peak, low = max(loads.values()), min(loads.values())
     return schemas.PhaseLoadRead(
-        **loads, imbalance_pct=round((peak - low) / peak * 100, 1) if peak else 0.0
+        **loads,
+        imbalance_pct=round((peak - low) / peak * 100, 1) if peak else 0.0,
+        limit_w=topology.phase_limit_w(devices),
     )
 
 

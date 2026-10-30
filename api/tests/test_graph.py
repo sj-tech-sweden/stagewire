@@ -251,6 +251,7 @@ async def test_batch_create_and_power_load(auth_headers):
         assert edge_res.status_code == 201, edge_res.text
         load = await client.get(f"{g}/power-load", headers=auth_headers)
         assert load.json()["L2"] == 400 and load.json()["imbalance_pct"] == 100.0
+        assert load.json()["limit_w"] == 16 * 230
 
 
 class FakeStockwire:
@@ -330,3 +331,13 @@ async def test_catalog_search_degrades_to_empty_when_unconfigured(auth_headers):
         assert res.status_code == 200 and res.json()["items"] == []
         kids = await client.get(f"{BASE}/stockwire/catalog/cases/5/children", headers=auth_headers)
         assert kids.json() == {"items": []}
+
+
+def test_phase_limit_sums_source_ratings_and_defaults_to_16a():
+    assert topology.phase_limit_w({}) == 16 * 230
+    sources = {
+        "a": dev("a", "Mains", [], domain="power", kind="source", attributes={"rating_amps": 32}),
+        "b": dev("b", "Gen", [], domain="power", kind="source", attributes={"rating_amps": 16}),
+        "c": dev("c", "Distro", [], domain="power", kind="distro", attributes={"rating_amps": 63}),
+    }
+    assert topology.phase_limit_w(sources) == 48 * 230

@@ -134,6 +134,7 @@ class PhaseLoadRead(BaseModel):
     L2: float
     L3: float
     imbalance_pct: float
+    limit_w: float
 
 
 class BackfillRead(BaseModel):

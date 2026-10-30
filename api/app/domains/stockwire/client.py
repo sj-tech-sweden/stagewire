@@ -221,6 +221,33 @@ class StockwireClient:
             "availability": {"date_range_supported": False},
         }
 
+    async def list_cases(self) -> list[dict]:
+        """Devices that contain other devices (Stockwire has no "is a case" flag).
+
+        A device is a case when another device points at it through ``case_device_id``.
+        """
+        rows = await self._all_pages("/api/v1/inventory/devices", {})
+        counts: dict[str, int] = {}
+        for row in rows:
+            if row.get("case_device_id"):
+                key = str(row["case_device_id"])
+                counts[key] = counts.get(key, 0) + 1
+        cases = [r for r in rows if str(r.get("id")) in counts]
+        names: dict[str, str | None] = {}
+        async with self._client() as client:
+            for pid in {str(r["product_id"]) for r in cases if r.get("product_id")}:
+                response = await client.get(f"/api/v1/inventory/products/{pid}")
+                names[pid] = response.json().get("name") if response.status_code == 200 else None
+        return [
+            {
+                "id": case["id"],
+                "asset_tag": case.get("asset_tag"),
+                "name": names.get(str(case.get("product_id"))) or case.get("asset_tag"),
+                "child_count": counts[str(case["id"])],
+            }
+            for case in cases
+        ]
+
     async def list_child_devices(self, case_device_id: int | str) -> list[dict]:
         """Devices inside a case/rack, each with its product summary.
 

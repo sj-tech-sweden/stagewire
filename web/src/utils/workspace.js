@@ -66,7 +66,7 @@ export function visibleOnLayers(device, layers) {
   return layer === 'other' || layers[layer] !== false;
 }
 
-export function phaseStatus(loads, limitWatts = 3680) {
+export function phaseStatus(loads, limitWatts = loads?.limit_w || 3680) {
   const levelFor = (watts) => (watts > limitWatts ? 'over' : watts > limitWatts * 0.8 ? 'warn' : 'ok');
   return {
     L1: { watts: loads.L1 || 0, level: levelFor(loads.L1 || 0) },
@@ -90,3 +90,37 @@ export function catalogQuery({ q, categories = [], manufacturers = [], jobId, sk
 export function needsBookingRequest(device) {
   return Boolean(device.stockwire_product_id) && device.stockwire_booked === false;
 }
+
+const norm = (value) => String(value || '').toLowerCase();
+
+function connectorsFit(a, b) {
+  return !a || !b || norm(a) === norm(b);
+}
+
+// Pick the first output port of src and input port of dst that can carry the same
+// signal over a mating connector. Returns null when nothing fits.
+export function suggestPorts(src, dst) {
+  const outs = (src?.ports || []).filter((p) => p.direction === 'out');
+  const ins = (dst?.ports || []).filter((p) => p.direction === 'in');
+  for (const out of outs) {
+    for (const input of ins) {
+      const signalOk = !out.signal || !input.signal || out.signal === input.signal;
+      if (signalOk && connectorsFit(out.connector, input.connector)) {
+        return {
+          srcPort: out.id,
+          dstPort: input.id,
+          signal: out.signal || input.signal || DOMAIN_SIGNAL[src.domain] || 'audio',
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// Map a pointer position inside the canvas host to canvas centimetres.
+export function dropPosition(clientX, clientY, rect, zoom, grid = 10) {
+  const snap = (v) => Math.max(0, Math.round(v / zoom / grid) * grid);
+  return { x: snap(clientX - rect.left), y: snap(clientY - rect.top) };
+}
+
+export const PRODUCT_MIME = 'application/x-stagewire-products';

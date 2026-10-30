@@ -3,6 +3,8 @@ import {
   catalogQuery,
   deviceFromProduct,
   domainForCategory,
+  dropPosition,
+  suggestPorts,
   edgeRows,
   needsBookingRequest,
   phaseStatus,
@@ -66,4 +68,32 @@ test('catalog query repeats multi-value facets the way FastAPI expects', () => {
   expect(qs).toContain('manufacturer=Shure');
   expect(qs).toContain('job_id=7');
   expect(qs).not.toContain('[]');
+});
+
+test('port suggestion needs an output, an input, the same signal and mating connectors', () => {
+  const mic = { domain: 'audio', ports: [{ id: 'out', direction: 'out', signal: 'audio', connector: 'XLR3' }] };
+  const box = {
+    domain: 'audio',
+    ports: [
+      { id: 'dmx-in', direction: 'in', signal: 'dmx', connector: 'xlr5' },
+      { id: 'in-xlr3', direction: 'in', signal: 'audio', connector: 'xlr3' },
+    ],
+  };
+  expect(suggestPorts(mic, box)).toEqual({ srcPort: 'out', dstPort: 'in-xlr3', signal: 'audio' });
+  expect(suggestPorts(box, mic)).toBeNull();
+  expect(suggestPorts({ domain: 'audio', ports: [] }, box)).toBeNull();
+  const video = { domain: 'video', ports: [{ id: 'in', direction: 'in', signal: 'video', connector: 'sdi' }] };
+  expect(suggestPorts(mic, video)).toBeNull();
+});
+
+test('drop positions snap to the grid and never go negative', () => {
+  const rect = { left: 100, top: 50 };
+  expect(dropPosition(260, 130, rect, 0.8)).toEqual({ x: 200, y: 100 });
+  expect(dropPosition(90, 40, rect, 0.8)).toEqual({ x: 0, y: 0 });
+});
+
+test('phase status uses the limit reported by the API', () => {
+  const status = phaseStatus({ L1: 6000, L2: 0, L3: 0, imbalance_pct: 0, limit_w: 7360 });
+  expect(status.L1.level).toBe('warn');
+  expect(phaseStatus({ L1: 6000, L2: 0, L3: 0 }).L1.level).toBe('over');
 });

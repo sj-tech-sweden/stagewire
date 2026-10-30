@@ -93,7 +93,12 @@
     </div>
 
     <div class="row q-col-gutter-md">
-      <div class="col-12 col-md">
+      <div
+        class="col-12 col-md"
+        data-testid="drop-zone"
+        @dragover.prevent
+        @drop.prevent="onProductDrop"
+      >
         <q-banner
           v-if="!graph.devices.length && !graph.loading"
           class="bg-grey-9 text-white rounded-borders"
@@ -109,6 +114,15 @@
               flat
               class="q-mb-xs"
             >
+              <q-btn
+                dense
+                no-caps
+                icon="cable"
+                :color="connectMode ? 'primary' : undefined"
+                :label="t('workspace.connectTool')"
+                data-testid="connect-tool"
+                @click="connectMode = !connectMode"
+              />
               <q-btn
                 dense
                 icon="remove"
@@ -128,8 +142,10 @@
               :edges="canvasEdges"
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
+              :connect-mode="connectMode"
               @select="select"
               @move="move"
+              @connect="connectDevices"
             />
           </div>
           <WorkspaceTable
@@ -197,7 +213,14 @@ import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import { useGraphStore } from '@/stores/graph';
 import { useJobSocket } from '@/composables/useJobSocket';
-import { phaseStatus, visibleOnLayers } from '@/utils/workspace';
+import {
+  PRODUCT_MIME,
+  deviceFromProduct,
+  dropPosition,
+  phaseStatus,
+  suggestPorts,
+  visibleOnLayers,
+} from '@/utils/workspace';
 import ConflictDialog from '@/components/ConflictDialog.vue';
 import DeviceInspector from '@/components/DeviceInspector.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
@@ -225,6 +248,7 @@ const job = ref(null);
 const catalogOpen = ref(false);
 const importing = ref(false);
 const zoom = ref(0.8);
+const connectMode = ref(false);
 const layers = reactive({ audio: true, lighting: true, video: true, power: true });
 
 const phases = computed(() => phaseStatus(graph.loads));
@@ -272,6 +296,67 @@ async function move({ id, x, y }) {
     await graph.updateDevice(jobId, id, { canvas_x_cm: x, canvas_y_cm: y });
   } catch (err) {
     if (err.response?.status !== 409) $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+
+async function connectDevices({ srcId, dstId }) {
+  const src = graph.devices.find((d) => d.id === srcId);
+  const dst = graph.devices.find((d) => d.id === dstId);
+  const fit = suggestPorts(src, dst);
+  if (!fit) {
+    $q.notify({ type: 'negative', message: t('workspace.noFreePorts', { from: src.name, to: dst.name }) });
+    return;
+  }
+  const payload = {
+    signal: fit.signal,
+    src_device_id: srcId,
+    src_port: fit.srcPort,
+    dst_device_id: dstId,
+    dst_port: fit.dstPort,
+    channels: 1,
+  };
+  try {
+    await graph.createEdge(jobId, payload);
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    if (detail?.code === 'invalid_connection') {
+      $q.notify({
+        type: 'negative',
+        message: `${t('workspace.connectFailed')}: ${detail.issues.map((i) => i.message).join('; ')}`,
+        actions: [
+          {
+            label: t('workspace.connectForce'),
+            color: 'white',
+            handler: () => graph.createEdge(jobId, payload, { force: true }).catch(() => {}),
+          },
+        ],
+      });
+    } else {
+      $q.notify({ type: 'negative', message: typeof detail === 'string' ? detail : err.message });
+    }
+  }
+}
+
+async function onProductDrop(event) {
+  const raw = event.dataTransfer?.getData(PRODUCT_MIME);
+  if (!raw) return;
+  const products = JSON.parse(raw);
+  const canvas = event.target.closest?.('[data-testid="workspace-canvas"]');
+  const rect = canvas?.getBoundingClientRect();
+  try {
+    const payloads = products.map((product, index) => {
+      const device = deviceFromProduct(product);
+      if (rect && graph.mode === 'canvas') {
+        const at = dropPosition(event.clientX + index * 20, event.clientY + index * 20, rect, zoom.value);
+        device.canvas_x_cm = at.x;
+        device.canvas_y_cm = at.y;
+      }
+      return device;
+    });
+    const created = await graph.createDevices(jobId, payloads);
+    $q.notify({ type: 'positive', message: t('workspace.added', { n: created.length }) });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
   }
 }
 

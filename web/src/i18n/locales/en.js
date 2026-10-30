@@ -52,6 +52,8 @@ export default {
     discard: 'Discard my changes',
   },
   workspace: {
+    connectTool: 'Connect tool',
+    noFreePorts: 'No free matching ports between {from} and {to}',
     title: 'Workspace',
     back: 'Back to job',
     modeCanvas: 'Stage plot',

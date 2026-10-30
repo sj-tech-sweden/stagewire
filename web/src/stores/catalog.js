@@ -50,6 +50,10 @@ export const useCatalogStore = defineStore('catalog', {
     clearSelection() {
       this.selected = {};
     },
+    async cases() {
+      const { data } = await api.get('/stockwire/catalog/cases');
+      return data.items || [];
+    },
     async caseChildren(caseDeviceId) {
       const { data } = await api.get(`/stockwire/catalog/cases/${caseDeviceId}/children`);
       return data.items || [];
