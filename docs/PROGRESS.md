@@ -22,8 +22,8 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 5 | Mode A/B switching | **Done** (header toggle, persisted per job in localStorage) |
 | 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
 | 6b | Backfill video chains and audio **output** chains | **Done** |
-| 6c | Graph-backed readers (console exports, cable routing, report contexts) | **Built and parity-tested, not switched on** (see below) |
-| 6d | Move the *writers* (channel list / patch / device / plot editors) to the graph, then switch the readers on | **Not started** (the real remaining work) |
+| 6c | Readers on the graph: console exports, stage-plot cables in reports, channel-list and patch-sheet report contexts | **Done and switched on** (sync-before-read, see below) |
+| 6d | Move the *writers* (channel list / patch / device / plot editors) to the graph; port `web/src/utils/cables.js` + `StagePlotPage.vue`; remaining report contexts | **Not started** |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
 ## What exists
@@ -75,7 +75,18 @@ Each reader exists next to its legacy twin, produces the same output, and has a 
 - **Plot links**: migration `d4e5f6g7h8i9` adds `stage_plot_elements.graph_device_id` plus `graph_link_role` (`channel`, `video_input`, `output_point`, `device`, `patch_point`). The role is an addition to the agreed design: one id alone cannot say whether a speaker is tied to an output point (draws a cable) or only to a device (does not). Backfill fills both, priority channel > video input > output point > device > patch point, and notes any element that had more than one link. Verified on Postgres (upgrade from empty, no drift on the new columns).
 - To make the exports and report contexts lossless the backfill now carries every channel/output field, a `channel_list` container node, and per-point fields (type, connector, label, notes, position) on the chain edges (`first_point` on the console-to-bus edge). Re-running the backfill fills missing attributes on rows that already exist but never overwrites existing values.
 
-**Why these are not switched on yet.** The channel-list, patch-point, device and plot editors still write the legacy tables. A reader that already reads the graph would show stale data for any job edited there after its backfill. So the readers are dormant alternatives until the writers move (6d); only data created or edited in the workspace (which writes the graph) is current in the graph exports. The order for 6d: channel list + patch editors (Mode B table is the start), device editor, plot elements (write `graph_device_id`/`graph_link_role`), then flip the exporters, `routed_cable_paths` and the two report contexts, and port `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side from the legacy lists). Still on the legacy path as well: job summary, fixture patch, stage plot and video sheet report contexts.
+**Switched on, with sync-before-read.** Because the editors still write the legacy tables, every graph-backed read first calls `backfill_job` (the legacy endpoint `GET .../channel-lists/{id}/export`, `_channel_list_context`, `_patch_sheet_context`, `_stage_plot_context`). The legacy builders are kept as `*_legacy` for the parity tests. Sync rules (`graph/backfill.py`):
+- rows carry `legacy_ref`; new legacy rows are created, untouched graph rows (`graph_edited = false`) are refreshed from legacy, and untouched rows whose legacy source is gone are removed (edges first);
+- any row PATCHed through the graph API gets `graph_edited = true` and is never overwritten or pruned by sync (migration `e5f6g7h8i9j0`);
+- plot-element links are recomputed on every sync;
+- the sync runs under `no_autoflush` with devices flushed before edges (the ORM has no relationship ordering edge inserts after devices; SQLite hides this, Postgres does not) and reports `updated`/`removed` counts; a second sync with no legacy change is a no-op (tested).
+- Graph PATCH edits to a row are visible in the exports/reports; legacy edits to a row already edited in the graph are not (the graph wins). Sync does not publish WebSocket events, so open workspace tabs only see legacy-driven changes after a refetch.
+
+**Plot-element links (migration `f6g7h8i9j0k1`)**: real data has elements linked to a device (position) *and* to a video input or output point (cable) (e.g. cameras, speakers). So `graph_device_id` = the device link, and `graph_source_id` + `graph_source_role` (`channel` > `video_input` > `output_point` > `patch_point`) = the source link. `graph_link_role` from the earlier migration is no longer written; drop it with the legacy columns.
+
+**Verified on real data**: a copy of the dev database (517 jobs with audio or plot data, 870 plugin exports, 251 patch sheets, every channel row, all routed cables) matched legacy output exactly after sync and after a second sync; the check also found the FK ordering bug and the two-link bug above, neither visible with SQLite.
+
+Remaining on the legacy path: job summary, fixture patch, stage plot (elements) and video sheet report contexts; `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side); and all writers.
 
 ## Backfill mapping (phase 6a, decisions made)
 
