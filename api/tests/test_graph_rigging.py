@@ -384,3 +384,117 @@ async def test_loads_of_fixtures_on_the_same_device_are_assigned_one_by_one(auth
         assert fixtures[first["load_id"]]["rigging_point_id"] is not None
         other = next(row for row in loads if row["load_id"] != first["load_id"])
         assert fixtures[other["load_id"]]["rigging_point_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_extension_cords_breakouts_edits_and_plain_devices_on_the_power_tree(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        breakout = await post(
+            "power-nodes",
+            {
+                "name": "Breakout",
+                "kind": "breakout",
+                "parent_id": distro["id"],
+                "feed_connector": "schuko",
+                "outputs": [{"connector": "schuko", "count": 3}],
+            },
+        )
+
+        cord = await post(
+            f"power-nodes/{distro['id']}/extension", {"length_m": 10, "name": "10 m skarv"}
+        )
+        assert cord["kind"] == "extension" and cord["attributes"]["length_m"] == 10
+        nodes = {
+            n["name"]: n
+            for n in (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+        }
+        assert nodes["Stage distro"]["parent_id"] == nodes["10 m skarv"]["id"]
+        assert nodes["10 m skarv"]["parent_id"] == nodes["Mains"]["id"]
+        await client.post(f"{g}/backfill", headers=h)
+        again = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == cord["id"]
+        )
+        assert again["attributes"]["length_m"] == 10
+
+        refused = await post(f"power-nodes/{source['id']}/extension", {"length_m": 5}, status=422)
+        assert refused
+
+        # a breakout is edited after creation: renamed, re-typed and moved
+        node = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == breakout["id"]
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={
+                "name": "Breakout FOH",
+                "notes": "behind the riser",
+                "expected_revision": node["revision"],
+            },
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        legacy = next(
+            n
+            for n in (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+            if n["id"] == breakout["legacy_ref"].split(":")[1]
+        )
+        assert (legacy["name"], legacy["notes"]) == ("Breakout FOH", "behind the riser")
+
+        bad_move = await client.put(
+            f"{g}/power-nodes/{breakout['id']}/parent",
+            json={"parent_id": cord["id"], "feed_connector": "schuko"},
+            headers=h,
+        )
+        assert bad_move.status_code == 422
+        moved = await client.put(
+            f"{g}/power-nodes/{breakout['id']}/parent",
+            json={"parent_id": cord["id"], "feed_connector": "cee32_3p"},
+            headers=h,
+        )
+        assert moved.status_code == 200, moved.text
+        nodes = {
+            n["id"]: n
+            for n in (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+        }
+        assert (
+            nodes[breakout["legacy_ref"].split(":")[1]]["parent_id"]
+            == cord["legacy_ref"].split(":")[1]
+        )
+
+        # a plain device is plugged into a node with its power inlet recorded
+        gear = await post(
+            "audio-devices", {"name": "Amp", "device_type": "other", "power_watts": 800}
+        )
+        node = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == gear["id"]
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"attributes": {"power_inlet": "iec_c13"}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        plugged = await client.put(
+            f"{g}/loads/{gear['id']}",
+            json={"power_node_id": breakout["id"], "power_connector": "schuko"},
+            headers=h,
+        )
+        assert plugged.status_code == 200, plugged.text
+        assert plugged.json()["attributes"]["power_inlet"] == "iec_c13"
+        assert plugged.json()["attributes"]["power_node_id"] == breakout["id"]
+        summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
+        load = next(row for row in summary["loads"] if row["kind"] == "device")
+        assert load["id"] == gear["id"] and load["power_node_id"] == breakout["id"]
+        feed = next(
+            e
+            for e in (await _graph(client, h, job_id))["edges"]
+            if e["dst_device_id"] == gear["id"] and e["signal"] == "power"
+        )
+        res = await client.delete(
+            f"{g}/edges/{feed['id']}", params={"expected_revision": feed["revision"]}, headers=h
+        )
+        assert res.status_code == 204, res.text
+        summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
+        assert next(r for r in summary["loads"] if r["kind"] == "device")["power_node_id"] is None

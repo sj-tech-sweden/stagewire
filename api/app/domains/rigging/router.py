@@ -444,7 +444,9 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
         "nodes": list(evaluation.nodes.values()),
         "loads": loads,
         "errors": evaluation.errors,
-        "unassigned_weight": [r.label for r in rows if r.weight_kg and not r.rigging_point_id],
+        "unassigned_weight": [
+            r.label for r in rows if r.weight_kg and not r.rigging_point_id and r.kind != "device"
+        ],
         "unassigned_power": [r.label for r in rows if r.power_w and not r.power_node_id],
     }
 
@@ -458,13 +460,17 @@ async def assign_load(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _job(db, job_id)
-    if kind not in ("fixture", "element"):
+    if kind not in ("fixture", "element", "device"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown load kind")
     rows = await service.collect_loads(db, job_id)
     row = next((r for r in rows if r.id == str(load_id) and r.kind == kind), None)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
     data = payload.model_dump(exclude_unset=True)
+    if kind == "device" and data.get("rigging_point_id") is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A plain device is plugged in, not hung"
+        )
     if data.get("rigging_point_id") is not None:
         await _found(
             await service.get_point(db, job_id, data["rigging_point_id"]),
@@ -504,6 +510,11 @@ async def assign_load(
         if fixture is None or fixture.job_id != job_id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
         target = fixture
+    elif kind == "device":
+        device = await audio_service.get_device(db, load_id)
+        if device is None or device.job_id != job_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
+        target = device
     else:
         element = await db.get(StagePlotElement, load_id)
         if element is None or element.job_id != job_id:
@@ -512,7 +523,7 @@ async def assign_load(
     for key, value in data.items():
         if key == "power_node_id":
             target.power_node_id = value
-        elif key == "rigging_point_id":
+        elif key == "rigging_point_id" and kind != "device":
             target.rigging_point_id = value
         elif key == "power_connector":
             target.power_connector = value or ""

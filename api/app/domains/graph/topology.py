@@ -163,7 +163,7 @@ def validate_edge(
     ]
     dst_cap = dport.get("channels")
     if dst_cap is None:
-        if on_dst:
+        if len(on_dst) >= int(dport.get("max_connections") or 1):
             add("port_in_use", f"{dst['name']}:{edge['dst_port']} already has a source")
     elif sum(int(e.get("channels") or 1) for e in on_dst) + channels > int(dst_cap):
         add("port_in_use", f"{dst['name']}:{edge['dst_port']} has no free channels left")

@@ -26,6 +26,9 @@ import {
   powerTreeRows,
   outputsLabel,
   loadStatusColor,
+  longFeeds,
+  cordFor,
+  POWER_INLETS,
   channelsOf,
   nextChannelNumber,
   centerOf,
@@ -405,4 +408,20 @@ test('a bidirectional connector is two ports and shows as one group again', () =
       { id: 'b', direction: 'out', connector: 'xlr3', channels: 4 },
     ]),
   ).toHaveLength(2);
+});
+
+test('extension cords are suggested for feeds longer than the threshold, rounded up to a stock length', () => {
+  expect([1, 5, 5.1, 12, 60].map(cordFor)).toEqual([2, 5, 10, 15, 60]);
+  const nodes = [
+    { id: 'src', kind: 'source', parent_id: null, venue_outlet_id: 'o1', x_cm: null, y_cm: null },
+    { id: 'near', kind: 'distro', parent_id: 'src', x_cm: 300, y_cm: 0 },
+    { id: 'far', kind: 'distro', parent_id: 'src', x_cm: 1200, y_cm: 500 },
+    { id: 'cord', kind: 'extension', parent_id: 'src', x_cm: 5000, y_cm: 0 },
+    { id: 'behind', kind: 'breakout', parent_id: 'cord', x_cm: 9000, y_cm: 0 },
+    { id: 'unplaced', kind: 'distro', parent_id: 'src' },
+  ];
+  const found = longFeeds(nodes, [{ id: 'o1', x_cm: 0, y_cm: 0 }], 5);
+  expect(found.map((f) => [f.node.id, f.metres, f.length])).toEqual([['far', 13, 15]]);
+  expect(longFeeds(nodes, [{ id: 'o1', x_cm: 0, y_cm: 0 }], 1).map((f) => f.node.id)).toEqual(['far', 'near']);
+  expect(POWER_INLETS[0].value).toBe('iec_c13');
 });

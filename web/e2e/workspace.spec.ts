@@ -96,6 +96,9 @@ test('the patch drawer lists connections per domain and the inspector shows the 
   await expect(table.getByText('Lead mic')).toBeVisible();
   await expect(table.getByText('Stagebox')).toBeVisible();
 
+  // a device in the drawer is edited from there: its name opens the inspector
+  await page.getByTestId('patch-edit-from').first().click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Lead mic');
   await page.getByTestId('patch-tab-power').click();
   await expect(page.getByText(/no connections in this domain yet|inga kopplingar/i)).toBeVisible();
 
@@ -753,4 +756,63 @@ test('fixtures are added in bulk by kind and quantity, and the header offers imp
     ['Spot', 1, 49],
     ['Spot', 1, 89],
   ]);
+});
+
+test('the power flow takes extension cords, editable breakouts, outlets as sources and plugged devices', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Power flow ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const source = await post(request, headers, `${g}/power-nodes`, {
+    name: 'Mains',
+    kind: 'source',
+    feed_connector: 'cee63_3p',
+    rating_amps: 63,
+    outputs: [{ connector: 'cee32_3p', count: 1 }],
+  });
+  await post(request, headers, `${g}/power-nodes`, {
+    name: 'Breakout',
+    kind: 'breakout',
+    parent_id: source.id,
+    feed_connector: 'cee32_3p',
+    outputs: [{ connector: 'schuko', count: 4 }],
+  });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Amp', device_type: 'other', power_watts: 600 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await expect(page.getByTestId('power-node')).toHaveCount(2);
+
+  // edit the breakout after creation
+  await page.getByTestId('power-node').filter({ hasText: 'Breakout' }).getByTestId('power-edit').click();
+  await page.getByTestId('edit-power-name').fill('Breakout FOH');
+  await page.getByTestId('edit-power-save').click();
+  const legacy = async (path: string) =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/${path}`, { headers })).json()) as any[];
+  await expect.poll(async () => (await legacy('power-nodes')).map((n) => n.name).sort()).toEqual(['Breakout FOH', 'Mains']);
+
+  // a skarvsladd goes between the breakout and what feeds it
+  await page.getByTestId('power-node').filter({ hasText: 'Breakout' }).getByTestId('power-add-extension').click();
+  await page.getByTestId('ext-length').fill('10');
+  await page.getByTestId('ext-save').click();
+  await expect(page.getByTestId('power-node')).toHaveCount(3);
+  await expect(page.getByTestId('power-node').filter({ hasText: /10 m/ })).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const nodes = await legacy('power-nodes');
+      const cord = nodes.find((n) => n.kind === 'extension');
+      const breakout = nodes.find((n) => n.name === 'Breakout FOH');
+      return cord && breakout && breakout.parent_id === cord.id;
+    })
+    .toBe(true);
+
+  // the unplugged device is plugged into the breakout in one go
+  await expect(page.getByTestId('plug-all')).toContainText('1');
+  await page.getByTestId('plug-all-node').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Breakout FOH' }).click();
+  await page.getByTestId('plug-all-go').click();
+  await expect(page.getByTestId('plug-all')).toHaveCount(0);
 });

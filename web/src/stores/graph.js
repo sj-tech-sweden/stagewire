@@ -241,6 +241,15 @@ export const useGraphStore = defineStore('graph', {
       await this.fetchGraph(jobId);
       return data;
     },
+    async movePowerNode(jobId, nodeId, payload) {
+      await api.put(`${base(jobId)}/power-nodes/${nodeId}/parent`, payload);
+      await this.fetchGraph(jobId);
+    },
+    async insertExtension(jobId, nodeId, payload) {
+      const { data } = await api.post(`${base(jobId)}/power-nodes/${nodeId}/extension`, payload);
+      await this.fetchGraph(jobId);
+      return data;
+    },
     async addPowerFeed(jobId, nodeId, payload) {
       await api.post(`${base(jobId)}/power-nodes/${nodeId}/feeds`, payload);
       await this.fetchGraph(jobId);

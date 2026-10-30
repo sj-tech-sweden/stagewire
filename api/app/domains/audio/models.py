@@ -171,6 +171,21 @@ class AudioDevice(Base):
     channel_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     footprint_channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     default_gel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # How the device takes mains: its own inlet (iec_c13, attached_schuko, powercon, ...), and which
+    # power node output it is plugged into. Fixtures and plot elements are plugged through their
+    # own rows (see rigging.service.collect_loads); a plain device is a load through these.
+    power_inlet: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    power_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "power_nodes.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_audio_devices_power_node_id",
+        ),
+        nullable=True,
+        index=True,
+    )
+    power_connector: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

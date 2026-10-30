@@ -62,8 +62,16 @@
           >
             <q-card-section class="q-pa-sm">
               <div class="text-weight-medium">
-                {{ item.from }} <span class="text-grey-6">{{ item.fromPort }}</span> →
-                {{ item.to }} <span class="text-grey-6">{{ item.toPort }}</span>
+                <a
+                  class="device-link"
+                  @click="graph.selectedDeviceId = item.srcId"
+                >{{ item.from }}</a>
+                <span class="text-grey-6">{{ item.fromPort }}</span> →
+                <a
+                  class="device-link"
+                  @click="graph.selectedDeviceId = item.dstId"
+                >{{ item.to }}</a>
+                <span class="text-grey-6">{{ item.toPort }}</span>
               </div>
               <div class="text-caption">
                 {{ item.channels }} ch
@@ -105,6 +113,36 @@
         hide-bottom
         data-testid="patch-table"
       >
+        <template #body-cell-from="slot">
+          <q-td :props="slot">
+            <q-btn
+              flat
+              dense
+              no-caps
+              class="device-link"
+              :label="slot.row.from"
+              :data-testid="'patch-edit-from'"
+              @click="graph.selectedDeviceId = slot.row.srcId"
+            >
+              <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+            </q-btn>
+          </q-td>
+        </template>
+        <template #body-cell-to="slot">
+          <q-td :props="slot">
+            <q-btn
+              flat
+              dense
+              no-caps
+              class="device-link"
+              :label="slot.row.to"
+              :data-testid="'patch-edit-to'"
+              @click="graph.selectedDeviceId = slot.row.dstId"
+            >
+              <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+            </q-btn>
+          </q-td>
+        </template>
         <template #body-cell-cableLabel="slot">
           <q-td :props="slot">
             <q-input
@@ -240,6 +278,10 @@ async function remove(row) {
 </script>
 
 <style scoped>
+.device-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
 .patch-scroll {
   max-height: 260px;
 }

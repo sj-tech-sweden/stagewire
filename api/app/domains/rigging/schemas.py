@@ -35,7 +35,7 @@ class PowerOutput(BaseModel):
 
 class PowerNodeBase(BaseModel):
     name: str = ""
-    kind: Literal["source", "distro", "breakout"] = "distro"
+    kind: Literal["source", "distro", "breakout", "extension"] = "distro"
     feed_connector: str = ""
     phase: Literal["L1", "L2", "L3"] | None = None
     outputs: list[PowerOutput] = []
@@ -54,7 +54,7 @@ class PowerNodeCreate(PowerNodeBase):
 
 class PowerNodeUpdate(BaseModel):
     name: str | None = None
-    kind: Literal["source", "distro", "breakout"] | None = None
+    kind: Literal["source", "distro", "breakout", "extension"] | None = None
     parent_id: UUID | None = None
     feed_connector: str | None = None
     phase: Literal["L1", "L2", "L3"] | None = None
@@ -99,7 +99,7 @@ class PowerNodeRead(PowerNodeBase):
 
 class LoadRead(BaseModel):
     id: UUID
-    kind: Literal["fixture", "element"]
+    kind: Literal["fixture", "element", "device"]
     label: str
     device_id: UUID | None = None
     weight_kg: float | None = None

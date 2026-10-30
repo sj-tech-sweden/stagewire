@@ -326,6 +326,7 @@ class AudioDeviceBase(BaseModel):
     channel_mode: str | None = None
     footprint_channels: int | None = Field(None, ge=1)
     default_gel: str | None = None
+    power_inlet: str | None = None
 
 
 class AudioDeviceCreate(AudioDeviceBase):

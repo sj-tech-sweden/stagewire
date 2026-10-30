@@ -130,6 +130,19 @@
             type="number"
             :label="t('devices.power')"
           />
+          <q-select
+            v-model="form.power_inlet"
+            class="col-12"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="POWER_INLETS"
+            :label="t('workspace.powerInlet')"
+            :hint="t('workspace.powerInletHint')"
+            data-testid="power-inlet"
+          />
         </div>
         <div
           v-if="IO_DEVICE_TYPES.includes(form.device_type)"
@@ -283,6 +296,7 @@ import {
   CONNECTOR_PRESETS,
   DEVICE_TYPES,
   IO_DEVICE_TYPES,
+  POWER_INLETS,
   addConnector,
   deviceForm,
 } from '@/utils/workspace';

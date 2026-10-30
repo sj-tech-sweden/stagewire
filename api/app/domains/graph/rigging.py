@@ -56,6 +56,9 @@ class PowerNodeCreate(BaseModel):
     venue_outlet_id: UUID | None = None
     device_id: UUID | None = None
     notes: str = ""
+    length_m: float | None = None
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
 
 
 class FeedCreate(BaseModel):
@@ -116,11 +119,121 @@ async def create_power_node(
     data["parent_id"] = await _legacy(db, job_id, payload.parent_id, "power_nodes", "Parent node")
     if payload.device_id is not None:
         data["device_id"] = await _device_twin(db, job_id, payload.device_id)
+    extra = {k: data.pop(k) for k in ("length_m", "stockwire_product_id", "stockwire_product_name")}
     node = await rigging_router.create_node(job_id, rigging_schemas.PowerNodeCreate(**data), db)
     await backfill_job(db, job_id)
     row = await db.scalar(select(PowerNode).where(PowerNode.id == UUID(str(node["id"]))))
     ref = f"audio_devices:{row.device_id}" if row and row.device_id else f"power_nodes:{node['id']}"
-    return schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref))
+    return await _decorate(db, job_id, ref, extra)
+
+
+async def _decorate(
+    db: AsyncSession, job_id: UUID, ref: str, extra: dict
+) -> schemas.GraphDeviceRead:
+    """Put what only the graph knows about a power node on it: the length of an extension cord
+    (``length_m``) and the Stockwire product it is rented as. These are not legacy columns, so the
+    attribute makes the node ``graph_edited`` and the sync leaves it alone."""
+    node = await _by_ref(db, job_id, ref)
+    if extra.get("length_m") is not None:
+        node.attributes = {**node.attributes, "length_m": extra["length_m"]}
+        node.graph_edited = True
+    for key in ("stockwire_product_id", "stockwire_product_name"):
+        if extra.get(key) is not None:
+            setattr(node, key, extra[key])
+    await db.commit()
+    await db.refresh(node)
+    return schemas.GraphDeviceRead.model_validate(node)
+
+
+class ParentMove(BaseModel):
+    parent_id: UUID | None
+    feed_connector: str = ""
+    phase: str | None = None
+
+
+@router.put("/power-nodes/{node_id}/parent", response_model=schemas.GraphDeviceRead)
+async def move_power_node(
+    job_id: UUID, node_id: UUID, payload: ParentMove, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    """Re-hang a node from another parent (and connector/phase). The legacy update_node rules
+    apply: the connector must be an output of the new parent and the tree may not loop."""
+    await _job(db, job_id)
+    legacy_id = await _legacy(db, job_id, node_id, "power_nodes", "Power node")
+    parent = await _legacy(db, job_id, payload.parent_id, "power_nodes", "Parent node")
+    await rigging_router.update_node(
+        job_id,
+        legacy_id,
+        rigging_schemas.PowerNodeUpdate(
+            parent_id=parent, feed_connector=payload.feed_connector, phase=payload.phase
+        ),
+        db,
+    )
+    db.expire_all()
+    await backfill_job(db, job_id)
+    return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))
+
+
+class ExtensionInsert(BaseModel):
+    length_m: float | None = None
+    name: str = ""
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
+
+
+@router.post(
+    "/power-nodes/{node_id}/extension", response_model=schemas.GraphDeviceRead, status_code=201
+)
+async def insert_extension(
+    job_id: UUID, node_id: UUID, payload: ExtensionInsert, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    """Put an extension cord ("skarvsladd") between a node and the parent that feeds it.
+
+    The cord is a node of kind ``extension`` fed from the old parent on the node's feed connector
+    and with one output of that same connector; the node is then re-hung from the cord. The
+    legacy rules check both steps, so a node without a parent or feed connector is refused.
+    """
+    await _job(db, job_id)
+    legacy_id = await _legacy(db, job_id, node_id, "power_nodes", "Power node")
+    row = await db.get(PowerNode, legacy_id)
+    if row is None or row.parent_id is None or not row.feed_connector:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Only a node with a feed can get an extension"
+        )
+    cord = await rigging_router.create_node(
+        job_id,
+        rigging_schemas.PowerNodeCreate(
+            name=payload.name or "Extension",
+            kind="extension",
+            parent_id=row.parent_id,
+            feed_connector=row.feed_connector,
+            phase=row.phase,
+            outputs=[
+                rigging_schemas.PowerOutput(connector=row.feed_connector, count=1, phase=row.phase)
+            ],
+        ),
+        db,
+    )
+    cord_id = UUID(str(cord["id"]))
+    try:
+        await rigging_router.update_node(
+            job_id, legacy_id, rigging_schemas.PowerNodeUpdate(parent_id=cord_id), db
+        )
+    except HTTPException:
+        await db.rollback()
+        await rigging_router.delete_node(job_id, cord_id, db)
+        raise
+    db.expire_all()
+    await backfill_job(db, job_id)
+    return await _decorate(
+        db,
+        job_id,
+        f"power_nodes:{cord_id}",
+        {
+            "length_m": payload.length_m,
+            "stockwire_product_id": payload.stockwire_product_id,
+            "stockwire_product_name": payload.stockwire_product_name,
+        },
+    )
 
 
 @router.post(
@@ -155,10 +268,9 @@ async def _load_target(db: AsyncSession, job_id: UUID, node: GraphDevice) -> tup
         return "fixture", legacy_id
     if table == "audio_devices":
         fixtures = await _fixtures_on_device(db, job_id, legacy_id)
-        if fixtures:
-            return "fixture", fixtures[-1].id
+        return ("fixture", fixtures[-1].id) if fixtures else ("device", legacy_id)
     raise HTTPException(
-        status.HTTP_422_UNPROCESSABLE_CONTENT, "Only fixtures and plot elements carry loads"
+        status.HTTP_422_UNPROCESSABLE_CONTENT, "Only gear and plot elements carry loads"
     )
 
 

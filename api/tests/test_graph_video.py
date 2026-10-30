@@ -244,3 +244,73 @@ async def test_video_node_and_edge_edits_and_deletes_write_through(auth_headers)
             )
         ).status_code == 204
         assert await _legacy(client, h, job_id) == []
+
+
+@pytest.mark.asyncio
+async def test_many_video_inputs_can_share_a_switchers_generic_input_port(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, lst = await _setup(client, h)
+        sw = await _device(client, g, h, "Switcher", "switcher")
+        for n in range(3):
+            cam = (
+                await client.post(
+                    f"{g}/video-lists/{lst['id']}/inputs",
+                    json={"source_label": f"Cam {n}"},
+                    headers=h,
+                )
+            ).json()
+            res = await client.put(
+                f"{g}/video-inputs/{cam['id']}/chain",
+                json={"steps": [{"device_id": sw["id"]}]},
+                headers=h,
+            )
+            assert res.status_code == 200, res.text
+        issues = (await client.get(f"{g}/validate", headers=h)).json()
+        assert [i for i in issues if i["code"] == "port_in_use"] == []
+
+        a = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "domain": "video",
+                    "name": "A",
+                    "ports": [{"id": "o", "direction": "out", "signal": "video"}],
+                },
+                headers=h,
+            )
+        ).json()
+        b = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "domain": "video",
+                    "name": "B",
+                    "ports": [{"id": "i", "direction": "in", "signal": "video"}],
+                },
+                headers=h,
+            )
+        ).json()
+        edge = {
+            "signal": "video",
+            "src_device_id": a["id"],
+            "src_port": "o",
+            "dst_device_id": b["id"],
+            "dst_port": "i",
+        }
+        assert (await client.post(f"{g}/edges", json=edge, headers=h)).status_code == 201
+        other = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "domain": "video",
+                    "name": "C",
+                    "ports": [{"id": "o", "direction": "out", "signal": "video"}],
+                },
+                headers=h,
+            )
+        ).json()
+        second = await client.post(
+            f"{g}/edges", json={**edge, "src_device_id": other["id"]}, headers=h
+        )
+        assert second.status_code == 422

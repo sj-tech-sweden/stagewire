@@ -89,7 +89,7 @@ async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_head
         power = next(d for d in devices if d["name"] == "Mains")
         for row, changes, protected in (
             (node, {"canvas_x_cm": 120}, False),
-            (power, {"name": "Mains (graph)"}, True),
+            (power, {"attributes": {"length_m": 8}}, True),
         ):
             res = await client.patch(
                 f"{BASE}/jobs/{job_id}/graph/devices/{row['id']}",
@@ -107,8 +107,9 @@ async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_head
         by_name = {d["name"]: d for d in devices}
         # channels are mirrored both ways: legacy-owned fields flow in, graph-only ones stay
         assert by_name["Kick (legacy)"]["canvas_x_cm"] == 120
-        # power nodes are not mirrored yet: the graph edit wins
-        assert "Mains (graph)" in by_name and "Mains" not in by_name
+        # a power node's own fields are mirrored; an attribute only the graph has (cable length)
+        # is protected and survives the sync
+        assert by_name["Mains"]["attributes"]["length_m"] == 8
 
 
 @pytest.mark.asyncio

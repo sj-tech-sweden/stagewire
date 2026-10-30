@@ -46,6 +46,8 @@ export function edgeRows(edges, devices) {
   return edges.map((e) => ({
     id: e.id,
     signal: e.signal,
+    srcId: e.src_device_id,
+    dstId: e.dst_device_id,
     from: byId.get(e.src_device_id)?.name || '?',
     fromPort: e.src_port,
     to: byId.get(e.dst_device_id)?.name || '?',
@@ -454,7 +456,17 @@ export const NUMBER_FIELDS = [
   'throw_ratio_max',
   'image_aspect_ratio',
 ];
-export const TEXT_FIELDS = ['fixture_type', 'channel_mode', 'default_gel'];
+// How a device takes mains: most gear has an IEC C13 inlet (a detachable cable is needed) or a
+// cable attached with a Schuko plug. An empty value means the default, IEC C13.
+export const POWER_INLETS = [
+  { value: 'iec_c13', label: 'IEC C13' },
+  { value: 'attached_schuko', label: 'Attached cable, Schuko' },
+  { value: 'powercon', label: 'powerCON' },
+  { value: 'cee16', label: 'CEE 16 A' },
+  { value: 'other', label: 'Other' },
+];
+
+export const TEXT_FIELDS = ['fixture_type', 'channel_mode', 'default_gel', 'power_inlet'];
 
 export function deviceForm(node) {
   const attrs = node?.attributes || {};
@@ -604,3 +616,29 @@ export const outputsLabel = (outputs, labelOf = (c) => c) =>
 
 export const loadStatusColor = (status) =>
   ({ ok: 'positive', warn: 'warning', over: 'negative', unpowered: 'grey' })[status] || 'grey';
+
+// Standard cord lengths (m) an extension is rented or packed in; a needed length is rounded up.
+export const CORD_LENGTHS = [2, 5, 10, 15, 20, 25, 30, 50];
+export const cordFor = (metres) => CORD_LENGTHS.find((l) => l >= metres) || Math.ceil(metres);
+
+// Feeds on the plot that are longer than a normal cord reaches: the distance between a node and
+// what feeds it (another node, or the venue outlet a source is plugged into), in metres. Plot
+// positions are stage-relative cm for nodes and outlets alike. A feed that already goes through an
+// extension is skipped. Used to suggest the extension cords the plot needs.
+export function longFeeds(nodes, outlets, thresholdM = 5) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const outletAt = new Map(outlets.map((o) => [String(o.id), o]));
+  const spot = (n) => (n.x_cm != null && n.y_cm != null ? [n.x_cm, n.y_cm] : null);
+  const out = [];
+  for (const node of nodes) {
+    if (node.kind === 'extension' || !node.parent_id) continue;
+    const parent = byId.get(node.parent_id);
+    if (!parent || parent.kind === 'extension') continue;
+    const from = spot(parent) || (parent.venue_outlet_id && outletAt.get(String(parent.venue_outlet_id)) ? [outletAt.get(String(parent.venue_outlet_id)).x_cm, outletAt.get(String(parent.venue_outlet_id)).y_cm] : null);
+    const to = spot(node);
+    if (!from || !to) continue;
+    const metres = Math.hypot(from[0] - to[0], from[1] - to[1]) / 100;
+    if (metres > thresholdM) out.push({ node, parent, metres: Math.round(metres * 10) / 10, length: cordFor(metres) });
+  }
+  return out.sort((a, b) => b.metres - a.metres);
+}

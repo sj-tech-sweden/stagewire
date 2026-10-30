@@ -90,6 +90,31 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
                 device_id=str(element.linked_device_id),
             )
         )
+
+    # A plain device (no fixture, no plot element standing for it) is a load of its own, so it can
+    # be plugged into a node. Devices that already count through a fixture or an element are left
+    # out so their watts are not counted twice. Only devices that draw power or are plugged show.
+    covered = {r.device_id for r in rows if r.device_id}
+    powered_by_node = {n.device_id for n in await list_nodes(db, job_id) if n.device_id}
+    for device in devices:
+        if str(device.id) in covered or device.id in powered_by_node:
+            continue
+        name, weight, power = values(device.id)
+        if not power and device.power_node_id is None:
+            continue
+        rows.append(
+            LoadRow(
+                id=str(device.id),
+                kind="device",
+                label=name or device.name,
+                weight_kg=weight,
+                power_w=power,
+                rigging_point_id=None,
+                power_node_id=str(device.power_node_id) if device.power_node_id else None,
+                power_connector=device.power_connector or "",
+                device_id=str(device.id),
+            )
+        )
     return rows
 
 

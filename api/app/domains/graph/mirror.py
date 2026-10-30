@@ -86,6 +86,7 @@ DEVICE_ATTRS = {
     "channel_mode": "channel_mode",
     "footprint_channels": "footprint_channels",
     "default_gel": "default_gel",
+    "power_inlet": "power_inlet",
     **{key: key for key in DEVICE_SPEC_FIELDS},
 }
 POINT_KEYS = ("connector", "patch_label", "notes")
@@ -281,7 +282,7 @@ def _power_node_changes(data: dict) -> dict:
         out["name"] = data["name"]
     if "notes" in data:
         out["notes"] = data["notes"] or ""
-    if data.get("kind") in ("source", "distro", "breakout"):
+    if data.get("kind") in ("source", "distro", "breakout", "extension"):
         out["kind"] = data["kind"]
     for key in ("rating_amps", "active", "outputs"):
         if key in attrs and not (attrs[key] is None and key != "rating_amps"):
@@ -569,7 +570,12 @@ def _point_changes(attrs: dict) -> dict:
     return {key: attrs[key] for key in POINT_KEYS if key in attrs}
 
 
-POWER_EDGE_TABLES = {"power_nodes", "power_node_feeds", "lighting_fixtures.power"}
+POWER_EDGE_TABLES = {
+    "power_nodes",
+    "power_node_feeds",
+    "lighting_fixtures.power",
+    "audio_devices.power",
+}
 
 
 async def _power_edge_to_legacy(
@@ -596,7 +602,8 @@ async def _power_edge_to_legacy(
         elif table == "power_node_feeds":
             await _update_feed(db, job_id, legacy_id, changes)
         else:
-            await _assign_fixture_load(db, job_id, legacy_id, changes)
+            kind = "device" if table == "audio_devices.power" else "fixture"
+            await _assign_fixture_load(db, job_id, legacy_id, changes, kind)
     except HTTPException:
         await db.rollback()
         raise
@@ -626,7 +633,7 @@ async def _update_feed(db: AsyncSession, job_id: UUID, feed_id: UUID, changes: d
 
 
 async def _assign_fixture_load(
-    db: AsyncSession, job_id: UUID, fixture_id: UUID, changes: dict
+    db: AsyncSession, job_id: UUID, fixture_id: UUID, changes: dict, kind: str = "fixture"
 ) -> None:
     from app.domains.rigging import router as rigging_router
     from app.domains.rigging import schemas as rigging_schemas
@@ -634,7 +641,7 @@ async def _assign_fixture_load(
     assign = {"power_connector": changes["feed_connector"]} if "feed_connector" in changes else {}
     if assign:
         await rigging_router.assign_load(
-            job_id, "fixture", fixture_id, rigging_schemas.LoadAssign(**assign), db
+            job_id, kind, fixture_id, rigging_schemas.LoadAssign(**assign), db
         )
 
 
@@ -750,13 +757,13 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
             status.HTTP_409_CONFLICT,
             "A node's own feed cannot be cut; move the node to another parent or delete it",
         )
-    if table == "lighting_fixtures.power":
+    if table in ("lighting_fixtures.power", "audio_devices.power"):
         from app.domains.rigging import router as rigging_router
         from app.domains.rigging import schemas as rigging_schemas
 
         await rigging_router.assign_load(
             job_id,
-            "fixture",
+            "device" if table == "audio_devices.power" else "fixture",
             legacy_id,
             rigging_schemas.LoadAssign(power_node_id=None),
             db,

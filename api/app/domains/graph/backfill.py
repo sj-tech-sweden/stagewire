@@ -106,6 +106,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
     "dmx_universes": {"number", "source_port", "name"},
     "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
+    "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id"},
     "video_input_lists": {
         "switcher_product_id",
         "switcher_product_name",
@@ -122,6 +123,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
         "roots",
     },
     "audio_devices": {
+        "power_inlet",
         *DEVICE_SPEC_FIELDS,
         *FIXTURE_ONLY_ATTRS,
         "device_type",
@@ -152,6 +154,7 @@ MIRRORED_EDGE_TABLES = {
     "power_nodes",
     "power_node_feeds",
     "lighting_fixtures.power",
+    "audio_devices.power",
     "video_patch_points",
     "video_output_patch_points",
 }
@@ -334,8 +337,10 @@ class Backfill:
             "signal": signal,
             "connector": None,
         }
-        if direction == "out":
-            new["max_connections"] = FAN_OUT
+        # A port made up by the sync stands for "the inputs/outputs of this signal" on a device
+        # whose real connectors are unknown, so it takes many cables (a switcher's video inputs
+        # all end up on the same generic port). Ports a user defines keep their own capacity.
+        new["max_connections"] = FAN_OUT
         device.ports = [*device.ports, new]
         return new["id"]
 
@@ -425,6 +430,7 @@ class Backfill:
                     "channel_mode": row.channel_mode,
                     "footprint_channels": row.footprint_channels,
                     "default_gel": row.default_gel,
+                    "power_inlet": row.power_inlet,
                     **{key: getattr(row, key) for key in DEVICE_SPEC_FIELDS},
                 }.items()
                 if v not in (None, "")
@@ -1146,6 +1152,7 @@ class Backfill:
                     node.feed_connector,
                     node.phase,
                 )
+        await self._device_power()
         feeds = (
             await self.db.scalars(select(PowerNodeFeed).where(PowerNodeFeed.job_id == self.job_id))
         ).all()
@@ -1156,6 +1163,39 @@ class Backfill:
                 feed.node_id,
                 feed.feed_connector,
                 feed.phase,
+            )
+
+    async def _device_power(self) -> None:
+        """Devices plugged into a power node: the load attributes and the power edge to the node.
+
+        Only plain devices use the columns on the device row; a device that has fixtures gets its
+        load attributes from them (see ``lighting``). The edge is mirrored back like a fixture's.
+        """
+        plugged = (
+            await self.db.scalars(
+                select(AudioDevice).where(
+                    AudioDevice.job_id == self.job_id, AudioDevice.power_node_id.is_not(None)
+                )
+            )
+        ).all()
+        for row in plugged:
+            node = self.devices.get(f"audio_devices:{row.id}")
+            feeder = self.devices.get(f"power_nodes:{row.power_node_id}")
+            if node is None or feeder is None:
+                continue
+            node.attributes = {
+                **node.attributes,
+                "power_node_id": str(feeder.id),
+                "power_connector": row.power_connector or None,
+            }
+            self.edge(
+                f"audio_devices.power:{row.id}",
+                "power",
+                feeder,
+                self.port(feeder, "out", "power", row.power_connector),
+                node,
+                self.port(node, "in", "power", row.power_connector),
+                attributes={"connector": row.power_connector},
             )
 
     def _power_edge(
