@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { applyGraphEvent, placeUnplaced, threeWayMerge, upsertVersioned } from '../../src/utils/graph';
+import { applyGraphEvent, isRevisionConflict, placeUnplaced, threeWayMerge, upsertVersioned } from '../../src/utils/graph';
 
 test('an older revision never overwrites a newer row', () => {
   const rows = [{ id: 'a', revision: 3, name: 'new' }];
@@ -55,4 +55,12 @@ test('switching to canvas places only unplaced devices and keeps existing positi
   expect(placed[0]).toMatchObject({ canvas_x_cm: 5, canvas_y_cm: 6 });
   expect(placed[1]).toMatchObject({ canvas_x_cm: 0, canvas_y_cm: 0 });
   expect(placed[2]).toMatchObject({ canvas_x_cm: 100, canvas_y_cm: 0 });
+});
+
+test('only a revision conflict is a conflict; other 409s are real errors to show', () => {
+  const conflict = { response: { status: 409, data: { detail: { code: 'revision_conflict' } } } };
+  const refusal = { response: { status: 409, data: { detail: 'Move the nodes fed from this one first' } } };
+  expect(isRevisionConflict(conflict)).toBe(true);
+  expect(isRevisionConflict(refusal)).toBe(false);
+  expect(isRevisionConflict(new Error('offline'))).toBe(false);
 });

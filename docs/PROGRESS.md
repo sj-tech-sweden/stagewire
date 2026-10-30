@@ -190,3 +190,7 @@ Decision: keep the legacy editors and API contracts, and mirror at the service l
 cd api && ./.venv/bin/ruff check app tests && ./.venv/bin/ruff format --check app tests && ./.venv/bin/pytest -q
 cd web && ./node_modules/.bin/eslint . && ./node_modules/.bin/playwright test e2e/unit && npx quasar build
 ```
+
+### Third review (M6-M8, `1484c7d..e4cd2a7`)
+
+Fixed: power edge PATCH (connector/phase) was never written through because the branch in `edge_to_legacy` never applied (now mirrored, and not reverted by the next sync); a node that is not a device (rigging point, power node) could be used as a chain step and lose its legacy twin (`_device_twin` now refuses any node whose twin is not `audio_devices`); edits to a device-backed power node now reach the `PowerNode` row; the input chain checks for a projector before creating twin devices; the rigging summary no longer runs a write sync on read (writes already sync); loads of several fixtures on one device are assigned one by one (`load_id` on `PUT /graph/loads/{node_id}`); every editor showed no message for a 409 that was not a revision conflict, now only `revision_conflict` is silent (`isRevisionConflict`). Not changed: rigging point values of 0 are stored as empty, the same as the legacy schema (`gt=0`).

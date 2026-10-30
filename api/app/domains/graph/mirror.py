@@ -271,6 +271,9 @@ def _rigging_point_changes(data: dict) -> dict:
     return out
 
 
+POWER_ATTR_KEYS = ("rating_amps", "active", "outputs")
+
+
 def _power_node_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -439,9 +442,22 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
     elif table == "audio_devices":
         row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
         fixture_changes = _fixture_changes(data)
-        if row is None or not (changes or fixture_changes):
+        if row is None:
             return False
         persisted = False
+        power_changes = _power_node_changes({"attributes": data.get("attributes") or {}})
+        power_changes = {k: v for k, v in power_changes.items() if k in POWER_ATTR_KEYS}
+        if power_changes:
+            from app.domains.rigging.models import PowerNode
+
+            power_id = await db.scalar(
+                select(PowerNode.id).where(
+                    PowerNode.device_id == legacy_id, PowerNode.job_id == job_id
+                )
+            )
+            if power_id is not None:
+                await _update_power_node(db, job_id, power_id, power_changes)
+                persisted = True
         if fixture_changes:
             # a device node shows its last fixture, so that is the one edits go to
             fixtures = await _fixtures_on_device(db, job_id, legacy_id)
@@ -467,12 +483,6 @@ async def _publish_list(db: AsyncSession, job_id: UUID, list_id: UUID) -> None:
         await publish_job_event(
             job_id, "list.upsert", audio_schemas.ChannelListRead.model_validate(lst)
         )
-
-
-async def rigging_service_get_node(db: AsyncSession, job_id: UUID, node_id: UUID):
-    from app.domains.rigging import service as rigging_service
-
-    return await rigging_service.get_node(db, job_id, node_id)
 
 
 async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice) -> bool:
@@ -512,8 +522,9 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await db.commit()
     elif table == "power_nodes":
         from app.domains.rigging import router as rigging_router
+        from app.domains.rigging import service as rigging_service
 
-        if await rigging_service_get_node(db, job_id, legacy_id) is None:
+        if await rigging_service.get_node(db, job_id, legacy_id) is None:
             return False
         await rigging_router.delete_node(job_id, legacy_id, db)
     elif table in VIDEO_TABLES:
@@ -637,6 +648,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     """Write patch-point fields of an edge PATCH (connector, label, notes) to the legacy point."""
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
+    if target is not None and target[0] in POWER_EDGE_TABLES:
+        return await _power_edge_to_legacy(db, job_id, edge, target, data)
     if target is None or not attrs:
         return False
     table, legacy_id = target

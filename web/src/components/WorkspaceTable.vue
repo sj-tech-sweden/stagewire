@@ -107,6 +107,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -136,7 +137,7 @@ async function save(row, changes) {
   try {
     await graph.updateDevice(props.jobId, row.id, changes);
   } catch (err) {
-    if (err.response?.status !== 409) {
+    if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
     }
   }

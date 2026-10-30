@@ -259,6 +259,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -343,7 +344,7 @@ async function save(node, changes) {
   try {
     await graph.updateDevice(props.jobId, node.id, changes);
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
@@ -405,7 +406,7 @@ function removeNode(node) {
       try {
         await graph.deleteDevice(props.jobId, node.id);
       } catch (err) {
-        if (err.response?.status !== 409) failed(err);
+        if (!isRevisionConflict(err)) failed(err);
       }
     },
   );

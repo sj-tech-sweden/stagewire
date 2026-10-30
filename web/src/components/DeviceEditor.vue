@@ -141,6 +141,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -192,7 +193,7 @@ async function quickSave(device, changes) {
   try {
     await graph.updateDevice(props.jobId, device.id, changes);
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 
@@ -206,7 +207,7 @@ async function save(form) {
     dialogOpen.value = false;
     refresh();
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 

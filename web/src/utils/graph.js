@@ -63,3 +63,6 @@ export function placeUnplaced(devices, { originX = 100, originY = 100, step = 12
     return placed;
   });
 }
+
+export const isRevisionConflict = (error) =>
+  error?.response?.status === 409 && error.response?.data?.detail?.code === 'revision_conflict';

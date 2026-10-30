@@ -163,6 +163,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -221,7 +222,7 @@ async function update(row, changes) {
   try {
     await graph.updateEdge(props.jobId, row.id, changes);
   } catch (err) {
-    if (err.response?.status !== 409) {
+    if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
     }
   }
@@ -231,7 +232,7 @@ async function remove(row) {
   try {
     await graph.deleteEdge(props.jobId, row.id);
   } catch (err) {
-    if (err.response?.status !== 409) {
+    if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
     }
   }

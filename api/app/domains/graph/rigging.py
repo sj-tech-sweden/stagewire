@@ -65,6 +65,7 @@ class FeedCreate(BaseModel):
 
 
 class LoadAssign(BaseModel):
+    load_id: UUID | None = None
     rigging_point_id: UUID | None = None
     power_node_id: UUID | None = None
     power_connector: str | None = None
@@ -172,6 +173,13 @@ async def assign_load(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Node not found")
     kind, load_id = await _load_target(db, job_id, node)
     data = payload.model_dump(exclude_unset=True)
+    chosen = data.pop("load_id", None)
+    if chosen is not None:
+        if kind == "fixture" and chosen not in {
+            f.id for f in await _fixtures_on_device(db, job_id, legacy_target(node)[1])
+        } | {legacy_target(node)[1]}:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Load is not on that node")
+        load_id = chosen if kind == "fixture" else load_id
     if "rigging_point_id" in data:
         data["rigging_point_id"] = await _legacy(
             db, job_id, data["rigging_point_id"], "rigging_points", "Rigging point"
@@ -213,7 +221,6 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
     ``id`` is the graph node it sits on.
     """
     await _job(db, job_id)
-    await backfill_job(db, job_id)
     summary = await rigging_router.rigging_summary(job_id, db)
     ids = await _id_map(db, job_id)
     mapped = lambda value: ids.get(str(value)) if value else None  # noqa: E731

@@ -464,6 +464,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -540,7 +541,7 @@ async function save(node, changes) {
     await graph.updateDevice(props.jobId, node.id, changes);
     await refresh();
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
@@ -628,7 +629,7 @@ async function addFeed() {
 
 async function assign(load, changes) {
   try {
-    await graph.assignLoad(props.jobId, load.id, changes);
+    await graph.assignLoad(props.jobId, load.id, { load_id: load.load_id, ...changes });
     await refresh();
   } catch (err) {
     failed(err);
@@ -647,8 +648,7 @@ function removeById(id, name) {
         await graph.deleteDevice(props.jobId, id);
         await refresh();
       } catch (err) {
-        if (err.response?.status !== 409) failed(err);
-        else $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail });
+        if (!isRevisionConflict(err)) failed(err);
       }
     },
   );

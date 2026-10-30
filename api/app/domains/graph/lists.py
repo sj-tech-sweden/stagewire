@@ -157,6 +157,8 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
     target = legacy_target(node)
     if target is not None and target[0] == "audio_devices":
         return target[1]
+    if target is not None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
     if node.kind in NON_DEVICE_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
     changes = _audio_device_changes(
@@ -496,14 +498,21 @@ async def replace_video_input_chain(
     row = await video_service.get_input(db, job_id, _legacy_id(node, "video_inputs"))
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video input not found")
-    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
-    for twin in twins:
-        device = await service.get_device(db, twin)
-        if device is not None and device.device_type == "projector":
+    for step in payload.steps:
+        step_node = await db.get(GraphDevice, step.device_id)
+        step_target = legacy_target(step_node) if step_node is not None else None
+        step_device = (
+            await service.get_device(db, step_target[1])
+            if step_target is not None and step_target[0] == "audio_devices"
+            else None
+        )
+        kind = step_device.device_type if step_device is not None else (step_node or node).kind
+        if kind == "projector":
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "A projector takes its signal from a video output, not a video input",
             )
+    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
     for point in list(row.patch_points):
         await db.delete(point)
     await db.flush()

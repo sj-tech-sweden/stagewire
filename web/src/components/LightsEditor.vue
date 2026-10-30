@@ -320,6 +320,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -394,7 +395,7 @@ async function saveAttr(node, key, value) {
   try {
     await graph.updateDevice(props.jobId, node.id, { attributes: { [key]: value } });
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 
@@ -431,7 +432,7 @@ async function save(node, changes) {
   try {
     await graph.updateDevice(props.jobId, node.id, changes);
   } catch (err) {
-    if (err.response?.status !== 409) failed(err);
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 
@@ -499,7 +500,7 @@ function remove(fixture) {
       try {
         await graph.deleteDevice(props.jobId, fixture.id);
       } catch (err) {
-        if (err.response?.status !== 409) failed(err);
+        if (!isRevisionConflict(err)) failed(err);
       }
     },
   );

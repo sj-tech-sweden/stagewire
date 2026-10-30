@@ -1,15 +1,9 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
-import { applyGraphEvent, placeUnplaced, threeWayMerge } from '@/utils/graph';
+import { applyGraphEvent, isRevisionConflict, placeUnplaced, threeWayMerge } from '@/utils/graph';
 import { isVirtual } from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
-
-function isRevisionConflict(error) {
-  return (
-    error.response?.status === 409 && error.response?.data?.detail?.code === 'revision_conflict'
-  );
-}
 
 export const useGraphStore = defineStore('graph', {
   state: () => ({

@@ -264,6 +264,7 @@
 </template>
 
 <script setup>
+import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref, watch, reactive } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -375,7 +376,7 @@ async function move({ id, x, y }) {
   try {
     await graph.updateDevice(jobId, id, { canvas_x_cm: x, canvas_y_cm: y });
   } catch (err) {
-    if (err.response?.status !== 409) $q.notify({ type: 'negative', message: errorText(err) });
+    if (!isRevisionConflict(err)) $q.notify({ type: 'negative', message: errorText(err) });
   }
 }
 
@@ -512,7 +513,7 @@ function removeDevice(device) {
       graph.selectedDeviceId = null;
       scheduleChecks();
     } catch (err) {
-      if (err.response?.status !== 409) {
+      if (!isRevisionConflict(err)) {
         $q.notify({ type: 'negative', message: t('workspace.removeFail') });
       }
     }

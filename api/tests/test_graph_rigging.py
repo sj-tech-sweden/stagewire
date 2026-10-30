@@ -239,3 +239,148 @@ async def test_an_extra_feed_is_added_through_the_graph_and_removed_by_its_edge(
         assert res.status_code == 204, res.text
         nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
         assert next(n for n in nodes if n["kind"] == "distro")["feeds"] == []
+
+
+@pytest.mark.asyncio
+async def test_power_edge_edits_write_through_and_are_not_reverted_by_the_next_sync(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        edge = next(
+            e
+            for e in (await _graph(client, h, job_id))["edges"]
+            if e["dst_device_id"] == distro["id"]
+        )
+        res = await client.patch(
+            f"{g}/edges/{edge['id']}",
+            json={"phase": "L2", "expected_revision": edge["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+        assert next(n for n in nodes if n["kind"] == "distro")["phase"] == "L2"
+        await client.post(f"{g}/backfill", headers=h)
+        again = next(
+            e
+            for e in (await _graph(client, h, job_id))["edges"]
+            if e["dst_device_id"] == distro["id"]
+        )
+        assert again["phase"] == "L2"
+
+        wrong = await client.patch(
+            f"{g}/edges/{again['id']}",
+            json={"attributes": {"connector": "schuko"}, "expected_revision": again["revision"]},
+            headers=h,
+        )
+        assert wrong.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_device_backed_power_node_and_shared_device_loads_are_edited_by_their_own_rows(
+    auth_headers,
+):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        gear = await post("audio-devices", {"name": "Rack distro", "device_type": "other"})
+        backed = await post(
+            "power-nodes",
+            {
+                "name": "Rack",
+                "kind": "distro",
+                "parent_id": source["id"],
+                "feed_connector": "cee32_3p",
+                "device_id": gear["id"],
+                "outputs": [{"connector": "schuko", "count": 2}],
+            },
+        )
+        assert backed["id"] == gear["id"]
+        node = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == gear["id"]
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"attributes": {"rating_amps": 16}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+        assert next(n for n in nodes if n["name"] == "Rack")["rating_amps"] == 16
+
+        chain_bad = await client.put(
+            f"{g}/video-inputs/{source['id']}/chain", json={"steps": []}, headers=h
+        )
+        assert chain_bad.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_power_or_rigging_node_cannot_be_used_as_a_chain_device(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        point = await post("rigging-points", {"name": "T"})
+        vlist = (await client.post(f"{g}/video-lists", json={}, headers=h)).json()
+        vin = (
+            await client.post(f"{g}/video-lists/{vlist['id']}/inputs", json={}, headers=h)
+        ).json()
+        for node in (source, point):
+            res = await client.put(
+                f"{g}/video-inputs/{vin['id']}/chain",
+                json={"steps": [{"device_id": node["id"]}]},
+                headers=h,
+            )
+            assert res.status_code == 422, res.text
+        refs = {d["legacy_ref"] for d in (await _graph(client, h, job_id))["devices"]}
+        assert point["legacy_ref"] in refs and source["legacy_ref"] in refs
+
+
+@pytest.mark.asyncio
+async def test_a_projector_in_an_input_chain_leaves_no_new_devices_behind(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        vlist = (await client.post(f"{g}/video-lists", json={}, headers=h)).json()
+        vin = (
+            await client.post(f"{g}/video-lists/{vlist['id']}/inputs", json={}, headers=h)
+        ).json()
+        proj = await post("audio-devices", {"name": "Proj", "device_type": "projector"})
+        before = len((await client.get(f"{BASE}/jobs/{job_id}/devices", headers=h)).json())
+        res = await client.put(
+            f"{g}/video-inputs/{vin['id']}/chain",
+            json={"steps": [{"device_id": proj["id"]}]},
+            headers=h,
+        )
+        assert res.status_code == 422
+        assert len((await client.get(f"{BASE}/jobs/{job_id}/devices", headers=h)).json()) == before
+
+
+@pytest.mark.asyncio
+async def test_loads_of_fixtures_on_the_same_device_are_assigned_one_by_one(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        await client.post(
+            f"{BASE}/jobs/{job_id}/devices",
+            json={"name": "Robin", "device_type": "fixture"},
+            headers=h,
+        )
+        for address in (1, 20):
+            await post("fixtures", {"device_name": "Robin", "universe": 1, "dmx_address": address})
+        point = await post("rigging-points", {"name": "T"})
+        summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
+        loads = summary["loads"]
+        assert len(loads) == 2 and len({(row["kind"], row["load_id"]) for row in loads}) == 2
+        first = loads[0]
+        res = await client.put(
+            f"{g}/loads/{first['id']}",
+            json={"load_id": first["load_id"], "rigging_point_id": point["id"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        fixtures = {
+            f["id"]: f
+            for f in (await client.get(f"{BASE}/jobs/{job_id}/fixtures", headers=h)).json()
+        }
+        assert fixtures[first["load_id"]]["rigging_point_id"] is not None
+        other = next(row for row in loads if row["load_id"] != first["load_id"])
+        assert fixtures[other["load_id"]]["rigging_point_id"] is None
