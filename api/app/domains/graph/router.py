@@ -124,6 +124,7 @@ async def update_device(
     async def apply() -> GraphDevice:
         for key, value in data.items():
             setattr(device, key, value)
+        device.graph_edited = True
         await db.commit()
         await db.refresh(device)
         return device
@@ -227,6 +228,7 @@ async def update_edge(
     async def apply() -> ConnectionEdge:
         for key, value in data.items():
             setattr(edge, key, value)
+        edge.graph_edited = True
         await db.commit()
         await db.refresh(edge)
         return edge
@@ -393,7 +395,12 @@ async def backfill_graph(job_id: UUID, db: AsyncSession = Depends(get_db)) -> sc
     await _require_job(db, job_id)
     result = await backfill.backfill_job(db, job_id)
     return schemas.BackfillRead(
-        devices=result.devices, edges=result.edges, skipped=result.skipped, notes=result.notes
+        devices=result.devices,
+        edges=result.edges,
+        skipped=result.skipped,
+        updated=result.updated,
+        removed=result.removed,
+        notes=result.notes,
     )
 
 

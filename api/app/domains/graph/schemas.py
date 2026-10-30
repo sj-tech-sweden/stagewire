@@ -65,6 +65,7 @@ class GraphDeviceRead(GraphDeviceBase):
     id: UUID
     job_id: UUID
     stockwire_request_status: str | None = None
+    graph_edited: bool = False
     created_at: datetime
     revision: int
 
@@ -141,4 +142,6 @@ class BackfillRead(BaseModel):
     devices: int
     edges: int
     skipped: int
+    updated: int = 0
+    removed: int = 0
     notes: list[str] = []

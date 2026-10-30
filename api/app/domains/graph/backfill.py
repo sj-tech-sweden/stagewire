@@ -1,3 +1,4 @@
+import copy
 import uuid
 from dataclasses import dataclass, field
 
@@ -46,6 +47,8 @@ class BackfillResult:
     devices: int = 0
     edges: int = 0
     skipped: int = 0
+    updated: int = 0
+    removed: int = 0
     notes: list[str] = field(default_factory=list)
 
 
@@ -103,6 +106,11 @@ class Backfill:
         self.devices: dict[str, GraphDevice] = {}
         self.edge_refs: set[str] = set()
         self.edge_rows: dict[str, ConnectionEdge] = {}
+        self.loaded_devices: set[str] = set()
+        self.loaded_edges: set[str] = set()
+        self.loaded_revisions: dict[uuid.UUID, int] = {}
+        self.seen_devices: set[str] = set()
+        self.seen_edges: set[str] = set()
         self.result = BackfillResult()
 
     async def load_existing(self) -> None:
@@ -111,6 +119,8 @@ class Backfill:
         ).all():
             if device.legacy_ref:
                 self.devices[device.legacy_ref] = device
+                self.loaded_devices.add(device.legacy_ref)
+                self.loaded_revisions[device.id] = device.revision
         for edge in (
             await self.db.scalars(
                 select(ConnectionEdge).where(ConnectionEdge.job_id == self.job_id)
@@ -120,17 +130,20 @@ class Backfill:
             if ref:
                 self.edge_refs.add(ref)
                 self.edge_rows[ref] = edge
+                self.loaded_edges.add(ref)
+                self.loaded_revisions[edge.id] = edge.revision
 
     def device(self, ref: str, **fields) -> GraphDevice:
+        self.seen_devices.add(ref)
         existing = self.devices.get(ref)
         if existing is not None:
-            missing = {
-                k: v
-                for k, v in (fields.get("attributes") or {}).items()
-                if k not in existing.attributes
-            }
-            if missing:
-                existing.attributes = {**existing.attributes, **missing}
+            if not existing.graph_edited:
+                for key, value in fields.items():
+                    if key in ("attributes", "ports"):
+                        value = (
+                            copy.deepcopy(value) if value else ({} if key == "attributes" else [])
+                        )
+                    setattr(existing, key, value)
             self.result.skipped += 1
             return existing
         device = GraphDevice(id=uuid.uuid4(), job_id=self.job_id, legacy_ref=ref, **fields)
@@ -198,14 +211,15 @@ class Backfill:
         phase: str | None = None,
         attributes: dict | None = None,
     ) -> None:
+        self.seen_edges.add(ref)
         if ref in self.edge_refs:
             existing = self.edge_rows.get(ref)
-            if existing is not None:
-                missing = {
-                    k: v for k, v in (attributes or {}).items() if k not in existing.attributes
-                }
-                if missing:
-                    existing.attributes = {**existing.attributes, **missing}
+            if existing is not None and not existing.graph_edited:
+                existing.signal = signal
+                existing.src_device_id, existing.src_port = src.id, sport
+                existing.dst_device_id, existing.dst_port = dst.id, dport
+                existing.phase = phase if phase in ("L1", "L2", "L3") else None
+                existing.attributes = {"legacy_ref": ref, **(attributes or {})}
             self.result.skipped += 1
             return
         self.edge_refs.add(ref)
@@ -542,9 +556,38 @@ class Backfill:
                     attributes={"output_id": str(vout.id)},
                 )
 
+    async def prune(self) -> None:
+        """Remove untouched graph rows whose legacy source no longer exists."""
+        gone_edges = [
+            self.edge_rows[ref]
+            for ref in self.loaded_edges - self.seen_edges
+            if not self.edge_rows[ref].graph_edited
+        ]
+        gone_devices = {
+            self.devices[ref].id: self.devices[ref]
+            for ref in self.loaded_devices - self.seen_devices
+            if ref in self.devices and not self.devices[ref].graph_edited
+        }
+        if not gone_edges and not gone_devices:
+            return
+        doomed = {e.id: e for e in gone_edges}
+        for edge in (
+            await self.db.scalars(
+                select(ConnectionEdge).where(ConnectionEdge.job_id == self.job_id)
+            )
+        ).all():
+            if edge.src_device_id in gone_devices or edge.dst_device_id in gone_devices:
+                doomed[edge.id] = edge
+        for edge in doomed.values():
+            await self.db.delete(edge)
+        for device in gone_devices.values():
+            await self.db.delete(device)
+        self.result.removed = len(doomed) + len(gone_devices)
+
     async def plot_links(self) -> None:
         """Point each stage plot element at the graph node its legacy links resolve to.
 
+        Recomputed on every sync while the plot editor still writes the legacy links.
         An element can carry several legacy links; one graph node is kept, in this priority:
         channel, video input, output point, device, patch point.
         """
@@ -564,8 +607,6 @@ class Backfill:
             if p.device_id
         }
         for el in elements:
-            if el.graph_device_id is not None:
-                continue
             candidates = [
                 ("channel", f"audio_channel_patches:{el.linked_channel_id}")
                 if el.linked_channel_id
@@ -586,6 +627,7 @@ class Backfill:
                 self.result.notes.append(
                     f"plot element {el.id} has {len(candidates)} links; kept {candidates[0][0]}"
                 )
+            el.graph_device_id, el.graph_link_role = None, None
             for role, ref in candidates:
                 node = self.devices.get(ref)
                 if node is not None:
@@ -613,8 +655,9 @@ class Backfill:
             dmx = {k: v for k, v in dmx.items() if v not in (None, "")}
             linked = self.devices.get(f"audio_devices:{fx.device_id}") if fx.device_id else None
             if linked is not None:
-                linked.attributes = {**linked.attributes, **dmx}
-                linked.domain = "lighting"
+                if not linked.graph_edited:
+                    linked.attributes = {**linked.attributes, **dmx}
+                    linked.domain = "lighting"
                 fixture_nodes[fx.id] = linked
                 continue
             fixture_nodes[fx.id] = self.device(
@@ -695,7 +738,8 @@ class Backfill:
             }
             linked = self.devices.get(f"audio_devices:{node.device_id}") if node.device_id else None
             if linked is not None:
-                linked.attributes = {**linked.attributes, **attributes}
+                if not linked.graph_edited:
+                    linked.attributes = {**linked.attributes, **attributes}
                 self.devices[f"power_nodes:{node.id}"] = linked
                 continue
             self.device(
@@ -751,20 +795,30 @@ class Backfill:
 
 
 async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
-    """Copy a job's legacy audio/lighting/power rows into the unified graph.
+    """Sync a job's legacy audio/lighting/video/power rows into the unified graph.
 
-    Idempotent: rows and edges carry a ``legacy_ref`` so a second run only adds what is new.
-    Audio output chains hang off a bus node fed by the first patch point (the console).
+    Rows and edges carry a ``legacy_ref``. A run adds what is new, refreshes graph rows that
+    were never edited in the graph, removes untouched rows whose legacy source is gone, and
+    leaves anything edited in the graph (``graph_edited``) alone. Audio output chains hang off a
+    bus node fed by the first patch point (the console).
     """
     builder = Backfill(db, job_id)
     await builder.load_existing()
-    await builder.audio_devices()
-    await builder.power()
-    await builder.channel_lists()
-    await builder.channels()
-    await builder.audio_outputs()
-    await builder.video()
-    await builder.lighting()
-    await builder.plot_links()
+    with db.no_autoflush:
+        await builder.audio_devices()
+        await builder.power()
+        await builder.channel_lists()
+        await builder.channels()
+        await builder.audio_outputs()
+        await builder.video()
+        await builder.lighting()
+        await builder.plot_links()
+        await builder.prune()
+    await db.flush()
+    builder.result.updated = sum(
+        1
+        for row in [*builder.devices.values(), *builder.edge_rows.values()]
+        if row.id in builder.loaded_revisions and row.revision != builder.loaded_revisions[row.id]
+    )
     await db.commit()
     return builder.result
