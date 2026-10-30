@@ -252,7 +252,7 @@ Fixed: power edge PATCH (connector/phase) was never written through because the 
 
 ### Round 6
 
-- **Overload shows on the gear.** A load plugged into a node that is over (or at its warning level) is itself over/warn, not "ok". The phase imbalance is only reported across the phases the sources can actually feed (a single-phase group or outlet no longer reads as 100 % unbalanced); with no power tree a three-phase supply is assumed.
+- **Overload shows on the gear.** A load plugged into a node that is over (or at its warning level) is itself over/warn, not "ok". The phase imbalance is measured across all three phases on purpose (a job that loads one phase and leaves the others empty is told so, so a different outlet on another phase can be found).
 - **Outlets from the map.** "Add outlet" on the canvas creates an outlet at the stage centre in the job's venue; a job without a venue is given one (after a confirmation) built from its stage and venue sizes, so the outlets are reusable. A source node made from an outlet carries `venue_group_id`; the tree row lists the venue outlets it stands for.
 - **Venue power belongs to the venue** (`venue_power_groups`, `venue_power_outlets`): every job assigned the venue (`PUT /jobs/{id}/venue`) sees the same groups and outlets. The power tree nodes made from them are per job, created on first use.
 - **Many jobs.** `GET /jobs` takes `search` (title, venue, Stockwire id), `skip`, `limit` and `newest_first`, and answers `X-Total-Count` (exposed to the browser); the jobs page lists newest first, 50 at a time, with a search box and "Show more".

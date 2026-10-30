@@ -387,7 +387,6 @@ async def power_load(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schema
     devices = {str(d.id): _as_dict(d) for d in await _all_devices(db, job_id)}
     loads = topology.phase_loads(devices, [_as_dict(e) for e in await _all_edges(db, job_id)])
     from app.domains.rigging import router as rigging_router
-    from app.domains.rigging import service as rigging_service
 
     # With a power tree the load is what the tree evaluates (everything plugged in, spread over the
     # phases as the outputs say), summed over the sources; the per-edge figure above only knows
@@ -396,20 +395,9 @@ async def power_load(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schema
     sources = [n for n in tree["nodes"] if n["kind"] == "source"]
     if sources:
         loads = {p: round(sum(n["watts"].get(p, 0.0) for n in sources), 1) for p in topology.PHASES}
-    # Imbalance only means something across the phases the sources can feed: a single-phase
-    # group or outlet loads one phase by nature, and a job on one phase is not "unbalanced".
-    fed: set[str] = set()
-    for node in sources:
-        row = next(
-            (n for n in await rigging_service.list_nodes(db, job_id) if str(n.id) == node["id"]),
-            None,
-        )
-        phases = {o.get("phase") for o in (row.outputs if row else []) or []}
-        fed |= set(topology.PHASES) if (not phases or None in phases) else phases
-    if not sources:
-        fed = set(topology.PHASES)  # no tree: a three-phase supply is assumed
-    span = [loads[p] for p in topology.PHASES if p in fed]
-    peak, low = (max(span), min(span)) if len(span) > 1 else (0.0, 0.0)
+    # Imbalance is measured across all three phases on purpose: a job that loads one phase and
+    # leaves the others empty should be told so, to look for outlets on another phase.
+    peak, low = max(loads.values()), min(loads.values())
     return schemas.PhaseLoadRead(
         **loads,
         imbalance_pct=round((peak - low) / peak * 100, 1) if peak else 0.0,
