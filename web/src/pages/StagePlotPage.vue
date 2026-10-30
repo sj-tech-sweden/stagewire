@@ -1282,6 +1282,9 @@ import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useStagePlotStore } from '@/stores/stageplot';
+import { useGraphStore } from '@/stores/graph';
+import { useJobSocket } from '@/composables/useJobSocket';
+import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import { channelColor } from '@/utils/instrumentGroups';
 import { useDevicesStore } from '@/stores/devices';
 import { CATEGORIES, categoryOfDeviceType, categoryOfElement } from '@/utils/categories';
@@ -3342,17 +3345,33 @@ const drawPoints = ref([]);
 const editingWayId = ref(null);
 
 const cablePlan = computed(() => emptyCablePlan(job.value?.cable_plan));
-const cableRows = computed(() =>
-  buildCableRows({
+const graphStore = useGraphStore();
+const jobSocket = useJobSocket(String(route.params.jobId), (event) => {
+  if (event.type?.startsWith('graph.')) graphStore.applyRealtimeEvent(event);
+});
+const cableRows = computed(() => {
+  const common = {
+    plan: cablePlan.value,
+    audience: job.value?.audience_polygon || [],
+    stageOffset: [job.value?.stage_x_cm || 0, job.value?.stage_y_cm || 0],
+  };
+  // Chains and links come from the graph; until it has loaded the legacy data fills in.
+  if (graphStore.jobId === String(jobId) && graphStore.devices.length) {
+    return buildCableRowsFromGraph({
+      devices: graphStore.devices,
+      edges: graphStore.edges,
+      liveElements: store.elements,
+      ...common,
+    });
+  }
+  return buildCableRows({
     lists: channelLists.value,
     devices: devicesStore.devices,
     elements: store.elements,
-    plan: cablePlan.value,
     videoLists: videoLists.value,
-    audience: job.value?.audience_polygon || [],
-    stageOffset: [job.value?.stage_x_cm || 0, job.value?.stage_y_cm || 0],
-  }),
-);
+    ...common,
+  });
+});
 const highlightCableKeys = computed(() => {
   const keys = new Set();
   const raw = highlightParam.value;
@@ -3635,6 +3654,8 @@ onMounted(() => {
   devicesStore.fetchDevices(jobId);
   store.fetchElements(jobId);
   loadLights();
+  graphStore.backfill(jobId).catch((err) => console.error('Could not load the graph', err));
+  jobSocket.connect();
 });
 </script>
 

@@ -13,6 +13,7 @@ function isRevisionConflict(error) {
 
 export const useGraphStore = defineStore('graph', {
   state: () => ({
+    jobId: null,
     devices: [],
     edges: [],
     selectedDeviceId: null,
@@ -34,6 +35,12 @@ export const useGraphStore = defineStore('graph', {
   },
   actions: {
     async fetchGraph(jobId) {
+      if (this.jobId !== jobId) {
+        this.devices = [];
+        this.edges = [];
+        this.issues = [];
+      }
+      this.jobId = jobId;
       this.loading = true;
       this.error = null;
       try {

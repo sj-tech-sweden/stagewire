@@ -152,6 +152,20 @@ def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
     return ports
 
 
+def _video_point_attrs(point, chain_root: GraphDevice) -> dict:
+    return {
+        "chain": str(chain_root.id),
+        "point_id": str(point.id),
+        "position": point.position,
+        "connector": point.connector or "",
+        "patch_label": point.patch_label or "",
+        "notes": point.notes or "",
+        "source_port": point.source_port or "",
+        "input_port": point.input_port or "",
+        "parent_id": str(point.parent_id) if getattr(point, "parent_id", None) else None,
+    }
+
+
 def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False) -> dict:
     attrs = {
         "chain": str(chain_root.id),
@@ -161,6 +175,7 @@ def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False)
         "connector": point.connector or "",
         "patch_label": point.patch_label or "",
         "notes": point.notes or "",
+        "parent_id": str(point.parent_id) if getattr(point, "parent_id", None) else None,
     }
     if bus_connector:
         attrs["bus_connector"] = getattr(point, "bus_connector", None) or ""
@@ -567,6 +582,7 @@ class Backfill:
                     attributes={
                         "input_number": vin.input_number,
                         "source_type": vin.source_type,
+                        "source_label": vin.source_label or "",
                         "list_id": str(vlist.id),
                     },
                     ports=[
@@ -595,8 +611,8 @@ class Backfill:
                         target,
                         self.named_port(target, "in", "video", point.input_port, point.connector),
                         attributes={
-                            "patch_label": point.patch_label,
                             "input_number": vin.input_number,
+                            **_video_point_attrs(point, source),
                         },
                     )
                     prev = target
@@ -614,7 +630,12 @@ class Backfill:
             name=vout.destination_label or vout.name or f"Output {vout.output_number}",
             notes=vout.notes or "",
             position=vout.output_number,
-            attributes={"output_number": vout.output_number, "list_id": str(vlist.id)},
+            attributes={
+                "output_number": vout.output_number,
+                "name": vout.name or "",
+                "destination_label": vout.destination_label or "",
+                "list_id": str(vlist.id),
+            },
             ports=[
                 {
                     "id": "in",
@@ -639,7 +660,10 @@ class Backfill:
                         self.named_port(src, "out", "video", point.source_port, point.connector),
                         target,
                         self.named_port(target, "in", "video", point.input_port, point.connector),
-                        attributes={"patch_label": point.patch_label, "output_id": str(vout.id)},
+                        attributes={
+                            "output_id": str(vout.id),
+                            **_video_point_attrs(point, dest),
+                        },
                     )
             if point.id in leaves and target is not None:
                 self.edge(

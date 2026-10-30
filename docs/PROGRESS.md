@@ -24,7 +24,8 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 6b | Backfill video chains and audio **output** chains | **Done** |
 | 6c | Readers on the graph: console exports, stage-plot cables in reports, channel-list and patch-sheet report contexts | **Done and switched on** (sync-before-read, see below) |
 | 6d | Two-way mirror between the legacy editors and the graph for channel lists, channels, outputs, audio devices and patch points | **Done** (see below) |
-| 6e | Remaining writers (plot elements, video, DMX, power, rigging) into the graph; port `web/src/utils/cables.js` + `StagePlotPage.vue`; remaining report contexts | **Not started** |
+| 6e | Plot elements as graph nodes, mirrored both ways; cables (backend and the plot page) read from the graph | **Done** (see below) |
+| 7 | **Cutover**: new graph-native editors replace the legacy pages, then legacy endpoints and tables are removed | **Not started**, milestones M3-M9 below |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
 ## What exists
@@ -88,6 +89,25 @@ Each reader exists next to its legacy twin, produces the same output, and has a 
 **Verified on real data**: a copy of the dev database (517 jobs with audio or plot data, 870 plugin exports, 251 patch sheets, every channel row, all routed cables) matched legacy output exactly after sync and after a second sync; the check also found the FK ordering bug and the two-link bug above, neither visible with SQLite.
 
 Remaining on the legacy path: job summary, fixture patch, stage plot (elements) and video sheet report contexts; `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side); and all writers.
+
+## Plot elements and cables on the graph (phase 6e)
+
+- **Elements are nodes.** Each legacy plot element is a `kind="plot_element"` node (`legacy_ref stage_plot_elements:<id>`): `canvas_x/y/rotation` = position/rotation, `attributes` = element type, size, image, coverage, focal length, power connector, `label`, rigging point id. Its legacy links are `link` edges (`src_port "link"`, `dst_port = role`, `attributes {role, legacy_target}` where `legacy_target` is the legacy id, patch-point and output-point links included): roles `channel`, `device`, `patch_point`, `output_point`, `video_input`, `lens`, `power_node`. `link` is a signal like the others but is skipped by default traces and never validated.
+- **Mirror.** Moving/resizing/renaming/deleting an element node writes the plot element; the graph API can create `plot_element` nodes and create/delete `link` edges for roles channel, device, video_input, lens, power_node (the target must be a node with the matching legacy twin). Legacy plot edits flow back into the node.
+- **Cables.** `derive_cables_from_graph` / `routed_cable_paths_from_graph` (backend) and `legacyViewFromGraph` / `buildCableRowsFromGraph` (`web/src/utils/graphLegacy.js`) read only graph nodes and edges. The web version rebuilds the legacy shapes with legacy ids and feeds the existing `buildCableRows`, so cable keys, saved routes and highlights are unchanged. `StagePlotPage.vue` builds its cable list that way once the graph is loaded (legacy data until then) and keeps its own live element geometry for drags (`liveElements`). It syncs and loads the graph on mount and applies `graph.*` events.
+- **Verified** against real data: backend (547 jobs: channel rows, patch sheets, exports, routed cables) and web (998 jobs, 414 cables) are identical to the legacy output. `graph_device_id`, `graph_source_*` and `graph_link_role` on `stage_plot_elements` are no longer read by anything; drop them with the legacy columns.
+- The workspace canvas draws element nodes at their real size and rotation, hides a device that already has an element, and the connect tool links an element to what it is dropped on.
+
+## Cutover roadmap (phase 7): replacing the legacy editors, then retiring the tables
+
+Decisions: elements are graph nodes (done); the legacy UI is **replaced** by graph-native editors (no facade), so the legacy pages are removed one at a time. Until a page is replaced, the mirror keeps it working. Each milestone must leave the tree green (lint, pytest, unit specs, e2e) and be parity-checked on real data.
+- **M3 graph-native channel list + patch editor** (job page "channels" view): create/edit/delete lists, channels, outputs, patch points on the graph API (needs graph-side creation of `channel_list`/`channel`/`output` nodes and chain edges with ordering, the legacy `revision`/conflict dialog semantics, bulk create, stereo links, Stockwire sync). Then remove the legacy channel endpoints/UI.
+- **M4 device editor** on graph nodes (ports as individually addressable ports, I/O overrides, camera/projector/fixture specs). Replaces `DevicesPage.vue` and the job-page device dialogs.
+- **M5 lights**: fixtures, DMX universes and steps as nodes/edges (the backfill already maps them); port `LightingPanel.vue`, `DmxChainEditor.vue`, DMX checks and importers.
+- **M6 video**: input/output lists, chains with ports and splits; port `VideoListEditor.vue`, `PatchFlowEditor.vue`.
+- **M7 power and rigging**: power tree, rigging points and trusses as nodes (rigging points are not nodes yet); port `RiggingPanel.vue`.
+- **M8 stage plot page** on graph nodes only (element editing, coverage, cableways); delete the legacy element endpoints and the `liveElements` bridge.
+- **M9 retire the legacy tables.** Destructive: needs (1) a verified `pg_dump` taken immediately before, (2) a final backfill + parity run on that data, (3) explicit approval at that moment, then one Alembic revision per domain dropping the tables, FK columns (`linked_*`, `graph_*` link columns, `legacy_ref`) and the legacy services/schemas, with a downgrade that recreates the empty tables (data restore is from the dump). `init_db()`'s `create_all` fallback and the sqlite tests must lose the legacy models in the same change.
 
 ## Two-way mirror (phase 6d)
 
