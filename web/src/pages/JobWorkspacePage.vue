@@ -636,7 +636,26 @@ async function move({ id, x, y }) {
   }
 }
 
+// Dropping a connection on a venue outlet marker plugs the gear into that outlet: the outlet's
+// power group (or the outlet alone) becomes a source in the power tree and the gear is plugged
+// into it. A speaker or screen element needs a device to take power; the server says if not.
+async function plugIntoOutlet(srcId, outletId) {
+  const gear = graph.devices.find((d) => d.id === srcId);
+  try {
+    const { node, connector } = await graph.outletSource(jobId, outletId);
+    await graph.assignLoad(jobId, srcId, { power_node_id: node.id, power_connector: connector });
+    $q.notify({ type: 'positive', message: t('workspace.pluggedInto', { name: gear?.name || '', outlet: node.name }) });
+    plotFrame.load();
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+
 async function connectDevices({ srcId, dstId }) {
+  if (String(dstId).startsWith('outlet:')) {
+    await plugIntoOutlet(srcId, dstId.slice('outlet:'.length));
+    return;
+  }
   const src = graph.devices.find((d) => d.id === srcId);
   const dst = graph.devices.find((d) => d.id === dstId);
   if (isPlotElement(src)) {

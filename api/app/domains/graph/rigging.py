@@ -21,9 +21,11 @@ from app.domains.graph.lists import _by_ref, _device_twin
 from app.domains.graph.mirror import _fixtures_on_device, legacy_target
 from app.domains.graph.models import GraphDevice
 from app.domains.lighting.models import LightingFixture
+from app.domains.rigging import connectors
 from app.domains.rigging import router as rigging_router
 from app.domains.rigging import schemas as rigging_schemas
 from app.domains.rigging.models import PowerNode
+from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph",
@@ -109,6 +111,120 @@ async def create_rigging_point(
     return schemas.GraphDeviceRead.model_validate(
         await _by_ref(db, job_id, f"rigging_points:{point.id}")
     )
+
+
+class OutletSource(BaseModel):
+    node: schemas.GraphDeviceRead
+    connector: str
+
+
+@router.post("/venue-power/outlets/{outlet_id}/source", response_model=OutletSource)
+async def outlet_source(
+    job_id: UUID, outlet_id: UUID, db: AsyncSession = Depends(get_db)
+) -> OutletSource:
+    """The power node that stands for a venue outlet, made on first use.
+
+    An outlet in a group is served by one source node for the whole group: it carries the group's
+    rating, so everything plugged into the group's outlets counts against it, and has one output
+    per outlet connector (as many as there are outlets). An outlet without a group gets a source
+    of its own with one output. Anything can then be fed from the returned node on ``connector``.
+    """
+    job = await service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    outlet = await db.get(VenuePowerOutlet, outlet_id)
+    if outlet is None or job.venue_id is None or outlet.venue_id != job.venue_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found for this job's venue")
+    if not outlet.connector or not connectors.known(outlet.connector):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Give the outlet a known connector first"
+        )
+    connector = outlet.connector
+    async with job_lock(job_id):
+        if outlet.group_id:
+            node_id = await _group_source(db, job_id, outlet.group_id)
+        else:
+            node_id = await _single_outlet_source(db, job_id, outlet)
+    db.expire_all()
+    await backfill_job(db, job_id)
+    row = await db.get(PowerNode, node_id)
+    ref = f"audio_devices:{row.device_id}" if row and row.device_id else f"power_nodes:{node_id}"
+    return OutletSource(
+        node=schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref)),
+        connector=connector,
+    )
+
+
+async def _single_outlet_source(db: AsyncSession, job_id: UUID, outlet: VenuePowerOutlet) -> UUID:
+    existing = await db.scalar(
+        select(PowerNode).where(PowerNode.job_id == job_id, PowerNode.venue_outlet_id == outlet.id)
+    )
+    if existing is not None:
+        return existing.id
+    created = await rigging_router.create_node(
+        job_id,
+        rigging_schemas.PowerNodeCreate(
+            name=outlet.name or "Venue outlet",
+            kind="source",
+            feed_connector=outlet.connector,
+            rating_amps=outlet.rating_amps,
+            venue_outlet_id=outlet.id,
+            outputs=[rigging_schemas.PowerOutput(connector=outlet.connector, count=1)],
+        ),
+        db,
+    )
+    return UUID(str(created["id"]))
+
+
+async def _group_source(db: AsyncSession, job_id: UUID, group_id: UUID) -> UUID:
+    group = await db.get(VenuePowerGroup, group_id)
+    outlets = (
+        await db.scalars(select(VenuePowerOutlet).where(VenuePowerOutlet.group_id == group_id))
+    ).all()
+    counts: dict[str, int] = {}
+    for item in outlets:
+        if item.connector:
+            counts[item.connector] = counts.get(item.connector, 0) + 1
+    outputs = [
+        rigging_schemas.PowerOutput(connector=key, count=min(count, 99))
+        for key, count in sorted(counts.items())
+    ]
+    existing = await db.scalar(
+        select(PowerNode).where(PowerNode.job_id == job_id, PowerNode.venue_group_id == group_id)
+    )
+    if existing is not None:
+        await rigging_router.update_node(
+            job_id,
+            existing.id,
+            rigging_schemas.PowerNodeUpdate(
+                name=group.name or "Venue power",
+                rating_amps=group.rating_amps,
+                outputs=outputs,
+            ),
+            db,
+        )
+        return existing.id
+    if not group.rating_amps:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Give the power group its rating (amps) before using it",
+        )
+    created = await rigging_router.create_node(
+        job_id,
+        rigging_schemas.PowerNodeCreate(
+            name=group.name or "Venue power",
+            kind="source",
+            feed_connector="install_3p" if group.phases == 3 else "install_1p",
+            rating_amps=group.rating_amps,
+            outputs=outputs,
+        ),
+        db,
+    )
+    node_id = UUID(str(created["id"]))
+    row = await db.get(PowerNode, node_id)
+    row.venue_group_id = group_id
+    await db.commit()
+    return node_id
 
 
 @router.post("/power-nodes", response_model=schemas.GraphDeviceRead, status_code=201)

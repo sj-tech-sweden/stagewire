@@ -37,10 +37,10 @@
           <v-group
             v-for="outlet in outletMarks"
             :key="outlet.id"
-            :config="{ x: outlet.x, y: outlet.y, listening: false }"
+            :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y }"
           >
-            <v-circle :config="{ radius: 7, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 }" />
-            <v-text :config="{ text: outlet.label, fontSize: 10, x: 10, y: -5, fill: '#ddd' }" />
+            <v-circle :config="{ radius: connectMode ? 11 : 7, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 }" />
+            <v-text :config="{ text: outlet.label, fontSize: 10, x: 14, y: -5, fill: '#ddd', listening: false }" />
           </v-group>
         </template>
         <v-line

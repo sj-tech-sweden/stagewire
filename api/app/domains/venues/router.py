@@ -11,8 +11,9 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.rigging import connectors
+from app.domains.rigging.models import PowerNode
 from app.domains.venues import schemas, service
-from app.domains.venues.models import VenuePowerOutlet
+from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
 
 router = APIRouter(
     tags=["venues"], dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)]
@@ -96,6 +97,79 @@ async def assign_job_venue(
     return read
 
 
+async def _check_group(db: AsyncSession, venue_id: UUID, group_id: UUID | None) -> None:
+    if group_id is None:
+        return
+    group = await db.get(VenuePowerGroup, group_id)
+    if group is None or group.venue_id != venue_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Power group not found")
+
+
+@router.get("/venues/{venue_id}/power-groups", response_model=list[schemas.VenuePowerGroupRead])
+async def list_power_groups(venue_id: UUID, db: AsyncSession = Depends(get_db)):
+    await _get_venue_or_404(db, venue_id)
+    result = await db.execute(
+        select(VenuePowerGroup)
+        .where(VenuePowerGroup.venue_id == venue_id)
+        .order_by(VenuePowerGroup.name)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/venues/{venue_id}/power-groups",
+    response_model=schemas.VenuePowerGroupRead,
+    status_code=201,
+)
+async def create_power_group(
+    venue_id: UUID, payload: schemas.VenuePowerGroupCreate, db: AsyncSession = Depends(get_db)
+):
+    await _get_venue_or_404(db, venue_id)
+    group = VenuePowerGroup(venue_id=venue_id, **payload.model_dump())
+    db.add(group)
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+
+@router.patch(
+    "/venues/{venue_id}/power-groups/{group_id}", response_model=schemas.VenuePowerGroupRead
+)
+async def update_power_group(
+    venue_id: UUID,
+    group_id: UUID,
+    payload: schemas.VenuePowerGroupUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_venue_or_404(db, venue_id)
+    group = await db.get(VenuePowerGroup, group_id)
+    if group is None or group.venue_id != venue_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Power group not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(group, key, value)
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+
+@router.delete("/venues/{venue_id}/power-groups/{group_id}", status_code=204)
+async def delete_power_group(
+    venue_id: UUID, group_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    await _get_venue_or_404(db, venue_id)
+    group = await db.get(VenuePowerGroup, group_id)
+    if group is None or group.venue_id != venue_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Power group not found")
+    for outlet in await db.scalars(
+        select(VenuePowerOutlet).where(VenuePowerOutlet.group_id == group_id)
+    ):
+        outlet.group_id = None
+    for node in await db.scalars(select(PowerNode).where(PowerNode.venue_group_id == group_id)):
+        node.venue_group_id = None
+    await db.delete(group)
+    await db.commit()
+
+
 @router.get("/venues/{venue_id}/power-outlets", response_model=list[schemas.VenuePowerOutletRead])
 async def list_power_outlets(venue_id: UUID, db: AsyncSession = Depends(get_db)):
     await _get_venue_or_404(db, venue_id)
@@ -118,6 +192,7 @@ async def create_power_outlet(
     await _get_venue_or_404(db, venue_id)
     if not connectors.known(payload.connector):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown connector")
+    await _check_group(db, venue_id, payload.group_id)
     outlet = VenuePowerOutlet(venue_id=venue_id, **payload.model_dump())
     db.add(outlet)
     await db.commit()
@@ -142,6 +217,8 @@ async def update_power_outlet(
     data = payload.model_dump(exclude_unset=True)
     if "connector" in data and not connectors.known(data["connector"]):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown connector")
+    if "group_id" in data:
+        await _check_group(db, venue_id, data["group_id"])
     for key, value in data.items():
         setattr(outlet, key, value)
     await db.commit()

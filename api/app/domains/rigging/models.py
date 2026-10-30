@@ -50,6 +50,9 @@ class PowerNode(Base):
     venue_outlet_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("venue_power_outlets.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    venue_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venue_power_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )

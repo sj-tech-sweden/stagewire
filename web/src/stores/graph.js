@@ -246,6 +246,12 @@ export const useGraphStore = defineStore('graph', {
       await this.fetchGraph(jobId);
       return data;
     },
+    // The source node for a venue outlet (its power group, or the outlet alone), made on first use.
+    async outletSource(jobId, outletId) {
+      const { data } = await api.post(`${base(jobId)}/venue-power/outlets/${outletId}/source`);
+      await this.fetchGraph(jobId);
+      return data;
+    },
     async movePowerNode(jobId, nodeId, payload) {
       await api.put(`${base(jobId)}/power-nodes/${nodeId}/parent`, payload);
       await this.fetchGraph(jobId);

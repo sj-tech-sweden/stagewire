@@ -1,5 +1,9 @@
 <template>
   <div data-testid="rigging-editor">
+    <VenuePowerPanel
+      :job-id="jobId"
+      @changed="loadOutlets"
+    />
     <div
       v-if="summary?.errors?.length"
       class="text-negative q-mb-md"
@@ -353,7 +357,7 @@
               clearable
               emit-value
               map-options
-              :options="nodeOptions"
+              :options="parentOptions"
               :label="t('workspace.loadPlug')"
               data-testid="load-node"
               @update:model-value="(v) => assign(load, { power_node_id: v || null, power_connector: v ? load.power_connector || connectorsOf(v)[0]?.value || '' : '' })"
@@ -450,7 +454,7 @@
             outlined
             emit-value
             map-options
-            :options="nodeOptions"
+            :options="parentOptions"
             :label="t('workspace.powerParent')"
             data-testid="new-power-parent"
           />
@@ -561,7 +565,7 @@
               outlined
               emit-value
               map-options
-              :options="nodeOptions.filter((o) => o.value !== editing?.id)"
+              :options="parentOptions.filter((o) => o.value !== editing?.id)"
               :label="t('workspace.moveTo')"
               data-testid="edit-power-parent"
             />
@@ -694,7 +698,7 @@
             emit-value
             map-options
             class="q-mb-sm"
-            :options="nodeOptions.filter((o) => o.value !== editing?.id)"
+            :options="parentOptions.filter((o) => o.value !== editing?.id)"
             :label="t('workspace.feedFrom')"
           />
           <q-select
@@ -737,6 +741,7 @@ import { useGraphStore } from '@/stores/graph';
 import OutputsField from '@/components/OutputsField.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
 import { cableFor, loadStatusColor, longFeeds, outputsLabel, powerInletLabel, powerTreeRows } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
@@ -793,7 +798,7 @@ const c13Needed = computed(
     }).length,
 );
 const plugNodeOptions = computed(() =>
-  tree.value.filter((n) => connectorsOf(n.id).length).map((n) => ({ value: n.id, label: n.name })),
+  parentOptions.value.filter((o) => connectorsOf(o.value).length),
 );
 const feedForm = reactive({ parent_id: null, feed_connector: '' });
 
@@ -811,10 +816,36 @@ const allConnectors = computed(() => catalog.value.map((c) => ({ value: c.key, l
 const connectorLabel = (key) => catalog.value.find((c) => c.key === key)?.label || key;
 const pointOptions = computed(() => points.value.map((p) => ({ value: p.id, label: p.name })));
 const nodeOptions = computed(() => tree.value.map((n) => ({ value: n.id, label: n.name })));
+// Venue outlets can feed a node too: picking one brings its power group (or the outlet on its
+// own) into the tree as a source and feeds from that (see resolveSource).
+const outletParents = computed(() =>
+  outlets.value
+    .filter((o) => o.connector)
+    .map((o) => ({
+      value: `outlet:${o.id}`,
+      label: `${t('workspace.venueOutlet')}: ${o.name || connectorLabel(o.connector)}${o.group_id ? ` · ${groupName(o.group_id)}` : ''}`,
+    })),
+);
+const parentOptions = computed(() => [...nodeOptions.value, ...outletParents.value]);
+const groupNames = ref({});
+const groupName = (id) => groupNames.value[id] || '';
+const outletOf = (value) =>
+  String(value || '').startsWith('outlet:') ? outlets.value.find((o) => `outlet:${o.id}` === value) : null;
+
+// A parent chosen in a dialog is a node id or `outlet:<id>`; an outlet is turned into the source
+// node that stands for it (made on first use) with the outlet's connector.
+async function resolveSource(value, connector) {
+  const outlet = outletOf(value);
+  if (!outlet) return { id: value, connector };
+  const { node } = await graph.outletSource(props.jobId, outlet.id);
+  return { id: node.id, connector: outlet.connector };
+}
 const graphNode = (id) => graph.devices.find((d) => d.id === id);
 const summaryPoint = (id) => (summary.value?.points || []).find((p) => p.id === id);
 
 function connectorsOf(nodeId) {
+  const outlet = outletOf(nodeId);
+  if (outlet) return [{ value: outlet.connector, label: connectorLabel(outlet.connector) }];
   const outputs = graphNode(nodeId)?.attributes?.outputs || [];
   return [...new Set(outputs.map((o) => o.connector))].map((value) => ({
     value,
@@ -836,13 +867,27 @@ async function refresh() {
   }
 }
 
-onMounted(async () => {
+async function loadOutlets() {
   try {
-    catalog.value = (await api.get('/power-connectors')).data;
     outlets.value = (await api.get(`/jobs/${props.jobId}/power-outlets`)).data;
+    const job = (await api.get(`/jobs/${props.jobId}`)).data;
+    if (job.venue_id) {
+      groupNames.value = Object.fromEntries(
+        (await api.get(`/venues/${job.venue_id}/power-groups`)).data.map((g) => [g.id, g.name]),
+      );
+    }
   } catch (err) {
     failed(err);
   }
+}
+
+onMounted(async () => {
+  try {
+    catalog.value = (await api.get('/power-connectors')).data;
+  } catch (err) {
+    failed(err);
+  }
+  await loadOutlets();
   await refresh();
 });
 watch(() => [graph.devices.length, graph.edges.length], refresh);
@@ -886,11 +931,13 @@ function openCreate() {
 
 async function createNode() {
   try {
+    const parent =
+      form.kind === 'source' ? { id: null, connector: form.feed_connector } : await resolveSource(form.parent_id, form.feed_connector);
     await graph.createPowerNode(props.jobId, {
       name: form.name,
       kind: form.kind,
-      parent_id: form.kind === 'source' ? null : form.parent_id,
-      feed_connector: form.feed_connector || '',
+      parent_id: parent.id,
+      feed_connector: parent.connector || '',
       phase: form.phase || null,
       rating_amps: form.rating_amps || null,
       outputs: form.outputs,
@@ -951,9 +998,10 @@ async function saveEdit() {
       (editForm.phase || null) !== (edgeToParent(editing.value)?.phase || null));
   if (moved && editForm.parent_id) {
     try {
+      const parent = await resolveSource(editForm.parent_id, editForm.feed_connector);
       await graph.movePowerNode(props.jobId, editing.value.id, {
-        parent_id: editForm.parent_id,
-        feed_connector: editForm.feed_connector,
+        parent_id: parent.id,
+        feed_connector: parent.connector,
         phase: editForm.phase || null,
       });
     } catch (err) {
@@ -997,8 +1045,9 @@ async function insertExtension(node, extra = {}) {
 }
 
 async function plugAll() {
-  const target = plugTarget.value;
-  const connector = connectorsOf(target)[0]?.value || '';
+  const connector = connectorsOf(plugTarget.value)[0]?.value || '';
+  const resolved = await resolveSource(plugTarget.value, connector);
+  const target = resolved.id;
   let done = 0;
   for (const load of unplugged.value) {
     try {
@@ -1021,7 +1070,8 @@ function openFeed(node) {
 
 async function addFeed() {
   try {
-    await graph.addPowerFeed(props.jobId, editing.value.id, { ...feedForm });
+    const parent = await resolveSource(feedForm.parent_id, feedForm.feed_connector);
+    await graph.addPowerFeed(props.jobId, editing.value.id, { ...feedForm, parent_id: parent.id, feed_connector: parent.connector });
     feedOpen.value = false;
     await refresh();
   } catch (err) {
@@ -1031,7 +1081,13 @@ async function addFeed() {
 
 async function assign(load, changes) {
   try {
-    await graph.assignLoad(props.jobId, load.id, { load_id: load.load_id, ...changes });
+    const body = { load_id: load.load_id, ...changes };
+    if (outletOf(changes.power_node_id)) {
+      const parent = await resolveSource(changes.power_node_id, null);
+      body.power_node_id = parent.id;
+      body.power_connector = parent.connector;
+    }
+    await graph.assignLoad(props.jobId, load.id, body);
     await refresh();
   } catch (err) {
     failed(err);

@@ -1074,3 +1074,74 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
   await expect.poll(() => synced).toBe(1);
   await expect(page.getByText(/1 added|1 tillagda/)).toBeVisible();
 });
+
+test('venue power groups and outlets feed the power tree, and gear is plugged into an outlet from the map', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const put = async (path: string, data: object) => {
+    const res = await request.put(`${API_BASE}/api/v1${path}`, { headers, data });
+    expect(res.status(), `${path}: ${await res.text()}`).toBeLessThan(300);
+    return res.json();
+  };
+  const venue = await post(request, headers, '/venues', { name: `Hall ${Date.now()}` });
+  const group = await post(request, headers, `/venues/${venue.id}/power-groups`, { name: 'Stage left', rating_amps: 16, phases: 1 });
+  await post(request, headers, `/venues/${venue.id}/power-outlets`, {
+    name: 'SL 1',
+    connector: 'schuko',
+    group_id: group.id,
+    x_cm: 600,
+    y_cm: 200,
+  });
+  await post(request, headers, `/venues/${venue.id}/power-outlets`, { name: 'SL 2', connector: 'schuko', group_id: group.id, x_cm: 700, y_cm: 200 });
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Venue power ${Date.now()}` })).id as string;
+  await put(`/jobs/${jobId}/venue`, { venue_id: venue.id });
+  const amp = await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Amp', device_type: 'other', power_watts: 500 });
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Rack', device_type: 'other', power_watts: 200 });
+  const graphOf = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as any;
+  const ampNode = (await graphOf()).devices.find((d: any) => d.name === 'Amp');
+  const patchRes = await request.patch(`${API_BASE}/api/v1/jobs/${jobId}/graph/devices/${ampNode.id}`, {
+    headers,
+    data: { canvas_x_cm: 300, canvas_y_cm: 200, expected_revision: ampNode.revision },
+  });
+  expect(patchRes.status()).toBeLessThan(300);
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('canvas-fit').click();
+  const canvas = page.getByTestId('workspace-canvas');
+  const box = (await canvas.boundingBox())!;
+  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  // connect tool: drag from the amp (box 60 x 30 cm at 300,200) to the first outlet (600,200)
+  await page.getByTestId('connect-tool').click();
+  const from = { x: box.x + (300 + 30) * zoom, y: box.y + (200 + 15) * zoom };
+  const to = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, from.y, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const graph = await graphOf();
+      const node = graph.devices.find((d: any) => d.name === 'Amp');
+      const source = graph.devices.find((d: any) => d.id === node.attributes.power_node_id);
+      return source && [source.name, node.attributes.power_connector];
+    })
+    .toEqual(['Stage left', 'schuko']);
+  const nodes = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/power-nodes`, { headers })).json()) as any[];
+  expect(nodes.find((n) => n.name === 'Stage left')).toMatchObject({ rating_amps: 16, outputs: [{ connector: 'schuko', count: 2 }] });
+
+  // the venue power panel lists the groups and outlets and an outlet can be fed from in the tree
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('venue-power').click();
+  await expect(page.getByTestId('venue-group')).toHaveCount(1);
+  await expect(page.getByTestId('venue-outlet')).toHaveCount(2);
+  await page.getByTestId('add-power-node').click();
+  await page.getByTestId('new-power-name').fill('Rack distro');
+  await page.getByTestId('new-power-parent').click();
+  await expect(page.locator('.q-menu .q-item', { hasText: 'SL 2' })).toBeVisible();
+});
