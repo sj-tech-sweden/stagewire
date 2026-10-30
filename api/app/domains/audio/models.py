@@ -230,6 +230,10 @@ class StagePlotElement(Base):
         ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     power_connector: Mapped[str] = mapped_column(String(64), default="")
+    graph_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("graph_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    graph_link_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 

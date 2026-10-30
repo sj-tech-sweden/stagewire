@@ -11,6 +11,7 @@ from app.domains.audio.models import (
     ChannelListOutput,
     ChannelPatchPoint,
     OutputPatchPoint,
+    StagePlotElement,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
@@ -514,6 +515,56 @@ class Backfill:
                     attributes={"output_id": str(vout.id)},
                 )
 
+    async def plot_links(self) -> None:
+        """Point each stage plot element at the graph node its legacy links resolve to.
+
+        An element can carry several legacy links; one graph node is kept, in this priority:
+        channel, video input, output point, device, patch point.
+        """
+        elements = (
+            await self.db.scalars(
+                select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
+            )
+        ).all()
+        point_device = {
+            p.id: p.device_id
+            for p in (await self.db.scalars(select(ChannelPatchPoint))).all()
+            if p.device_id
+        }
+        out_device = {
+            p.id: p.device_id
+            for p in (await self.db.scalars(select(OutputPatchPoint))).all()
+            if p.device_id
+        }
+        for el in elements:
+            if el.graph_device_id is not None:
+                continue
+            candidates = [
+                ("channel", f"audio_channel_patches:{el.linked_channel_id}")
+                if el.linked_channel_id
+                else None,
+                ("video_input", f"video_inputs:{el.linked_video_input_id}")
+                if el.linked_video_input_id
+                else None,
+                ("output_point", f"audio_devices:{out_device.get(el.linked_output_point_id)}")
+                if el.linked_output_point_id in out_device
+                else None,
+                ("device", f"audio_devices:{el.linked_device_id}") if el.linked_device_id else None,
+                ("patch_point", f"audio_devices:{point_device.get(el.linked_patch_point_id)}")
+                if el.linked_patch_point_id in point_device
+                else None,
+            ]
+            candidates = [c for c in candidates if c]
+            if len(candidates) > 1:
+                self.result.notes.append(
+                    f"plot element {el.id} has {len(candidates)} links; kept {candidates[0][0]}"
+                )
+            for role, ref in candidates:
+                node = self.devices.get(ref)
+                if node is not None:
+                    el.graph_device_id, el.graph_link_role = node.id, role
+                    break
+
     async def lighting(self) -> None:
         fixtures = (
             await self.db.scalars(
@@ -687,5 +738,6 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     await builder.audio_outputs()
     await builder.video()
     await builder.lighting()
+    await builder.plot_links()
     await db.commit()
     return builder.result
