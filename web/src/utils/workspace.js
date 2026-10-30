@@ -235,3 +235,129 @@ export function chainForm(node, edges, devices) {
       parent_index: p.parent_id && index.has(p.parent_id) ? index.get(p.parent_id) : null,
     }));
 }
+
+export const DEVICE_TYPES = [
+  'digital_stagebox',
+  'analog_stagebox',
+  'mixer',
+  'split',
+  'network',
+  'direct',
+  'switcher',
+  'router',
+  'multiviewer',
+  'camera',
+  'lens',
+  'ptz_camera',
+  'computer',
+  'patchbay',
+  'converter',
+  'encoder',
+  'recorder',
+  'screen',
+  'projector',
+  'fixture',
+  'other',
+];
+
+export const IO_DEVICE_TYPES = ['mixer', 'switcher', 'router', 'multiviewer'];
+export const CAMERA_TYPES = ['camera', 'ptz_camera'];
+
+export function signalForType(type) {
+  if (type === 'fixture') return 'dmx';
+  if (['camera', 'ptz_camera', 'lens', 'screen', 'projector', 'switcher', 'multiviewer'].includes(type)) {
+    return 'video';
+  }
+  return 'audio';
+}
+
+const slug = (connector) => String(connector || '').toLowerCase() || 'x';
+
+// Connector groups the editor shows: the ports that carry a connector or a channel count.
+export const portGroups = (ports) =>
+  (ports || [])
+    .filter((p) => p.connector || p.channels)
+    .map((p) => ({ direction: p.direction, connector: p.connector || '', count: p.channels || 0 }));
+
+// Graph ports for a set of connector groups, keeping the device's own generic ports as they are.
+export function portsFromGroups(groups, existing, type) {
+  const generic = (existing || []).filter((p) => !p.connector && !p.channels);
+  const seen = new Set(generic.map((p) => p.id));
+  const signal = signalForType(type);
+  const fromGroups = groups.map((g) => {
+    const base = `${g.direction}-${slug(g.connector)}`;
+    let id = base;
+    for (let n = 2; seen.has(id); n += 1) id = `${base}-${n}`;
+    seen.add(id);
+    return {
+      id,
+      direction: g.direction,
+      signal,
+      connector: g.connector ? g.connector.toLowerCase() : null,
+      channels: g.count || null,
+    };
+  });
+  return [...fromGroups, ...generic];
+}
+
+export const NUMBER_FIELDS = [
+  'weight_kg',
+  'power_w',
+  'input_override',
+  'output_override',
+  'footprint_channels',
+  'sensor_width_mm',
+  'focal_min_mm',
+  'focal_max_mm',
+  'max_distance_m',
+  'throw_ratio_min',
+  'throw_ratio_max',
+  'image_aspect_ratio',
+];
+export const TEXT_FIELDS = ['fixture_type', 'channel_mode', 'default_gel'];
+
+export function deviceForm(node) {
+  const attrs = node?.attributes || {};
+  const form = {
+    name: node?.name || '',
+    device_type: node?.kind || 'other',
+    notes: node?.notes || '',
+    ports: portGroups(node?.ports).map((g) => ({ ...g })),
+  };
+  for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) form[key] = attrs[key] ?? null;
+  return form;
+}
+
+// PATCH body for an edit: attributes are replaced as a whole, so merge into the existing ones.
+export function devicePatch(node, form) {
+  const attributes = { ...(node.attributes || {}) };
+  for (const key of NUMBER_FIELDS) {
+    attributes[key] = form[key] === '' || form[key] == null ? null : Number(form[key]);
+  }
+  for (const key of TEXT_FIELDS) attributes[key] = form[key] || null;
+  return {
+    name: form.name,
+    kind: form.device_type,
+    notes: form.notes,
+    attributes,
+    ports: portsFromGroups(form.ports, node.ports, form.device_type),
+  };
+}
+
+// Body for the create endpoint, which speaks the legacy field names.
+export function deviceCreateBody(form) {
+  const body = {
+    name: form.name,
+    device_type: form.device_type,
+    notes: form.notes,
+    ports: form.ports.filter((p) => p.connector || p.count),
+  };
+  const map = { power_w: 'power_watts' };
+  for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) {
+    const value = form[key];
+    if (value !== null && value !== '' && value !== undefined) body[map[key] || key] = value;
+  }
+  return body;
+}
+
+export const isGear = (device) => !isVirtual(device) && !isPlotElement(device);

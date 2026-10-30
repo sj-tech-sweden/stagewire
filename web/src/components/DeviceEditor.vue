@@ -1,0 +1,228 @@
+<template>
+  <div data-testid="device-editor">
+    <div class="row items-center q-mb-md">
+      <div class="text-subtitle1 col">
+        {{ t('devices.title') }}
+      </div>
+      <q-btn
+        color="primary"
+        no-caps
+        icon="add"
+        :label="t('devices.createDevice')"
+        data-testid="new-device"
+        @click="openDialog(null)"
+      />
+    </div>
+
+    <div
+      v-if="!gear.length"
+      class="text-grey-6"
+    >
+      {{ t('workspace.noGear') }}
+    </div>
+
+    <q-list
+      v-else-if="$q.screen.lt.sm"
+      bordered
+      separator
+    >
+      <q-item
+        v-for="device in gear"
+        :key="device.id"
+        clickable
+        @click="openDialog(device)"
+      >
+        <q-item-section>
+          <q-item-label>{{ device.name }}</q-item-label>
+          <q-item-label caption>
+            {{ typeLabel(device) }} · {{ portsLabel(device) }}
+          </q-item-label>
+        </q-item-section>
+      </q-item>
+    </q-list>
+
+    <q-table
+      v-else
+      flat
+      dense
+      bordered
+      virtual-scroll
+      :virtual-scroll-item-size="44"
+      :rows="gear"
+      :columns="columns"
+      row-key="id"
+      :rows-per-page-options="[0]"
+      hide-bottom
+      style="max-height: 560px"
+      data-testid="device-table"
+    >
+      <template #body-cell-name="slot">
+        <q-td :props="slot">
+          <q-input
+            :model-value="slot.row.name"
+            dense
+            borderless
+            @change="(v) => quickSave(slot.row, { name: v })"
+          />
+        </q-td>
+      </template>
+      <template #body-cell-type="slot">
+        <q-td :props="slot">
+          {{ typeLabel(slot.row) }}
+        </q-td>
+      </template>
+      <template #body-cell-ports="slot">
+        <q-td :props="slot">
+          {{ portsLabel(slot.row) }}
+        </q-td>
+      </template>
+      <template #body-cell-io="slot">
+        <q-td :props="slot">
+          <span v-if="effective(slot.row)">
+            {{ effective(slot.row).input_count ?? '–' }} / {{ effective(slot.row).output_count ?? '–' }}
+          </span>
+        </q-td>
+      </template>
+      <template #body-cell-weight="slot">
+        <q-td :props="slot">
+          {{ effective(slot.row)?.weight_kg_effective ?? '' }}
+          <q-badge
+            v-if="effective(slot.row)?.weight_source === 'stockwire'"
+            color="teal"
+            label="SW"
+          />
+        </q-td>
+      </template>
+      <template #body-cell-power="slot">
+        <q-td :props="slot">
+          {{ effective(slot.row)?.power_watts_effective ?? '' }}
+          <q-badge
+            v-if="effective(slot.row)?.power_source === 'stockwire'"
+            color="teal"
+            label="SW"
+          />
+        </q-td>
+      </template>
+      <template #body-cell-patched="slot">
+        <q-td :props="slot">
+          {{ effective(slot.row)?.patch_point_count || '' }}
+        </q-td>
+      </template>
+      <template #body-cell-actions="slot">
+        <q-td :props="slot">
+          <q-btn
+            flat
+            dense
+            round
+            icon="edit"
+            :aria-label="t('app.actions.edit')"
+            data-testid="edit-device"
+            @click="openDialog(slot.row)"
+          />
+          <q-btn
+            flat
+            dense
+            round
+            color="negative"
+            icon="delete"
+            :aria-label="t('workspace.remove')"
+            @click="remove(slot.row)"
+          />
+        </q-td>
+      </template>
+    </q-table>
+
+    <DeviceDialog
+      v-model="dialogOpen"
+      :node="editing"
+      @save="save"
+    />
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { useQuasar } from 'quasar';
+import { useGraphStore } from '@/stores/graph';
+import DeviceDialog from '@/components/DeviceDialog.vue';
+import { deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
+
+const props = defineProps({ jobId: { type: String, required: true } });
+const { t } = useI18n();
+const $q = useQuasar();
+const graph = useGraphStore();
+const dialogOpen = ref(false);
+const editing = ref(null);
+
+const gear = computed(() =>
+  graph.devices.filter((d) => isGear(d) && d.kind !== 'case').sort((a, b) => a.name.localeCompare(b.name)),
+);
+const columns = computed(() => [
+  { name: 'name', label: t('devices.name'), field: 'name', align: 'left' },
+  { name: 'type', label: t('devices.type'), field: 'kind', align: 'left' },
+  { name: 'ports', label: t('devices.ports'), field: () => '', align: 'left' },
+  { name: 'io', label: `${t('devices.inputs')} / ${t('devices.outputs')}`, field: () => '', align: 'left' },
+  { name: 'weight', label: t('devices.weight'), field: () => '', align: 'right' },
+  { name: 'power', label: t('devices.power'), field: () => '', align: 'right' },
+  { name: 'patched', label: t('workspace.chain'), field: () => '', align: 'right' },
+  { name: 'actions', label: '', field: () => '', align: 'right' },
+]);
+
+const effective = (device) => graph.effective[device.id];
+const typeLabel = (device) => (device.kind ? t(`devices.types.${device.kind}`, device.kind) : '');
+const portsLabel = (device) =>
+  portGroups(device.ports)
+    .map((g) => `${g.direction === 'in' ? '↓' : '↑'}${g.count || ''} ${g.connector}`.trim())
+    .join(', ');
+
+const refresh = () => graph.fetchEffective(props.jobId).catch(() => {});
+onMounted(refresh);
+watch(() => graph.devices.length, refresh);
+
+const failed = (err) =>
+  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+
+function openDialog(device) {
+  editing.value = device;
+  dialogOpen.value = true;
+}
+
+async function quickSave(device, changes) {
+  try {
+    await graph.updateDevice(props.jobId, device.id, changes);
+  } catch (err) {
+    if (err.response?.status !== 409) failed(err);
+  }
+}
+
+async function save(form) {
+  try {
+    if (editing.value) {
+      await graph.updateDevice(props.jobId, editing.value.id, devicePatch(editing.value, form));
+    } else {
+      await graph.createAudioDevice(props.jobId, deviceCreateBody(form));
+    }
+    dialogOpen.value = false;
+    refresh();
+  } catch (err) {
+    if (err.response?.status !== 409) failed(err);
+  }
+}
+
+function remove(device) {
+  $q.dialog({ title: t('workspace.remove'), message: device.name, cancel: true, persistent: true }).onOk(
+    async () => {
+      try {
+        await graph.deleteDevice(props.jobId, device.id);
+      } catch (err) {
+        if (err.response?.status === 409) {
+          $q.notify({ type: 'warning', message: t('workspace.deviceInUse') });
+        } else {
+          failed(err);
+        }
+      }
+    },
+  );
+}
+</script>

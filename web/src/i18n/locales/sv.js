@@ -52,6 +52,9 @@ export default {
     discard: 'Släng mina ändringar',
   },
   workspace: {
+    modeDevices: 'Enheter',
+    noGear: 'Inga enheter än. Skapa en eller lägg till utrustning från katalogen.',
+    deviceInUse: 'Flytta eller ta bort patchpunkterna på enheten först',
     modeLists: 'Kanallistor',
     chainHint: 'Signalvägen i ordning, från källan till mixern.',
     stepDevice: 'Enhet',
@@ -940,6 +943,7 @@ export default {
     },
   },
   devices: {
+    edit: 'Redigera enhet',
     inputs: 'Ingångar',
     outputs: 'Utgångar',
     sensorPreset: 'Standardsensor',

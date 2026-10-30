@@ -20,6 +20,7 @@ export const useGraphStore = defineStore('graph', {
     mode: 'canvas',
     conflict: null,
     issues: [],
+    effective: {},
     loads: { L1: 0, L2: 0, L3: 0, imbalance_pct: 0 },
     loading: false,
     error: null,
@@ -39,6 +40,7 @@ export const useGraphStore = defineStore('graph', {
         this.devices = [];
         this.edges = [];
         this.issues = [];
+        this.effective = {};
       }
       this.jobId = jobId;
       this.loading = true;
@@ -223,6 +225,15 @@ export const useGraphStore = defineStore('graph', {
       await this.fetchGraph(jobId);
       return data;
     },
+    async createAudioDevice(jobId, body) {
+      const { data } = await api.post(`${base(jobId)}/audio-devices`, body);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async fetchEffective(jobId) {
+      const { data } = await api.get(`${base(jobId)}/effective`);
+      this.effective = data;
+    },
     async exportPlugins(jobId) {
       const { data } = await api.get(`${base(jobId)}/export-plugins`);
       return data;
@@ -236,7 +247,7 @@ export const useGraphStore = defineStore('graph', {
       return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
-      this.mode = ['list', 'lists'].includes(mode) ? mode : 'canvas';
+      this.mode = ['list', 'lists', 'devices'].includes(mode) ? mode : 'canvas';
     },
   },
 });

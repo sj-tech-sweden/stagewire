@@ -3,6 +3,11 @@ import {
   catalogQuery,
   deviceFromProduct,
   boxFor,
+  deviceCreateBody,
+  deviceForm,
+  devicePatch,
+  portGroups,
+  portsFromGroups,
   chainForm,
   chainSteps,
   channelsOf,
@@ -190,4 +195,48 @@ test('channels are listed by number and the next number follows the highest', ()
   expect(mine.map((c) => c.id)).toEqual(['b', 'a']);
   expect(nextChannelNumber(mine)).toBe(11);
   expect(nextChannelNumber([])).toBe(1);
+});
+
+test('only ports with a connector or channel count are connector groups', () => {
+  const ports = [
+    { id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 32 },
+    { id: 'out-audio', direction: 'out', signal: 'audio' },
+  ];
+  expect(portGroups(ports)).toEqual([{ direction: 'in', connector: 'xlr3', count: 32 }]);
+});
+
+test('editing groups keeps generic ports and gives every port a unique id', () => {
+  const existing = [{ id: 'out-audio', direction: 'out', signal: 'audio' }];
+  const ports = portsFromGroups(
+    [
+      { direction: 'in', connector: 'XLR3', count: 16 },
+      { direction: 'in', connector: 'XLR3', count: 8 },
+      { direction: 'out', connector: '', count: 4 },
+    ],
+    existing,
+    'analog_stagebox',
+  );
+  expect(ports.map((p) => p.id)).toEqual(['in-xlr3', 'in-xlr3-2', 'out-x', 'out-audio']);
+  expect(ports[0]).toMatchObject({ connector: 'xlr3', channels: 16, signal: 'audio' });
+  expect(portsFromGroups([{ direction: 'out', connector: 'SDI', count: 2 }], [], 'camera')[0].signal).toBe('video');
+});
+
+test('a device form round-trips into a patch that clears emptied fields and keeps other attributes', () => {
+  const node = {
+    name: 'Cam',
+    kind: 'camera',
+    notes: '',
+    attributes: { weight_kg: 2, max_distance_m: 30, device_type: 'camera', custom: 'keep' },
+    ports: [{ id: 'out-sdi', direction: 'out', connector: 'sdi', channels: 2 }],
+  };
+  const form = deviceForm(node);
+  expect(form).toMatchObject({ device_type: 'camera', weight_kg: 2, max_distance_m: 30 });
+  form.max_distance_m = '';
+  form.focal_min_mm = '4.3';
+  const patch = devicePatch(node, form);
+  expect(patch.attributes).toMatchObject({ weight_kg: 2, max_distance_m: null, focal_min_mm: 4.3, custom: 'keep' });
+  expect(patch.ports).toHaveLength(1);
+  const body = deviceCreateBody({ ...form, power_w: 120, ports: [{ direction: 'out', connector: 'SDI', count: 2 }] });
+  expect(body).toMatchObject({ name: 'Cam', device_type: 'camera', power_watts: 120, focal_min_mm: '4.3' });
+  expect(body).not.toHaveProperty('max_distance_m');
 });

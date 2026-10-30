@@ -52,6 +52,9 @@ export default {
     discard: 'Discard my changes',
   },
   workspace: {
+    modeDevices: 'Devices',
+    noGear: 'No devices yet. Create one or add gear from the catalog.',
+    deviceInUse: 'Move or delete the patch points on this device first',
     modeLists: 'Channel lists',
     chainHint: 'The signal path in order, from the source to the console.',
     stepDevice: 'Device',
@@ -940,6 +943,7 @@ export default {
     },
   },
   devices: {
+    edit: 'Edit device',
     inputs: 'Inputs',
     outputs: 'Outputs',
     sensorPreset: 'Standard sensor',

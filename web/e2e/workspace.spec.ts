@@ -410,3 +410,34 @@ test('a channel list is built in the channel list editor and ends up in the expo
   await page.getByTestId('add-output').click();
   await expect(page.getByTestId('output-row')).toHaveCount(1);
 });
+
+test('a device is created and edited in the device editor, with ports and camera specs', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Devices ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
+
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-name').fill('PTZ 1');
+  await page.getByTestId('device-type').click();
+  await page.locator('.q-menu .q-item', { hasText: /^PTZ camera$/ }).click();
+  await page.getByTestId('add-port').click();
+  await page.getByTestId('port-connector').first().fill('SDI');
+  await page.getByLabel(/sensor width/i).fill('9.6');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json())[0];
+  await expect.poll(async () => (await legacy())?.device_type).toBe('ptz_camera');
+  const created = await legacy();
+  expect(created.sensor_width_mm).toBe(9.6);
+  expect(created.ports).toEqual([{ direction: 'in', connector: 'SDI', count: 1 }]);
+
+  await expect(page.getByTestId('device-table').locator('tbody input').first()).toHaveValue('PTZ 1');
+  await page.getByTestId('edit-device').click();
+  await page.getByLabel(/max.*distance/i).fill('40');
+  await page.getByTestId('device-save').click();
+  await expect.poll(async () => (await legacy()).max_distance_m).toBe(40);
+});
