@@ -133,6 +133,7 @@ export const VIRTUAL_KINDS = new Set([
   'video_input',
   'video_destination',
   'video_list',
+  'rigging_point',
   'dmx_universe',
 ]);
 
@@ -483,3 +484,32 @@ export function modesForType(types, typeName) {
 
 // What choosing a mode does to a fixture row: the mode's name and its footprint.
 export const modeAttributes = (mode) => ({ channel_mode: mode.name, footprint: mode.footprint });
+
+// The power tree as rows in display order (a node under its first parent), with its depth.
+export function powerTreeRows(nodes) {
+  const children = new Map();
+  for (const node of nodes) {
+    const parent = node.parent_id || null;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(node);
+  }
+  const rows = [];
+  const seen = new Set();
+  const walk = (parent, depth) => {
+    for (const node of children.get(parent) || []) {
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      rows.push({ ...node, depth });
+      walk(node.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  for (const node of nodes) if (!seen.has(node.id)) rows.push({ ...node, depth: 0 });
+  return rows;
+}
+
+export const outputsLabel = (outputs, labelOf = (c) => c) =>
+  (outputs || []).map((o) => `${o.count}× ${labelOf(o.connector)}${o.phase ? ` ${o.phase}` : ''}`).join(', ');
+
+export const loadStatusColor = (status) =>
+  ({ ok: 'positive', warn: 'warning', over: 'negative', unpowered: 'grey' })[status] || 'grey';

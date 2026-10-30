@@ -618,3 +618,49 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   await expect(page.getByTestId('video-video_output-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(1);
   await expect.poll(async () => (await legacy())[0]?.outputs.length).toBe(1);
 });
+
+test('rigging points and the power tree are built in the rigging editor and fixtures hang and plug in', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Power ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  await post(request, headers, `${g}/fixtures`, { purpose: 'Wash 1', footprint: 8 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+
+  await page.getByTestId('add-truss').click();
+  await expect(page.getByTestId('truss-card')).toHaveCount(1);
+  await page.getByTestId('truss-capacity').fill('250');
+  await page.getByTestId('truss-capacity').press('Enter');
+
+  await page.getByTestId('add-power-node').click();
+  await page.getByTestId('new-power-name').fill('Mains');
+  await page.getByTestId('new-power-feed').click();
+  await page.locator('.q-menu .q-item', { hasText: /63 A, 3-phase/ }).click();
+  await page.getByTestId('add-output-row').click();
+  await page.getByTestId('output-connector').click();
+  await page.locator('.q-menu .q-item', { hasText: /^Schuko 16 A$/ }).click();
+  await page.getByTestId('create-power-save').click();
+  await expect(page.getByTestId('power-node')).toHaveCount(1);
+
+  const legacy = async (path: string) =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/${path}`, { headers })).json()) as any[];
+  await expect.poll(async () => (await legacy('rigging-points'))[0]?.weight_capacity_kg).toBe(250);
+  await expect.poll(async () => (await legacy('power-nodes'))[0]?.name).toBe('Mains');
+
+  const row = page.getByTestId('load-row').first();
+  await row.getByTestId('load-point').click();
+  await page.locator('.q-menu .q-item').first().click();
+  await row.getByTestId('load-node').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Mains' }).click();
+  await expect
+    .poll(async () => {
+      const fx = (await legacy('fixtures'))[0];
+      return fx && [fx.rigging_point_id !== null, fx.power_node_id !== null, fx.power_connector];
+    })
+    .toEqual([true, true, 'schuko']);
+});

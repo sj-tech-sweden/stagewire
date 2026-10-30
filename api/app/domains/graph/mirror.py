@@ -256,6 +256,48 @@ async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -
     return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
 
 
+def _rigging_point_changes(data: dict) -> dict:
+    out: dict = {}
+    attrs = data.get("attributes") or {}
+    if data.get("name") is not None:
+        out["name"] = data["name"]
+    if "notes" in data:
+        out["notes"] = data["notes"] or ""
+    for key in ("trim_height_cm", "weight_capacity_kg"):
+        if key in attrs:
+            out[key] = attrs[key] or None
+    return out
+
+
+def _power_node_changes(data: dict) -> dict:
+    out: dict = {}
+    attrs = data.get("attributes") or {}
+    if data.get("name") is not None:
+        out["name"] = data["name"]
+    if "notes" in data:
+        out["notes"] = data["notes"] or ""
+    if data.get("kind") in ("source", "distro", "breakout"):
+        out["kind"] = data["kind"]
+    for key in ("rating_amps", "active", "outputs"):
+        if key in attrs and not (attrs[key] is None and key != "rating_amps"):
+            out[key] = attrs[key]
+    return out
+
+
+async def _update_power_node(db: AsyncSession, job_id: UUID, node_id: UUID, changes: dict) -> None:
+    """Edit a power node through the legacy handler, so its rules and errors are the same."""
+    from app.domains.rigging import router as rigging_router
+    from app.domains.rigging import schemas as rigging_schemas
+
+    try:
+        await rigging_router.update_node(
+            job_id, node_id, rigging_schemas.PowerNodeUpdate(**changes), db
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+
+
 def _universe_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -346,6 +388,21 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         for key, value in changes.items():
             setattr(row, key, value)
         await db.commit()
+    elif table == "rigging_points":
+        from app.domains.rigging import service as rigging_service
+
+        point = await rigging_service.get_point(db, job_id, legacy_id)
+        changes = _rigging_point_changes(data)
+        if point is None or not changes:
+            return False
+        for key, value in changes.items():
+            setattr(point, key, value)
+        await db.commit()
+    elif table == "power_nodes":
+        changes = _power_node_changes(data)
+        if not changes:
+            return False
+        await _update_power_node(db, job_id, legacy_id, changes)
     elif table == "dmx_universes":
         universe = await db.get(DmxUniverse, legacy_id)
         changes = _universe_changes(data)
@@ -410,6 +467,12 @@ async def _publish_list(db: AsyncSession, job_id: UUID, list_id: UUID) -> None:
         )
 
 
+async def rigging_service_get_node(db: AsyncSession, job_id: UUID, node_id: UUID):
+    from app.domains.rigging import service as rigging_service
+
+    return await rigging_service.get_node(db, job_id, node_id)
+
+
 async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice) -> bool:
     """Delete the legacy row behind a graph device (checked first, so the caller can abort)."""
     target = legacy_target(device)
@@ -437,6 +500,20 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
+    elif table == "rigging_points":
+        from app.domains.rigging import service as rigging_service
+
+        point = await rigging_service.get_point(db, job_id, legacy_id)
+        if point is None:
+            return False
+        await db.delete(point)
+        await db.commit()
+    elif table == "power_nodes":
+        from app.domains.rigging import router as rigging_router
+
+        if await rigging_service_get_node(db, job_id, legacy_id) is None:
+            return False
+        await rigging_router.delete_node(job_id, legacy_id, db)
     elif table in VIDEO_TABLES:
         row = await _video_row(db, job_id, VIDEO_TABLES[table][0], legacy_id)
         if row is None:
@@ -477,6 +554,75 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
 
 def _point_changes(attrs: dict) -> dict:
     return {key: attrs[key] for key in POINT_KEYS if key in attrs}
+
+
+POWER_EDGE_TABLES = {"power_nodes", "power_node_feeds", "lighting_fixtures.power"}
+
+
+async def _power_edge_to_legacy(
+    db: AsyncSession, job_id: UUID, edge: ConnectionEdge, target: tuple[str, UUID], data: dict
+) -> bool:
+    from app.domains.rigging import router as rigging_router
+    from app.domains.rigging import schemas as rigging_schemas
+
+    table, legacy_id = target
+    attrs = data.get("attributes") or {}
+    connector = attrs.get("connector")
+    changes: dict = {}
+    if connector is not None:
+        changes["feed_connector"] = connector
+    if "phase" in data:
+        changes["phase"] = data["phase"]
+    if not changes:
+        return False
+    try:
+        if table == "power_nodes":
+            await rigging_router.update_node(
+                job_id, legacy_id, rigging_schemas.PowerNodeUpdate(**changes), db
+            )
+        elif table == "power_node_feeds":
+            await _update_feed(db, job_id, legacy_id, changes)
+        else:
+            await _assign_fixture_load(db, job_id, legacy_id, changes)
+    except HTTPException:
+        await db.rollback()
+        raise
+    return True
+
+
+async def _update_feed(db: AsyncSession, job_id: UUID, feed_id: UUID, changes: dict) -> None:
+    from app.domains.rigging import power_tree
+    from app.domains.rigging import router as rigging_router
+    from app.domains.rigging import service as rigging_service
+    from app.domains.rigging.models import PowerNodeFeed
+
+    feed = await db.get(PowerNodeFeed, feed_id)
+    if feed is None or feed.job_id != job_id:
+        return
+    for key, value in changes.items():
+        setattr(feed, key, value)
+    nodes = await rigging_service.list_nodes(db, job_id)
+    feeds = await rigging_service.list_feeds(db, job_id)
+    rows = await rigging_service.collect_loads(db, job_id)
+    evaluation = power_tree.evaluate(
+        rigging_service.to_tree_nodes(nodes, feeds), rigging_service.to_tree_loads(rows)
+    )
+    names = [n.name for n in nodes if n.id in (feed.node_id, feed.parent_id)]
+    await rigging_router._reject(rigging_router._problems(evaluation, *names))
+    await db.commit()
+
+
+async def _assign_fixture_load(
+    db: AsyncSession, job_id: UUID, fixture_id: UUID, changes: dict
+) -> None:
+    from app.domains.rigging import router as rigging_router
+    from app.domains.rigging import schemas as rigging_schemas
+
+    assign = {"power_connector": changes["feed_connector"]} if "feed_connector" in changes else {}
+    if assign:
+        await rigging_router.assign_load(
+            job_id, "fixture", fixture_id, rigging_schemas.LoadAssign(**assign), db
+        )
 
 
 async def _video_point(db: AsyncSession, job_id: UUID, table: str, point_id: UUID):
@@ -574,6 +720,32 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         universe.source_device_id = None
         universe.source_port = ""
         await db.commit()
+        return True
+    if table == "power_node_feeds":
+        from app.domains.rigging.models import PowerNodeFeed
+
+        feed = await db.get(PowerNodeFeed, legacy_id)
+        if feed is None or feed.job_id != job_id:
+            return False
+        await db.delete(feed)
+        await db.commit()
+        return True
+    if table == "power_nodes":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A node's own feed cannot be cut; move the node to another parent or delete it",
+        )
+    if table == "lighting_fixtures.power":
+        from app.domains.rigging import router as rigging_router
+        from app.domains.rigging import schemas as rigging_schemas
+
+        await rigging_router.assign_load(
+            job_id,
+            "fixture",
+            legacy_id,
+            rigging_schemas.LoadAssign(power_node_id=None),
+            db,
+        )
         return True
     if table == "video_patch_points":
         point = await _video_point(db, job_id, table, legacy_id)
@@ -748,9 +920,9 @@ def device_needs_protection(device: GraphDevice, data: dict) -> bool:
 
 
 def edge_needs_protection(edge: ConnectionEdge, data: dict) -> bool:
-    if "phase" in data:
-        return True
     ref = (edge.attributes or {}).get("legacy_ref")
+    if "phase" in data and (ref or "").partition(":")[0] not in ("power_nodes", "power_node_feeds"):
+        return True
     if not ref or ref.partition(":")[0] in MIRRORED_EDGE_TABLES:
         return False
     return "attributes" in data

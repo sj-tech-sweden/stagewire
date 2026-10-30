@@ -250,6 +250,29 @@ export const useGraphStore = defineStore('graph', {
       await this.fetchGraph(jobId);
       return data;
     },
+    async fetchRiggingSummary(jobId) {
+      const { data } = await api.get(`${base(jobId)}/rigging/summary`);
+      return data;
+    },
+    async createRiggingPoint(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/rigging-points`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async createPowerNode(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/power-nodes`, payload);
+      await this.fetchGraph(jobId);
+      return data;
+    },
+    async addPowerFeed(jobId, nodeId, payload) {
+      await api.post(`${base(jobId)}/power-nodes/${nodeId}/feeds`, payload);
+      await this.fetchGraph(jobId);
+    },
+    async assignLoad(jobId, nodeId, payload) {
+      const { data } = await api.put(`${base(jobId)}/loads/${nodeId}`, payload);
+      await this.fetchGraph(jobId);
+      return data;
+    },
     async createAudioDevice(jobId, body) {
       const { data } = await api.post(`${base(jobId)}/audio-devices`, body);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
@@ -293,7 +316,7 @@ export const useGraphStore = defineStore('graph', {
       return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
-      this.mode = ['list', 'lists', 'devices', 'lights', 'video'].includes(mode) ? mode : 'canvas';
+      this.mode = ['list', 'lists', 'devices', 'lights', 'video', 'power'].includes(mode) ? mode : 'canvas';
     },
   },
 });

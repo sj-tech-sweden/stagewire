@@ -445,6 +445,7 @@ VIRTUAL_KINDS = {
     "video_input",
     "video_destination",
     "video_list",
+    "rigging_point",
     "channel_list",
 }
 LEGACY_KEY_TABLES = {

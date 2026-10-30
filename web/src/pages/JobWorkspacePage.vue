@@ -37,6 +37,7 @@
           { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
           { label: t('workspace.modeLights'), value: 'lights', icon: 'lightbulb' },
           { label: t('workspace.modeVideo'), value: 'video', icon: 'videocam' },
+          { label: t('workspace.modePower'), value: 'power', icon: 'bolt' },
         ]"
         style="max-width: 100%; overflow-x: auto"
         data-testid="mode-toggle"
@@ -137,7 +138,7 @@
         @drop.prevent="onProductDrop"
       >
         <q-banner
-          v-if="!graph.devices.length && !graph.loading && !['lists', 'devices', 'lights', 'video'].includes(graph.mode)"
+          v-if="!graph.devices.length && !graph.loading && !['lists', 'devices', 'lights', 'video', 'power'].includes(graph.mode)"
           class="bg-grey-9 text-white rounded-borders"
         >
           {{ t('workspace.empty') }}
@@ -199,6 +200,10 @@
           />
           <VideoEditor
             v-else-if="graph.mode === 'video'"
+            :job-id="jobId"
+          />
+          <RiggingEditor
+            v-else-if="graph.mode === 'power'"
             :job-id="jobId"
           />
           <WorkspaceTable
@@ -286,6 +291,7 @@ import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import DeviceEditor from '@/components/DeviceEditor.vue';
 import LightsEditor from '@/components/LightsEditor.vue';
 import VideoEditor from '@/components/VideoEditor.vue';
+import RiggingEditor from '@/components/RiggingEditor.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import WorkspaceTable from '@/components/WorkspaceTable.vue';
 

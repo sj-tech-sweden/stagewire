@@ -20,6 +20,9 @@ import {
   videoChainForm,
   videoChainNames,
   videoRowsOf,
+  powerTreeRows,
+  outputsLabel,
+  loadStatusColor,
   channelsOf,
   nextChannelNumber,
   centerOf,
@@ -350,4 +353,25 @@ test('a video chain is rebuilt from its edges and from the roots kept on the des
   ];
   expect(videoChainNames(output, outputEdges, gear)).toEqual(['Switcher', 'Screen']);
   expect(videoChainForm(output, outputEdges, gear).map((s) => s.parent_index)).toEqual([null, 0]);
+});
+
+test('the power tree is listed under its parents and orphans are still shown', () => {
+  const nodes = [
+    { id: 'b', parent_id: 'a' },
+    { id: 'a', parent_id: null },
+    { id: 'c', parent_id: 'b' },
+    { id: 'x', parent_id: 'missing' },
+  ];
+  expect(powerTreeRows(nodes).map((n) => [n.id, n.depth])).toEqual([
+    ['a', 0],
+    ['b', 1],
+    ['c', 2],
+    ['x', 0],
+  ]);
+  expect(outputsLabel([{ connector: 'schuko', count: 4, phase: 'L1' }, { connector: 'cee16', count: 1 }])).toBe(
+    '4× schuko L1, 1× cee16',
+  );
+  expect(loadStatusColor('over')).toBe('negative');
+  expect(loadStatusColor('whatever')).toBe('grey');
+  expect(isVirtual({ kind: 'rigging_point' })).toBe(true);
 });

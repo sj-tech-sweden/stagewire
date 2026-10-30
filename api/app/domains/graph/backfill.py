@@ -17,7 +17,7 @@ from app.domains.audio.models import (
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
-from app.domains.rigging.models import PowerNode, PowerNodeFeed
+from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
 from app.domains.video.models import VideoInputList
 
 FAN_OUT = 64
@@ -61,7 +61,16 @@ FIXTURE_ATTRS = (
     "gel",
     "purpose",
 )
-FIXTURE_ONLY_ATTRS = ("universe", "dmx_address", "footprint", "location", "gel", "purpose")
+LOAD_ATTRS = ("rigging_point_id", "power_node_id", "power_connector")
+FIXTURE_ONLY_ATTRS = (
+    "universe",
+    "dmx_address",
+    "footprint",
+    "location",
+    "gel",
+    "purpose",
+    *LOAD_ATTRS,
+)
 ELEMENT_FIELDS = (
     "element_type",
     "width_cm",
@@ -94,8 +103,9 @@ OWNED_ATTRS: dict[str, set[str]] = {
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
-    "lighting_fixtures": set(FIXTURE_ATTRS),
+    "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
     "dmx_universes": {"number", "source_port", "name"},
+    "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
     "video_input_lists": {
         "switcher_product_id",
         "switcher_product_name",
@@ -139,6 +149,9 @@ MIRRORED_EDGE_TABLES = {
     "stage_plot_elements.link",
     "dmx_steps",
     "dmx_universes",
+    "power_nodes",
+    "power_node_feeds",
+    "lighting_fixtures.power",
     "video_patch_points",
     "video_output_patch_points",
 }
@@ -833,8 +846,9 @@ class Backfill:
                     },
                     "label": el.label or "",
                     **(
-                        {"rigging_point_id": str(el.rigging_point_id)}
+                        {"rigging_point_id": str(point.id)}
                         if el.rigging_point_id
+                        and (point := self.devices.get(f"rigging_points:{el.rigging_point_id}"))
                         else {}
                     ),
                 },
@@ -935,6 +949,13 @@ class Backfill:
                 "purpose": fx.purpose,
             }
             dmx = {k: v for k, v in dmx.items() if v not in (None, "")}
+            rigging = self.devices.get(f"rigging_points:{fx.rigging_point_id}")
+            feeder = self.devices.get(f"power_nodes:{fx.power_node_id}")
+            dmx.update(
+                rigging_point_id=str(rigging.id) if rigging else None,
+                power_node_id=str(feeder.id) if feeder else None,
+                power_connector=(fx.power_connector or None) if feeder else None,
+            )
             linked = self.devices.get(f"audio_devices:{fx.device_id}") if fx.device_id else None
             if linked is not None:
                 if not linked.graph_edited:
@@ -1064,6 +1085,26 @@ class Backfill:
                     )
 
     async def power(self) -> None:
+        for point in (
+            await self.db.scalars(select(RiggingPoint).where(RiggingPoint.job_id == self.job_id))
+        ).all():
+            self.device(
+                f"rigging_points:{point.id}",
+                domain="rigging",
+                kind="rigging_point",
+                name=point.name or "Rigging point",
+                notes=point.notes or "",
+                position=point.position,
+                attributes={
+                    k: v
+                    for k, v in {
+                        "trim_height_cm": point.trim_height_cm,
+                        "weight_capacity_kg": point.weight_capacity_kg,
+                    }.items()
+                    if v is not None
+                },
+                ports=[],
+            )
         nodes = (
             await self.db.scalars(select(PowerNode).where(PowerNode.job_id == self.job_id))
         ).all()
