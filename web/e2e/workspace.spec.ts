@@ -61,7 +61,7 @@ test('the workspace opens as a canvas, places unplaced devices and keeps data wh
     return graph.devices.every((d: { canvas_x_cm: number | null }) => d.canvas_x_cm !== null);
   }).toBe(true);
 
-  await page.getByTestId('mode-toggle').getByText(/channel list|kanallista/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
   await expect(page.getByTestId('workspace-table')).toBeVisible();
   await expect(dataRows(page)).toHaveCount(2);
   await expect(page.getByRole('button', { name: /request to add to stockwire job booking/i })).toBeVisible();
@@ -84,7 +84,7 @@ test('the patch drawer lists connections per domain and the inspector shows the 
   await page.getByTestId('patch-tab-power').click();
   await expect(page.getByText(/no connections in this domain yet|inga kopplingar/i)).toBeVisible();
 
-  await page.getByTestId('mode-toggle').getByText(/channel list|kanallista/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
   await dataRows(page).first().locator('td').nth(1).click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Lead mic');
 });
@@ -107,7 +107,7 @@ test('on a phone the list becomes cards and the catalog is full screen', async (
   const { jobId } = await seedGraph(page, request);
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/channel list|kanallista/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
 
   await expect(page.getByTestId('workspace-table')).toHaveCount(0);
   await expect(page.getByText('Lead mic').first()).toBeVisible();
@@ -291,7 +291,7 @@ test('renaming a channel in the workspace list updates the channel list, and the
   });
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/channel list|kanallista/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(channel list|kanallista)$/i).click();
   const row = dataRows(page).first();
   await expect(row.locator('input').first()).toHaveValue('Kick');
   await row.locator('input').first().fill('Kick In');
