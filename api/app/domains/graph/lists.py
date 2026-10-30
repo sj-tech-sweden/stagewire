@@ -303,3 +303,58 @@ async def replace_output_chain(
     output = await service.get_output(db, legacy_id)
     await _publish_list(db, job_id, output.channel_list_id)
     return await _chain_edges(db, job_id, node)
+
+
+EFFECTIVE_KEYS = {
+    "patch_point_count",
+    "input_default",
+    "output_default",
+    "input_count",
+    "output_count",
+    "input_source",
+    "output_source",
+    "stockwire_inputs",
+    "stockwire_outputs",
+    "stockwire_connectors",
+    "weight_kg_effective",
+    "weight_source",
+    "power_watts_effective",
+    "power_source",
+}
+
+
+@router.post("/audio-devices", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_audio_device(
+    job_id: UUID, payload: audio_schemas.AudioDeviceCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    """Create a piece of gear (stagebox, mixer, camera, fixture, ...) with its ports and specs."""
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
+    return await _read(db, job_id, f"audio_devices:{device.id}")
+
+
+@router.get("/effective")
+async def effective_values(job_id: UUID, db: AsyncSession = Depends(get_db)) -> dict[str, dict]:
+    """Computed values per device node: I/O counts, weight and power and where they come from."""
+    from app.domains.audio.router import _device_io_context, _to_device_read
+
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    await backfill_job(db, job_id)
+    nodes = (
+        await db.scalars(
+            select(GraphDevice).where(
+                GraphDevice.job_id == job_id, GraphDevice.legacy_ref.like("audio_devices:%")
+            )
+        )
+    ).all()
+    by_legacy = {legacy_target(n)[1]: n for n in nodes if legacy_target(n)}
+    devices = [d for d in await service.list_devices(db, job_id) if d.id in by_legacy]
+    context = await _device_io_context(db, job_id, devices)
+    return {
+        str(by_legacy[d.id].id): _to_device_read(d, context).model_dump(
+            mode="json", include=EFFECTIVE_KEYS
+        )
+        for d in devices
+    }

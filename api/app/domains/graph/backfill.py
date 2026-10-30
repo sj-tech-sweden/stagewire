@@ -41,6 +41,15 @@ CHANNEL_FIELDS = (
 )
 OUTPUT_FIELDS = ("mode", "connector", "color_code")
 
+DEVICE_SPEC_FIELDS = (
+    "sensor_width_mm",
+    "focal_min_mm",
+    "focal_max_mm",
+    "max_distance_m",
+    "throw_ratio_min",
+    "throw_ratio_max",
+    "image_aspect_ratio",
+)
 ELEMENT_FIELDS = (
     "element_type",
     "width_cm",
@@ -74,6 +83,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "audio_devices": {
+        *DEVICE_SPEC_FIELDS,
         "device_type",
         "weight_kg",
         "power_w",
@@ -367,6 +377,7 @@ class Backfill:
                     "channel_mode": row.channel_mode,
                     "footprint_channels": row.footprint_channels,
                     "default_gel": row.default_gel,
+                    **{key: getattr(row, key) for key in DEVICE_SPEC_FIELDS},
                 }.items()
                 if v not in (None, "")
             }

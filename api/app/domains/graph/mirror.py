@@ -13,6 +13,7 @@ from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
 from app.domains.graph.backfill import (
     CHANNEL_FIELDS,
+    DEVICE_SPEC_FIELDS,
     ELEMENT_FIELDS,
     ELEMENT_LINKS,
     OUTPUT_FIELDS,
@@ -73,6 +74,7 @@ DEVICE_ATTRS = {
     "channel_mode": "channel_mode",
     "footprint_channels": "footprint_channels",
     "default_gel": "default_gel",
+    **{key: key for key in DEVICE_SPEC_FIELDS},
 }
 POINT_KEYS = ("connector", "patch_label", "notes")
 
@@ -185,6 +187,18 @@ def _audio_device_changes(data: dict) -> dict:
     for key in ("stockwire_product_id", "stockwire_product_name"):
         if key in data:
             out[key] = data[key]
+    if "ports" in data and data["ports"] is not None:
+        # a connector group is a port with a connector or a channel count; the generic
+        # ports the graph adds on its own carry neither and are not legacy data
+        out["ports"] = [
+            {
+                "direction": p.get("direction") or "in",
+                "connector": p.get("connector") or "",
+                "count": p.get("channels") or 0,
+            }
+            for p in data["ports"]
+            if p.get("connector") or p.get("channels")
+        ]
     return out
 
 
