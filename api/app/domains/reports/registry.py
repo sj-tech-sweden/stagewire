@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
 from app.domains.lighting import service as lighting_service
+from app.domains.reports import graph_context
 from app.domains.reports.cable_routing import routed_cable_paths
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
@@ -231,6 +232,18 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
             }
         )
     return {"job": job, "fixture_patch": rows}
+
+
+async def _channel_list_context_from_graph(db: AsyncSession, job_id: UUID) -> dict:
+    job = await _load_job(db, job_id)
+    devices, _, elements = await graph_context.load_graph(db, job_id)
+    return {"job": job, "channels": graph_context.channel_rows(devices, elements)}
+
+
+async def _patch_sheet_context_from_graph(db: AsyncSession, job_id: UUID) -> dict:
+    job = await _load_job(db, job_id)
+    devices, edges, elements = await graph_context.load_graph(db, job_id)
+    return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges, elements)}
 
 
 async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:

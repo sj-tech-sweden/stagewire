@@ -1,0 +1,206 @@
+"""Report contexts built from the unified graph.
+
+Same rows as the legacy ``_channel_list_context`` / ``_patch_sheet_context`` in
+``registry.py`` (which read the audio tables), so a report can switch data source.
+"""
+
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domains.audio.models import StagePlotElement
+from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.readers import channel_view
+
+
+def _performer_names(elements: list[Any]) -> dict[str, str]:
+    return {
+        str(e.graph_device_id): e.label
+        for e in elements
+        if e.element_type == "performer"
+        and e.graph_link_role == "channel"
+        and e.graph_device_id
+        and e.label
+    }
+
+
+def _lists(devices: list[Any]) -> list[Any]:
+    return sorted((d for d in devices if d.kind == "channel_list"), key=lambda d: d.position)
+
+
+def _in_list(devices: list[Any], kind: str, list_id: Any) -> list[Any]:
+    return [
+        d for d in devices if d.kind == kind and (d.attributes or {}).get("list_id") == str(list_id)
+    ]
+
+
+def channel_rows(devices: list[Any], elements: list[Any]) -> list[dict]:
+    performers = _performer_names(elements)
+    rows = []
+    for channel_list in _lists(devices):
+        nodes = sorted(
+            _in_list(devices, "channel", channel_list.id),
+            key=lambda d: channel_view(d).channel_number,
+        )
+        for node in nodes:
+            channel = channel_view(node)
+            performer = performers.get(str(node.id)) or channel.performer_name or ""
+            rows.append(
+                {
+                    "channel_number": channel.channel_number,
+                    "source_label": channel.source_label,
+                    "device": channel.device or "",
+                    "input_details": " · ".join(
+                        v
+                        for v in (
+                            channel.input_type or "",
+                            channel.instrument_group or "",
+                            channel.stand_type or "",
+                        )
+                        if v
+                    ),
+                    "performer_name": performer,
+                    "wireless_pack": channel.wireless_pack or "",
+                    "wireless_frequency": channel.wireless_frequency or "",
+                    "wireless_details": " · ".join(
+                        v
+                        for v in (
+                            performer,
+                            channel.wireless_pack or "",
+                            channel.wireless_frequency or "",
+                        )
+                        if v
+                    ),
+                    "connector": channel.connector or "",
+                    "phantom_power": channel.phantom_power,
+                    "notes": channel.notes,
+                    "list_name": channel_list.name,
+                }
+            )
+    return rows
+
+
+def _chain_points(node: Any, edges: list[Any]) -> list[dict]:
+    """Patch points of one chain (an input channel or an output bus), in order."""
+    points = []
+    for edge in edges:
+        attrs = edge.attributes or {}
+        if attrs.get("chain") != str(node.id):
+            continue
+        if "first_point" in attrs:
+            points.append({**attrs["first_point"], "device_id": str(edge.src_device_id)})
+        elif edge.dst_device_id != node.id:
+            points.append({**attrs, "device_id": str(edge.dst_device_id)})
+    return sorted(points, key=lambda p: p.get("position") or 0)
+
+
+def patch_sheets(devices: list[Any], edges: list[Any], elements: list[Any]) -> list[dict]:
+    performers = _performer_names(elements)
+    by_id = {str(d.id): d for d in devices}
+    names = {key: d.name for key, d in by_id.items()}
+    sheets: dict[str, dict] = {}
+
+    def console_patch(points: list[dict]) -> str:
+        return next(
+            (
+                p.get("patch_label") or ""
+                for p in points
+                if (device := by_id.get(p["device_id"])) and device.kind == "mixer"
+            ),
+            "",
+        )
+
+    def add_row(point: dict, row: dict) -> None:
+        key = point["device_id"]
+        sheet = sheets.setdefault(
+            key,
+            {
+                "id": key,
+                "name": names.get(key) or key,
+                "type": point.get("point_type") or "mixer",
+                "rows": [],
+            },
+        )
+        sheet["rows"].append(row)
+
+    for channel_list in _lists(devices):
+        for node in sorted(
+            _in_list(devices, "channel", channel_list.id),
+            key=lambda d: channel_view(d).channel_number,
+        ):
+            channel = channel_view(node)
+            points = _chain_points(node, edges)
+            for point in points:
+                add_row(
+                    point,
+                    {
+                        "direction": "In",
+                        "channel_number": channel.channel_number,
+                        "source_label": channel.source_label,
+                        "instrument_group": channel.instrument_group,
+                        "device": channel.device or "",
+                        "stand_type": channel.stand_type,
+                        "performer_name": performers.get(str(node.id))
+                        or channel.performer_name
+                        or "",
+                        "wireless_pack": channel.wireless_pack or "",
+                        "wireless_frequency": channel.wireless_frequency or "",
+                        "phantom_power": channel.phantom_power,
+                        "patch_assignment": " / ".join(
+                            v
+                            for v in (names.get(point["device_id"], ""), console_patch(points))
+                            if v
+                        ),
+                        "patch_label": point.get("patch_label") or "",
+                        "connector": point.get("connector") or "",
+                        "notes": " · ".join(
+                            v for v in (channel.notes, point.get("notes") or "") if v
+                        ),
+                    },
+                )
+        for bus in sorted(_in_list(devices, "output", channel_list.id), key=lambda d: d.position):
+            points = _chain_points(bus, edges)
+            for point in points:
+                add_row(
+                    point,
+                    {
+                        "direction": "Out",
+                        "channel_number": "OUT",
+                        "source_label": bus.name,
+                        "instrument_group": "",
+                        "device": "",
+                        "stand_type": "",
+                        "performer_name": "",
+                        "wireless_pack": "",
+                        "wireless_frequency": "",
+                        "phantom_power": False,
+                        "bus_connector": point.get("bus_connector") or "",
+                        "patch_assignment": " / ".join(
+                            v
+                            for v in (names.get(point["device_id"], ""), console_patch(points))
+                            if v
+                        ),
+                        "patch_label": point.get("patch_label") or "",
+                        "connector": point.get("connector") or "",
+                        "notes": " · ".join(
+                            v for v in (bus.notes or "", point.get("notes") or "") if v
+                        ),
+                    },
+                )
+    return [
+        {**sheet, "rows": sorted(sheet["rows"], key=lambda row: row["direction"] != "In")}
+        for sheet in sorted(sheets.values(), key=lambda value: value["name"].lower())
+    ]
+
+
+async def load_graph(
+    db: AsyncSession, job_id: UUID
+) -> tuple[list[GraphDevice], list[ConnectionEdge], list[StagePlotElement]]:
+    devices = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()
+    edges = (await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))).all()
+    elements = (
+        await db.scalars(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
+    ).all()
+    return list(devices), list(edges), list(elements)

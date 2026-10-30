@@ -22,7 +22,8 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 5 | Mode A/B switching | **Done** (header toggle, persisted per job in localStorage) |
 | 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
 | 6b | Backfill video chains and audio **output** chains | **Done** |
-| 6c | Repoint routers, reports, exports, stage plot to read the graph, one domain at a time | **Not started** (the big one) |
+| 6c | Graph-backed readers (console exports, cable routing, report contexts) | **Built and parity-tested, not switched on** (see below) |
+| 6d | Move the *writers* (channel list / patch / device / plot editors) to the graph, then switch the readers on | **Not started** (the real remaining work) |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
 ## What exists
@@ -64,6 +65,17 @@ Route `/jobs/:jobId/workspace` (`web/src/pages/JobWorkspacePage.vue`, opened fro
 Added after the first version: **drag-to-connect** (connect tool in the canvas header; drag from one device to another, ports are auto-picked by `suggestPorts`, rejected connections show the validator's issues with a "connect anyway" action; works with touch because the drop target is hit-tested from the pointer position), **catalog drag-and-drop** (items, or the whole selection, can be dragged onto the canvas or list on screens wider than a phone; the drawer is non-modal there; phones keep click/multi-select), **case picker** (`GET /stockwire/catalog/cases` lists devices that other devices point at via `case_device_id`, since Stockwire has no case flag), and a **real phase limit** (`/power-load` returns `limit_w` = sum of power-source `rating_amps` x 230 V, 16 A fallback).
 
 Known gaps: no edge selection on the canvas; dropping several catalog items offsets them by 20 px each; the legacy job page, stage plot, reports and exports do not read the graph yet (phase 6c).
+
+## Graph readers (phase 6c)
+
+Each reader exists next to its legacy twin, produces the same output, and has a parity test that seeds legacy data, backfills, and compares:
+- **Console exports**: `GET /jobs/{id}/graph/lists/{list_id}/export?plugin=` and `/graph/export-plugins` (`graph/readers.py`). `tests/test_graph_exports.py` compares every plugin against the legacy endpoint. The workspace page has an Export menu using it.
+- **Cable routing**: `derive_cables_from_graph` / `routed_cable_paths_from_graph` in `reports/cable_routing.py` (routing core shared with the legacy path). Output buses are looked through, channel / video-input nodes are replaced by the plot elements linked to them, and cable keys stay the legacy patch point ids so saved cable routes (`cable_plan.routes`) keep working. `tests/test_graph_cables.py`.
+- **Report contexts**: `reports/graph_context.py` (`channel_rows`, `patch_sheets`) wrapped as `_channel_list_context_from_graph` / `_patch_sheet_context_from_graph` in `registry.py`. `tests/test_graph_reports.py`.
+- **Plot links**: migration `d4e5f6g7h8i9` adds `stage_plot_elements.graph_device_id` plus `graph_link_role` (`channel`, `video_input`, `output_point`, `device`, `patch_point`). The role is an addition to the agreed design: one id alone cannot say whether a speaker is tied to an output point (draws a cable) or only to a device (does not). Backfill fills both, priority channel > video input > output point > device > patch point, and notes any element that had more than one link. Verified on Postgres (upgrade from empty, no drift on the new columns).
+- To make the exports and report contexts lossless the backfill now carries every channel/output field, a `channel_list` container node, and per-point fields (type, connector, label, notes, position) on the chain edges (`first_point` on the console-to-bus edge). Re-running the backfill fills missing attributes on rows that already exist but never overwrites existing values.
+
+**Why these are not switched on yet.** The channel-list, patch-point, device and plot editors still write the legacy tables. A reader that already reads the graph would show stale data for any job edited there after its backfill. So the readers are dormant alternatives until the writers move (6d); only data created or edited in the workspace (which writes the graph) is current in the graph exports. The order for 6d: channel list + patch editors (Mode B table is the start), device editor, plot elements (write `graph_device_id`/`graph_link_role`), then flip the exporters, `routed_cable_paths` and the two report contexts, and port `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side from the legacy lists). Still on the legacy path as well: job summary, fixture patch, stage plot and video sheet report contexts.
 
 ## Backfill mapping (phase 6a, decisions made)
 

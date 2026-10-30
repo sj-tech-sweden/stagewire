@@ -82,12 +82,27 @@ def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
     return ports
 
 
+def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False) -> dict:
+    attrs = {
+        "chain": str(chain_root.id),
+        "position": point.position,
+        "point_type": getattr(point, "point_type", None),
+        "connector": point.connector or "",
+        "patch_label": point.patch_label or "",
+        "notes": point.notes or "",
+    }
+    if bus_connector:
+        attrs["bus_connector"] = getattr(point, "bus_connector", None) or ""
+    return attrs
+
+
 class Backfill:
     def __init__(self, db: AsyncSession, job_id: uuid.UUID) -> None:
         self.db = db
         self.job_id = job_id
         self.devices: dict[str, GraphDevice] = {}
         self.edge_refs: set[str] = set()
+        self.edge_rows: dict[str, ConnectionEdge] = {}
         self.result = BackfillResult()
 
     async def load_existing(self) -> None:
@@ -104,6 +119,7 @@ class Backfill:
             ref = (edge.attributes or {}).get("legacy_ref")
             if ref:
                 self.edge_refs.add(ref)
+                self.edge_rows[ref] = edge
 
     def device(self, ref: str, **fields) -> GraphDevice:
         existing = self.devices.get(ref)
@@ -183,6 +199,13 @@ class Backfill:
         attributes: dict | None = None,
     ) -> None:
         if ref in self.edge_refs:
+            existing = self.edge_rows.get(ref)
+            if existing is not None:
+                missing = {
+                    k: v for k, v in (attributes or {}).items() if k not in existing.attributes
+                }
+                if missing:
+                    existing.attributes = {**existing.attributes, **missing}
             self.result.skipped += 1
             return
         self.edge_refs.add(ref)
@@ -319,7 +342,7 @@ class Backfill:
                     self.port(target, "in", "audio", point.connector),
                     attributes={
                         "channel_number": channel.channel_number,
-                        "patch_label": point.patch_label,
+                        **_point_attrs(point, node),
                     },
                 )
                 prev, prev_port = target, self.port(target, "out", "audio", point.connector)
@@ -381,14 +404,19 @@ class Backfill:
                     self.port(console, "out", "audio", output.connector or ""),
                     bus,
                     "in",
-                    attributes={"connector": output.connector},
+                    attributes={
+                        "connector": output.connector,
+                        "first_point": _point_attrs(chain[0], bus, bus_connector=True),
+                        "chain": str(bus.id),
+                        "position": chain[0].position,
+                    },
                 )
             for index, point in enumerate(chain):
                 if index == 0:
                     continue
                 parent = by_id.get(point.parent_id) if point.parent_id else chain[index - 1]
                 target = self.devices.get(f"audio_devices:{point.device_id}")
-                if parent is None or target is None or parent.device_id == point.device_id:
+                if parent is None or target is None:
                     continue
                 src = (
                     bus
@@ -406,9 +434,8 @@ class Backfill:
                     self.port(target, "in", "audio", point.connector),
                     attributes={
                         "output_id": str(output.id),
-                        "patch_label": point.patch_label,
-                        "bus_connector": point.bus_connector,
                         "parallel": point.parallel,
+                        **_point_attrs(point, bus, bus_connector=True),
                     },
                 )
 
