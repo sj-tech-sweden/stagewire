@@ -1099,6 +1099,11 @@ class Backfill:
 _JOB_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
 
 
+def job_lock(job_id: uuid.UUID) -> asyncio.Lock:
+    """The per-job lock syncs queue on; also used to make check-then-insert writes atomic."""
+    return _JOB_LOCKS.setdefault(job_id, asyncio.Lock())
+
+
 async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     """Sync one job into the graph, one sync at a time per job.
 
@@ -1106,8 +1111,7 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     duplicates, so syncs queue on a per-job lock (in this process) and on a Postgres advisory
     lock (across workers, held until the sync commits).
     """
-    lock = _JOB_LOCKS.setdefault(job_id, asyncio.Lock())
-    async with lock:
+    async with job_lock(job_id):
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})

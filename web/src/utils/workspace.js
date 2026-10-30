@@ -178,13 +178,17 @@ export function linkRoleFor(target) {
   return 'device';
 }
 
+// The edge that feeds a universe node is its source, not one of its steps.
+const isUniverseSource = (node, edge) =>
+  node.kind === 'dmx_universe' && edge.dst_device_id === node.id;
+
 // Names of the devices a channel or output chain passes through, in order.
 export function chainSteps(node, edges, devices) {
   const names = new Map(devices.map((d) => [d.id, d.name]));
   const steps = [];
   for (const edge of edges) {
     const attrs = edge.attributes || {};
-    if (attrs.chain !== node.id || (edge.dst_device_id === node.id && !attrs.first_point)) continue;
+    if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
     if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, name: names.get(edge.src_device_id) });
     } else {
@@ -212,7 +216,7 @@ export function chainForm(node, edges, devices) {
   const byPos = [];
   for (const edge of edges) {
     const attrs = edge.attributes || {};
-    if (attrs.chain !== node.id || (edge.dst_device_id === node.id && !attrs.first_point)) continue;
+    if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
     const point = attrs.first_point || attrs;
     byPos.push({
       position: point.position || 0,
@@ -333,9 +337,9 @@ export function deviceForm(node) {
   return form;
 }
 
-// PATCH body for an edit: attributes are replaced as a whole, so merge into the existing ones.
+// PATCH body for an edit: only the form's attributes; the server keeps the others.
 export function devicePatch(node, form) {
-  const attributes = { ...(node.attributes || {}) };
+  const attributes = {};
   for (const key of NUMBER_FIELDS) {
     attributes[key] = form[key] === '' || form[key] == null ? null : Number(form[key]);
   }

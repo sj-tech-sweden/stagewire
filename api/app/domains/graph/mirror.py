@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import db as db_mod
@@ -269,6 +270,18 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         changes = _universe_changes(data)
         if universe is None or not changes:
             return False
+        number = changes.get("number")
+        if number is not None and number != universe.number:
+            taken = await db.scalar(
+                select(DmxUniverse.id).where(
+                    DmxUniverse.job_id == job_id,
+                    DmxUniverse.number == number,
+                    DmxUniverse.id != universe.id,
+                )
+            )
+            if taken is not None:
+                await db.rollback()
+                raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
         for key, value in changes.items():
             setattr(universe, key, value)
         await db.commit()
@@ -288,10 +301,18 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         fixture_changes = _fixture_changes(data)
         if row is None or not (changes or fixture_changes):
             return False
-        for fixture in await _fixtures_on_device(db, job_id, legacy_id) if fixture_changes else []:
-            await lighting_service.update_fixture(db, job_id, fixture, fixture_changes)
+        persisted = False
+        if fixture_changes:
+            # a device node shows its last fixture, so that is the one edits go to
+            fixtures = await _fixtures_on_device(db, job_id, legacy_id)
+            if fixtures:
+                await lighting_service.update_fixture(db, job_id, fixtures[-1], fixture_changes)
+                persisted = True
         if changes:
             row = await service.update_device(db, row, changes)
+            persisted = True
+        if not persisted:
+            return False
         from app.domains.audio.router import _device_read
 
         await publish_job_event(job_id, "device.upsert", await _device_read(db, row))
@@ -438,6 +459,10 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         step = await db.get(DmxStep, legacy_id)
         if step is None:
             return False
+        children = (await db.scalars(select(DmxStep).where(DmxStep.parent_id == step.id))).all()
+        for child in children:
+            child.parent_id = step.parent_id
+        await db.flush()
         await db.delete(step)
         await db.commit()
         return True

@@ -383,9 +383,9 @@ async function save(node, changes) {
     if (err.response?.status !== 409) failed(err);
   }
 }
-const saveAttr = (node, key, value) => save(node, { attributes: { ...node.attributes, [key]: value } });
+const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
 const setNumber = (node, value) =>
-  save(node, { position: value, attributes: { ...node.attributes, channel_number: value } });
+  save(node, { position: value, attributes: { channel_number: value } });
 
 async function addList() {
   try {

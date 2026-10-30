@@ -241,7 +241,8 @@ test('a device form round-trips into a patch that clears emptied fields and keep
   form.max_distance_m = '';
   form.focal_min_mm = '4.3';
   const patch = devicePatch(node, form);
-  expect(patch.attributes).toMatchObject({ weight_kg: 2, max_distance_m: null, focal_min_mm: 4.3, custom: 'keep' });
+  expect(patch.attributes).toMatchObject({ weight_kg: 2, max_distance_m: null, focal_min_mm: 4.3 });
+  expect(patch.attributes).not.toHaveProperty('custom');
   expect(patch.ports).toHaveLength(1);
   const body = deviceCreateBody({ ...form, power_w: 120, ports: [{ direction: 'out', connector: 'SDI', count: 2 }] });
   expect(body).toMatchObject({ name: 'Cam', device_type: 'camera', power_watts: 120, focal_min_mm: '4.3' });
@@ -307,4 +308,10 @@ test('library modes are found by type name and bring their footprint', () => {
   expect(modesForType(types, 'Unknown')).toEqual([]);
   expect(modesForType(types, null)).toEqual([]);
   expect(modeAttributes(types[0].modes[0])).toEqual({ channel_mode: '16ch', footprint: 16 });
+});
+
+test('only a universe skips the edge that feeds it: other chains keep every step', () => {
+  const channel = { id: 'ch', kind: 'channel' };
+  const edges = [{ src_device_id: 'x', dst_device_id: 'ch', attributes: { chain: 'ch', position: 0 } }];
+  expect(chainForm(channel, edges, [{ id: 'ch', name: 'Ch' }, { id: 'x', name: 'X' }])).toHaveLength(1);
 });

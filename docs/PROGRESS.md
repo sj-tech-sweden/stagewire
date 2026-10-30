@@ -101,6 +101,14 @@ Fixed (each has a regression test in `tests/test_graph_review_fixes.py` / `test_
 - Graph PATCH/DELETE wrote the legacy row before the version check; the graph row is flushed first so a stale edit fails before legacy changes (delete rolls back if the legacy twin refuses).
 - Batch-created plot elements now get their legacy row; the channels store no longer replays a stale conflict after an unrelated error; Stockwire pages are cached for 60 s, product lookups run concurrently, and `truncated` is reported when the 2000-row cap cuts a list short.
 
+Second review (after M5 and the fixture library), all fixed with tests:
+- renumbering a DMX universe into a taken number is refused (409) on the graph path, and creating one is atomic under the per-job lock (`job_lock`); `PUT .../source` returns 404 instead of a 500 when the legacy row is gone;
+- the grid and list editors send **only the attribute they changed** (the server merges), so a cell edit no longer rewrites every fixture attribute over a concurrent edit; a device node reflects its **last** fixture, and fixture edits, chain steps and the backfill all use that one (a device with several fixtures is a known limit of the one-node model);
+- the mirror no longer reports success when nothing was written to the legacy row;
+- deleting a mid-chain DMX step edge hands its children to the deleted step's parent instead of re-rooting them;
+- chain steps load the job's fixtures once (not once per step);
+- the "skip the source edge" rule in the chain form applies only to universe nodes.
+
 Deliberately kept: the legacy report contexts and `derive_cables`/`routed_cable_paths` are the parity oracle for the graph versions until the legacy tables are dropped (M9), then they go.
 
 ## Plot elements and cables on the graph (phase 6e)

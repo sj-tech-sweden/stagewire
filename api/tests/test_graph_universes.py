@@ -178,3 +178,83 @@ async def test_universe_edits_and_deletes_write_through_to_the_legacy_rows(auth_
             )
         ).status_code == 204
         assert await _legacy_universes(client, h, job_id) == []
+
+
+@pytest.mark.asyncio
+async def test_renumbering_a_universe_into_a_taken_number_is_refused(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Numbers"}, headers=h)).json()[
+            "id"
+        ]
+        g = f"{BASE}/jobs/{job_id}/graph"
+        first = (await client.post(f"{g}/universes", json={}, headers=h)).json()
+        second = (await client.post(f"{g}/universes", json={}, headers=h)).json()
+        assert (first["attributes"]["number"], second["attributes"]["number"]) == (1, 2)
+        res = await client.patch(
+            f"{g}/devices/{second['id']}",
+            json={
+                "attributes": {"number": 1},
+                "expected_revision": second["revision"],
+            },
+            headers=h,
+        )
+        assert res.status_code == 409
+        assert sorted(u["number"] for u in await _legacy_universes(client, h, job_id)) == [1, 2]
+        free = await client.patch(
+            f"{g}/devices/{second['id']}",
+            json={"attributes": {"number": 7}, "expected_revision": second["revision"]},
+            headers=h,
+        )
+        assert free.status_code == 200, free.text
+        assert sorted(u["number"] for u in await _legacy_universes(client, h, job_id)) == [1, 7]
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_step_edge_hands_its_children_to_its_parent(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, a, b, desk, split = await _setup(client, h)
+        uni = (await client.post(f"{g}/universes", json={}, headers=h)).json()
+        await client.put(
+            f"{g}/universes/{uni['id']}/chain",
+            json={
+                "steps": [
+                    {"device_id": split["id"]},
+                    {"device_id": a["id"], "parent_index": 0},
+                    {"device_id": b["id"], "parent_index": 1},
+                ]
+            },
+            headers=h,
+        )
+        edges = (await _graph(client, h, job_id))["edges"]
+        middle = next(e for e in edges if e["attributes"].get("position") == 1)
+        res = await client.delete(
+            f"{g}/edges/{middle['id']}", params={"expected_revision": middle["revision"]}, headers=h
+        )
+        assert res.status_code == 204
+        tree = (await _legacy_universes(client, h, job_id))[0]["steps"]
+        assert len(tree) == 1 and len(tree[0]["children"]) == 1
+        assert tree[0]["children"][0]["children"] == []
+
+
+@pytest.mark.asyncio
+async def test_an_edit_on_a_device_without_fixtures_is_not_reported_as_saved(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, a, b, desk, split = await _setup(client, h)
+        node = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["name"] == "Splitter"
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"attributes": {"location": "Truss 3"}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200
+        legacy = next(
+            d
+            for d in (await client.get(f"{BASE}/jobs/{job_id}/devices", headers=h)).json()
+            if d["name"] == "Splitter"
+        )
+        assert "location" not in legacy

@@ -18,7 +18,7 @@ from app.domains.audio.models import ChannelPatchPoint, OutputPatchPoint
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.graph import schemas
-from app.domains.graph.backfill import backfill_job
+from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.mirror import (
     KNOWN_DEVICE_TYPES,
     _audio_device_changes,
@@ -424,25 +424,26 @@ async def create_universe(
 ) -> schemas.GraphDeviceRead:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-    existing = (await db.scalars(select(DmxUniverse).where(DmxUniverse.job_id == job_id))).all()
-    number = payload.number or max((u.number for u in existing), default=0) + 1
-    if any(u.number == number for u in existing):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
     source = (
         await _device_twin(db, job_id, payload.source_device_id)
         if payload.source_device_id
         else None
     )
-    universe = DmxUniverse(
-        job_id=job_id,
-        number=number,
-        name=payload.name,
-        notes=payload.notes,
-        source_device_id=source,
-        source_port=payload.source_port if source else "",
-    )
-    db.add(universe)
-    await db.commit()
+    async with job_lock(job_id):
+        existing = (await db.scalars(select(DmxUniverse).where(DmxUniverse.job_id == job_id))).all()
+        number = payload.number or max((u.number for u in existing), default=0) + 1
+        if any(u.number == number for u in existing):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
+        universe = DmxUniverse(
+            job_id=job_id,
+            number=number,
+            name=payload.name,
+            notes=payload.notes,
+            source_device_id=source,
+            source_port=payload.source_port if source else "",
+        )
+        db.add(universe)
+        await db.commit()
     return await _read(db, job_id, f"dmx_universes:{universe.id}")
 
 
@@ -452,6 +453,8 @@ async def set_universe_source(
 ) -> schemas.GraphDeviceRead:
     node = await _node(db, job_id, universe_id, "dmx_universe")
     universe = await db.get(DmxUniverse, _legacy_id(node, "dmx_universes"))
+    if universe is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Universe not found")
     universe.source_device_id = (
         await _device_twin(db, job_id, payload.device_id) if payload.device_id else None
     )
@@ -460,7 +463,9 @@ async def set_universe_source(
     return await _read(db, job_id, node.legacy_ref)
 
 
-async def _step_target(db: AsyncSession, job_id: UUID, node_id: UUID) -> dict:
+async def _step_target(
+    db: AsyncSession, job_id: UUID, node_id: UUID, fixtures_by_device: dict[UUID, UUID]
+) -> dict:
     """A DMX step is either a fixture or a device; a device with a fixture steps as the fixture."""
     node = await db.get(GraphDevice, node_id)
     if node is None or node.job_id != job_id:
@@ -469,10 +474,8 @@ async def _step_target(db: AsyncSession, job_id: UUID, node_id: UUID) -> dict:
     if target is not None and target[0] == "lighting_fixtures":
         return {"fixture_id": target[1]}
     device_id = await _device_twin(db, job_id, node_id)
-    fixtures = [
-        f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id
-    ]
-    return {"fixture_id": fixtures[0].id} if fixtures else {"device_id": device_id}
+    fixture_id = fixtures_by_device.get(device_id)
+    return {"fixture_id": fixture_id} if fixture_id else {"device_id": device_id}
 
 
 @router.put("/universes/{universe_id}/chain", response_model=ChainRead)
@@ -487,7 +490,13 @@ async def replace_universe_chain(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "A step can only take its signal from an earlier step",
             )
-    targets = [await _step_target(db, job_id, step.device_id) for step in payload.steps]
+    fixtures_by_device: dict[UUID, UUID] = {}
+    for fixture in await lighting_service.list_fixtures(db, job_id):
+        if fixture.device_id:
+            fixtures_by_device[fixture.device_id] = fixture.id  # the node shows the last one
+    targets = [
+        await _step_target(db, job_id, step.device_id, fixtures_by_device) for step in payload.steps
+    ]
     await db.execute(delete(DmxStep).where(DmxStep.universe_id == legacy_id))
     created: list[DmxStep] = []
     for position, (step, target) in enumerate(zip(payload.steps, targets, strict=True)):

@@ -392,7 +392,7 @@ const failed = (err) =>
 
 async function saveAttr(node, key, value) {
   try {
-    await graph.updateDevice(props.jobId, node.id, { attributes: { ...node.attributes, [key]: value } });
+    await graph.updateDevice(props.jobId, node.id, { attributes: { [key]: value } });
   } catch (err) {
     if (err.response?.status !== 409) failed(err);
   }
@@ -422,7 +422,7 @@ async function chooseMode(row, name) {
   const fixture = graph.devices.find((d) => d.id === row.id) || row;
   const mode = modesForType(library.types, fixture.attributes.fixture_type).find((m) => m.name === name);
   await save(fixture, {
-    attributes: { ...fixture.attributes, ...(mode ? modeAttributes(mode) : { channel_mode: name || null }) },
+    attributes: mode ? modeAttributes(mode) : { channel_mode: name || null },
   });
   library.fetch(props.jobId).catch(() => {});
 }
