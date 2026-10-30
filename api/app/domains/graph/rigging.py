@@ -272,10 +272,21 @@ class ParentMove(BaseModel):
 async def move_power_node(
     job_id: UUID, node_id: UUID, payload: ParentMove, db: AsyncSession = Depends(get_db)
 ) -> schemas.GraphDeviceRead:
-    """Re-hang a node from another parent (and connector/phase). The legacy update_node rules
-    apply: the connector must be an output of the new parent and the tree may not loop."""
+    """Re-hang a node from another parent (and connector/phase), or cut its feed with no parent.
+
+    The legacy update_node rules apply to a new parent: the connector must be an output of it and
+    the tree may not loop."""
     await _job(db, job_id)
     legacy_id = await _legacy(db, job_id, node_id, "power_nodes", "Power node")
+    if payload.parent_id is None:
+        # Cutting the feed leaves the node unpowered; the legacy update would refuse that as an
+        # error on the node, so the link is cleared directly.
+        row = await db.get(PowerNode, legacy_id)
+        row.parent_id, row.feed_connector, row.phase = None, "", None
+        await db.commit()
+        db.expire_all()
+        await backfill_job(db, job_id)
+        return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))
     parent = await _legacy(db, job_id, payload.parent_id, "power_nodes", "Parent node")
     await rigging_router.update_node(
         job_id,

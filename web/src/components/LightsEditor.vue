@@ -317,6 +317,7 @@
     />
     <ChainDialog
       v-model="chainOpen"
+      :job-id="jobId"
       :title="`${t('workspace.editChain')}: ${chainNode?.name || ''}`"
       :initial="chainInitial"
       :devices="chainDevices"

@@ -184,6 +184,9 @@ def _video_input_changes(data: dict) -> dict:
     for key in ("input_number", "source_type", "source_label", "connector"):
         if attrs.get(key) is not None:
             out[key] = attrs[key]
+    for key in ("stockwire_product_id", "stockwire_product_name"):
+        if key in attrs:
+            out[key] = attrs[key]
     return out
 
 

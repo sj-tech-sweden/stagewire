@@ -234,10 +234,10 @@ test('catalog items can be dragged onto the canvas and cases are picked from a l
   expect(Math.abs(dropped.canvas_x_cm - 400 / zoom)).toBeLessThanOrEqual(10);
   expect(Math.abs(dropped.canvas_y_cm - 300 / zoom)).toBeLessThanOrEqual(10);
 
-  await page.getByText(/add a case with its contents|lägg till en kåpa med innehåll/i).click();
+  await page.getByText(/add a case with its contents|lägg till en case med innehåll/i).click();
   await page.getByTestId('case-select').click();
   await page.getByRole('option', { name: /rack case/i }).click();
-  await page.getByRole('button', { name: /add case and contents|lägg till kåpa/i }).click();
+  await page.getByRole('button', { name: /add case and contents|lägg till case/i }).click();
   await expect
     .poll(async () => (await graphOf(request, headers, jobId)).devices.filter((d: { case_parent_id: string | null }) => d.case_parent_id).length)
     .toBe(2);
@@ -1188,4 +1188,193 @@ test('an outlet is moved on the map and its position is edited in the venue powe
   await page.getByTestId('venue-outlet-x').fill('300');
   await page.getByTestId('venue-outlet-x').press('Enter');
   await expect.poll(async () => (await outletRow()).x_cm).toBe(300);
+});
+
+test('the job details and the Stockwire link are edited in the workspace, and the stage and venue are in metres', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Job ${Date.now()}` })).id as string;
+  let linkedBody: { stockwire_job_id: string | null } | null = null;
+  await page.route('**/api/v1/stockwire/rental-jobs*', (route) =>
+    route.fulfill({ json: { items: [{ id: 4711, name: 'Summer festival', venue_name: 'Park' }] } }),
+  );
+  await page.route(`**/api/v1/stockwire/jobs/${jobId}/link`, (route) => {
+    linkedBody = route.request().postDataJSON();
+    return route.fulfill({ json: { stockwire_job_id: '4711' } });
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await page.getByTestId('open-job-details').click();
+  await page.getByTestId('job-title').fill('Renamed show');
+  await page.getByTestId('job-link-existing').click();
+  await page.getByTestId('job-link-result').filter({ hasText: 'Summer festival' }).click();
+  await expect.poll(() => linkedBody?.stockwire_job_id).toBe('4711');
+  await page.getByTestId('job-save').click();
+  await expect
+    .poll(async () => ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}`, { headers })).json()) as { title: string }).title)
+    .toBe('Renamed show');
+  await expect(page.getByTestId('job-summary')).toContainText('Renamed show');
+
+  await page.getByTestId('edit-stage-venue').click();
+  await expect(page.getByLabel(/stage width \(m\)|scenbredd \(m\)/i)).toBeVisible();
+  await expect(page.getByLabel(/venue width \(m\)|lokalbredd \(m\)/i)).toBeVisible();
+});
+
+test('bus channels are set on an output chain and a plugged device is unplugged from the inspector', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Bus ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/outputs`, { name: 'Main', mode: 'lcr_sub' });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Sub amp', device_type: 'other', power_watts: 900 });
+  const source = await post(request, headers, `${g}/power-nodes`, {
+    name: 'Mains',
+    kind: 'source',
+    feed_connector: 'cee63_3p',
+    rating_amps: 63,
+    outputs: [{ connector: 'schuko', count: 2 }],
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  await page.getByTestId('output-row').getByRole('button', { name: /edit patch|redigera patch/i }).click();
+  await page.getByTestId('chain-add-step').click();
+  await page.getByTestId('chain-device').first().click();
+  await page.locator('.q-menu .q-item', { hasText: 'Sub amp' }).click();
+  await page.getByTestId('chain-bus-channel').click();
+  await page.locator('.q-menu .q-item', { hasText: /^Sub$/ }).click();
+  await page.getByTestId('chain-save').click();
+  const lists = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as {
+      outputs: { points: { bus_connector: string | null }[] }[];
+    }[];
+  await expect.poll(async () => (await lists())[0]?.outputs[0]?.points[0]?.bus_connector).toBe('Sub');
+
+  const graphOf = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as any;
+  const amp = (await graphOf()).devices.find((d: any) => d.name === 'Sub amp');
+  const res = await request.put(`${API_BASE}/api/v1/jobs/${jobId}/graph/loads/${amp.id}`, {
+    headers,
+    data: { power_node_id: source.id, power_connector: 'schuko' },
+  });
+  expect(res.status()).toBeLessThan(300);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  const rows = page.getByTestId('workspace-table').locator('tbody tr').filter({ has: page.locator('input') });
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    await rows.nth(i).locator('td').nth(1).click();
+    if ((await page.getByTestId('inspector-name').inputValue()) === 'Sub amp') break;
+  }
+  await expect(page.getByTestId('plugged-into').first()).toContainText('Mains');
+  await page.getByTestId('unplug').first().click();
+  await expect
+    .poll(async () => (await graphOf()).devices.find((d: any) => d.name === 'Sub amp').attributes.power_node_id ?? null)
+    .toBeNull();
+});
+
+test('cables are routed on the new map: settings, a drawn cableway and the cable list', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Cables ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Kick' });
+  const box = await post(request, headers, `${g}/audio-devices`, { name: 'Stagebox', device_type: 'analog_stagebox' });
+  const desk = await post(request, headers, `${g}/audio-devices`, { name: 'Desk', device_type: 'mixer' });
+  const chain = await request.put(`${API_BASE}/api/v1${g}/channels/${channel.id}/chain`, {
+    headers,
+    data: { steps: [{ device_id: box.id }, { device_id: desk.id }] },
+  });
+  expect(chain.status()).toBe(200);
+  const place = async (node: { id: string; revision: number }, x: number, y: number) => {
+    const fresh = ((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices.find((d: any) => d.id === node.id);
+    const res = await request.patch(`${API_BASE}/api/v1${g}/devices/${node.id}`, {
+      headers,
+      data: { canvas_x_cm: x, canvas_y_cm: y, expected_revision: fresh.revision },
+    });
+    expect(res.status()).toBeLessThan(300);
+  };
+  await place(box, 200, 100);
+  await place(desk, 800, 100);
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('canvas-fit').click();
+  await page.getByTestId('cable-routing').getByText(/^cables$|^kablar$/i).first().click();
+  await expect(page.getByTestId('cable-table')).toContainText('Stagebox');
+  await expect(page.getByTestId('cable-table')).toContainText('Desk');
+
+  await page.getByTestId('cable-slack-pct').fill('20');
+  await page.getByTestId('cable-slack-pct').press('Enter');
+  const plan = async () =>
+    ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}`, { headers })).json()) as any).cable_plan;
+  await expect.poll(async () => (await plan()).settings?.slack_pct).toBe(20);
+
+  // a cableway is drawn with two clicks on the map and saved on the job
+  const canvas = page.getByTestId('workspace-canvas');
+  await page.getByTestId('draw-cableway').click();
+  await canvas.scrollIntoViewIfNeeded();
+  const area = (await canvas.boundingBox())!;
+  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  await page.mouse.click(area.x + 200 * zoom, area.y + 170 * zoom);
+  await page.mouse.click(area.x + 830 * zoom, area.y + 170 * zoom);
+  await page.getByTestId('finish-cableway').click();
+  await expect.poll(async () => (await plan()).cableways?.length).toBe(1);
+  await expect(page.getByTestId('cableway')).toHaveCount(1);
+  await expect(page.getByTestId('cable-table')).toContainText(/10 m|15 m|7.5 m|5 m/);
+});
+
+test('a patch point can search Stockwire for a device and a video input takes a Stockwire source', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Search ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const vlist = await post(request, headers, `${g}/video-lists`, { name: 'Cameras' });
+  await post(request, headers, `${g}/video-lists/${vlist.id}/inputs`, { source_label: '' });
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 88, name: 'Studio camera', sku: 'SC1', category: 'Video > Cameras', device_count: 3 }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/88/device-specs', (route) =>
+    route.fulfill({
+      json: { id: 88, name: 'Studio camera', connector_groups: [{ connector: 'sdi', direction: 'out', count: 1, signal: 'video' }], power_inlet: 'iec_c13' },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^video$/i).click();
+
+  const row = page.getByTestId('video-video_input-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await row.getByTestId('video-source-picker').first().click();
+  await page.keyboard.type('studio');
+  await page.locator('.q-menu .q-item', { hasText: 'Studio camera' }).click();
+  const lists = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json()) as {
+      inputs: { source_label: string; stockwire_product_id: string | null }[];
+    }[];
+  await expect.poll(async () => (await lists())[0]?.inputs[0]?.stockwire_product_id).toBe('88');
+  expect((await lists())[0].inputs[0].source_label).toBe('Studio camera');
+
+  // the chain dialog searches Stockwire too: the product becomes a device with its connectors
+  await row.getByTestId('edit-video-chain').click();
+  await page.getByTestId('chain-add-step').click();
+  await page.getByTestId('chain-stockwire').first().click();
+  await page.keyboard.type('studio');
+  await page.locator('.q-menu .q-item', { hasText: 'Studio camera' }).click();
+  await page.getByTestId('chain-save').click();
+  await expect
+    .poll(async () => {
+      const devices = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as any[];
+      const cam = devices.find((d) => d.name === 'Studio camera');
+      return cam && [cam.device_type, cam.ports.length];
+    })
+    .toEqual(['camera', 1]);
 });

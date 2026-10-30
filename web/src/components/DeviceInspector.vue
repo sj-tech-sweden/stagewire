@@ -29,6 +29,26 @@
         @change="(v) => save({ notes: v })"
       />
       <div
+        v-if="pluggedNode"
+        class="row items-center q-mb-sm"
+        data-testid="plugged-into"
+      >
+        <div class="col text-caption">
+          {{ t('workspace.pluggedIntoLabel') }}: <strong>{{ pluggedNode.name }}</strong>
+          <span v-if="device.attributes.power_connector">({{ device.attributes.power_connector }})</span>
+        </div>
+        <q-btn
+          flat
+          dense
+          no-caps
+          color="negative"
+          icon="power_off"
+          :label="t('workspace.unplug')"
+          data-testid="unplug"
+          @click="unplug"
+        />
+      </div>
+      <div
         v-if="device.kind === 'plot_element'"
         class="q-mb-sm"
         data-testid="element-inspector"
@@ -96,7 +116,7 @@
         </div>
       </div>
       <q-select
-        v-if="device.kind !== 'plot_element' && !isVirtual(device)"
+        v-if="device.kind !== 'plot_element' && !isVirtual(device) && !isPowerNode(device)"
         :model-value="device.attributes?.power_inlet || 'iec_c13'"
         dense
         outlined
@@ -294,7 +314,7 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { legacyId } from '@/utils/graphLegacy';
-import { isPlotElement, isVirtual } from '@/utils/workspace';
+import { isPlotElement, isPowerNode, isVirtual } from '@/utils/workspace';
 import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
 const props = defineProps({
@@ -345,6 +365,20 @@ async function createDeviceForElement() {
     $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
   }
 }
+// Gear plugged into a power node shows where, and can be unplugged (the node keeps its other loads).
+const pluggedNode = computed(() =>
+  props.device?.attributes?.power_node_id
+    ? graph.devices.find((d) => d.id === props.device.attributes.power_node_id) || null
+    : null,
+);
+async function unplug() {
+  try {
+    await graph.assignLoad(props.jobId, props.device.id, { power_node_id: null });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+  }
+}
+
 async function linkElement(links) {
   try {
     await stagePlot.updateElement(props.jobId, legacyId(props.device), links);

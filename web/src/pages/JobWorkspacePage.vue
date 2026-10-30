@@ -4,6 +4,12 @@
       v-model="reportDialog"
       :job-id="jobId"
     />
+    <JobDetailsDialog
+      v-model="jobDialog"
+      :job-id="jobId"
+      :job="job"
+      @saved="reloadJob"
+    />
     <StageVenueDialog
       v-model="stageVenueOpen"
       :job-id="jobId"
@@ -31,11 +37,40 @@
         </div>
         <div
           v-if="job"
-          class="text-subtitle2 text-grey-7"
+          class="row items-center q-gutter-xs text-subtitle2 text-grey-7"
+          data-testid="job-summary"
         >
-          {{ job.title }}
+          <span>{{ job.title }}</span>
+          <span v-if="job.venue_name">· {{ job.venue_name }}</span>
+          <span v-if="job.event_date">· {{ new Date(job.event_date).toLocaleDateString() }}</span>
+          <q-chip
+            dense
+            square
+            :color="job.stockwire_job_id ? 'positive' : 'grey-7'"
+            text-color="white"
+            icon="link"
+          >
+            {{ job.stockwire_job_id ? t('stockwire.linkedAs', { id: job.stockwire_job_id }) : t('stockwire.notLinked') }}
+          </q-chip>
         </div>
       </div>
+      <q-btn
+        flat
+        no-caps
+        icon="event_note"
+        :label="t('workspace.jobDetails')"
+        data-testid="open-job-details"
+        @click="jobDialog = true"
+      />
+      <q-btn
+        v-if="job?.stockwire_job_id"
+        flat
+        no-caps
+        icon="open_in_new"
+        :label="t('stockwire.openInStockwire')"
+        data-testid="open-in-stockwire"
+        @click="openInStockwire"
+      />
       <q-btn
         color="primary"
         no-caps
@@ -389,7 +424,12 @@
               :show-audience="plotFrame.show.audience.value"
               :coverage-image="plotFrame.coverageImage.value"
               :shapes="viewShapes"
+              :cables="plotFrame.show.cables.value ? cableRows : []"
+              :cableways="plotFrame.cablePlan.value.cableways"
+              :draw-points="drawPoints"
+              :drawing="drawingWay"
               :connect-mode="connectMode"
+              @draw-point="(p) => drawPoints.push(p)"
               @pan="(p) => (pan = p)"
               @move-outlet="moveOutlet"
               @select="select"
@@ -426,15 +466,38 @@
             @request-booking="requestBooking"
           />
         </template>
+
+        <CableRoutingPanel
+          v-if="graph.mode === 'canvas'"
+          v-model:show="plotFrame.show.cables.value"
+          :rows="cableRows"
+          :settings="plotFrame.cablePlan.value.settings"
+          :cableways="plotFrame.cablePlan.value.cableways"
+          :drawing="drawingWay"
+          :draw-points="drawPoints"
+          @settings="saveCableSettings"
+          @draw-start="startDrawWay"
+          @draw-finish="finishDrawWay"
+          @draw-undo="drawPoints.pop()"
+          @draw-cancel="cancelDrawWay"
+          @delete-way="removeCableway"
+        />
+
+        <div class="q-mt-md">
+          <MultiDomainPatchDrawer :job-id="jobId" />
+        </div>
       </div>
 
       <div
         v-if="$q.screen.gt.sm"
         class="col-md-4 col-lg-3"
       >
+        <!-- The patch drawer sits under the map (left), so a tall inspector never leaves a gap
+             between them; the inspector stays in view and scrolls on its own when it is long. -->
         <q-card
           flat
           bordered
+          class="inspector-sticky"
         >
           <DeviceInspector
             :job-id="jobId"
@@ -462,10 +525,6 @@
       </q-card>
     </q-dialog>
 
-    <div class="q-mt-md">
-      <MultiDomainPatchDrawer :job-id="jobId" />
-    </div>
-
     <StockwireCatalogDrawer
       v-model="catalogOpen"
       :job-id="jobId"
@@ -476,6 +535,10 @@
 
 <script setup>
 import { isRevisionConflict } from '@/utils/graph';
+import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
+import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
+import JobDetailsDialog from '@/components/JobDetailsDialog.vue';
+import { useStockwireStore } from '@/stores/stockwire';
 import StageVenueDialog from '@/components/StageVenueDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 import { elementsFromGraph, legacyId } from '@/utils/graphLegacy';
@@ -789,6 +852,67 @@ async function exportList(list, plugin) {
 const importInput = ref(null);
 const reportDialog = ref(false);
 const stageVenueOpen = ref(false);
+
+// Cables are derived from the chains and routed along the cableways (utils/cables.js); only the
+// settings and the cableways are stored, on the job. Drawing a cableway adds points with a click
+// on the map and saves the way when finished.
+const drawingWay = ref(false);
+const drawPoints = ref([]);
+const cableRows = computed(() => {
+  if (!graph.devices.length) return [];
+  const frame = plotFrame.frame.value;
+  return buildCableRowsFromGraph({
+    devices: graph.devices,
+    edges: graph.edges,
+    plan: plotFrame.job.value?.cable_plan,
+    audience: frame.audience,
+    stageOffset: [frame.stageX, frame.stageY],
+  });
+});
+const startDrawWay = () => {
+  drawPoints.value = [];
+  drawingWay.value = true;
+};
+const cancelDrawWay = () => {
+  drawingWay.value = false;
+  drawPoints.value = [];
+};
+function finishDrawWay() {
+  if (drawPoints.value.length < 2) return;
+  const plan = plotFrame.cablePlan.value;
+  plotFrame.savePlan({
+    ...plan,
+    cableways: [...plan.cableways, { id: crypto.randomUUID(), points: drawPoints.value }],
+  });
+  cancelDrawWay();
+}
+const removeCableway = (id) => {
+  const plan = plotFrame.cablePlan.value;
+  plotFrame.savePlan({ ...plan, cableways: plan.cableways.filter((w) => w.id !== id) });
+};
+const saveCableSettings = (patch) => {
+  const plan = plotFrame.cablePlan.value;
+  plotFrame.savePlan({ ...plan, settings: { ...plan.settings, ...patch } });
+};
+const jobDialog = ref(false);
+const stockwireStore = useStockwireStore();
+
+async function reloadJob() {
+  try {
+    job.value = (await api.get(`/jobs/${jobId}`)).data;
+    await plotFrame.load();
+  } catch {
+    /* the header keeps what it had */
+  }
+}
+
+async function openInStockwire() {
+  try {
+    window.open(await stockwireStore.jobDeeplink(jobId), '_blank');
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
 const stagePlot = useStagePlotStore();
 const objectLabel = (object) => (object.labelKey ? t(object.labelKey, object.label || object.type) : object.label);
 
@@ -915,3 +1039,12 @@ onMounted(async () => {
   socket.connect();
 });
 </script>
+
+<style scoped>
+.inspector-sticky {
+  position: sticky;
+  top: 8px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+</style>

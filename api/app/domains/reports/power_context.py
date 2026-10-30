@@ -19,6 +19,8 @@ from app.domains.graph.backfill import backfill_job
 from app.domains.graph.models import GraphDevice
 from app.domains.rigging import connectors
 from app.domains.rigging import router as rigging_router
+from app.domains.rigging.models import PowerNode
+from app.domains.venues.models import VenuePowerOutlet
 
 # Standard cord lengths in metres; a needed length is rounded up to one of them.
 CORD_LENGTHS = (2, 5, 10, 15, 20, 25, 30, 50)
@@ -34,8 +36,26 @@ INLET_LABELS = {
 }
 
 
-def cord_for(metres: float) -> int:
-    return next((length for length in CORD_LENGTHS if length >= metres), math.ceil(metres))
+def cord_for(metres: float, lengths: tuple[float, ...] = CORD_LENGTHS) -> float:
+    found = next((length for length in sorted(lengths) if length >= metres), None)
+    return _metres(found if found is not None else math.ceil(metres))
+
+
+def cable_settings(job: Any) -> dict:
+    """Slack and standard lengths as set for the job's cable plan (same defaults as the web)."""
+    saved = ((getattr(job, "cable_plan", None) or {}).get("settings")) or {}
+    lengths = saved.get("standard_lengths_m") or [1, 2, 3, 5, 7.5, 10, 15, 20, 30, 50]
+    return {
+        "slack_pct": float(saved.get("slack_pct", 10)),
+        "slack_m": float(saved.get("slack_m", 1)),
+        "lengths": tuple(float(x) for x in lengths),
+    }
+
+
+def run_length(distance_m: float, settings: dict) -> float:
+    """The standard cable length for a run: the distance plus slack, rounded up to a length."""
+    needed = distance_m * (1 + settings["slack_pct"] / 100) + settings["slack_m"]
+    return cord_for(needed, settings["lengths"])
 
 
 def _metres(value: Any) -> Any:
@@ -73,12 +93,10 @@ def _spot(node: GraphDevice | None) -> tuple[float, float] | None:
     return node.canvas_x_cm, node.canvas_y_cm
 
 
-def _feed_length(parent: GraphDevice | None, node: GraphDevice | None) -> float | None:
-    """Metres between two nodes on the plot, rounded up to a standard cord, if both are placed."""
-    a, b = _spot(parent), _spot(node)
+def _distance_m(a: tuple[float, float] | None, b: tuple[float, float] | None) -> float | None:
     if a is None or b is None:
         return None
-    return cord_for(math.hypot(a[0] - b[0], a[1] - b[1]) / 100)
+    return math.hypot(a[0] - b[0], a[1] - b[1]) / 100
 
 
 async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
@@ -97,6 +115,16 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         for d in await db.scalars(select(AudioDevice).where(AudioDevice.job_id == job_id))
     }
     nodes = {n["id"]: n for n in summary["nodes"]}
+    settings = cable_settings(job)
+    outlets = {
+        str(o.id): o
+        for o in await db.scalars(
+            select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == job.venue_id)
+        )
+    }
+    power_rows = {
+        str(n.id): n for n in await db.scalars(select(PowerNode).where(PowerNode.job_id == job_id))
+    }
 
     def node_graph(node_id: str | None) -> GraphDevice | None:
         return graph.get(f"power_nodes:{node_id}") if node_id else None
@@ -108,7 +136,8 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         parent = nodes.get(node["parent_id"]) if node["parent_id"] else None
         length = _metres((row.attributes or {}).get("length_m")) if row else None
         if length is None and parent and node["kind"] != "extension":
-            length = _feed_length(node_graph(parent["id"]), row)
+            metres = _distance_m(_spot(node_graph(parent["id"])), _spot(row))
+            length = run_length(metres, settings) if metres is not None else None
         tree_rows.append(
             {
                 "name": node["name"],
@@ -136,6 +165,29 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
                 }
             )
 
+    def node_spot(node_id: str, toward: tuple[float, float] | None) -> tuple[float, float] | None:
+        """Where a power node is on the plot: its own place, else its venue outlet, else (a
+        venue group) the outlet of that group nearest to what is plugged in."""
+        spot = _spot(node_graph(node_id))
+        if spot is not None:
+            return spot
+        row = power_rows.get(node_id)
+        if row is None:
+            return None
+        if row.venue_outlet_id and str(row.venue_outlet_id) in outlets:
+            o = outlets[str(row.venue_outlet_id)]
+            return (o.x_cm, o.y_cm) if o.x_cm is not None and o.y_cm is not None else None
+        if row.venue_group_id:
+            placed = [
+                (o.x_cm, o.y_cm)
+                for o in outlets.values()
+                if o.group_id == row.venue_group_id and o.x_cm is not None and o.y_cm is not None
+            ]
+            if placed and toward is not None:
+                return min(placed, key=lambda p: math.hypot(p[0] - toward[0], p[1] - toward[1]))
+            return placed[0] if placed else None
+        return None
+
     load_rows: list[dict] = []
     needed: dict[str, int] = {}
     for load in summary["loads"]:
@@ -143,8 +195,20 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         inlet = device.power_inlet if device else ""
         node = nodes.get(load["power_node_id"]) if load["power_node_id"] else None
         cable = cable_for(inlet, load["power_connector"]) if node else ""
+        gear_ref = {"fixture": "lighting_fixtures", "element": "stage_plot_elements"}.get(
+            load["kind"], "audio_devices"
+        )
+        gear_node = graph.get(f"{gear_ref}:{load['id']}") or (
+            graph.get(f"audio_devices:{load['device_id']}") if load.get("device_id") else None
+        )
+        gear_spot = _spot(gear_node)
+        metres = (
+            _distance_m(node_spot(load["power_node_id"], gear_spot), gear_spot) if node else None
+        )
+        length = run_length(metres, settings) if metres is not None else None
         if cable:
-            needed[cable] = needed.get(cable, 0) + 1
+            label = f"{cable} {length} m" if length is not None else cable
+            needed[label] = needed.get(label, 0) + 1
         load_rows.append(
             {
                 "device": load["label"],
@@ -154,6 +218,7 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
                 "connector": connector_label(load["power_connector"]),
                 "power_w": load["power_w"] if load["power_w"] is not None else "",
                 "cable": cable or "Not plugged in",
+                "length_m": length if length is not None else "",
                 "status": load["power_status"],
             }
         )

@@ -11,6 +11,7 @@ export const legacyId = (node) => {
   return table && id ? id : node?.id;
 };
 
+const VIRTUAL = new Set(['channel', 'channel_list', 'output', 'video_input', 'video_destination', 'video_list', 'dmx_universe', 'rigging_point']);
 const byPosition = (a, b) => (a.position || 0) - (b.position || 0);
 const byCreated = (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || (a.id < b.id ? -1 : 1);
 
@@ -189,6 +190,24 @@ export function legacyViewFromGraph(devices, edges) {
   }));
 
   const elements = elementsFromGraph(devices, edges);
+  // Gear placed on the workspace map without a plot element stands for itself: cables run to its
+  // box (a pseudo element linked to the device), so they can be routed from the new map too.
+  const represented = new Set(elements.map((e) => e.linked_device_id).filter(Boolean));
+  for (const node of devices) {
+    if (VIRTUAL.has(node.kind) || node.kind === 'plot_element') continue;
+    if (node.canvas_x_cm == null || node.canvas_y_cm == null || represented.has(legacyId(node))) continue;
+    elements.push({
+      id: `gear:${node.id}`,
+      element_type: 'gear',
+      label: node.name,
+      position_x: node.canvas_x_cm,
+      position_y: node.canvas_y_cm,
+      rotation: node.canvas_rotation || 0,
+      width_cm: node.attributes?.width_cm ?? 60,
+      height_cm: node.attributes?.height_cm ?? 30,
+      linked_device_id: legacyId(node),
+    });
+  }
 
   const plain = devices
     .filter((d) => d.kind !== 'plot_element' && d.kind !== 'channel_list')

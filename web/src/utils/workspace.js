@@ -300,6 +300,7 @@ export function chainForm(node, edges, devices) {
       device_id: attrs.first_point ? edge.src_device_id : edge.dst_device_id,
       connector: point.connector || '',
       patch_label: point.patch_label || '',
+      bus_connector: point.bus_connector || '',
       in_port: point.in_port || '',
       out_port: point.out_port || '',
       notes: point.notes || '',
@@ -558,7 +559,12 @@ export function deviceCreateBody(form) {
   return body;
 }
 
-export const isGear = (device) => !isVirtual(device) && !isPlotElement(device);
+// Power tree nodes (sources such as a venue outlet, distros, breakouts and extension cords) are
+// edited in the rigging & power editor: they have no power inlet of their own and are not gear.
+export const POWER_NODE_KINDS = ['source', 'distro', 'breakout', 'extension'];
+export const isPowerNode = (device) => device.domain === 'power' && POWER_NODE_KINDS.includes(device.kind);
+
+export const isGear = (device) => !isVirtual(device) && !isPlotElement(device) && !isPowerNode(device);
 
 // A node that is a fixture: its own fixture node, or a device that carries a DMX patch.
 export const isFixtureNode = (device) =>
@@ -745,4 +751,30 @@ export function cableFor(inlet, outletLabel) {
   if (kind === 'iec_c13') return `IEC C13 → ${outletLabel}`;
   if (kind === 'attached_schuko') return /schuko/i.test(outletLabel) || !outletLabel ? 'Fixed cable (Schuko)' : `Fixed Schuko → ${outletLabel}`;
   return `${powerInletLabel(kind)} → ${outletLabel}`;
+}
+
+// Output (bus) modes and the channels a bus has: a connection on the bus is for one of them
+// (OutputPatchPoint.bus_connector). A mono bus has none. Names can also be typed in.
+export const OUTPUT_MODES = [
+  { value: 'mono', channels: [] },
+  { value: 'stereo', channels: ['L', 'R'] },
+  { value: 'stereo_sub', channels: ['L', 'R', 'Sub'] },
+  { value: 'lcr', channels: ['L', 'C', 'R'] },
+  { value: 'lcr_sub', channels: ['L', 'C', 'R', 'Sub'] },
+  { value: '5.1', channels: ['L', 'R', 'C', 'LFE', 'Ls', 'Rs'] },
+  { value: '7.1', channels: ['L', 'R', 'C', 'LFE', 'Ls', 'Rs', 'Lb', 'Rb'] },
+  { value: '7.1.2', channels: ['L', 'R', 'C', 'LFE', 'Ls', 'Rs', 'Lb', 'Rb', 'Ltf', 'Rtf'] },
+];
+export const busChannelsFor = (mode) => OUTPUT_MODES.find((m) => m.value === mode)?.channels || [];
+
+// The device type to give gear imported from a Stockwire product, from its category path.
+export function deviceTypeFromCategory(category) {
+  const c = String(category || '').toLowerCase();
+  if (/ptz/.test(c)) return 'ptz_camera';
+  if (/camera/.test(c)) return 'camera';
+  if (/projector/.test(c)) return 'projector';
+  if (/screen|display|monitor|led wall/.test(c)) return 'screen';
+  if (/switcher|vision mixer/.test(c)) return 'switcher';
+  if (/mixer|console/.test(c)) return 'mixer';
+  return 'other';
 }

@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue';
 import { api } from '@/boot/api';
 import { buildCoverageCanvas, frameFromJob } from '@/utils/plotFrame';
 import { cameraShapes, projectorShapes } from '@/utils/plotViews';
+import { emptyCablePlan } from '@/utils/cables';
 
 const saved = (key, fallback) => {
   try {
@@ -26,8 +27,24 @@ export function usePlotFrame(jobId) {
     coverage: ref(saved('sw_ws_coverage', false)),
     camera: ref(saved('sw_ws_camera', false)),
     projector: ref(saved('sw_ws_projector', false)),
+    cables: ref(saved('sw_ws_cables', false)),
   };
   const cameraMode = ref(saved('sw_ws_camera_mode', 'range'));
+
+  // Cable routing: cableways and settings are the job's cable_plan, saved as a whole (a counter
+  // makes sure an older save that finishes late cannot bring back an older plan).
+  const cablePlan = computed(() => emptyCablePlan(job.value?.cable_plan));
+  let planSeq = 0;
+  async function savePlan(next) {
+    const seq = ++planSeq;
+    job.value = { ...job.value, cable_plan: next };
+    try {
+      const { data } = await api.patch(`/jobs/${jobId}`, { cable_plan: next });
+      if (seq === planSeq) job.value = { ...job.value, cable_plan: data.cable_plan };
+    } catch (err) {
+      console.error('Failed to save the cable plan', err);
+    }
+  }
   const cameraSpecs = ref({});
   for (const [name, flag] of Object.entries(show)) {
     watch(flag, (value) => {
@@ -115,6 +132,8 @@ export function usePlotFrame(jobId) {
     coverageImage,
     show,
     cameraMode,
+    cablePlan,
+    savePlan,
     load,
     loadCoverage,
     loadCameraSpecs,

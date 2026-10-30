@@ -387,6 +387,8 @@ class VideoInputCreate(BaseModel):
     source_type: str = "camera"
     connector: str = "sdi"
     notes: str = ""
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
 
 
 class VideoOutputCreate(BaseModel):

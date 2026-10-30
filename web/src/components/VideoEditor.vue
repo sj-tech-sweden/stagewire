@@ -180,6 +180,24 @@
               />
             </q-td>
           </template>
+          <template #body-cell-source="slot">
+            <q-td
+              :props="slot"
+              style="min-width: 170px; max-width: 220px"
+            >
+              <StockwireProductPicker
+                :model-value="sourceOf(slot.row)"
+                own
+                :local-items="gearItems"
+                gear-type="video"
+                :label="t('workspace.videoSource')"
+                :hint="''"
+                borderless
+                data-testid="video-source-picker"
+                @update:model-value="(p) => setSource(slot.row, p)"
+              />
+            </q-td>
+          </template>
           <template #body-cell-source_type="slot">
             <q-td :props="slot">
               <q-select
@@ -272,6 +290,7 @@
     />
     <ChainDialog
       v-model="chainOpen"
+      :job-id="jobId"
       :title="chainTitle"
       :initial="chainInitial"
       :devices="gear"
@@ -291,6 +310,7 @@ import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { flowTree, isPlotElement, isVirtual, videoChainForm, videoChainNames, videoRowsOf } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
@@ -333,6 +353,7 @@ const sections = computed(() => [
     columns: [
       number,
       col('name', t('workspace.colSource')),
+      col('source', t('workspace.videoSource')),
       col('source_type', t('workspace.colSourceType')),
       col('connector', t('workspace.stepConnector')),
       ...tail,
@@ -409,6 +430,27 @@ async function fill() {
     failed(err);
   }
 }
+
+// The source of a video input (a camera, a computer ...) is picked like a microphone's: gear
+// already in the job, the company's own Stockwire products, or a typed name. A product is
+// requested on the linked Stockwire job (one per input using it) by "Sync gear to Stockwire".
+const gearItems = computed(() =>
+  graph.devices
+    .filter((d) => !isVirtual(d) && !isPlotElement(d))
+    .map((d) => ({ id: d.id, name: d.name, stockwire_product_id: d.stockwire_product_id })),
+);
+const sourceOf = (node) =>
+  node.attributes.stockwire_product_name
+    ? { id: node.attributes.stockwire_product_id || null, name: node.attributes.stockwire_product_name }
+    : null;
+const setSource = (node, pick) =>
+  save(node, {
+    attributes: {
+      stockwire_product_id: pick?.id ? String(pick.id) : null,
+      stockwire_product_name: pick?.name || null,
+      ...(pick?.name && !node.attributes.source_label ? { source_label: pick.name } : {}),
+    },
+  });
 
 const flowOpen = ref(false);
 const flowSteps = ref([]);

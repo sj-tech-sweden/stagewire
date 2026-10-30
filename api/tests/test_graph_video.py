@@ -314,3 +314,52 @@ async def test_many_video_inputs_can_share_a_switchers_generic_input_port(auth_h
             f"{g}/edges", json={**edge, "src_device_id": other["id"]}, headers=h
         )
         assert second.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_video_source_can_be_a_stockwire_product_and_counts_for_the_job(auth_headers):
+    from types import SimpleNamespace
+
+    from app.domains.audio.router import _desired_stockwire_items
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, lst = await _setup(client, h)
+        cam = (
+            await client.post(
+                f"{g}/video-lists/{lst['id']}/inputs", json={"source_label": "Cam 1"}, headers=h
+            )
+        ).json()
+        res = await client.patch(
+            f"{g}/devices/{cam['id']}",
+            json={
+                "attributes": {
+                    "stockwire_product_id": "77",
+                    "stockwire_product_name": "PTZ 4K",
+                    "source_label": "PTZ 4K",
+                },
+                "expected_revision": cam["revision"],
+            },
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        legacy = (await _legacy(client, h, job_id))[0]["inputs"][0]
+        assert (legacy["stockwire_product_id"], legacy["stockwire_product_name"]) == (
+            "77",
+            "PTZ 4K",
+        )
+        node = next(d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == cam["id"])
+        assert node["attributes"]["stockwire_product_id"] == "77"
+
+        job = SimpleNamespace(channel_lists=[], devices=[])
+        inputs = [
+            SimpleNamespace(
+                input_number=n,
+                source_label="PTZ 4K",
+                stockwire_product_id="77",
+                stockwire_product_name="PTZ 4K",
+            )
+            for n in (1, 2)
+        ]
+        desired, freetext = _desired_stockwire_items(job, inputs)
+        assert desired[77]["quantity"] == 2 and freetext == []

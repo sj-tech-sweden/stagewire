@@ -493,6 +493,7 @@ _POWER_LOAD_COLUMNS = (
     ReportField(key="connector", label="Outlet"),
     ReportField(key="power_w", label="Power (W)"),
     ReportField(key="cable", label="Cable"),
+    ReportField(key="length_m", label="Length (m)"),
 )
 _POWER_CORD_COLUMNS = (
     ReportField(key="name", label="Extension cord"),
@@ -525,6 +526,7 @@ _POWER_LOAD_COLUMNS_SV = (
     ReportField(key="connector", label="Uttag"),
     ReportField(key="power_w", label="Effekt (W)"),
     ReportField(key="cable", label="Kabel"),
+    ReportField(key="length_m", label="Längd (m)"),
 )
 _POWER_CORD_COLUMNS_SV = (
     ReportField(key="name", label="Skarvsladd"),

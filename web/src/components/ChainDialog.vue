@@ -37,6 +37,15 @@
             data-testid="chain-device"
             @filter="filterDevices"
           />
+          <StockwireProductPicker
+            class="col-12 col-sm-4"
+            :model-value="null"
+            own
+            :label="t('workspace.stepFromStockwire')"
+            :hint="''"
+            data-testid="chain-stockwire"
+            @update:model-value="(p) => addFromStockwire(step, p)"
+          />
           <div class="col-auto">
             <q-btn
               flat
@@ -89,6 +98,23 @@
             />
           </template>
           <q-select
+            v-if="busChannels.length"
+            v-model="step.bus_connector"
+            class="col-6 col-sm"
+            dense
+            outlined
+            clearable
+            use-input
+            hide-selected
+            fill-input
+            new-value-mode="add-unique"
+            input-debounce="0"
+            :options="busChannels"
+            :label="t('workspace.busChannel')"
+            data-testid="chain-bus-channel"
+            @new-value="(v, done) => done(v.trim(), 'add-unique')"
+          />
+          <q-select
             v-if="branching && i > 0"
             v-model="step.parent_index"
             class="col-6 col-sm"
@@ -131,8 +157,11 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import { useGraphStore } from '@/stores/graph';
+import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({
@@ -140,7 +169,10 @@ const props = defineProps({
   title: { type: String, default: '' },
   initial: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
+  jobId: { type: String, default: '' },
   branching: { type: Boolean, default: false },
+  // the channels of the bus an output chain feeds (L, R, C, Sub ...); empty for other chains
+  busChannels: { type: Array, default: () => [] },
   fields: {
     type: Array,
     default: () => [
@@ -151,6 +183,8 @@ const props = defineProps({
 });
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
+const graph = useGraphStore();
+const $q = useQuasar();
 const steps = ref([]);
 const filtered = ref([]);
 
@@ -160,6 +194,7 @@ const blank = () => ({
   patch_label: '',
   in_port: '',
   out_port: '',
+  bus_connector: '',
   notes: '',
   parent_index: null,
 });
@@ -173,6 +208,23 @@ watch(
     filtered.value = options();
   },
 );
+
+// Searching Stockwire from a patch point: the picked product becomes a device in the job (with
+// its connectors and power inlet) and is chosen for this step at once.
+async function addFromStockwire(step, product) {
+  if (!product) return;
+  try {
+    const created = await graph.createDeviceFromProduct(props.jobId, product);
+    await nextTick();
+    filtered.value = options();
+    if (!filtered.value.some((o) => o.value === created.id)) {
+      filtered.value = [...filtered.value, { label: created.name, value: created.id }];
+    }
+    step.device_id = created.id;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+  }
+}
 
 function filterDevices(value, update) {
   update(() => {
@@ -197,6 +249,7 @@ function cleaned() {
     device_id: s.device_id,
     ...Object.fromEntries(props.fields.map((f) => [f.key, s[f.key] || ''])),
     notes: s.notes || '',
+    ...(props.busChannels.length ? { bus_connector: s.bus_connector || null } : {}),
     ...(props.branching ? { parent_index: s.parent_index ?? null } : {}),
   }));
 }

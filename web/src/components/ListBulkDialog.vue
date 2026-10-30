@@ -110,6 +110,7 @@ import { computed, reactive, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import { INSTRUMENT_GROUP_KEYS } from '@/utils/instrumentGroups';
+import { OUTPUT_MODES } from '@/utils/workspace';
 
 // Adds many channels (inputs) or outputs to a list at once. A prefix names them "Prefix 1",
 // "Prefix 2", ...; channels continue from the start number (the next free one by default).
@@ -140,10 +141,7 @@ const inputTypes = ['microphone', 'di', 'wireless', 'fxReturn'].map((v) => ({
 }));
 const groupOptions = INSTRUMENT_GROUP_KEYS.map((v) => ({ value: v, label: t(`channels.instrumentGroups.${v}`) }));
 const modeOptions = computed(() =>
-  ['mono', 'stereo', '5.1', '7.1'].map((v) => ({
-    value: v,
-    label: t({ mono: 'channels.outputModeMono', stereo: 'channels.outputModeStereo', '5.1': 'channels.outputMode51', '7.1': 'channels.outputMode71' }[v]),
-  })),
+  OUTPUT_MODES.map((m) => ({ value: m.value, label: t(`workspace.busMode.${m.value.replace(/[._]/g, '')}`) })),
 );
 
 watch(

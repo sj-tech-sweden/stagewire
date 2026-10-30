@@ -50,6 +50,10 @@ class VideoInput(Base):
     source_type: Mapped[str] = mapped_column(String(64), default="camera")
     connector: Mapped[str] = mapped_column(String(64), default="sdi")
     notes: Mapped[str] = mapped_column(String(2000), default="")
+    # The camera or other source as a Stockwire product (the number of inputs using a product is
+    # the quantity requested on the Stockwire job); empty for a typed-in source.
+    stockwire_product_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stockwire_product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     input_list: Mapped[VideoInputList] = relationship(back_populates="inputs")
     patch_points: Mapped[list["VideoPatchPoint"]] = relationship(

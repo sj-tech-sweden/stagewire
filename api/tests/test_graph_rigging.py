@@ -570,3 +570,90 @@ async def test_the_power_sheet_lists_inlets_cables_and_extension_cords(auth_head
     }
     kinds = {row["name"]: row["kind"] for row in ctx["power_tree"]}
     assert kinds["Skarv 10"] == "extension"
+
+
+@pytest.mark.asyncio
+async def test_a_nodes_feed_can_be_cut_and_a_plugged_device_unplugged(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        res = await client.put(
+            f"{g}/power-nodes/{distro['id']}/parent", json={"parent_id": None}, headers=h
+        )
+        assert res.status_code == 200, res.text
+        nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
+        cut = next(n for n in nodes if n["name"] == "Stage distro")
+        assert cut["parent_id"] is None and cut["feed_connector"] == ""
+        summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
+        assert (
+            next(n for n in summary["nodes"] if n["name"] == "Stage distro")["status"]
+            == "unpowered"
+        )
+        edges = [e for e in (await _graph(client, h, job_id))["edges"] if e["signal"] == "power"]
+        assert edges == []
+
+        gear = await post(
+            "audio-devices", {"name": "Amp", "device_type": "other", "power_watts": 100}
+        )
+        res = await client.put(
+            f"{g}/loads/{gear['id']}",
+            json={"power_node_id": source["id"], "power_connector": "cee32_3p"},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        res = await client.put(f"{g}/loads/{gear['id']}", json={"power_node_id": None}, headers=h)
+        assert res.status_code == 200, res.text
+        assert res.json()["attributes"].get("power_node_id") is None
+
+
+@pytest.mark.asyncio
+async def test_the_power_sheet_gives_each_cable_a_standard_length_from_the_plot(auth_headers):
+    import uuid
+
+    from app.core import db as db_mod
+    from app.domains.reports.power_context import power_sheet_context
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        breakout = await post(
+            "power-nodes",
+            {
+                "name": "Breakout",
+                "kind": "breakout",
+                "parent_id": distro["id"],
+                "feed_connector": "schuko",
+                "outputs": [{"connector": "schuko", "count": 4}],
+            },
+        )
+        legacy_id = breakout["legacy_ref"].split(":")[1]
+        res = await client.patch(
+            f"{BASE}/jobs/{job_id}/power-nodes/{legacy_id}", json={"x_cm": 0, "y_cm": 0}, headers=h
+        )
+        assert res.status_code == 200, res.text
+        gear = await post(
+            "audio-devices", {"name": "Amp", "device_type": "other", "power_watts": 400}
+        )
+        node = next(
+            d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == gear["id"]
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"canvas_x_cm": 600, "canvas_y_cm": 0, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        await client.put(
+            f"{g}/loads/{gear['id']}",
+            json={"power_node_id": breakout["id"], "power_connector": "schuko"},
+            headers=h,
+        )
+
+    async with db_mod.SessionLocal() as db:
+        ctx = await power_sheet_context(db, uuid.UUID(job_id))
+    amp = next(row for row in ctx["power_loads"] if row["device"] == "Amp")
+    # 6 m + 10 % + 1 m slack = 7.6 m, which is packed as a 10 m cable
+    assert amp["length_m"] == 10
+    assert {row["cable"]: row["count"] for row in ctx["power_cables"]} == {
+        "IEC C13 → Schuko 16 A 10 m": 1
+    }

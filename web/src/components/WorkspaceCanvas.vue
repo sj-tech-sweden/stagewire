@@ -10,6 +10,8 @@
     <v-stage
       ref="stageRef"
       :config="{ width: size.width, height: size.height, x: pan.x, y: pan.y, draggable: panning }"
+      @click="onStageClick"
+      @tap="onStageClick"
       @dragend="onStagePanEnd"
       @mousemove="onMove"
       @touchmove="onMove"
@@ -17,7 +19,7 @@
       @touchend="endLink"
     >
       <v-layer>
-        <v-rect :config="{ x: 0, y: 0, width: size.width, height: size.height, fill: bg }" />
+        <v-rect :config="{ x: 0, y: 0, width: size.width, height: size.height, fill: bg, listening: false }" />
         <template v-if="frame">
           <v-rect :config="venueConfig" />
           <v-rect :config="stageConfig" />
@@ -33,6 +35,20 @@
           <v-line
             v-if="audienceLine"
             :config="audienceLine"
+          />
+          <v-line
+            v-for="way in wayLines"
+            :key="way.id"
+            :config="way.config"
+          />
+          <v-line
+            v-for="cable in cableLines"
+            :key="cable.id"
+            :config="cable.config"
+          />
+          <v-line
+            v-if="draftLine"
+            :config="draftLine"
           />
           <v-group
             v-for="outlet in outletMarks"
@@ -121,6 +137,11 @@ const props = defineProps({
   showAudience: { type: Boolean, default: true },
   coverageImage: { type: Object, default: null },
   shapes: { type: Array, default: () => [] },
+  // routed cables ({ key, points, mode }), cableways ({ id, points }) and the cableway being drawn
+  cables: { type: Array, default: () => [] },
+  cableways: { type: Array, default: () => [] },
+  drawPoints: { type: Array, default: () => [] },
+  drawing: { type: Boolean, default: false },
   devices: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
@@ -130,7 +151,7 @@ const props = defineProps({
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'draw-point']);
 
 const $q = useQuasar();
 const host = ref(null);
@@ -228,6 +249,43 @@ const shapeLines = computed(() =>
     },
   })),
 );
+const toPx = (points) =>
+  points.flatMap(([x, y]) => [(x + origin.value.x) * props.zoom, (y + origin.value.y) * props.zoom]);
+const wayLines = computed(() =>
+  props.cableways.map((way) => ({
+    id: way.id,
+    config: { points: toPx(way.points), stroke: '#ffb300', strokeWidth: 6, opacity: 0.35, lineCap: 'round', lineJoin: 'round', listening: false },
+  })),
+);
+const cableLines = computed(() =>
+  props.cables
+    .filter((c) => c.placed && !c.hidden)
+    .map((c) => ({
+      id: c.key,
+      config: {
+        points: toPx(c.points),
+        stroke: '#b0bec5',
+        strokeWidth: 2,
+        dash: c.mode === 'direct' ? [8, 6] : undefined,
+        lineCap: 'round',
+        lineJoin: 'round',
+        listening: false,
+      },
+    })),
+);
+const draftLine = computed(() =>
+  props.drawing && props.drawPoints.length
+    ? { points: toPx(props.drawPoints), stroke: '#ffb300', strokeWidth: 3, dash: [6, 4], listening: false }
+    : null,
+);
+
+// While a cableway is being drawn a click on the map adds a point (stage-relative cm).
+function onStageClick(event) {
+  if (!props.drawing || event.target !== stageRef.value?.getStage()) return;
+  const pos = stageRef.value.getStage().getRelativePointerPosition();
+  emit('draw-point', [Math.round(pos.x / props.zoom - origin.value.x), Math.round(pos.y / props.zoom - origin.value.y)]);
+}
+
 const audienceLine = computed(() => {
   const polygon = props.frame?.audience || [];
   if (!props.showAudience || polygon.length < 3) return null;

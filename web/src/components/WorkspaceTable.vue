@@ -113,7 +113,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
-import { needsBookingRequest, powerInletLabel } from '@/utils/workspace';
+import { isPowerNode, needsBookingRequest, powerInletLabel } from '@/utils/workspace';
 
 const props = defineProps({
   jobId: { type: String, required: true },
@@ -130,7 +130,7 @@ const columns = computed(() => [
   { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
   { name: 'domain', label: t('workspace.colDomain'), field: 'domain', align: 'left' },
   { name: 'kind', label: t('workspace.colKind'), field: 'kind', align: 'left' },
-  { name: 'inlet', label: t('workspace.colInlet'), field: (row) => powerInletLabel(row.attributes?.power_inlet), align: 'left' },
+  { name: 'inlet', label: t('workspace.colInlet'), field: (row) => (isPowerNode(row) ? '' : powerInletLabel(row.attributes?.power_inlet)), align: 'left' },
   { name: 'stockwire', label: t('workspace.colStockwire'), field: 'stockwire_product_name', align: 'left' },
   { name: 'notes', label: t('workspace.colNotes'), field: 'notes', align: 'left' },
 ]);

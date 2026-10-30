@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
 import { applyGraphEvent, isRevisionConflict, threeWayMerge } from '@/utils/graph';
-import { isVirtual } from '@/utils/workspace';
+import {
+  deviceCreateBody,
+  deviceForm,
+  deviceTypeFromCategory,
+  fillFormFromSpecs,
+  isVirtual,
+} from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
 
@@ -269,6 +275,23 @@ export const useGraphStore = defineStore('graph', {
       const { data } = await api.put(`${base(jobId)}/loads/${nodeId}`, payload);
       await this.fetchGraph(jobId);
       return data;
+    },
+    // A device made from a Stockwire product: its connectors, power inlet, weight and power come
+    // from /stockwire/products/{id}/device-specs (a product without specs still makes a device).
+    async createDeviceFromProduct(jobId, product) {
+      let specs = {};
+      if (product.id) {
+        try {
+          specs = (await api.get(`/stockwire/products/${product.id}/device-specs`)).data;
+        } catch {
+          specs = {};
+        }
+      }
+      const form = deviceForm(null);
+      form.device_type = deviceTypeFromCategory(product.category);
+      fillFormFromSpecs(form, product, specs);
+      form.name = form.name || product.name;
+      return this.createAudioDevice(jobId, deviceCreateBody(form));
     },
     async createAudioDevice(jobId, body) {
       const { data } = await api.post(`${base(jobId)}/audio-devices`, body);

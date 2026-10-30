@@ -590,6 +590,38 @@
               :label="t('workspace.outputPhase')"
             />
           </template>
+          <div
+            v-if="editing?.kind !== 'source' && feedEdges.length"
+            class="col-12"
+            data-testid="feed-list"
+          >
+            <div class="text-caption text-grey-6">
+              {{ t('workspace.feedsOf') }}
+            </div>
+            <div
+              v-for="feed in feedEdges"
+              :key="feed.id"
+              class="row items-center"
+            >
+              <div class="col">
+                {{ nodeName(feed.src_device_id) }}
+                <span class="text-caption text-grey-6">
+                  {{ feed.attributes?.connector ? connectorLabel(feed.attributes.connector) : '' }}
+                  <span v-if="feed.id === primaryFeedId">· {{ t('workspace.primaryFeed') }}</span>
+                </span>
+              </div>
+              <q-btn
+                flat
+                dense
+                no-caps
+                color="negative"
+                icon="link_off"
+                :label="t('workspace.disconnect')"
+                data-testid="feed-disconnect"
+                @click="disconnect(feed)"
+              />
+            </div>
+          </div>
           <q-input
             v-if="editForm.kind === 'extension'"
             v-model.number="editForm.length_m"
@@ -970,6 +1002,29 @@ function openEdit(node) {
     outputs: (attrs.outputs || []).map((o) => ({ ...o })),
   });
   editOpen.value = true;
+}
+
+// Every feed of the node being edited: its own (primary) feed and the merged extra ones. Cutting
+// the primary feed leaves the node unpowered until it is hung somewhere again; extra feeds are
+// plain links and are removed with their edge.
+const feedEdges = computed(() =>
+  editing.value
+    ? graph.edges.filter((e) => e.signal === 'power' && e.dst_device_id === editing.value.id)
+    : [],
+);
+const primaryFeedId = computed(() => (editing.value ? edgeToParent(editing.value)?.id : null));
+const nodeName = (id) => graphNode(id)?.name || '?';
+async function disconnect(edge) {
+  try {
+    if (edge.id === primaryFeedId.value) {
+      await graph.movePowerNode(props.jobId, editing.value.id, { parent_id: null });
+    } else {
+      await graph.deleteEdge(props.jobId, edge.id);
+    }
+    await refresh();
+  } catch (err) {
+    failed(err);
+  }
 }
 
 const edgeToParent = (node) =>

@@ -24,7 +24,7 @@
             type="number"
             min="1"
             step="0.5"
-            :label="t('stagePlot.stageWidth')"
+            :label="t('workspace.stageWidthM')"
             data-testid="stage-width"
           />
           <q-input
@@ -35,7 +35,7 @@
             type="number"
             min="1"
             step="0.5"
-            :label="t('stagePlot.stageHeight')"
+            :label="t('workspace.stageDepthM')"
             data-testid="stage-height"
           />
           <q-input
@@ -45,7 +45,7 @@
             outlined
             type="number"
             step="0.5"
-            :label="t('stagePlot.stageX')"
+            :label="t('workspace.stageXM')"
           />
           <q-input
             v-model.number="form.stageY"
@@ -54,7 +54,7 @@
             outlined
             type="number"
             step="0.5"
-            :label="t('stagePlot.stageY')"
+            :label="t('workspace.stageYM')"
           />
         </div>
         <div class="text-subtitle2">
@@ -69,7 +69,7 @@
             type="number"
             min="0"
             step="0.5"
-            :label="t('stagePlot.venueWidth')"
+            :label="t('workspace.venueWidthM')"
             data-testid="venue-width"
           />
           <q-input
@@ -80,7 +80,7 @@
             type="number"
             min="0"
             step="0.5"
-            :label="t('stagePlot.venueHeight')"
+            :label="t('workspace.venueDepthM')"
             data-testid="venue-height"
           />
         </div>

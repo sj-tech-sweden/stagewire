@@ -339,6 +339,22 @@
               {{ chain(out) || t('workspace.chainEmpty') }}
             </q-item-label>
           </q-item-section>
+          <q-item-section
+            side
+            style="min-width: 150px"
+          >
+            <q-select
+              :model-value="out.attributes.mode || 'mono'"
+              :options="modeOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              :label="t('channels.outputMode')"
+              data-testid="output-mode"
+              @update:model-value="(v) => saveAttr(out, 'mode', v)"
+            />
+          </q-item-section>
           <q-item-section side>
             <div class="row">
               <q-btn
@@ -398,10 +414,12 @@
     />
     <ChainDialog
       v-model="chainOpen"
+      :job-id="jobId"
       :title="chainTitle"
       :initial="chainInitial"
       :devices="gear"
       :branching="chainKind === 'output'"
+      :bus-channels="chainKind === 'output' ? busChannelsFor(chainNode?.attributes?.mode) : []"
       @save="saveChain"
     />
   </div>
@@ -421,8 +439,10 @@ import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
   chainForm,
+  busChannelsFor,
   chainSteps,
   flowTree,
+  OUTPUT_MODES,
   channelsOf,
   isPlotElement,
   isVirtual,
@@ -589,6 +609,10 @@ async function addOutput() {
     failed(err);
   }
 }
+
+const modeOptions = computed(() =>
+  OUTPUT_MODES.map((m) => ({ value: m.value, label: t(`workspace.busMode.${m.value.replace(/[._]/g, '')}`) })),
+);
 
 const flowOpen = ref(false);
 const flowSteps = ref([]);

@@ -1060,7 +1060,9 @@ class StockwireSyncResult(BaseModel):
     message: str = ""
 
 
-def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[str]]:
+def _desired_stockwire_items(
+    job: ProductionJob, video_inputs: list | None = None
+) -> tuple[dict[int, dict], list[str]]:
     """Catalog products used in the job, one entry per product with its total quantity.
 
     Each device that holds a product adds one unit. Freetext entries (no catalog
@@ -1102,6 +1104,13 @@ def _desired_stockwire_items(job: ProductionJob) -> tuple[dict[int, dict], list[
                 f"{slot} stand",
                 freetext_name=ch.stand_product_name,
             )
+    for video_input in video_inputs or []:
+        put(
+            video_input.stockwire_product_id,
+            video_input.stockwire_product_name or video_input.source_label,
+            f"Video in {video_input.input_number} {video_input.source_label or ''}".strip(),
+            freetext_name=video_input.stockwire_product_name,
+        )
     for device in job.devices:
         put(
             device.stockwire_product_id,
@@ -1152,7 +1161,10 @@ async def sync_job_to_stockwire(
         )
 
     target = job.stockwire_job_id
-    desired, freetext = _desired_stockwire_items(job)
+    video_inputs = [
+        vin for vlist in await video_service.list_input_lists(db, job.id) for vin in vlist.inputs
+    ]
+    desired, freetext = _desired_stockwire_items(job, video_inputs)
     sw = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
 
     links = (
