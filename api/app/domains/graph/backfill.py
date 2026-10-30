@@ -51,6 +51,17 @@ DEVICE_SPEC_FIELDS = (
     "throw_ratio_max",
     "image_aspect_ratio",
 )
+FIXTURE_ATTRS = (
+    "universe",
+    "dmx_address",
+    "fixture_type",
+    "channel_mode",
+    "footprint",
+    "location",
+    "gel",
+    "purpose",
+)
+FIXTURE_ONLY_ATTRS = ("universe", "dmx_address", "footprint", "location", "gel", "purpose")
 ELEMENT_FIELDS = (
     "element_type",
     "width_cm",
@@ -83,8 +94,10 @@ OWNED_ATTRS: dict[str, set[str]] = {
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
+    "lighting_fixtures": set(FIXTURE_ATTRS),
     "audio_devices": {
         *DEVICE_SPEC_FIELDS,
+        *FIXTURE_ONLY_ATTRS,
         "device_type",
         "weight_kg",
         "power_w",
@@ -884,6 +897,11 @@ class Backfill:
                 if not linked.graph_edited:
                     linked.attributes = {**linked.attributes, **dmx}
                     linked.domain = "lighting"
+                else:
+                    kept = {
+                        k: v for k, v in linked.attributes.items() if k not in FIXTURE_ONLY_ATTRS
+                    }
+                    linked.attributes = {**kept, **dmx}
                 fixture_nodes[fx.id] = linked
                 continue
             fixture_nodes[fx.id] = self.device(

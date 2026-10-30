@@ -16,12 +16,14 @@ from app.domains.graph.backfill import (
     DEVICE_SPEC_FIELDS,
     ELEMENT_FIELDS,
     ELEMENT_LINKS,
+    FIXTURE_ATTRS,
     MIRRORED_EDGE_TABLES,
     OUTPUT_FIELDS,
     OWNED_ATTRS,
     backfill_job,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.lighting import service as lighting_service
 from app.domains.video import service as video_service
 
 logger = logging.getLogger(__name__)
@@ -170,6 +172,22 @@ def _element_changes(data: dict) -> dict:
     return out
 
 
+FIXTURE_NOT_NULL = {"fixture_type", "channel_mode", "location", "gel", "purpose"}
+
+
+def _fixture_changes(data: dict) -> dict:
+    attrs = data.get("attributes") or {}
+    return {
+        key: attrs[key]
+        for key in FIXTURE_ATTRS
+        if key in attrs and not (attrs[key] is None and key in FIXTURE_NOT_NULL)
+    }
+
+
+async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -> list:
+    return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
+
+
 def _audio_device_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -231,6 +249,12 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
+    elif table == "lighting_fixtures":
+        row = await lighting_service.get_fixture(db, job_id, legacy_id)
+        changes = _fixture_changes(data)
+        if row is None or not changes:
+            return False
+        await lighting_service.update_fixture(db, job_id, row, changes)
     elif table == "stage_plot_elements":
         changes = _element_changes(data)
         if not changes:
@@ -238,9 +262,13 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         return await service.update_plot_element(db, job_id, legacy_id, changes) is not None
     elif table == "audio_devices":
         row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
-        if row is None or not changes:
+        fixture_changes = _fixture_changes(data)
+        if row is None or not (changes or fixture_changes):
             return False
-        row = await service.update_device(db, row, changes)
+        for fixture in await _fixtures_on_device(db, job_id, legacy_id) if fixture_changes else []:
+            await lighting_service.update_fixture(db, job_id, fixture, fixture_changes)
+        if changes:
+            row = await service.update_device(db, row, changes)
         from app.domains.audio.router import _device_read
 
         await publish_job_event(job_id, "device.upsert", await _device_read(db, row))
@@ -284,6 +312,11 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
+    elif table == "lighting_fixtures":
+        fixture = await lighting_service.get_fixture(db, job_id, legacy_id)
+        if fixture is None:
+            return False
+        await lighting_service.delete_fixture(db, fixture)
     elif table == "audio_devices":
         row = await service.get_device(db, legacy_id)
         if row is None:
@@ -297,6 +330,8 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
                 status.HTTP_409_CONFLICT,
                 "Move or delete the patch points on this device before removing it",
             )
+        for fixture in await _fixtures_on_device(db, job_id, legacy_id):
+            await lighting_service.delete_fixture(db, fixture)
         await service.delete_device(db, row)
         await publish_job_event(job_id, "device.delete", {"id": str(legacy_id)})
     else:

@@ -26,6 +26,8 @@ from app.domains.graph.mirror import (
     legacy_target,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.lighting import schemas as lighting_schemas
+from app.domains.lighting import service as lighting_service
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph", tags=["graph:lists"], dependencies=[Depends(get_current_user)]
@@ -366,3 +368,24 @@ async def effective_values(job_id: UUID, db: AsyncSession = Depends(get_db)) -> 
         )
         for d in devices
     }
+
+
+@router.post("/fixtures", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_fixture(
+    job_id: UUID, payload: lighting_schemas.FixtureCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    """Create a fixture. Type-library rules and the first free DMX address apply as before.
+
+    A fixture on a device lives on that device's node; otherwise it gets a node of its own.
+    """
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    fixture = await lighting_service.create_fixture(
+        db, job_id, payload.model_dump(exclude_unset=True)
+    )
+    ref = (
+        f"audio_devices:{fixture.device_id}"
+        if fixture.device_id
+        else f"lighting_fixtures:{fixture.id}"
+    )
+    return await _read(db, job_id, ref)
