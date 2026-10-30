@@ -1403,7 +1403,7 @@ test('a plain device such as an LED wall can be hung on a rigging point', async 
   await page.locator('.q-menu .q-item', { hasText: 'Truss A' }).click();
   await expect(page.getByTestId('truss-load')).toContainText('120');
   await expect(page.getByTestId('load-rigging-status')).toContainText(/Rigging: OK|Rigg: OK/);
-  await expect(page.getByTestId('load-power-status')).toContainText(/Power: OK|Ström: OK/);
+  await expect(page.getByTestId('load-power-status')).toContainText(/Power: Unpowered|Ström: Utan ström/);
   const graph = (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
   const wall = graph.devices.find((d: any) => d.name === 'LED wall');
   expect(wall.attributes.rigging_point_id).toBeTruthy();
