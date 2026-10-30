@@ -515,3 +515,65 @@ test('a DMX universe is built in the lights editor with a source, a chain and an
   await page.getByText(/flow diagram|flödesdiagram/i).click();
   await expect(page.getByText('Wash B').first()).toBeVisible();
 });
+
+test('the fixture library is managed in the lights editor and its modes set the footprint', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Library ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(lights|ljus)$/i).click();
+
+  await page.getByTestId('open-library').click();
+  await page.getByTestId('library-type-name').fill('LED wash');
+  await page.getByTestId('library-add-type').click();
+  await page.getByTestId('library-type').first().click();
+  for (const [name, footprint] of [['16ch', '16'], ['8ch', '8']]) {
+    await page.getByTestId('library-mode-name').fill(name);
+    await page.getByTestId('library-mode-footprint').fill(footprint);
+    await page.getByTestId('library-add-mode').click();
+    await expect(page.getByTestId('library-mode').filter({ has: page.locator(`input[value="${name}"]`) })).toHaveCount(1);
+  }
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('add-fixture').click();
+  const row = page.getByTestId('fixture-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await row.getByTestId('fixture-fixture_type').click();
+  await page.locator('.q-menu .q-item', { hasText: 'LED wash' }).click();
+  await expect
+    .poll(async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixtures`, { headers })).json())[0]?.fixture_type)
+    .toBe('LED wash');
+  await row.getByTestId('fixture-channel_mode').click();
+  await page.locator('.q-menu .q-item', { hasText: '16ch' }).click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixtures`, { headers })).json())[0];
+  await expect.poll(async () => (await legacy())?.footprint).toBe(16);
+  expect((await legacy()).fixture_type).toBe('LED wash');
+  await expect(row.getByTestId('fixture-footprint')).toHaveValue('16');
+});
+
+test('a fixture type is imported from Stockwire into the library', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Import ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 91, name: 'Wash Pro 300', sku: 'WP300', manufacturer: 'Acme', category: 'Lights' }], total: 1 } }),
+  );
+  let imported: { product_id?: string } | null = null;
+  await page.route(`**/api/v1/jobs/${jobId}/fixture-types/from-stockwire`, (route) => {
+    imported = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      json: { id: '00000000-0000-0000-0000-000000000001', job_id: jobId, name: 'Wash Pro 300', manufacturer: 'Acme', source: 'stockwire', modes: [] },
+    });
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(lights|ljus)$/i).click();
+  await page.getByTestId('open-library').click();
+  await page.getByLabel(/add type from stockwire|lägg till typ från stockwire/i).fill('wash');
+  await page.locator('.q-menu .q-item', { hasText: 'Wash Pro 300' }).click();
+  await expect.poll(() => imported?.product_id).toBe('91');
+  await expect(page.getByText(/added wash pro 300|lade till wash pro 300/i)).toBeVisible();
+});

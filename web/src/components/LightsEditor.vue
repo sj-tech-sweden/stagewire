@@ -22,6 +22,14 @@
       <q-btn
         flat
         no-caps
+        icon="inventory"
+        :label="t('workspace.library')"
+        data-testid="open-library"
+        @click="libraryOpen = true"
+      />
+      <q-btn
+        flat
+        no-caps
         icon="upload_file"
         :label="t('workspace.importFixtures')"
         data-testid="import-fixtures"
@@ -124,6 +132,42 @@
             dense
             borderless
             @change="(v) => saveAttr(slot.row, field, v || null)"
+          />
+        </q-td>
+      </template>
+      <template #body-cell-fixture_type="slot">
+        <q-td :props="slot">
+          <q-select
+            :model-value="slot.row.attributes.fixture_type"
+            dense
+            borderless
+            use-input
+            hide-dropdown-icon
+            input-debounce="0"
+            new-value-mode="add-unique"
+            :options="typeOptions"
+            style="min-width: 130px"
+            data-testid="fixture-fixture_type"
+            @filter="filterTypes"
+            @update:model-value="(v) => saveAttr(slot.row, 'fixture_type', v || null)"
+          />
+        </q-td>
+      </template>
+      <template #body-cell-channel_mode="slot">
+        <q-td :props="slot">
+          <q-select
+            :model-value="slot.row.attributes.channel_mode"
+            dense
+            borderless
+            use-input
+            hide-dropdown-icon
+            input-debounce="0"
+            new-value-mode="add-unique"
+            :options="modeOptions"
+            style="min-width: 100px"
+            data-testid="fixture-channel_mode"
+            @filter="(v, update) => filterModes(slot.row, v, update)"
+            @update:model-value="(v) => chooseMode(slot.row, v)"
           />
         </q-td>
       </template>
@@ -259,6 +303,10 @@
       </q-item>
     </q-list>
 
+    <FixtureLibraryDialog
+      v-model="libraryOpen"
+      :job-id="jobId"
+    />
     <ChainDialog
       v-model="chainOpen"
       :title="`${t('workspace.editChain')}: ${chainNode?.name || ''}`"
@@ -272,12 +320,14 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
 import DmxFlowDiagram from '@/components/DmxFlowDiagram.vue';
+import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
+import { useFixtureLibraryStore } from '@/stores/fixtureLibrary';
 import { dmxFlags } from '@/utils/dmx';
 import {
   chainForm,
@@ -286,6 +336,8 @@ import {
   fixtureView,
   fixturesOf,
   isGear,
+  modeAttributes,
+  modesForType,
   universeSource,
   universesOf,
 } from '@/utils/workspace';
@@ -295,6 +347,9 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 
+const library = useFixtureLibraryStore();
+const libraryOpen = ref(false);
+const typeOptions = ref([]);
 const fileInput = ref(null);
 const chainOpen = ref(false);
 const chainNode = ref(null);
@@ -305,7 +360,7 @@ const dmxFields = [
   { key: 'out_port', label: 'workspace.stepOut' },
 ];
 const numberFields = ['universe', 'dmx_address', 'footprint'];
-const textFields = ['fixture_type', 'channel_mode', 'location', 'gel', 'purpose'];
+const textFields = ['location', 'gel', 'purpose'];
 const fixtures = computed(() => fixturesOf(graph.devices));
 const universes = computed(() => universesOf(graph.devices));
 const chainDevices = computed(() => graph.devices.filter(isGear));
@@ -341,6 +396,35 @@ async function saveAttr(node, key, value) {
   } catch (err) {
     if (err.response?.status !== 409) failed(err);
   }
+}
+
+function filterTypes(value, update) {
+  update(() => {
+    const needle = value.toLowerCase();
+    typeOptions.value = library.types.map((t_) => t_.name).filter((n) => n.toLowerCase().includes(needle));
+  });
+}
+
+const modeOptions = ref([]);
+function filterModes(fixture, value, update) {
+  update(() => {
+    const needle = value.toLowerCase();
+    const current = graph.devices.find((d) => d.id === fixture.id) || fixture;
+    modeOptions.value = modesForType(library.types, current.attributes.fixture_type)
+      .map((m) => m.name)
+      .filter((n) => n.toLowerCase().includes(needle));
+  });
+}
+
+// A library mode brings its footprint; a name typed in for the first time is created in the
+// library with the row's current footprint.
+async function chooseMode(row, name) {
+  const fixture = graph.devices.find((d) => d.id === row.id) || row;
+  const mode = modesForType(library.types, fixture.attributes.fixture_type).find((m) => m.name === name);
+  await save(fixture, {
+    attributes: { ...fixture.attributes, ...(mode ? modeAttributes(mode) : { channel_mode: name || null }) },
+  });
+  library.fetch(props.jobId).catch(() => {});
 }
 
 async function save(node, changes) {
@@ -406,6 +490,8 @@ async function addFixtures(count) {
     failed(err);
   }
 }
+
+onMounted(() => library.fetch(props.jobId).catch(() => {}));
 
 function remove(fixture) {
   $q.dialog({ title: t('workspace.remove'), message: fixture.name, cancel: true, persistent: true }).onOk(

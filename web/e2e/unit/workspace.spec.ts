@@ -3,6 +3,8 @@ import {
   catalogQuery,
   deviceFromProduct,
   boxFor,
+  modeAttributes,
+  modesForType,
   dmxTree,
   universeSource,
   universesOf,
@@ -294,4 +296,15 @@ test('the DMX flow tree nests steps under their parents and tells fixtures from 
   expect(tree.map((n) => [n.label, n.kind])).toEqual([['Wash A', 'fixture'], ['Splitter', 'device']]);
   expect(tree[0].children.map((n) => n.label)).toEqual(['Wash B']);
   expect(tree[0].connector).toBe('XLR5');
+});
+
+test('library modes are found by type name and bring their footprint', () => {
+  const types = [
+    { name: 'LED wash', modes: [{ name: '16ch', footprint: 16, position: 1 }, { name: '8ch', footprint: 8, position: 0 }] },
+    { name: 'Spot', modes: [] },
+  ];
+  expect(modesForType(types, ' led WASH ').map((m) => m.name)).toEqual(['8ch', '16ch']);
+  expect(modesForType(types, 'Unknown')).toEqual([]);
+  expect(modesForType(types, null)).toEqual([]);
+  expect(modeAttributes(types[0].modes[0])).toEqual({ channel_mode: '16ch', footprint: 16 });
 });

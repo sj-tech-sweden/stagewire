@@ -430,3 +430,13 @@ export function dmxTree(universe, edges, devices) {
   }
   return roots;
 }
+
+// Modes of the library type with this name (case-insensitive), for the mode select.
+export function modesForType(types, typeName) {
+  const wanted = String(typeName || '').trim().toLowerCase();
+  const found = (types || []).find((t) => t.name.toLowerCase() === wanted);
+  return found ? [...found.modes].sort((a, b) => a.position - b.position) : [];
+}
+
+// What choosing a mode does to a fixture row: the mode's name and its footprint.
+export const modeAttributes = (mode) => ({ channel_mode: mode.name, footprint: mode.footprint });
