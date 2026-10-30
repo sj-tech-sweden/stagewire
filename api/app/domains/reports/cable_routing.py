@@ -439,7 +439,14 @@ def routed_cable_paths(
     )
 
 
-VIRTUAL_KINDS = {"channel", "output", "video_input", "video_destination", "channel_list"}
+VIRTUAL_KINDS = {
+    "channel",
+    "output",
+    "video_input",
+    "video_destination",
+    "video_list",
+    "channel_list",
+}
 LEGACY_KEY_TABLES = {
     "channel_patch_points",
     "output_patch_points",

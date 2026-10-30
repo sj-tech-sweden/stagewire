@@ -577,3 +577,44 @@ test('a fixture type is imported from Stockwire into the library', async ({ page
   await expect.poll(() => imported?.product_id).toBe('91');
   await expect(page.getByText(/added wash pro 300|lade till wash pro 300/i)).toBeVisible();
 });
+
+test('a video list is built in the video editor: inputs, outputs and a patch chain', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Video ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Switcher A', device_type: 'switcher' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^video$/i).click();
+
+  await page.getByTestId('add-video-list').click();
+  await expect(page.getByTestId('video-list-tab')).toHaveCount(1);
+  await page.getByTestId('add-video-input').click();
+  const row = page.getByTestId('video-video_input-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await row.getByTestId('video-name').fill('Cam 1');
+  await row.getByTestId('video-name').press('Enter');
+
+  await row.getByTestId('edit-video-chain').click();
+  await page.getByTestId('chain-add-step').click();
+  await page.getByTestId('chain-device').first().click();
+  await page.locator('.q-menu .q-item', { hasText: 'Switcher A' }).click();
+  await page.getByTestId('chain-connector').fill('SDI');
+  await page.getByTestId('chain-save').click();
+  await expect(row.getByTestId('edit-video-chain')).toContainText('Switcher A');
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/video-lists`, { headers })).json()) as {
+      inputs: { source_label: string; patch_points: { connector: string }[] }[];
+      outputs: unknown[];
+    }[];
+  await expect
+    .poll(async () => {
+      const input = (await legacy())[0]?.inputs[0];
+      return input && [input.source_label, input.patch_points[0]?.connector];
+    })
+    .toEqual(['Cam 1', 'SDI']);
+
+  await page.getByTestId('add-video-output').click();
+  await expect(page.getByTestId('video-video_output-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(1);
+  await expect.poll(async () => (await legacy())[0]?.outputs.length).toBe(1);
+});

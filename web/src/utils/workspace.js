@@ -132,6 +132,7 @@ export const VIRTUAL_KINDS = new Set([
   'output',
   'video_input',
   'video_destination',
+  'video_list',
   'dmx_universe',
 ]);
 
@@ -207,6 +208,44 @@ export const outputsOf = (devices, listId) =>
   devices
     .filter((d) => d.kind === 'output' && d.attributes?.list_id === listId)
     .sort((a, b) => a.position - b.position);
+
+export const videoListsOf = (devices) =>
+  devices.filter((d) => d.kind === 'video_list').sort((a, b) => a.position - b.position);
+
+export const videoRowsOf = (devices, listId, kind) =>
+  devices
+    .filter((d) => d.kind === kind && d.attributes?.list_id === listId)
+    .sort((a, b) => a.position - b.position);
+
+// Every point of a video chain with the data the chain dialog edits, in order. Input chains have
+// one edge per point; output chains keep the points that start a branch on the destination node.
+export function videoChainForm(node, edges, devices) {
+  const points = [];
+  for (const edge of edges) {
+    const attrs = edge.attributes || {};
+    if (attrs.chain !== node.id || !attrs.point_id) continue;
+    points.push({ ...attrs, device_id: edge.dst_device_id });
+  }
+  for (const root of node.attributes?.roots || []) points.push(root);
+  points.sort((a, b) => (a.position || 0) - (b.position || 0));
+  const index = new Map(points.map((p, i) => [p.point_id, i]));
+  return points
+    .filter((p) => devices.some((d) => d.id === p.device_id))
+    .map((p) => ({
+      device_id: p.device_id,
+      connector: p.connector || '',
+      patch_label: p.patch_label || '',
+      source_port: p.source_port || '',
+      input_port: p.input_port || '',
+      notes: p.notes || '',
+      parent_index: p.parent_id && index.has(p.parent_id) ? index.get(p.parent_id) : null,
+    }));
+}
+
+export const videoChainNames = (node, edges, devices) =>
+  videoChainForm(node, edges, devices).map(
+    (step) => devices.find((d) => d.id === step.device_id)?.name || '?',
+  );
 
 export const nextChannelNumber = (channels) =>
   channels.reduce((max, c) => Math.max(max, c.attributes?.channel_number || 0), 0) + 1;

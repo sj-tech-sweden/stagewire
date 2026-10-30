@@ -96,6 +96,21 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "lighting_fixtures": set(FIXTURE_ATTRS),
     "dmx_universes": {"number", "source_port", "name"},
+    "video_input_lists": {
+        "switcher_product_id",
+        "switcher_product_name",
+        "switcher_inputs",
+        "switcher_outputs",
+    },
+    "video_inputs": {"input_number", "source_type", "source_label", "connector", "list_id"},
+    "video_outputs": {
+        "output_number",
+        "name",
+        "destination_label",
+        "connector",
+        "list_id",
+        "roots",
+    },
     "audio_devices": {
         *DEVICE_SPEC_FIELDS,
         *FIXTURE_ONLY_ATTRS,
@@ -124,6 +139,8 @@ MIRRORED_EDGE_TABLES = {
     "stage_plot_elements.link",
     "dmx_steps",
     "dmx_universes",
+    "video_patch_points",
+    "video_output_patch_points",
 }
 CANVAS_OWNED_TABLES = {"stage_plot_elements"}
 
@@ -179,9 +196,9 @@ def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
     return ports
 
 
-def _video_point_attrs(point, chain_root: GraphDevice) -> dict:
+def _video_point_attrs(point, chain_root: GraphDevice | None) -> dict:
     return {
-        "chain": str(chain_root.id),
+        **({"chain": str(chain_root.id)} if chain_root is not None else {}),
         "point_id": str(point.id),
         "position": point.position,
         "connector": point.connector or "",
@@ -600,6 +617,21 @@ class Backfill:
             )
         ).all()
         for vlist in lists:
+            list_node = self.device(
+                f"video_input_lists:{vlist.id}",
+                domain="video",
+                kind="video_list",
+                name=vlist.name,
+                position=vlist.position,
+                stockwire_product_id=vlist.switcher_product_id,
+                stockwire_product_name=vlist.switcher_product_name,
+                attributes={
+                    "switcher_product_id": vlist.switcher_product_id,
+                    "switcher_product_name": vlist.switcher_product_name,
+                    "switcher_inputs": vlist.switcher_inputs,
+                    "switcher_outputs": vlist.switcher_outputs,
+                },
+            )
             for vin in vlist.inputs:
                 source = self.device(
                     f"video_inputs:{vin.id}",
@@ -612,7 +644,8 @@ class Backfill:
                         "input_number": vin.input_number,
                         "source_type": vin.source_type,
                         "source_label": vin.source_label or "",
-                        "list_id": str(vlist.id),
+                        "connector": vin.connector or "",
+                        "list_id": str(list_node.id),
                     },
                     ports=[
                         {
@@ -646,9 +679,9 @@ class Backfill:
                     )
                     prev = target
             for vout in vlist.outputs:
-                self._video_output(vlist, vout)
+                self._video_output(vlist, list_node, vout)
 
-    def _video_output(self, vlist: VideoInputList, vout) -> None:
+    def _video_output(self, vlist: VideoInputList, list_node: GraphDevice, vout) -> None:
         dest_ref = f"video_outputs:{vout.id}"
         points = [p for p in vout.patch_points if p.device_id]
         leaves = {p.id for p in points} - {p.parent_id for p in points if p.parent_id}
@@ -663,7 +696,14 @@ class Backfill:
                 "output_number": vout.output_number,
                 "name": vout.name or "",
                 "destination_label": vout.destination_label or "",
-                "list_id": str(vlist.id),
+                "connector": vout.connector or "",
+                "list_id": str(list_node.id),
+                "roots": [
+                    {"device_id": str(node.id), **_video_point_attrs(p, None)}
+                    for p in points
+                    if p.parent_id is None
+                    and (node := self.devices.get(f"audio_devices:{p.device_id}")) is not None
+                ],
             },
             ports=[
                 {

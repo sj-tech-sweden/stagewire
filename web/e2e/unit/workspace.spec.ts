@@ -17,6 +17,9 @@ import {
   portsFromGroups,
   chainForm,
   chainSteps,
+  videoChainForm,
+  videoChainNames,
+  videoRowsOf,
   channelsOf,
   nextChannelNumber,
   centerOf,
@@ -314,4 +317,37 @@ test('only a universe skips the edge that feeds it: other chains keep every step
   const channel = { id: 'ch', kind: 'channel' };
   const edges = [{ src_device_id: 'x', dst_device_id: 'ch', attributes: { chain: 'ch', position: 0 } }];
   expect(chainForm(channel, edges, [{ id: 'ch', name: 'Ch' }, { id: 'x', name: 'X' }])).toHaveLength(1);
+});
+
+test('video rows are listed per list and in number order', () => {
+  const devices = [
+    { id: 'a', kind: 'video_input', position: 2, attributes: { list_id: 'L' } },
+    { id: 'b', kind: 'video_input', position: 1, attributes: { list_id: 'L' } },
+    { id: 'c', kind: 'video_input', position: 1, attributes: { list_id: 'M' } },
+    { id: 'd', kind: 'video_destination', position: 1, attributes: { list_id: 'L' } },
+  ];
+  expect(videoRowsOf(devices, 'L', 'video_input').map((d) => d.id)).toEqual(['b', 'a']);
+  expect(isVirtual({ kind: 'video_list' })).toBe(true);
+});
+
+test('a video chain is rebuilt from its edges and from the roots kept on the destination', () => {
+  const gear = [
+    { id: 'conv', name: 'Converter' },
+    { id: 'sw', name: 'Switcher' },
+    { id: 'screen', name: 'Screen' },
+  ];
+  const input = { id: 'cam' };
+  const inputEdges = [
+    { dst_device_id: 'sw', attributes: { chain: 'cam', point_id: 'p1', position: 1, input_port: 'In 1' } },
+    { dst_device_id: 'conv', attributes: { chain: 'cam', point_id: 'p0', position: 0, connector: 'SDI' } },
+  ];
+  expect(videoChainNames(input, inputEdges, gear)).toEqual(['Converter', 'Switcher']);
+  expect(videoChainForm(input, inputEdges, gear)[1].input_port).toBe('In 1');
+
+  const output = { id: 'dest', attributes: { roots: [{ device_id: 'sw', point_id: 'r', position: 0 }] } };
+  const outputEdges = [
+    { dst_device_id: 'screen', attributes: { chain: 'dest', point_id: 'p1', position: 1, parent_id: 'r' } },
+  ];
+  expect(videoChainNames(output, outputEdges, gear)).toEqual(['Switcher', 'Screen']);
+  expect(videoChainForm(output, outputEdges, gear).map((s) => s.parent_index)).toEqual([null, 0]);
 });

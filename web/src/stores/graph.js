@@ -31,6 +31,8 @@ export const useGraphStore = defineStore('graph', {
       state.devices.filter((d) => d.stockwire_product_id && d.stockwire_booked === false),
     channelLists: (state) =>
       state.devices.filter((d) => d.kind === 'channel_list').sort((a, b) => a.position - b.position),
+    videoLists: (state) =>
+      state.devices.filter((d) => d.kind === 'video_list').sort((a, b) => a.position - b.position),
     unplaced: (state) => state.devices.filter((d) => d.canvas_x_cm == null && !isVirtual(d)),
     devicesByDomain: (state) => (domain) => state.devices.filter((d) => d.domain === domain),
   },
@@ -219,10 +221,32 @@ export const useGraphStore = defineStore('graph', {
       return data;
     },
     async replaceChain(jobId, kind, nodeId, steps) {
-      const route = { output: 'outputs', universe: 'universes' }[kind] || 'channels';
+      const route =
+        {
+          output: 'outputs',
+          universe: 'universes',
+          video_input: 'video-inputs',
+          video_output: 'video-outputs',
+        }[kind] || 'channels';
       const url = `${base(jobId)}/${route}/${nodeId}/chain`;
       const { data } = await api.put(url, { steps });
       // the server synced; refetch so devices created for the chain and edge changes all arrive
+      await this.fetchGraph(jobId);
+      return data;
+    },
+    async createVideoList(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/video-lists`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    // kind is 'inputs' or 'outputs'
+    async createVideoRows(jobId, listId, kind, payloads) {
+      const { data } = await api.post(`${base(jobId)}/video-lists/${listId}/${kind}/batch`, payloads);
+      data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
+      return data;
+    },
+    async fillVideoFromSwitcher(jobId, listId) {
+      const { data } = await api.post(`${base(jobId)}/video-lists/${listId}/fill-from-switcher`);
       await this.fetchGraph(jobId);
       return data;
     },
@@ -269,7 +293,7 @@ export const useGraphStore = defineStore('graph', {
       return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
-      this.mode = ['list', 'lists', 'devices', 'lights'].includes(mode) ? mode : 'canvas';
+      this.mode = ['list', 'lists', 'devices', 'lights', 'video'].includes(mode) ? mode : 'canvas';
     },
   },
 });

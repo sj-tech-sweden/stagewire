@@ -29,12 +29,30 @@ from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import schemas as lighting_schemas
 from app.domains.lighting import service as lighting_service
 from app.domains.lighting.models import DmxStep, DmxUniverse
+from app.domains.video import service as video_service
+from app.domains.video.models import (
+    VideoInput,
+    VideoInputList,
+    VideoOutput,
+    VideoOutputPatchPoint,
+    VideoPatchPoint,
+)
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph", tags=["graph:lists"], dependencies=[Depends(get_current_user)]
 )
 
 MAX_BATCH = 200
+NON_DEVICE_KINDS = (
+    "channel",
+    "output",
+    "channel_list",
+    "plot_element",
+    "video_list",
+    "video_input",
+    "video_destination",
+    "dmx_universe",
+)
 
 
 class ListCreate(BaseModel):
@@ -139,7 +157,7 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
     target = legacy_target(node)
     if target is not None and target[0] == "audio_devices":
         return target[1]
-    if node.kind in ("channel", "output", "channel_list", "plot_element"):
+    if node.kind in NON_DEVICE_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
     changes = _audio_device_changes(
         {
@@ -313,6 +331,238 @@ async def replace_output_chain(
     await backfill_job(db, job_id)
     output = await service.get_output(db, legacy_id)
     await _publish_list(db, job_id, output.channel_list_id)
+    return await _chain_edges(db, job_id, node)
+
+
+class VideoListCreate(BaseModel):
+    name: str = "Camera inputs"
+    switcher_product_id: str | None = None
+    switcher_product_name: str | None = None
+    switcher_inputs: int | None = None
+    switcher_outputs: int | None = None
+
+
+class VideoInputCreate(BaseModel):
+    input_number: int | None = Field(None, ge=1)
+    source_label: str = ""
+    source_type: str = "camera"
+    connector: str = "sdi"
+    notes: str = ""
+
+
+class VideoOutputCreate(BaseModel):
+    output_number: int | None = Field(None, ge=1)
+    name: str = ""
+    destination_label: str = ""
+    connector: str = "sdi"
+    notes: str = ""
+
+
+class VideoStep(BaseModel):
+    device_id: UUID
+    connector: str = ""
+    patch_label: str = ""
+    notes: str = ""
+    source_port: str = ""
+    input_port: str = ""
+    parent_index: int | None = None
+
+
+class VideoChain(BaseModel):
+    steps: list[VideoStep] = Field(default_factory=list, max_length=64)
+
+
+async def _video_list(db: AsyncSession, job_id: UUID, node_id: UUID) -> VideoInputList:
+    node = await _node(db, job_id, node_id, "video_list")
+    row = await db.get(VideoInputList, _legacy_id(node, "video_input_lists"))
+    if row is None or row.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video list not found")
+    return row
+
+
+@router.post("/video-lists", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_video_list(
+    job_id: UUID, payload: VideoListCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    position = len(await video_service.list_input_lists(db, job_id))
+    row = await video_service.save(
+        db,
+        VideoInputList(job_id=job_id, position=position, **payload.model_dump(exclude_unset=True)),
+    )
+    return await _read(db, job_id, f"video_input_lists:{row.id}")
+
+
+async def _create_video_rows(
+    db: AsyncSession, job_id: UUID, list_id: UUID, items: list, *, outputs: bool
+) -> list[schemas.GraphDeviceRead]:
+    lst = await _video_list(db, job_id, list_id)
+    model, key, table = (
+        (VideoOutput, "output_number", "video_outputs")
+        if outputs
+        else (VideoInput, "input_number", "video_inputs")
+    )
+    async with job_lock(job_id):
+        number = await (
+            video_service.next_output_number(db, lst.id)
+            if outputs
+            else video_service.next_input_number(db, lst.id)
+        )
+        rows = []
+        for item in items:
+            data = item.model_dump(exclude_unset=True)
+            if data.get(key) is None:
+                data[key] = number
+            number = max(number, data[key]) + 1
+            row = model(list_id=lst.id, **data)
+            db.add(row)
+            rows.append(row)
+        await db.commit()
+    db.expire_all()
+    await backfill_job(db, job_id)
+    return [
+        schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, f"{table}:{row.id}"))
+        for row in rows
+    ]
+
+
+@router.post(
+    "/video-lists/{list_id}/inputs", response_model=schemas.GraphDeviceRead, status_code=201
+)
+async def create_video_input(
+    job_id: UUID, list_id: UUID, payload: VideoInputCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    return (await _create_video_rows(db, job_id, list_id, [payload], outputs=False))[0]
+
+
+@router.post(
+    "/video-lists/{list_id}/inputs/batch",
+    response_model=list[schemas.GraphDeviceRead],
+    status_code=201,
+)
+async def create_video_inputs(
+    job_id: UUID,
+    list_id: UUID,
+    payload: list[VideoInputCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} inputs")
+    return await _create_video_rows(db, job_id, list_id, payload, outputs=False)
+
+
+@router.post(
+    "/video-lists/{list_id}/outputs", response_model=schemas.GraphDeviceRead, status_code=201
+)
+async def create_video_output(
+    job_id: UUID, list_id: UUID, payload: VideoOutputCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    return (await _create_video_rows(db, job_id, list_id, [payload], outputs=True))[0]
+
+
+@router.post(
+    "/video-lists/{list_id}/outputs/batch",
+    response_model=list[schemas.GraphDeviceRead],
+    status_code=201,
+)
+async def create_video_outputs(
+    job_id: UUID,
+    list_id: UUID,
+    payload: list[VideoOutputCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} outputs")
+    return await _create_video_rows(db, job_id, list_id, payload, outputs=True)
+
+
+@router.post("/video-lists/{list_id}/fill-from-switcher")
+async def fill_video_list_from_switcher(
+    job_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
+    lst = await _video_list(db, job_id, list_id)
+    result = await video_service.fill_from_switcher(db, lst)
+    db.expire_all()
+    await backfill_job(db, job_id)
+    return {k: (str(v) if k == "device_id" else v) for k, v in result.items()}
+
+
+@router.put("/video-inputs/{input_id}/chain", response_model=ChainRead)
+async def replace_video_input_chain(
+    job_id: UUID, input_id: UUID, payload: VideoChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _node(db, job_id, input_id, "video_input")
+    row = await video_service.get_input(db, job_id, _legacy_id(node, "video_inputs"))
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video input not found")
+    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
+    for twin in twins:
+        device = await service.get_device(db, twin)
+        if device is not None and device.device_type == "projector":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A projector takes its signal from a video output, not a video input",
+            )
+    for point in list(row.patch_points):
+        await db.delete(point)
+    await db.flush()
+    for position, (step, twin) in enumerate(zip(payload.steps, twins, strict=True)):
+        db.add(
+            VideoPatchPoint(
+                input_id=row.id,
+                position=position,
+                device_id=twin,
+                connector=step.connector,
+                patch_label=step.patch_label,
+                notes=step.notes,
+                source_port=step.source_port,
+                input_port=step.input_port,
+            )
+        )
+    await db.commit()
+    db.expire_all()
+    await backfill_job(db, job_id)
+    return await _chain_edges(db, job_id, node)
+
+
+@router.put("/video-outputs/{output_id}/chain", response_model=ChainRead)
+async def replace_video_output_chain(
+    job_id: UUID, output_id: UUID, payload: VideoChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _node(db, job_id, output_id, "video_destination")
+    row = await video_service.get_output(db, job_id, _legacy_id(node, "video_outputs"))
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video output not found")
+    for position, step in enumerate(payload.steps):
+        if step.parent_index is not None and not 0 <= step.parent_index < position:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A step can only take its signal from an earlier step",
+            )
+    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
+    for point in list(row.patch_points):
+        await db.delete(point)
+    await db.flush()
+    created: list[VideoOutputPatchPoint] = []
+    for position, (step, twin) in enumerate(zip(payload.steps, twins, strict=True)):
+        point = VideoOutputPatchPoint(
+            output_id=row.id,
+            position=position,
+            device_id=twin,
+            connector=step.connector,
+            patch_label=step.patch_label,
+            notes=step.notes,
+            source_port=step.source_port,
+            input_port=step.input_port,
+            parent_id=created[step.parent_index].id if step.parent_index is not None else None,
+        )
+        db.add(point)
+        await db.flush()
+        created.append(point)
+    await db.commit()
+    db.expire_all()
+    await backfill_job(db, job_id)
     return await _chain_edges(db, job_id, node)
 
 
