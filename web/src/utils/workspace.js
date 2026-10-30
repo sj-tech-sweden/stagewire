@@ -124,3 +124,14 @@ export function dropPosition(clientX, clientY, rect, zoom, grid = 10) {
 }
 
 export const PRODUCT_MIME = 'application/x-stagewire-products';
+
+// Nodes that stand for list rows or chain ends, not for gear on the stage.
+export const VIRTUAL_KINDS = new Set([
+  'channel',
+  'channel_list',
+  'output',
+  'video_input',
+  'video_destination',
+]);
+
+export const isVirtual = (device) => VIRTUAL_KINDS.has(device.kind);

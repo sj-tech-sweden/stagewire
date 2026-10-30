@@ -11,7 +11,7 @@ from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
-from app.domains.graph import backfill, readers, schemas, topology
+from app.domains.graph import backfill, mirror, readers, schemas, topology
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -122,10 +122,13 @@ async def update_device(
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
 
     async def apply() -> GraphDevice:
+        mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         for key, value in data.items():
             setattr(device, key, value)
         device.graph_edited = True
         await db.commit()
+        if mirrored:
+            await backfill.backfill_job(db, job_id)
         await db.refresh(device)
         return device
 
@@ -155,6 +158,7 @@ async def delete_device(
     removed_edges = [str(e.id) for e in touching]
 
     async def remove() -> None:
+        await mirror.delete_device_twin(db, job_id, device)
         for edge in touching:
             await db.delete(edge)
         await db.delete(device)
@@ -226,10 +230,13 @@ async def update_edge(
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
 
     async def apply() -> ConnectionEdge:
+        mirrored = await mirror.edge_to_legacy(db, job_id, edge, data)
         for key, value in data.items():
             setattr(edge, key, value)
         edge.graph_edited = True
         await db.commit()
+        if mirrored:
+            await backfill.backfill_job(db, job_id)
         await db.refresh(edge)
         return edge
 
@@ -259,8 +266,11 @@ async def delete_edge(
     edge = await _edge(db, job_id, edge_id)
 
     async def remove() -> None:
+        mirrored = await mirror.delete_edge_twin(db, job_id, edge)
         await db.delete(edge)
         await db.commit()
+        if mirrored:
+            await backfill.backfill_job(db, job_id)
 
     await run_versioned_delete(
         db,

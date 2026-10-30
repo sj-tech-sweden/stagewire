@@ -23,7 +23,8 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
 | 6b | Backfill video chains and audio **output** chains | **Done** |
 | 6c | Readers on the graph: console exports, stage-plot cables in reports, channel-list and patch-sheet report contexts | **Done and switched on** (sync-before-read, see below) |
-| 6d | Move the *writers* (channel list / patch / device / plot editors) to the graph; port `web/src/utils/cables.js` + `StagePlotPage.vue`; remaining report contexts | **Not started** |
+| 6d | Two-way mirror between the legacy editors and the graph for channel lists, channels, outputs, audio devices and patch points | **Done** (see below) |
+| 6e | Remaining writers (plot elements, video, DMX, power, rigging) into the graph; port `web/src/utils/cables.js` + `StagePlotPage.vue`; remaining report contexts | **Not started** |
 | 7 | Retire legacy tables (new Alembic revision, never edit old ones) | **Not started** |
 
 ## What exists
@@ -87,6 +88,16 @@ Each reader exists next to its legacy twin, produces the same output, and has a 
 **Verified on real data**: a copy of the dev database (517 jobs with audio or plot data, 870 plugin exports, 251 patch sheets, every channel row, all routed cables) matched legacy output exactly after sync and after a second sync; the check also found the FK ordering bug and the two-link bug above, neither visible with SQLite.
 
 Remaining on the legacy path: job summary, fixture patch, stage plot (elements) and video sheet report contexts; `web/src/utils/cables.js` and `StagePlotPage.vue` (the Konva plot derives its own cables client-side); and all writers.
+
+## Two-way mirror (phase 6d)
+
+Decision: keep the legacy editors and API contracts, and mirror at the service layer instead of rebuilding the UI.
+- **Legacy -> graph, immediately.** `MirrorToGraphRoute` (`graph/mirror.py`) is the route class of the audio, video, lighting and rigging routers. After any successful POST/PATCH/PUT/DELETE under `/jobs/{job_id}/...` it runs `backfill_job` for that job in its own session (errors are logged, never fail the user's write). The sync publishes `graph.*` WebSocket events for exactly what changed, so open workspaces update.
+- **Graph -> legacy, in the same request.** Graph `PATCH`/`DELETE` of a twin of a channel list, channel, output, audio device or patch-point edge is written to the legacy row through the same `audio.service` functions the legacy editors use, and the usual legacy events (`channel.upsert`, `list.upsert`, `device.upsert`, `*.delete`) are published, so a legacy editor open in another tab updates and legacy revisions bump. Deleting an audio device that still has patch points returns 409 and changes nothing on either side.
+- **Field ownership.** Legacy-owned fields (name, notes, position, the channel/output/list/device attribute keys, patch-point connector/label/notes/type, chain endpoints) always flow legacy -> graph, even for graph-edited rows, because graph edits are mirrored back at once. Graph-only fields (canvas position, cable label, phase, channel counts, `notes` column on edges, extra ports/attributes) are never touched. Kinds that are not mirrored yet (video, DMX, power, rigging) keep the earlier rule: a graph edit wins over sync.
+- **Not mirrored (documented gaps).** Creating channel lists / channels / outputs / patch points from the graph API (only the legacy editors create them), graph-created edges (they stay graph-only; `connect` from a channel node does not add a legacy patch point), editing `point_type` or the device a patch point sits on from the graph.
+- Channels, outputs and list containers are virtual nodes (`isVirtual` in `web/src/utils/workspace.js`): the workspace list shows channels and outputs, the canvas and auto-placement skip them.
+- Cost: every legacy write now syncs the whole job (roughly doubles the backend test time); if that shows up for very large jobs, sync only the touched entity.
 
 ## Backfill mapping (phase 6a, decisions made)
 

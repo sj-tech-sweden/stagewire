@@ -3,6 +3,7 @@ import {
   catalogQuery,
   deviceFromProduct,
   domainForCategory,
+  isVirtual,
   dropPosition,
   suggestPorts,
   edgeRows,
@@ -96,4 +97,13 @@ test('phase status uses the limit reported by the API', () => {
   const status = phaseStatus({ L1: 6000, L2: 0, L3: 0, imbalance_pct: 0, limit_w: 7360 });
   expect(status.L1.level).toBe('warn');
   expect(phaseStatus({ L1: 6000, L2: 0, L3: 0 }).L1.level).toBe('over');
+});
+
+test('channel, output, list and video chain nodes are virtual, gear is not', () => {
+  for (const kind of ['channel', 'output', 'channel_list', 'video_input', 'video_destination']) {
+    expect(isVirtual({ kind })).toBe(true);
+  }
+  for (const kind of ['mixer', 'analog_stagebox', 'fixture', 'case', '']) {
+    expect(isVirtual({ kind })).toBe(false);
+  }
 });

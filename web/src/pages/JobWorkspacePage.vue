@@ -249,6 +249,7 @@ import {
   PRODUCT_MIME,
   deviceFromProduct,
   dropPosition,
+  isVirtual,
   phaseStatus,
   suggestPorts,
   visibleOnLayers,
@@ -285,9 +286,15 @@ const plugins = ref([]);
 const layers = reactive({ audio: true, lighting: true, video: true, power: true });
 
 const phases = computed(() => phaseStatus(graph.loads));
-const listDevices = computed(() => graph.devices.filter((d) => visibleOnLayers(d, layers)));
+const listDevices = computed(() =>
+  graph.devices
+    .filter((d) => d.kind !== 'channel_list' && visibleOnLayers(d, layers))
+    .sort((a, b) => (a.domain === b.domain ? a.position - b.position : a.domain.localeCompare(b.domain))),
+);
 const canvasDevices = computed(() =>
-  listDevices.value.filter((d) => d.canvas_x_cm != null && d.canvas_y_cm != null),
+  listDevices.value.filter(
+    (d) => !isVirtual(d) && d.canvas_x_cm != null && d.canvas_y_cm != null,
+  ),
 );
 const canvasEdges = computed(() =>
   graph.edges.filter((e) => layers[SIGNAL_LAYER[e.signal]] !== false),

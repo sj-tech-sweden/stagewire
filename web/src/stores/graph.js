@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
 import { applyGraphEvent, placeUnplaced, threeWayMerge } from '@/utils/graph';
+import { isVirtual } from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
 
@@ -28,7 +29,7 @@ export const useGraphStore = defineStore('graph', {
       state.devices.filter((d) => d.stockwire_product_id && d.stockwire_booked === false),
     channelLists: (state) =>
       state.devices.filter((d) => d.kind === 'channel_list').sort((a, b) => a.position - b.position),
-    unplaced: (state) => state.devices.filter((d) => d.canvas_x_cm == null),
+    unplaced: (state) => state.devices.filter((d) => d.canvas_x_cm == null && !isVirtual(d)),
     devicesByDomain: (state) => (domain) => state.devices.filter((d) => d.domain === domain),
   },
   actions: {
@@ -179,7 +180,10 @@ export const useGraphStore = defineStore('graph', {
     // Mode B -> A: give every unplaced device a default spot, keeping all other data.
     async placeUnplacedDevices(jobId) {
       const before = new Map(this.devices.map((d) => [d.id, d]));
-      const placed = placeUnplaced(this.devices, {});
+      const placed = placeUnplaced(
+        this.devices.filter((d) => !isVirtual(d)),
+        {},
+      );
       for (const device of placed) {
         const old = before.get(device.id);
         if (old.canvas_x_cm == null || old.canvas_y_cm == null) {

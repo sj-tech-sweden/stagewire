@@ -275,3 +275,40 @@ test('a channel list can be exported from the graph', async ({ page, request }) 
   const file = await download;
   expect(file.suggestedFilename()).toMatch(/\.zip$/);
 });
+
+test('renaming a channel in the workspace list updates the channel list, and the canvas ignores channels', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Round trip ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/channel-lists`, { name: 'FOH Inputs' });
+  const channel = await post(request, headers, `/jobs/${jobId}/channel-lists/${lst.id}/channels`, {
+    channel_number: 1,
+    source_label: 'Kick',
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/channel list|kanallista/i).click();
+  const row = dataRows(page).first();
+  await expect(row.locator('input').first()).toHaveValue('Kick');
+  await row.locator('input').first().fill('Kick In');
+  await row.locator('input').first().press('Enter');
+
+  await expect
+    .poll(async () => {
+      const rows = await (
+        await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists/${lst.id}/channels`, { headers })
+      ).json();
+      return rows.find((r: { id: string }) => r.id === channel.id)?.source_label;
+    })
+    .toBe('Kick In');
+
+  await page.getByTestId('mode-toggle').getByText(/stage plot|scenplan/i).click();
+  await page.waitForTimeout(500);
+  const graph = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  const node = graph.devices.find((d: { kind: string }) => d.kind === 'channel');
+  expect(node.canvas_x_cm).toBeNull();
+});
