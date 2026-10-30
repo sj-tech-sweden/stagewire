@@ -65,6 +65,14 @@
               class="q-ml-sm"
               @click="router.push({ path: `/jobs/${route.params.jobId}/devices`, query: subPageQuery })"
             />
+            <q-btn
+              flat
+              icon="hub"
+              :label="t('workspace.title')"
+              class="q-ml-sm"
+              data-testid="open-workspace"
+              @click="router.push(`/jobs/${route.params.jobId}/workspace`)"
+            />
           </div>
           <div class="row items-center q-gutter-xs q-mt-xs">
             <q-chip

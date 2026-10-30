@@ -18,8 +18,8 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 | 1 | Unified `GraphDevice` / `ConnectionEdge`, traversal + validation, REST, WS events | **Done** (backend, new tables) |
 | 2 | Stockwire client: global catalog search, case children, booked flags, request-to-add | **Done**, verified live against the dev Stockwire |
 | 3 | Pinia graph store + WS deltas + merge utils | **Done** |
-| 4 | Quasar UI: `JobWorkspaceView`, `MultiDomainPatchDrawer`, `StockwireCatalogDrawer`, inspector, layer HUD | **Not started** |
-| 5 | Mode A/B switching UI (store state + `placeUnplaced` exist, no view) | **Not started** |
+| 4 | Quasar UI: workspace page, patch drawer, catalog drawer, inspector, layer HUD | **Done** (first version, see below) |
+| 5 | Mode A/B switching | **Done** (header toggle, persisted per job in localStorage) |
 | 6a | Backfill legacy audio devices, channel input chains, DMX trees and power trees into the graph | **Done** (`POST /jobs/{id}/graph/backfill`, idempotent) |
 | 6b | Backfill video chains and audio **output** chains | **Done** |
 | 6c | Repoint routers, reports, exports, stage plot to read the graph, one domain at a time | **Not started** (the big one) |
@@ -47,6 +47,21 @@ Read `AGENTS.md` first; rule 0 (ask when unclear) applies to every open question
 - `src/stores/channels.js`: audio revision handling with `conflict`, `reapplyConflict`, `clearConflict` (no UI consumes these yet).
 - `src/pages/JobDetailPage.vue`: routes `graph.*` WS events into the graph store.
 - Tests: `web/e2e/unit/graph.spec.ts` (4 cases). `eslint .` clean, `quasar build` succeeds.
+
+## Workspace UI (phases 4-5)
+
+Route `/jobs/:jobId/workspace` (`web/src/pages/JobWorkspacePage.vue`, opened from the "Workspace" button on the job page).
+- `WorkspaceCanvas.vue` (Konva, Mode A): draggable device boxes at `canvas_x/y_cm`, edges as signal-coloured lines, selection, zoom. Unbooked Stockwire items get an amber outline.
+- `WorkspaceTable.vue` (Mode B): virtual-scroll `q-table` with inline name/notes edit, Stockwire column with the "Request to add to Stockwire Job booking" button; cards on `$q.screen.lt.sm`.
+- `DeviceInspector.vue`: edit name/notes, booking request, connect form (rejected connections list the validator's issues with a "connect anyway" override), upstream/downstream trace, remove. Side card on desktop, bottom dialog below `md`.
+- `MultiDomainPatchDrawer.vue`: tabs Audio / DMX / Power / Video over `graph.edges`, virtual-scroll table (cards on phones), inline cable label and power phase, per-row validation status, remove.
+- `StockwireCatalogDrawer.vue`: search, multi category/manufacturer facets (counts come from the API), in-stock toggle, multi-select batch add, case expansion by Stockwire device id (creates a `case` device plus children with `case_parent_id`). It states that date-range availability is unavailable (see Stockwire contract).
+- Layer HUD toggles audio/lighting/video/power; phase chips use `/power-load` with a fixed 3680 W per-phase limit (placeholder, should come from the power source rating).
+- Switching to Mode A auto-places every device without a position (`placeUnplacedDevices`) and never touches patch data, notes or Stockwire bindings. Mode B just hides nothing; spatial data stays in the rows.
+- Real-time: the page opens its own job WebSocket (`useJobSocket`) and applies `graph.*` events.
+- Tests: `web/e2e/unit/workspace.spec.ts` (helpers), `web/e2e/workspace.spec.ts` (Playwright flows incl. a 390px phone viewport).
+
+Known gaps: no drag-to-connect on the canvas (connections are made in the inspector); no edge selection on the canvas; case detection needs a device id typed in (Stockwire exposes no "is a case" flag on products); catalog drag-and-drop is not implemented (click/multi-select only); the per-phase limit is hard-coded; the legacy job page and stage plot do not read the graph yet (phase 6c).
 
 ## Backfill mapping (phase 6a, decisions made)
 

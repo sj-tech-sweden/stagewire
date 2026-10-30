@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
-import { applyGraphEvent, threeWayMerge } from '@/utils/graph';
+import { applyGraphEvent, placeUnplaced, threeWayMerge } from '@/utils/graph';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
 
@@ -17,6 +17,8 @@ export const useGraphStore = defineStore('graph', {
     selectedDeviceId: null,
     mode: 'canvas',
     conflict: null,
+    issues: [],
+    loads: { L1: 0, L2: 0, L3: 0, imbalance_pct: 0 },
     loading: false,
     error: null,
   }),
@@ -158,6 +160,33 @@ export const useGraphStore = defineStore('graph', {
         params: { direction, signal },
       });
       return data;
+    },
+    async refreshChecks(jobId) {
+      const [issues, loads] = await Promise.all([
+        api.get(`${base(jobId)}/validate`),
+        api.get(`${base(jobId)}/power-load`),
+      ]);
+      this.issues = issues.data;
+      this.loads = loads.data;
+    },
+    async backfill(jobId) {
+      const { data } = await api.post(`${base(jobId)}/backfill`);
+      await this.fetchGraph(jobId);
+      return data;
+    },
+    // Mode B -> A: give every unplaced device a default spot, keeping all other data.
+    async placeUnplacedDevices(jobId) {
+      const before = new Map(this.devices.map((d) => [d.id, d]));
+      const placed = placeUnplaced(this.devices, {});
+      for (const device of placed) {
+        const old = before.get(device.id);
+        if (old.canvas_x_cm == null || old.canvas_y_cm == null) {
+          await this.updateDevice(jobId, device.id, {
+            canvas_x_cm: device.canvas_x_cm,
+            canvas_y_cm: device.canvas_y_cm,
+          });
+        }
+      }
     },
     setMode(mode) {
       this.mode = mode === 'list' ? 'list' : 'canvas';
