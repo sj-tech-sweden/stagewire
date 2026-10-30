@@ -374,3 +374,39 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
     })
     .toBe(box.id);
 });
+
+test('a channel list is built in the channel list editor and ends up in the exports', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Lists ${Date.now()}` })).id as string;
+  const box = await post(request, headers, `/jobs/${jobId}/graph/devices`, { domain: 'audio', name: 'Stagebox A' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/channel lists|kanallistor/i).click();
+
+  await page.getByTestId('add-list').click();
+  await expect(page.getByTestId('list-tab')).toHaveCount(1);
+  await page.getByTestId('add-channel').click();
+  const row = page.getByTestId('channel-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await row.getByTestId('channel-label').fill('Kick');
+  await row.getByTestId('channel-label').press('Enter');
+
+  await row.getByTestId('edit-chain').click();
+  await page.getByTestId('chain-add-step').click();
+  await page.getByTestId('chain-device').first().click();
+  await page.locator('.q-menu .q-item', { hasText: 'Stagebox A' }).click();
+  await page.getByTestId('chain-save').click();
+  await expect(row.getByTestId('edit-chain')).toContainText('Stagebox A');
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json();
+      const ch = lists[0]?.channels?.[0];
+      return ch && [ch.source_label, ch.patch_points.length];
+    })
+    .toEqual(['Kick', 1]);
+  expect(box.id).toBeTruthy();
+
+  await page.getByTestId('add-output').click();
+  await expect(page.getByTestId('output-row')).toHaveCount(1);
+});

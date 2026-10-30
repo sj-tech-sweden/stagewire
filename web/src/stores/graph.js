@@ -201,6 +201,28 @@ export const useGraphStore = defineStore('graph', {
         }
       }
     },
+    async createList(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/lists`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async createChannels(jobId, listId, payloads) {
+      const { data } = await api.post(`${base(jobId)}/lists/${listId}/channels/batch`, payloads);
+      data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
+      return data;
+    },
+    async createOutput(jobId, listId, payload) {
+      const { data } = await api.post(`${base(jobId)}/lists/${listId}/outputs`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async replaceChain(jobId, kind, nodeId, steps) {
+      const url = `${base(jobId)}/${kind === 'output' ? 'outputs' : 'channels'}/${nodeId}/chain`;
+      const { data } = await api.put(url, { steps });
+      // the server synced; refetch so devices created for the chain and edge changes all arrive
+      await this.fetchGraph(jobId);
+      return data;
+    },
     async exportPlugins(jobId) {
       const { data } = await api.get(`${base(jobId)}/export-plugins`);
       return data;
@@ -214,7 +236,7 @@ export const useGraphStore = defineStore('graph', {
       return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
-      this.mode = mode === 'list' ? 'list' : 'canvas';
+      this.mode = ['list', 'lists'].includes(mode) ? mode : 'canvas';
     },
   },
 });

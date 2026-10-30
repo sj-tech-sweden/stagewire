@@ -3,6 +3,10 @@ import {
   catalogQuery,
   deviceFromProduct,
   boxFor,
+  chainForm,
+  chainSteps,
+  channelsOf,
+  nextChannelNumber,
   centerOf,
   devicesShownAsElements,
   domainForCategory,
@@ -141,4 +145,49 @@ test('a plot element links to a channel, video input, power node or device by wh
   expect(linkRoleFor({ kind: 'video_input' })).toBe('video_input');
   expect(linkRoleFor({ kind: 'distro', domain: 'power' })).toBe('power_node');
   expect(linkRoleFor({ kind: 'mixer', domain: 'audio' })).toBe('device');
+});
+
+const names = [
+  { id: 'box', name: 'Stagebox', kind: 'analog_stagebox' },
+  { id: 'desk', name: 'Desk', kind: 'mixer' },
+  { id: 'amp', name: 'Amp', kind: 'amp' },
+];
+
+test('a channel chain reads in order and rebuilds into the dialog form', () => {
+  const edges = [
+    { src_device_id: 'ch', dst_device_id: 'desk', attributes: { chain: 'ch', position: 1, connector: 'Dante' } },
+    { src_device_id: 'ch', dst_device_id: 'box', attributes: { chain: 'ch', position: 0, connector: 'XLR', patch_label: 'In 3' } },
+    { src_device_id: 'x', dst_device_id: 'amp', attributes: { chain: 'other', position: 0 } },
+  ];
+  expect(chainSteps({ id: 'ch' }, edges, names)).toEqual(['Stagebox', 'Desk']);
+  expect(chainForm({ id: 'ch' }, edges, names)).toEqual([
+    { device_id: 'box', connector: 'XLR', patch_label: 'In 3', notes: '', parent_index: null },
+    { device_id: 'desk', connector: 'Dante', patch_label: '', notes: '', parent_index: null },
+  ]);
+});
+
+test('an output chain starts at the console and keeps its branches', () => {
+  const edges = [
+    {
+      src_device_id: 'desk',
+      dst_device_id: 'bus',
+      attributes: { chain: 'bus', first_point: { position: 0, point_id: 'p0', connector: '' } },
+    },
+    { src_device_id: 'bus', dst_device_id: 'amp', attributes: { chain: 'bus', position: 1, point_id: 'p1' } },
+    { src_device_id: 'bus', dst_device_id: 'box', attributes: { chain: 'bus', position: 2, point_id: 'p2', parent_id: 'p0' } },
+  ];
+  expect(chainSteps({ id: 'bus' }, edges, names)).toEqual(['Desk', 'Amp', 'Stagebox']);
+  expect(chainForm({ id: 'bus' }, edges, names).map((s) => s.parent_index)).toEqual([null, null, 0]);
+});
+
+test('channels are listed by number and the next number follows the highest', () => {
+  const devices = [
+    { id: 'a', kind: 'channel', attributes: { list_id: 'L', channel_number: 10 } },
+    { id: 'b', kind: 'channel', attributes: { list_id: 'L', channel_number: 2 } },
+    { id: 'c', kind: 'channel', attributes: { list_id: 'other', channel_number: 99 } },
+  ];
+  const mine = channelsOf(devices, 'L');
+  expect(mine.map((c) => c.id)).toEqual(['b', 'a']);
+  expect(nextChannelNumber(mine)).toBe(11);
+  expect(nextChannelNumber([])).toBe(1);
 });

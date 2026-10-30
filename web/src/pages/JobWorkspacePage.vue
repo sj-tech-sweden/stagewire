@@ -33,6 +33,7 @@
         :options="[
           { label: t('workspace.modeCanvas'), value: 'canvas', icon: 'map' },
           { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
+          { label: t('workspace.modeLists'), value: 'lists', icon: 'queue_music' },
         ]"
         data-testid="mode-toggle"
         @update:model-value="switchMode"
@@ -132,7 +133,7 @@
         @drop.prevent="onProductDrop"
       >
         <q-banner
-          v-if="!graph.devices.length && !graph.loading"
+          v-if="!graph.devices.length && !graph.loading && graph.mode !== 'lists'"
           class="bg-grey-9 text-white rounded-borders"
         >
           {{ t('workspace.empty') }}
@@ -180,6 +181,10 @@
               @connect="connectDevices"
             />
           </div>
+          <ChannelListEditor
+            v-else-if="graph.mode === 'lists'"
+            :job-id="jobId"
+          />
           <WorkspaceTable
             v-else
             :job-id="jobId"
@@ -261,6 +266,7 @@ import ConflictDialog from '@/components/ConflictDialog.vue';
 import DeviceInspector from '@/components/DeviceInspector.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import StockwireCatalogDrawer from '@/components/StockwireCatalogDrawer.vue';
+import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import WorkspaceTable from '@/components/WorkspaceTable.vue';
 

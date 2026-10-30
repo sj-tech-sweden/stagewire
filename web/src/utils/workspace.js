@@ -176,3 +176,62 @@ export function linkRoleFor(target) {
   if (target.domain === 'power' && target.kind !== 'plot_element') return 'power_node';
   return 'device';
 }
+
+// Names of the devices a channel or output chain passes through, in order.
+export function chainSteps(node, edges, devices) {
+  const names = new Map(devices.map((d) => [d.id, d.name]));
+  const steps = [];
+  for (const edge of edges) {
+    const attrs = edge.attributes || {};
+    if (attrs.chain !== node.id) continue;
+    if (attrs.first_point) {
+      steps.push({ position: attrs.first_point.position || 0, name: names.get(edge.src_device_id) });
+    } else {
+      steps.push({ position: attrs.position || 0, name: names.get(edge.dst_device_id) });
+    }
+  }
+  return steps.sort((a, b) => a.position - b.position).map((s) => s.name || '?');
+}
+
+export const channelsOf = (devices, listId) =>
+  devices
+    .filter((d) => d.kind === 'channel' && d.attributes?.list_id === listId)
+    .sort((a, b) => (a.attributes.channel_number || 0) - (b.attributes.channel_number || 0));
+
+export const outputsOf = (devices, listId) =>
+  devices
+    .filter((d) => d.kind === 'output' && d.attributes?.list_id === listId)
+    .sort((a, b) => a.position - b.position);
+
+export const nextChannelNumber = (channels) =>
+  channels.reduce((max, c) => Math.max(max, c.attributes?.channel_number || 0), 0) + 1;
+
+// Steps the chain dialog edits, rebuilt from the graph so saving sends the whole chain.
+export function chainForm(node, edges, devices) {
+  const byPos = [];
+  for (const edge of edges) {
+    const attrs = edge.attributes || {};
+    if (attrs.chain !== node.id) continue;
+    const point = attrs.first_point || attrs;
+    byPos.push({
+      position: point.position || 0,
+      device_id: attrs.first_point ? edge.src_device_id : edge.dst_device_id,
+      connector: point.connector || '',
+      patch_label: point.patch_label || '',
+      notes: point.notes || '',
+      point_id: point.point_id,
+      parent_id: point.parent_id || null,
+    });
+  }
+  byPos.sort((a, b) => a.position - b.position);
+  const index = new Map(byPos.map((p, i) => [p.point_id, i]));
+  return byPos
+    .filter((p) => devices.some((d) => d.id === p.device_id))
+    .map((p) => ({
+      device_id: p.device_id,
+      connector: p.connector,
+      patch_label: p.patch_label,
+      notes: p.notes,
+      parent_index: p.parent_id && index.has(p.parent_id) ? index.get(p.parent_id) : null,
+    }));
+}
