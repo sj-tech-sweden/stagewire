@@ -312,3 +312,65 @@ test('renaming a channel in the workspace list updates the channel list, and the
   const node = graph.devices.find((d: { kind: string }) => d.kind === 'channel');
   expect(node.canvas_x_cm).toBeNull();
 });
+
+test('plot elements are drawn on the workspace canvas: dragging moves the element, connecting links it', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Elements ${Date.now()}` })).id as string;
+  const element = await post(request, headers, `/jobs/${jobId}/plot-elements`, {
+    element_type: 'microphone',
+    label: 'Vox mic',
+    position_x: 100,
+    position_y: 100,
+    width_cm: 100,
+    height_cm: 50,
+  });
+  const box = await post(request, headers, `/jobs/${jobId}/devices`, {
+    name: 'Stagebox',
+    device_type: 'analog_stagebox',
+  });
+  const graphOf = async () => (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  const boxNode = (await graphOf()).devices.find((d: { name: string }) => d.name === 'Stagebox');
+  await request.patch(`${API_BASE}/api/v1/jobs/${jobId}/graph/devices/${boxNode.id}`, {
+    headers,
+    data: { canvas_x_cm: 600, canvas_y_cm: 100, expected_revision: boxNode.revision },
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+  const area = (await canvas.boundingBox())!;
+  const zoom = 0.8;
+  // element: top-left (100,100) cm, 100x50 cm -> 80x40 px; grab it near its middle
+  const grab = { x: area.x + 100 * zoom + 40, y: area.y + 100 * zoom + 20 };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(grab.x + 60, grab.y + 40, { steps: 6 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const rows = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json();
+      return Math.round(rows.find((r: { id: string }) => r.id === element.id).position_x);
+    })
+    .toBe(175);
+
+  await page.getByTestId('connect-tool').click();
+  const from = { x: area.x + 175 * zoom + 40, y: area.y + 150 * zoom + 20 };
+  const to = { x: area.x + 600 * zoom + 48, y: area.y + 100 * zoom + 20 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const rows = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json();
+      return rows.find((r: { id: string }) => r.id === element.id).linked_device_id;
+    })
+    .toBe(box.id);
+});

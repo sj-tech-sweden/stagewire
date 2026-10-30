@@ -2,8 +2,12 @@ import { test, expect } from '@playwright/test';
 import {
   catalogQuery,
   deviceFromProduct,
+  boxFor,
+  centerOf,
+  devicesShownAsElements,
   domainForCategory,
   isVirtual,
+  linkRoleFor,
   dropPosition,
   suggestPorts,
   edgeRows,
@@ -106,4 +110,35 @@ test('channel, output, list and video chain nodes are virtual, gear is not', () 
   for (const kind of ['mixer', 'analog_stagebox', 'fixture', 'case', '']) {
     expect(isVirtual({ kind })).toBe(false);
   }
+});
+
+test('plot elements are drawn at their real size and rotate about their top-left corner', () => {
+  const element = {
+    kind: 'plot_element',
+    canvas_x_cm: 100,
+    canvas_y_cm: 50,
+    canvas_rotation: 90,
+    attributes: { width_cm: 200, height_cm: 100 },
+  };
+  expect(boxFor(element, 0.5)).toEqual({ w: 100, h: 50 });
+  expect(boxFor({ kind: 'mixer' }, 0.5)).toEqual({ w: 96, h: 40 });
+  const [x, y] = centerOf(element, 1);
+  expect(Math.round(x)).toBe(50);
+  expect(Math.round(y)).toBe(150);
+});
+
+test('a device with a plot element is hidden from the canvas, other links are not', () => {
+  const shown = devicesShownAsElements([
+    { signal: 'link', dst_device_id: 'stagebox', attributes: { role: 'device' } },
+    { signal: 'link', dst_device_id: 'channel', attributes: { role: 'channel' } },
+    { signal: 'audio', dst_device_id: 'desk', attributes: {} },
+  ]);
+  expect([...shown]).toEqual(['stagebox']);
+});
+
+test('a plot element links to a channel, video input, power node or device by what it is dropped on', () => {
+  expect(linkRoleFor({ kind: 'channel' })).toBe('channel');
+  expect(linkRoleFor({ kind: 'video_input' })).toBe('video_input');
+  expect(linkRoleFor({ kind: 'distro', domain: 'power' })).toBe('power_node');
+  expect(linkRoleFor({ kind: 'mixer', domain: 'audio' })).toBe('device');
 });

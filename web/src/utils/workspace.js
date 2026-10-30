@@ -135,3 +135,44 @@ export const VIRTUAL_KINDS = new Set([
 ]);
 
 export const isVirtual = (device) => VIRTUAL_KINDS.has(device.kind);
+
+export const BOX_W = 96;
+export const BOX_H = 40;
+
+export const isPlotElement = (device) => device.kind === 'plot_element';
+
+// Devices that already appear on the plot through an element are drawn as that element.
+export function devicesShownAsElements(edges) {
+  return new Set(
+    edges
+      .filter((e) => e.signal === 'link' && e.attributes?.role === 'device')
+      .map((e) => e.dst_device_id),
+  );
+}
+
+export function boxFor(device, zoom) {
+  if (!isPlotElement(device)) return { w: BOX_W, h: BOX_H };
+  const attrs = device.attributes || {};
+  return {
+    w: Math.max(24, (attrs.width_cm || 60) * zoom),
+    h: Math.max(16, (attrs.height_cm || 60) * zoom),
+  };
+}
+
+// Plot elements rotate about their top-left corner, like Konva groups do.
+export function centerOf(device, zoom) {
+  const { w, h } = boxFor(device, zoom);
+  const theta = ((device.canvas_rotation || 0) * Math.PI) / 180;
+  return [
+    device.canvas_x_cm * zoom + (w / 2) * Math.cos(theta) - (h / 2) * Math.sin(theta),
+    device.canvas_y_cm * zoom + (w / 2) * Math.sin(theta) + (h / 2) * Math.cos(theta),
+  ];
+}
+
+// Role of the link a plot element makes to the node it is dropped on.
+export function linkRoleFor(target) {
+  if (target.kind === 'channel') return 'channel';
+  if (target.kind === 'video_input') return 'video_input';
+  if (target.domain === 'power' && target.kind !== 'plot_element') return 'power_node';
+  return 'device';
+}

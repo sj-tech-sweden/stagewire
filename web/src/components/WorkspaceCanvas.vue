@@ -36,6 +36,7 @@
             id: device.id,
             x: device.canvas_x_cm * zoom,
             y: device.canvas_y_cm * zoom,
+            rotation: device.canvas_rotation || 0,
             draggable: !connectMode,
           }"
           @click="emit('select', device.id)"
@@ -46,9 +47,10 @@
         >
           <v-rect
             :config="{
-              width: BOX_W,
-              height: BOX_H,
+              width: boxFor(device, zoom).w,
+              height: boxFor(device, zoom).h,
               cornerRadius: 4,
+              dash: isPlotElement(device) ? [6, 3] : undefined,
               fill: fillFor(device),
               stroke: device.id === selectedId ? '#FFFFFF' : strokeFor(device),
               strokeWidth: device.id === selectedId ? 3 : 1,
@@ -58,8 +60,8 @@
             :config="{
               x: 6,
               y: 6,
-              width: BOX_W - 12,
-              height: BOX_H - 12,
+              width: Math.max(8, boxFor(device, zoom).w - 12),
+              height: Math.max(8, boxFor(device, zoom).h - 12),
               text: device.name,
               fontSize: 12,
               fill: '#FFFFFF',
@@ -76,10 +78,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useQuasar } from 'quasar';
-import { SIGNAL_COLOR, needsBookingRequest } from '@/utils/workspace';
-
-const BOX_W = 96;
-const BOX_H = 40;
+import { SIGNAL_COLOR, boxFor, centerOf, isPlotElement, needsBookingRequest } from '@/utils/workspace';
 
 const props = defineProps({
   devices: { type: Array, default: () => [] },
@@ -112,19 +111,12 @@ const lines = computed(() =>
       return {
         id: e.id,
         color: SIGNAL_COLOR[e.signal] || SIGNAL_COLOR.data,
-        points: [
-          a.canvas_x_cm * props.zoom + BOX_W / 2,
-          a.canvas_y_cm * props.zoom + BOX_H / 2,
-          b.canvas_x_cm * props.zoom + BOX_W / 2,
-          b.canvas_y_cm * props.zoom + BOX_H / 2,
-        ],
+        points: [...centerOf(a, props.zoom), ...centerOf(b, props.zoom)],
       };
     }),
 );
 
-function center(device) {
-  return [device.canvas_x_cm * props.zoom + BOX_W / 2, device.canvas_y_cm * props.zoom + BOX_H / 2];
-}
+const center = (device) => centerOf(device, props.zoom);
 
 function startLink(device) {
   if (!props.connectMode) return;

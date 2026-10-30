@@ -248,8 +248,11 @@ import { useJobSocket } from '@/composables/useJobSocket';
 import {
   PRODUCT_MIME,
   deviceFromProduct,
+  devicesShownAsElements,
   dropPosition,
+  isPlotElement,
   isVirtual,
+  linkRoleFor,
   phaseStatus,
   suggestPorts,
   visibleOnLayers,
@@ -288,16 +291,22 @@ const layers = reactive({ audio: true, lighting: true, video: true, power: true 
 const phases = computed(() => phaseStatus(graph.loads));
 const listDevices = computed(() =>
   graph.devices
-    .filter((d) => d.kind !== 'channel_list' && visibleOnLayers(d, layers))
+    .filter((d) => d.kind !== 'channel_list' && !isPlotElement(d) && visibleOnLayers(d, layers))
     .sort((a, b) => (a.domain === b.domain ? a.position - b.position : a.domain.localeCompare(b.domain))),
 );
+const shownAsElements = computed(() => devicesShownAsElements(graph.edges));
 const canvasDevices = computed(() =>
-  listDevices.value.filter(
-    (d) => !isVirtual(d) && d.canvas_x_cm != null && d.canvas_y_cm != null,
+  graph.devices.filter(
+    (d) =>
+      visibleOnLayers(d, layers) &&
+      !isVirtual(d) &&
+      !shownAsElements.value.has(d.id) &&
+      d.canvas_x_cm != null &&
+      d.canvas_y_cm != null,
   ),
 );
 const canvasEdges = computed(() =>
-  graph.edges.filter((e) => layers[SIGNAL_LAYER[e.signal]] !== false),
+  graph.edges.filter((e) => e.signal !== 'link' && layers[SIGNAL_LAYER[e.signal]] !== false),
 );
 const inspectorOpen = computed(() => Boolean(graph.selectedDevice));
 
@@ -342,6 +351,20 @@ async function move({ id, x, y }) {
 async function connectDevices({ srcId, dstId }) {
   const src = graph.devices.find((d) => d.id === srcId);
   const dst = graph.devices.find((d) => d.id === dstId);
+  if (isPlotElement(src)) {
+    try {
+      await graph.createEdge(jobId, {
+        signal: 'link',
+        src_device_id: srcId,
+        src_port: 'link',
+        dst_device_id: dstId,
+        dst_port: linkRoleFor(dst),
+      });
+    } catch (err) {
+      $q.notify({ type: 'negative', message: errorText(err) });
+    }
+    return;
+  }
   const fit = suggestPorts(src, dst);
   if (!fit) {
     $q.notify({ type: 'negative', message: t('workspace.noFreePorts', { from: src.name, to: dst.name }) });
