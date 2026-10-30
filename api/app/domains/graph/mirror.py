@@ -24,6 +24,7 @@ from app.domains.graph.backfill import (
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import service as lighting_service
+from app.domains.lighting.models import DmxStep, DmxUniverse
 from app.domains.video import service as video_service
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,20 @@ async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -
     return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
 
 
+def _universe_changes(data: dict) -> dict:
+    out: dict = {}
+    attrs = data.get("attributes") or {}
+    if "name" in data and data["name"] is not None:
+        out["name"] = data["name"]
+    if "notes" in data:
+        out["notes"] = data["notes"] or ""
+    if attrs.get("number"):
+        out["number"] = attrs["number"]
+    if "source_port" in attrs:
+        out["source_port"] = attrs["source_port"] or ""
+    return out
+
+
 def _audio_device_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -249,6 +264,14 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
+    elif table == "dmx_universes":
+        universe = await db.get(DmxUniverse, legacy_id)
+        changes = _universe_changes(data)
+        if universe is None or not changes:
+            return False
+        for key, value in changes.items():
+            setattr(universe, key, value)
+        await db.commit()
     elif table == "lighting_fixtures":
         row = await lighting_service.get_fixture(db, job_id, legacy_id)
         changes = _fixture_changes(data)
@@ -312,6 +335,12 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
+    elif table == "dmx_universes":
+        universe = await db.get(DmxUniverse, legacy_id)
+        if universe is None:
+            return False
+        await db.delete(universe)
+        await db.commit()
     elif table == "lighting_fixtures":
         fixture = await lighting_service.get_fixture(db, job_id, legacy_id)
         if fixture is None:
@@ -350,6 +379,24 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     if target is None or not attrs:
         return False
     table, legacy_id = target
+    if table == "dmx_steps":
+        step = await db.get(DmxStep, legacy_id)
+        changes = {
+            k: attrs[k] or "" for k in ("connector", "in_port", "out_port", "notes") if k in attrs
+        }
+        if step is None or not changes:
+            return False
+        for key, value in changes.items():
+            setattr(step, key, value)
+        await db.commit()
+        return True
+    if table == "dmx_universes":
+        universe = await db.get(DmxUniverse, legacy_id)
+        if universe is None or "source_port" not in attrs:
+            return False
+        universe.source_port = attrs["source_port"] or ""
+        await db.commit()
+        return True
     if table == "channel_patch_points":
         point, changes = await service.get_patch_point(db, legacy_id), _point_changes(attrs)
         if point is None or not changes:
@@ -387,6 +434,21 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
     if target is None:
         return False
     table, legacy_id = target
+    if table == "dmx_steps":
+        step = await db.get(DmxStep, legacy_id)
+        if step is None:
+            return False
+        await db.delete(step)
+        await db.commit()
+        return True
+    if table == "dmx_universes":
+        universe = await db.get(DmxUniverse, legacy_id)
+        if universe is None:
+            return False
+        universe.source_device_id = None
+        universe.source_port = ""
+        await db.commit()
+        return True
     if table == "channel_patch_points":
         point = await service.get_patch_point(db, legacy_id)
         if point is None:

@@ -86,10 +86,10 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 3 devices + 1 channel list + 2 channels + 2 power nodes
-        # 4 chain edges + 1 power feed + 1 dmx + 1 fixture power
-        assert first.json()["devices"] == 8
-        assert first.json()["edges"] == 7
+        # 3 devices + 1 channel list + 2 channels + 2 power nodes + 1 DMX universe
+        # 4 chain edges + 1 power feed + 2 dmx (source -> universe -> fixture) + 1 fixture power
+        assert first.json()["devices"] == 9
+        assert first.json()["edges"] == 8
 
         second = await client.post(f"{g}/backfill", headers=auth_headers)
         assert second.json()["devices"] == 0 and second.json()["edges"] == 0

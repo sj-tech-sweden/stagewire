@@ -28,6 +28,7 @@ from app.domains.graph.mirror import (
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import schemas as lighting_schemas
 from app.domains.lighting import service as lighting_service
+from app.domains.lighting.models import DmxStep, DmxUniverse
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph", tags=["graph:lists"], dependencies=[Depends(get_current_user)]
@@ -389,3 +390,120 @@ async def create_fixture(
         else f"lighting_fixtures:{fixture.id}"
     )
     return await _read(db, job_id, ref)
+
+
+class UniverseCreate(BaseModel):
+    number: int | None = Field(None, ge=1)
+    name: str = ""
+    source_device_id: UUID | None = None
+    source_port: str = ""
+    notes: str = ""
+
+
+class UniverseSource(BaseModel):
+    device_id: UUID | None = None
+    port: str = ""
+
+
+class DmxStepIn(BaseModel):
+    device_id: UUID
+    parent_index: int | None = None
+    in_port: str = ""
+    out_port: str = ""
+    connector: str = ""
+    notes: str = ""
+
+
+class DmxChain(BaseModel):
+    steps: list[DmxStepIn] = Field(default_factory=list, max_length=512)
+
+
+@router.post("/universes", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_universe(
+    job_id: UUID, payload: UniverseCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    existing = (await db.scalars(select(DmxUniverse).where(DmxUniverse.job_id == job_id))).all()
+    number = payload.number or max((u.number for u in existing), default=0) + 1
+    if any(u.number == number for u in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
+    source = (
+        await _device_twin(db, job_id, payload.source_device_id)
+        if payload.source_device_id
+        else None
+    )
+    universe = DmxUniverse(
+        job_id=job_id,
+        number=number,
+        name=payload.name,
+        notes=payload.notes,
+        source_device_id=source,
+        source_port=payload.source_port if source else "",
+    )
+    db.add(universe)
+    await db.commit()
+    return await _read(db, job_id, f"dmx_universes:{universe.id}")
+
+
+@router.put("/universes/{universe_id}/source", response_model=schemas.GraphDeviceRead)
+async def set_universe_source(
+    job_id: UUID, universe_id: UUID, payload: UniverseSource, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    node = await _node(db, job_id, universe_id, "dmx_universe")
+    universe = await db.get(DmxUniverse, _legacy_id(node, "dmx_universes"))
+    universe.source_device_id = (
+        await _device_twin(db, job_id, payload.device_id) if payload.device_id else None
+    )
+    universe.source_port = payload.port if payload.device_id else ""
+    await db.commit()
+    return await _read(db, job_id, node.legacy_ref)
+
+
+async def _step_target(db: AsyncSession, job_id: UUID, node_id: UUID) -> dict:
+    """A DMX step is either a fixture or a device; a device with a fixture steps as the fixture."""
+    node = await db.get(GraphDevice, node_id)
+    if node is None or node.job_id != job_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
+    target = legacy_target(node)
+    if target is not None and target[0] == "lighting_fixtures":
+        return {"fixture_id": target[1]}
+    device_id = await _device_twin(db, job_id, node_id)
+    fixtures = [
+        f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id
+    ]
+    return {"fixture_id": fixtures[0].id} if fixtures else {"device_id": device_id}
+
+
+@router.put("/universes/{universe_id}/chain", response_model=ChainRead)
+async def replace_universe_chain(
+    job_id: UUID, universe_id: UUID, payload: DmxChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _node(db, job_id, universe_id, "dmx_universe")
+    legacy_id = _legacy_id(node, "dmx_universes")
+    for position, step in enumerate(payload.steps):
+        if step.parent_index is not None and not 0 <= step.parent_index < position:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A step can only take its signal from an earlier step",
+            )
+    targets = [await _step_target(db, job_id, step.device_id) for step in payload.steps]
+    await db.execute(delete(DmxStep).where(DmxStep.universe_id == legacy_id))
+    created: list[DmxStep] = []
+    for position, (step, target) in enumerate(zip(payload.steps, targets, strict=True)):
+        row = DmxStep(
+            universe_id=legacy_id,
+            position=position,
+            parent_id=created[step.parent_index].id if step.parent_index is not None else None,
+            in_port=step.in_port,
+            out_port=step.out_port,
+            connector=step.connector,
+            notes=step.notes,
+            **target,
+        )
+        db.add(row)
+        await db.flush()
+        created.append(row)
+    await db.commit()
+    await backfill_job(db, job_id)
+    return await _chain_edges(db, job_id, node)
