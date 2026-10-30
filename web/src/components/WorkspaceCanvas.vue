@@ -2,12 +2,15 @@
   <div
     ref="host"
     class="canvas-host"
+    :class="{ 'hand-cursor': panning }"
     :data-zoom="zoom"
+    :data-pan="`${Math.round(pan.x)},${Math.round(pan.y)}`"
     data-testid="workspace-canvas"
   >
     <v-stage
       ref="stageRef"
-      :config="{ width: size.width, height: size.height }"
+      :config="{ width: size.width, height: size.height, x: pan.x, y: pan.y, draggable: panning }"
+      @dragend="onStagePanEnd"
       @mousemove="onMove"
       @touchmove="onMove"
       @mouseup="endLink"
@@ -63,7 +66,7 @@
             x: (device.canvas_x_cm + origin.x) * zoom,
             y: (device.canvas_y_cm + origin.y) * zoom,
             rotation: device.canvas_rotation || 0,
-            draggable: !connectMode,
+            draggable: !connectMode && !panning,
           }"
           @click="emit('select', device.id)"
           @tap="emit('select', device.id)"
@@ -102,7 +105,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { objectColor } from '@/utils/plotObjects';
 import { SIGNAL_COLOR, boxFor, centerOf, isPlotElement, needsBookingRequest } from '@/utils/workspace';
@@ -122,23 +125,57 @@ const props = defineProps({
   selectedId: { type: String, default: null },
   zoom: { type: Number, default: 0.8 },
   deviceScale: { type: Number, default: 1 },
+  // the hand tool (or Space) pans a map that is zoomed in beyond the standard fit
+  hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan']);
 
 const $q = useQuasar();
 const host = ref(null);
 const stageRef = ref(null);
 const link = reactive({ from: null, points: [0, 0, 0, 0] });
 const hostWidth = ref(800);
+// The map is drawn at full size and the page scrolls, so there are no scrollbars on the map. Only
+// when it is zoomed in beyond the standard fit (the venue as wide as the page) does the map get a
+// viewport of its own and move by panning with the hand tool.
+const mapSize = computed(() => ({
+  width: props.frame ? props.frame.width * props.zoom : hostWidth.value,
+  height: props.frame ? props.frame.height * props.zoom : 0,
+}));
+const zoomedIn = computed(() => Boolean(props.frame) && mapSize.value.width > hostWidth.value + 1);
+const panning = computed(() => props.hand && zoomedIn.value);
+const viewportHeight = computed(() => Math.max(300, Math.round(window.innerHeight * 0.7)));
 const size = computed(() => {
   const minHeight = $q.screen.lt.sm ? 380 : 520;
   if (!props.frame) return { width: hostWidth.value, height: minHeight };
-  return {
-    width: Math.max(hostWidth.value, props.frame.width * props.zoom),
-    height: Math.max(minHeight, props.frame.height * props.zoom),
-  };
+  if (zoomedIn.value) {
+    return { width: hostWidth.value, height: Math.min(mapSize.value.height, viewportHeight.value) };
+  }
+  return { width: hostWidth.value, height: Math.max(minHeight, mapSize.value.height) };
 });
+
+// Pan offset of the map inside its viewport, kept so the map always covers the viewport.
+const pan = reactive({ x: 0, y: 0 });
+function clampPan() {
+  if (!zoomedIn.value) {
+    pan.x = 0;
+    pan.y = 0;
+  } else {
+    pan.x = Math.min(0, Math.max(hostWidth.value - mapSize.value.width, pan.x));
+    pan.y = Math.min(0, Math.max(size.value.height - mapSize.value.height, pan.y));
+  }
+  emit('pan', { x: pan.x, y: pan.y });
+}
+function onStagePanEnd(event) {
+  if (event.target !== stageRef.value?.getStage()) return;
+  pan.x = event.target.x();
+  pan.y = event.target.y();
+  clampPan();
+  event.target.position({ x: pan.x, y: pan.y });
+}
+watch([() => props.zoom, hostWidth, () => props.frame?.width, () => props.frame?.height], clampPan);
+
 let observer = null;
 
 const bg = computed(() => ($q.dark.isActive ? '#0C1114' : '#F5F5F5'));
@@ -280,9 +317,11 @@ onBeforeUnmount(() => observer?.disconnect());
 <style scoped>
 .canvas-host {
   width: 100%;
-  overflow: auto;
-  max-height: 75vh;
+  overflow: hidden;
   border-radius: 4px;
   touch-action: none;
+}
+.hand-cursor :deep(canvas) {
+  cursor: grab;
 }
 </style>

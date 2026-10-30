@@ -124,3 +124,55 @@ async def test_list_endpoints_reject_the_wrong_kind_of_node(auth_headers):
         assert (
             await client.put(f"{g}/channels/{node['id']}/chain", json={"steps": []}, headers=h)
         ).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_sheets_include_output_chains(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Sheets"}, headers=h)).json()[
+            "id"
+        ]
+        g = f"{BASE}/jobs/{job_id}/graph"
+        lst = (await client.post(f"{g}/lists", json={"name": "FOH"}, headers=h)).json()
+        out = (
+            await client.post(f"{g}/lists/{lst['id']}/outputs", json={"name": "Main"}, headers=h)
+        ).json()
+        box = (
+            await client.post(
+                f"{g}/audio-devices", json={"name": "Amp", "device_type": "other"}, headers=h
+            )
+        ).json()
+        res = await client.put(
+            f"{g}/outputs/{out['id']}/chain", json={"steps": [{"device_id": box["id"]}]}, headers=h
+        )
+        assert res.status_code == 200, res.text
+        sheets = await client.get(f"{BASE}/jobs/{job_id}/patch-sheets", headers=h)
+        assert sheets.status_code == 200, sheets.text
+        rows = [r for sheet in sheets.json() for r in sheet["channels"]]
+        assert any(r["kind"] == "output" and r["point"]["revision"] >= 1 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_outputs_are_added_in_bulk(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Bulk out"}, headers=h)).json()[
+            "id"
+        ]
+        g = f"{BASE}/jobs/{job_id}/graph"
+        lst = (await client.post(f"{g}/lists", json={"name": "FOH"}, headers=h)).json()
+        res = await client.post(
+            f"{g}/lists/{lst['id']}/outputs/batch",
+            json=[{"name": f"Aux {n}", "mode": "mono"} for n in range(1, 7)],
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        assert [n["name"] for n in res.json()] == [f"Aux {n}" for n in range(1, 7)]
+        assert [n["position"] for n in res.json()] == list(range(6))
+        legacy = (await client.get(f"{BASE}/jobs/{job_id}/channel-lists", headers=h)).json()[0]
+        assert [o["name"] for o in legacy["outputs"]] == [f"Aux {n}" for n in range(1, 7)]
+        too_many = await client.post(
+            f"{g}/lists/{lst['id']}/outputs/batch", json=[{"name": "x"}] * 201, headers=h
+        )
+        assert too_many.status_code == 422

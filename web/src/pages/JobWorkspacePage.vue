@@ -182,7 +182,7 @@
         @drop.prevent="onProductDrop"
       >
         <q-banner
-          v-if="!graph.devices.length && !graph.loading && !['lists', 'devices', 'lights', 'video', 'power'].includes(graph.mode)"
+          v-if="!graph.devices.length && !graph.loading && graph.mode === 'list'"
           class="bg-grey-9 text-white rounded-borders"
         >
           {{ t('workspace.empty') }}
@@ -190,11 +190,11 @@
         <template v-else>
           <div
             v-if="graph.mode === 'canvas'"
-            class="column items-end"
+            class="column items-stretch"
           >
-            <q-btn-group
-              flat
-              class="q-mb-xs"
+            <div
+              class="row items-center q-gutter-xs q-mb-xs canvas-toolbar"
+              data-testid="canvas-toolbar"
             >
               <q-btn
                 dense
@@ -223,6 +223,21 @@
                 aria-label="fit"
                 data-testid="canvas-fit"
                 @click="fitCanvas"
+              />
+              <q-btn
+                dense
+                no-caps
+                icon="pan_tool"
+                :color="handTool ? 'primary' : undefined"
+                :label="t('workspace.handTool')"
+                data-testid="hand-tool"
+                @click="handTool = !handTool"
+              >
+                <q-tooltip>{{ t('workspace.handToolHint') }}</q-tooltip>
+              </q-btn>
+              <q-separator
+                vertical
+                class="q-mx-xs"
               />
               <q-btn
                 dense
@@ -301,7 +316,7 @@
                 no-caps
                 icon="surround_sound"
                 :color="plotFrame.show.coverage.value ? 'primary' : undefined"
-                :label="t('workspace.layerCoverage')"
+                :label="t('workspace.layerSpeakerCoverage')"
                 data-testid="layer-coverage"
                 @click="plotFrame.show.coverage.value = !plotFrame.show.coverage.value"
               />
@@ -323,8 +338,14 @@
                 data-testid="layer-projector"
                 @click="plotFrame.show.projector.value = !plotFrame.show.projector.value"
               />
+            </div>
+            <div
+              v-if="plotFrame.show.camera.value"
+              class="row items-center q-gutter-xs q-mb-xs"
+              data-testid="camera-view-options"
+            >
+              <span class="text-caption text-grey-6">{{ t('workspace.layerCamera') }}</span>
               <q-btn-toggle
-                v-if="plotFrame.show.camera.value"
                 v-model="plotFrame.cameraMode.value"
                 dense
                 no-caps
@@ -335,7 +356,7 @@
                   { label: t('stagePlot.cameraViewChosen'), value: 'chosen' },
                 ]"
               />
-            </q-btn-group>
+            </div>
             <div
               v-if="unplacedGear.length"
               class="row items-center q-gutter-xs q-mb-xs full-width"
@@ -361,6 +382,7 @@
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
               :device-scale="deviceScale"
+              :hand="handTool || spaceHeld"
               :frame="plotFrame.frame.value"
               :outlets="plotFrame.outlets.value"
               :show-outlets="plotFrame.show.outlets.value"
@@ -368,6 +390,7 @@
               :coverage-image="plotFrame.coverageImage.value"
               :shapes="viewShapes"
               :connect-mode="connectMode"
+              @pan="(p) => (pan = p)"
               @select="select"
               @move="move"
               @connect="connectDevices"
@@ -459,7 +482,7 @@ import { usePlotFrame } from '@/composables/usePlotFrame';
 import { OBJECT_TYPES } from '@/utils/plotObjects';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { fitWidthZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
-import { computed, onMounted, ref, watch, reactive } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch, reactive } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -508,17 +531,29 @@ const jobId = String(route.params.jobId);
 const job = ref(null);
 const catalogOpen = ref(false);
 const importing = ref(false);
+// The order follows how a job is built: the plan, then each discipline (sound, lights, video,
+// power and rigging), then the cross-cutting gear views.
 const modeTabs = computed(() => [
   { label: t('workspace.modeCanvas'), value: 'canvas', icon: 'map' },
-  { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
   { label: t('workspace.modeLists'), value: 'lists', icon: 'queue_music' },
-  { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
   { label: t('workspace.modeLights'), value: 'lights', icon: 'lightbulb' },
   { label: t('workspace.modeVideo'), value: 'video', icon: 'videocam' },
   { label: t('workspace.modePower'), value: 'power', icon: 'bolt' },
+  { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
+  { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
 ]);
 const zoom = ref(0.3);
 const deviceScale = ref(1);
+// The hand tool pans a zoomed-in map by dragging; holding Space does the same until released.
+const handTool = ref(false);
+const spaceHeld = ref(false);
+const pan = ref({ x: 0, y: 0 });
+const typing = (event) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target?.tagName) || event.target?.isContentEditable;
+function onKey(event) {
+  if (event.code !== 'Space' || typing(event) || graph.mode !== 'canvas') return;
+  event.preventDefault();
+  spaceHeld.value = event.type === 'keydown';
+}
 const plotFrame = usePlotFrame(jobId);
 const connectMode = ref(false);
 const plugins = ref([]);
@@ -527,7 +562,7 @@ const layers = reactive({ audio: true, lighting: true, video: true, power: true 
 const phases = computed(() => phaseStatus(graph.loads));
 const listDevices = computed(() =>
   graph.devices
-    .filter((d) => d.kind !== 'channel_list' && !isPlotElement(d) && visibleOnLayers(d, layers))
+    .filter((d) => !isVirtual(d) && !isPlotElement(d) && visibleOnLayers(d, layers))
     .sort((a, b) => (a.domain === b.domain ? a.position - b.position : a.domain.localeCompare(b.domain))),
 );
 const shownAsElements = computed(() => devicesShownAsElements(graph.edges));
@@ -668,6 +703,7 @@ async function onProductDrop(event) {
           event.clientY + index * 20 - rect.top,
           zoom.value,
           plotFrame.frame.value,
+          pan.value,
         );
         device.canvas_x_cm = at.x;
         device.canvas_y_cm = at.y;
@@ -798,6 +834,11 @@ function removeDevice(device) {
   });
 }
 
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('keyup', onKey, true);
+});
+
 watch(
   () => graph.edges.length,
   () => scheduleChecks(),
@@ -821,6 +862,9 @@ watch(
 );
 
 onMounted(async () => {
+  // capture phase: Quasar buttons stop Space from bubbling when one has focus
+  window.addEventListener('keydown', onKey, true);
+  window.addEventListener('keyup', onKey, true);
   try {
     const { data } = await api.get(`/jobs/${jobId}`);
     job.value = data;

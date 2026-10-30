@@ -53,7 +53,8 @@
       row-key="id"
       :rows-per-page-options="[0]"
       hide-bottom
-      style="max-height: 560px"
+      class="sticky-header-table"
+      style="max-height: 70vh"
       data-testid="device-table"
     >
       <template #body-cell-name="slot">

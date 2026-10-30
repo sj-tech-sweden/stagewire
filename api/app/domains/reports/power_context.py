@@ -29,6 +29,7 @@ INLET_LABELS = {
     "attached_schuko": "Fixed cable, Schuko",
     "powercon": "powerCON",
     "cee16": "CEE 16 A",
+    "none": "No power",
     "other": "Other",
 }
 
@@ -56,6 +57,8 @@ def connector_label(key: str | None) -> str:
 def cable_for(inlet: str | None, connector: str) -> str:
     """The lead a device needs to reach a node output of ``connector``."""
     inlet = (inlet or "").strip().lower()
+    if inlet == "none":
+        return ""
     target = connector_label(connector) or "node"
     if inlet in ("", "iec_c13"):
         return f"IEC C13 → {target}"

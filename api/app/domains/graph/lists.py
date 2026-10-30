@@ -257,6 +257,40 @@ async def create_output(
     return await _read(db, job_id, f"channel_list_outputs:{output.id}")
 
 
+@router.post(
+    "/lists/{list_id}/outputs/batch",
+    response_model=list[schemas.GraphDeviceRead],
+    status_code=201,
+)
+async def create_outputs(
+    job_id: UUID,
+    list_id: UUID,
+    payload: list[OutputCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    """Add several outputs at once (the way ``/channels/batch`` adds inputs)."""
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} outputs")
+    list_node = await _node(db, job_id, list_id, "channel_list")
+    row = await _list_row(db, job_id, list_node)
+    position = len(row.outputs)
+    created = []
+    for offset, item in enumerate(payload):
+        created.append(
+            await service.create_output(
+                db, row.id, {**item.model_dump(exclude_unset=True), "position": position + offset}
+            )
+        )
+    await _publish_list(db, job_id, row.id)
+    await backfill_job(db, job_id)
+    return [
+        schemas.GraphDeviceRead.model_validate(
+            await _by_ref(db, job_id, f"channel_list_outputs:{output.id}")
+        )
+        for output in created
+    ]
+
+
 async def _chain_edges(db: AsyncSession, job_id: UUID, node: GraphDevice) -> ChainRead:
     edges = (await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))).all()
     mine = [e for e in edges if (e.attributes or {}).get("chain") == str(node.id)]

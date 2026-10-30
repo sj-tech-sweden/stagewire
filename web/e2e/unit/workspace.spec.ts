@@ -494,6 +494,7 @@ test('the lead a device needs follows its power inlet and the outlet it is plugg
   expect(powerInletLabel(undefined)).toBe('IEC C13');
   expect(powerInletLabel('attached_schuko')).toBe('Attached cable, Schuko');
   expect(cableFor('', 'Schuko 16 A')).toBe('IEC C13 → Schuko 16 A');
+  expect(cableFor('none', 'Schuko 16 A')).toBe('');
   expect(cableFor('attached_schuko', 'Schuko 16 A')).toBe('Fixed cable (Schuko)');
   expect(cableFor('attached_schuko', 'powerCON 20 A')).toBe('Fixed Schuko → powerCON 20 A');
   expect(cableFor('powercon', 'powerCON 20 A')).toBe('powerCON → powerCON 20 A');

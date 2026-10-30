@@ -120,3 +120,17 @@ h6,
     display: none !important;
   }
 }
+
+
+/* Tables in the workspace keep their column headers visible while the rows scroll. The table
+   gets a max-height (so it is the scroll container) and this class; virtual-scroll tables are
+   already sticky in Quasar, this makes the plain ones match. */
+.sticky-header-table thead tr th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+}
+.body--dark .sticky-header-table thead tr th {
+  background: #1d1d1d;
+}

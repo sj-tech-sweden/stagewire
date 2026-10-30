@@ -679,6 +679,7 @@ async def list_patch_sheets(
                             connector=p.connector,
                             patch_label=p.patch_label,
                             notes=p.notes,
+                            revision=p.revision,
                         ),
                     )
                 )

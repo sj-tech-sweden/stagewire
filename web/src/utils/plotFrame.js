@@ -48,9 +48,9 @@ export const fitWidthZoom = (frame, hostWidth, margin = 16) =>
   Math.min(2, Math.max(0.05, Math.round(((hostWidth - margin) / Math.max(1, frame.width)) * 1000) / 1000));
 
 // Where a screen position (relative to the canvas) lands in stage-relative cm, snapped to a grid.
-export function stagePosition(px, py, zoom, frame, grid = 10) {
+export function stagePosition(px, py, zoom, frame, pan = { x: 0, y: 0 }, grid = 10) {
   const snap = (v) => Math.round(v / grid) * grid;
-  return { x: snap(px / zoom - frame.stageX), y: snap(py / zoom - frame.stageY) };
+  return { x: snap((px - pan.x) / zoom - frame.stageX), y: snap((py - pan.y) / zoom - frame.stageY) };
 }
 
 // The spot in the middle of the stage where gear is placed when it is added to the plot.

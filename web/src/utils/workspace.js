@@ -492,9 +492,11 @@ export const NUMBER_FIELDS = [
   'image_aspect_ratio',
 ];
 // How a device takes mains: most gear has an IEC C13 inlet (a detachable cable is needed) or a
-// cable attached with a Schuko plug. An empty value means the default, IEC C13.
+// cable attached with a Schuko plug; microphones, passive speakers and the like take none. An empty
+// value means the default, IEC C13.
 export const POWER_INLETS = [
   { value: 'iec_c13', label: 'IEC C13' },
+  { value: 'none', label: 'No power (passive)' },
   { value: 'attached_schuko', label: 'Attached cable, Schuko' },
   { value: 'powercon', label: 'powerCON' },
   { value: 'cee16', label: 'CEE 16 A' },
@@ -739,6 +741,7 @@ export const powerInletLabel = (inlet) =>
 // the power sheet (api/app/domains/reports/power_context.py).
 export function cableFor(inlet, outletLabel) {
   const kind = inlet || 'iec_c13';
+  if (kind === 'none') return '';
   if (kind === 'iec_c13') return `IEC C13 → ${outletLabel}`;
   if (kind === 'attached_schuko') return /schuko/i.test(outletLabel) || !outletLabel ? 'Fixed cable (Schuko)' : `Fixed Schuko → ${outletLabel}`;
   return `${powerInletLabel(kind)} → ${outletLabel}`;

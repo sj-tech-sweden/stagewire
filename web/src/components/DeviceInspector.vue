@@ -67,6 +67,33 @@
           data-testid="element-device"
           @update:model-value="(v) => linkElement({ linked_device_id: v || null })"
         />
+        <div
+          v-if="isPowerable"
+          class="q-mt-sm"
+        >
+          <q-select
+            v-if="linkedGear"
+            :model-value="linkedGear.attributes?.power_inlet || 'iec_c13'"
+            dense
+            outlined
+            emit-value
+            map-options
+            :options="POWER_INLETS"
+            :label="t('workspace.powerInlet')"
+            :hint="t('workspace.elementInletHint')"
+            data-testid="element-inlet"
+            @update:model-value="(v) => graph.updateDevice(jobId, linkedGear.id, { attributes: { power_inlet: v } }).catch(() => {})"
+          />
+          <q-btn
+            v-else
+            flat
+            no-caps
+            icon="add"
+            :label="t('workspace.createDeviceFor')"
+            data-testid="element-create-device"
+            @click="createDeviceForElement"
+          />
+        </div>
       </div>
       <q-select
         v-if="device.kind !== 'plot_element' && !isVirtual(device)"
@@ -298,6 +325,26 @@ const gearOptions = computed(() =>
     .filter((d) => !isVirtual(d) && !isPlotElement(d))
     .map((d) => ({ value: legacyId(d), label: d.name })),
 );
+// Elements that can draw power (an active speaker, a screen, a rack ...) take their power inlet
+// from the device they are linked to; people, tables and risers do not.
+const NO_POWER_ELEMENTS = new Set(['performer', 'instrument', 'table', 'chair', 'riser', 'dais', 'custom', 'microphone']);
+const isPowerable = computed(
+  () => props.device?.kind === 'plot_element' && !NO_POWER_ELEMENTS.has(props.device.attributes?.element_type),
+);
+const linkedGear = computed(() =>
+  elementLinks.value.linked_device_id
+    ? graph.devices.find((d) => d.legacy_ref === `audio_devices:${elementLinks.value.linked_device_id}`) || null
+    : null,
+);
+// A speaker or screen without a device gets one (named after it) so its power can be set.
+async function createDeviceForElement() {
+  try {
+    const created = await graph.createAudioDevice(props.jobId, { name: props.device.name, device_type: 'other' });
+    await stagePlot.updateElement(props.jobId, legacyId(props.device), { linked_device_id: legacyId(created) });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+  }
+}
 async function linkElement(links) {
   try {
     await stagePlot.updateElement(props.jobId, legacyId(props.device), links);

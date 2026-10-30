@@ -234,7 +234,7 @@ test('catalog items can be dragged onto the canvas and cases are picked from a l
   expect(Math.abs(dropped.canvas_x_cm - 400 / zoom)).toBeLessThanOrEqual(10);
   expect(Math.abs(dropped.canvas_y_cm - 300 / zoom)).toBeLessThanOrEqual(10);
 
-  await page.getByText(/add case contents|lägg till kåpans innehåll/i).click();
+  await page.getByText(/add a case with its contents|lägg till en kåpa med innehåll/i).click();
   await page.getByTestId('case-select').click();
   await page.getByRole('option', { name: /rack case/i }).click();
   await page.getByRole('button', { name: /add case and contents|lägg till kåpa/i }).click();
@@ -296,7 +296,7 @@ test('a channel list can be exported from the graph', async ({ page, request }) 
   expect(file.suggestedFilename()).toMatch(/\.zip$/);
 });
 
-test('renaming a channel in the workspace list updates the channel list, and the canvas ignores channels', async ({
+test('renaming a channel in the sound editor updates the channel list, and the canvas ignores channels', async ({
   page,
   request,
 }) => {
@@ -311,11 +311,11 @@ test('renaming a channel in the workspace list updates the channel list, and the
   });
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
-  const row = dataRows(page).first();
-  await expect(row.locator('input').first()).toHaveValue('Kick');
-  await row.locator('input').first().fill('Kick In');
-  await row.locator('input').first().press('Enter');
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  const row = page.getByTestId('channel-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await expect(row.getByTestId('channel-label')).toHaveValue('Kick');
+  await row.getByTestId('channel-label').fill('Kick In');
+  await row.getByTestId('channel-label').press('Enter');
 
   await expect
     .poll(async () => {
@@ -404,7 +404,7 @@ test('a channel list is built in the channel list editor and ends up in the expo
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Lists ${Date.now()}` })).id as string;
   const box = await post(request, headers, `/jobs/${jobId}/graph/devices`, { domain: 'audio', name: 'Stagebox A' });
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('mode-toggle').getByText(/channel lists|kanallistor/i).click();
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
   await page.getByTestId('add-list').click();
   await expect(page.getByTestId('list-tab')).toHaveCount(1);
@@ -974,4 +974,103 @@ test('power inlets show in the device list, a new power connector asks for its r
   await page.getByTestId('open-reports').click();
   await page.getByRole('combobox', { name: /^template$|^mall$/i }).click();
   await expect(page.locator('.q-menu .q-item', { hasText: /power & cables|ström och kablar/i })).toBeVisible();
+});
+
+test('the map fits the page width and the page scrolls; zoomed in, the hand tool and Space pan it', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (
+    await post(request, headers, '/jobs', {
+      title: `E2E Pan ${Date.now()}`,
+      venue_width_cm: 3000,
+      venue_height_cm: 4000,
+      stage_width_cm: 1000,
+      stage_height_cm: 600,
+    })
+  ).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+  await page.getByTestId('canvas-fit').click();
+
+  // fitted: no horizontal scroll, the tall map makes the page itself taller
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const fitted = (await canvas.boundingBox())!;
+  expect(fitted.height).toBeGreaterThan(900);
+  expect(await canvas.getAttribute('data-pan')).toBe('0,0');
+
+  // zoomed in beyond the fit the map gets its own viewport and the hand tool moves it
+  await page.getByLabel('zoom in').click();
+  await page.getByLabel('zoom in').click();
+  const zoomed = (await canvas.boundingBox())!;
+  expect(zoomed.height).toBeLessThan(900);
+  await page.getByTestId('hand-tool').click();
+  const drag = async () => {
+    await page.mouse.move(zoomed.x + 600, zoomed.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(zoomed.x + 500, zoomed.y + 240, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag();
+  await expect.poll(async () => (await canvas.getAttribute('data-pan'))!.split(',').map(Number)).toEqual([-100, -60]);
+
+  // Space does the same without the tool
+  await page.getByTestId('hand-tool').click();
+  await page.keyboard.down('Space');
+  await page.waitForTimeout(150);
+  await drag();
+  await page.keyboard.up('Space');
+  await expect.poll(async () => (await canvas.getAttribute('data-pan'))!.split(',').map(Number)).toEqual([-200, -120]);
+});
+
+test('the sound editor adds channels and outputs in bulk, sets a stand per channel and syncs gear to Stockwire', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Sound ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 301, name: 'Boom stand', sku: 'BS1', category: 'Stands' }], total: 1 } }),
+  );
+  let synced = 0;
+  await page.route(`**/api/v1/jobs/${jobId}/sync-stockwire`, (route) => {
+    synced += 1;
+    return route.fulfill({ json: { added: ['Boom stand'], updated: [], removed: [], errors: [] } });
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await page.getByTestId('bulk-channels').click();
+  await page.getByTestId('list-bulk-count').fill('4');
+  await page.getByTestId('list-bulk-prefix').fill('Tom');
+  await page.getByTestId('list-bulk-create').click();
+  const lists = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as {
+      channels: { channel_number: number; source_label: string; stand_product_name: string | null }[];
+      outputs: { name: string; mode: string }[];
+    }[];
+  await expect.poll(async () => (await lists())[0]?.channels.map((c) => c.source_label)).toEqual(['Tom 1', 'Tom 2', 'Tom 3', 'Tom 4']);
+
+  await page.getByTestId('bulk-outputs').click();
+  await page.getByTestId('list-bulk-count').fill('3');
+  await page.getByTestId('list-bulk-prefix').fill('Aux');
+  await page.getByTestId('list-bulk-create').click();
+  await expect.poll(async () => (await lists())[0]?.outputs.map((o) => o.name)).toEqual(['Aux 1', 'Aux 2', 'Aux 3']);
+
+  const row = page.getByTestId('channel-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
+  await row.getByTestId('stand-picker').first().click();
+  await page.keyboard.type('boom');
+  await page.locator('.q-menu .q-item', { hasText: 'Boom stand' }).click();
+  await expect.poll(async () => (await lists())[0]?.channels[0]?.stand_product_name).toBe('Boom stand');
+
+  await page.getByTestId('sync-stockwire').click();
+  await expect.poll(() => synced).toBe(1);
+  await expect(page.getByText(/1 added|1 tillagda/)).toBeVisible();
 });

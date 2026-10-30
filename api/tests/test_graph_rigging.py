@@ -509,6 +509,7 @@ async def test_the_power_sheet_lists_inlets_cables_and_extension_cords(auth_head
     assert cable_for("", "schuko") == "IEC C13 → Schuko 16 A"
     assert cable_for("attached_schuko", "schuko") == "Fixed cable (Schuko)"
     assert cable_for("powercon", "powercon") == "powerCON → powerCON 20 A"
+    assert cable_for("none", "schuko") == ""
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
@@ -537,6 +538,10 @@ async def test_the_power_sheet_lists_inlets_cables_and_extension_cords(auth_head
             },
         )
         await post("audio-devices", {"name": "Loose", "device_type": "other", "power_watts": 50})
+        await post(
+            "audio-devices",
+            {"name": "Mic", "device_type": "other", "power_watts": 5, "power_inlet": "none"},
+        )
         for gear in (amp, rack):
             res = await client.put(
                 f"{g}/loads/{gear['id']}",
@@ -551,6 +556,7 @@ async def test_the_power_sheet_lists_inlets_cables_and_extension_cords(auth_head
     assert loads["Amp"]["cable"] == "IEC C13 → Schuko 16 A" and loads["Amp"]["inlet"] == "IEC C13"
     assert loads["Rack"]["cable"] == "Fixed cable (Schuko)"
     assert loads["Loose"]["cable"] == "Not plugged in"
+    assert "Mic" not in loads
     assert ctx["power_cords"][0]["name"] == "Skarv 10" and ctx["power_cords"][0]["length_m"] == 10
     assert (
         ctx["power_cords"][0]["from"] == "Stage distro"

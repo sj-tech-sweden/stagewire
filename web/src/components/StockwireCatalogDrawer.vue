@@ -153,6 +153,9 @@
         :label="t('workspace.caseTitle')"
         @show="loadCases"
       >
+        <div class="q-px-sm q-pt-sm text-caption text-grey-6">
+          {{ t('workspace.caseHint') }}
+        </div>
         <div class="row q-pa-sm q-col-gutter-sm items-center">
           <q-select
             v-model="caseId"

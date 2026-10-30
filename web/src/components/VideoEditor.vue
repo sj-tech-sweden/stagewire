@@ -153,6 +153,8 @@
           row-key="id"
           :rows-per-page-options="[0]"
           hide-bottom
+          class="sticky-header-table"
+          style="max-height: 70vh"
           :data-testid="`video-${section.kind}-table`"
         >
           <template #body-cell-number="slot">

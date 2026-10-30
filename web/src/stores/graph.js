@@ -192,6 +192,11 @@ export const useGraphStore = defineStore('graph', {
       data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
       return data;
     },
+    async createOutputs(jobId, listId, payloads) {
+      const { data } = await api.post(`${base(jobId)}/lists/${listId}/outputs/batch`, payloads);
+      data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
+      return data;
+    },
     async createOutput(jobId, listId, payload) {
       const { data } = await api.post(`${base(jobId)}/lists/${listId}/outputs`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });

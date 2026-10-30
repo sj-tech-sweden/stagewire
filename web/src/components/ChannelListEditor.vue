@@ -59,8 +59,18 @@
           flat
           no-caps
           icon="playlist_add"
-          :label="t('workspace.addEight')"
-          @click="addChannels(8)"
+          :label="t('workspace.bulkAdd')"
+          data-testid="bulk-channels"
+          @click="bulkChannels = true"
+        />
+        <q-btn
+          flat
+          no-caps
+          icon="cloud_upload"
+          :loading="syncing"
+          :label="t('workspace.syncStockwire')"
+          data-testid="sync-stockwire"
+          @click="syncStockwire"
         />
         <q-space />
         <q-btn
@@ -141,7 +151,8 @@
         row-key="id"
         :rows-per-page-options="[0]"
         hide-bottom
-        style="max-height: 480px"
+        class="sticky-header-table"
+        style="max-height: 70vh"
         data-testid="channel-table"
       >
         <template #body-cell-number="slot">
@@ -182,7 +193,7 @@
           </q-td>
         </template>
         <template
-          v-for="field in ['device', 'stand_type']"
+          v-for="field in ['device']"
           #[`body-cell-${field}`]="slot"
           :key="field"
         >
@@ -192,6 +203,22 @@
               dense
               borderless
               @change="(v) => saveAttr(slot.row, field, v)"
+            />
+          </q-td>
+        </template>
+        <template #body-cell-stand_type="slot">
+          <q-td
+            :props="slot"
+            style="min-width: 150px; max-width: 190px"
+          >
+            <StockwireProductPicker
+              :model-value="standOf(slot.row)"
+              gear-type="stand"
+              :label="t('stockwire.selectStand')"
+              :hint="''"
+              borderless
+              data-testid="stand-picker"
+              @update:model-value="(p) => setStand(slot.row, p)"
             />
           </q-td>
         </template>
@@ -228,7 +255,10 @@
           </q-td>
         </template>
         <template #body-cell-chain="slot">
-          <q-td :props="slot">
+          <q-td
+            :props="slot"
+            class="chain-cell"
+          >
             <q-btn
               flat
               dense
@@ -275,6 +305,14 @@
           :label="t('workspace.addOutput')"
           data-testid="add-output"
           @click="addOutput"
+        />
+        <q-btn
+          flat
+          no-caps
+          icon="playlist_add"
+          :label="t('workspace.bulkAdd')"
+          data-testid="bulk-outputs"
+          @click="bulkOutputs = true"
         />
       </div>
       <q-list
@@ -336,6 +374,18 @@
       </q-list>
     </template>
 
+    <ListBulkDialog
+      v-model="bulkChannels"
+      :next-number="nextChannelNumber(channels)"
+      :busy="bulkBusy"
+      @create="(items) => bulkCreate('channels', items)"
+    />
+    <ListBulkDialog
+      v-model="bulkOutputs"
+      outputs
+      :busy="bulkBusy"
+      @create="(items) => bulkCreate('outputs', items)"
+    />
     <ChainFlowDialog
       v-model="flowOpen"
       :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
@@ -360,6 +410,9 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import { api } from '@/boot/api';
+import ListBulkDialog from '@/components/ListBulkDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
@@ -453,6 +506,60 @@ async function addChannels(count) {
   }
 }
 
+const bulkChannels = ref(false);
+const bulkOutputs = ref(false);
+const bulkBusy = ref(false);
+
+async function bulkCreate(kind, items) {
+  bulkBusy.value = true;
+  try {
+    if (kind === 'channels') await graph.createChannels(props.jobId, list.value.id, items);
+    else await graph.createOutputs(props.jobId, list.value.id, items);
+    bulkChannels.value = false;
+    bulkOutputs.value = false;
+  } catch (err) {
+    failed(err);
+  } finally {
+    bulkBusy.value = false;
+  }
+}
+
+// A stand is a Stockwire product (or a name typed in for something not in the catalog). The
+// product is stored on the channel; stand_type keeps the name for lists and exports. "Sync to
+// Stockwire" then adds the stands, mixers and gear to the linked Stockwire job.
+const standOf = (node) =>
+  node.attributes.stand_product_name || node.attributes.stand_type
+    ? { id: node.attributes.stand_product_id || null, name: node.attributes.stand_product_name || node.attributes.stand_type }
+    : null;
+const setStand = (node, product) =>
+  save(node, {
+    attributes: {
+      stand_product_id: product?.id ? String(product.id) : null,
+      stand_product_name: product?.name || null,
+      stand_type: product?.name || '',
+    },
+  });
+
+const syncing = ref(false);
+async function syncStockwire() {
+  syncing.value = true;
+  try {
+    const { data } = await api.post(`/jobs/${props.jobId}/sync-stockwire`);
+    $q.notify({
+      type: data.errors?.length ? 'warning' : 'positive',
+      message: t('workspace.stockwireSynced', {
+        added: data.added.length,
+        updated: data.updated.length,
+        removed: data.removed.length,
+      }),
+    });
+  } catch (err) {
+    failed(err);
+  } finally {
+    syncing.value = false;
+  }
+}
+
 async function addOutput() {
   try {
     await graph.createOutput(props.jobId, list.value.id, { name: `${t('workspace.output')} ${outputs.value.length + 1}` });
@@ -506,3 +613,12 @@ function removeNode(node) {
 
 const removeList = () => removeNode(list.value);
 </script>
+
+<style scoped>
+/* The chain button shows the whole chain and sits next to the flow button, so the cell must be
+   wide enough for both or the next column would cover the flow button. */
+.chain-cell {
+  min-width: 240px;
+  white-space: nowrap;
+}
+</style>

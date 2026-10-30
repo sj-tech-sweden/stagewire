@@ -50,7 +50,8 @@
       row-key="id"
       :rows-per-page-options="[0]"
       hide-bottom
-      style="max-height: 520px"
+      class="sticky-header-table"
+      style="max-height: 70vh"
       data-testid="workspace-table"
       @row-click="(_, row) => emit('select', row.id)"
     >
