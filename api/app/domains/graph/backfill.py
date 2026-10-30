@@ -106,7 +106,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
     "dmx_universes": {"number", "source_port", "name"},
     "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
-    "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id"},
+    "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id"},
     "video_input_lists": {
         "switcher_product_id",
         "switcher_product_name",
@@ -1132,6 +1132,7 @@ class Backfill:
                     "active": node.active,
                     "outputs": node.outputs,
                     "venue_outlet_id": str(node.venue_outlet_id) if node.venue_outlet_id else None,
+                    "venue_group_id": str(node.venue_group_id) if node.venue_group_id else None,
                 }.items()
                 if v not in (None, [])
             }

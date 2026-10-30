@@ -169,3 +169,41 @@ async def test_create_and_list_job(auth_headers: dict) -> None:
             )["label"]
             == "Alex channel edit"
         )
+
+
+async def test_jobs_can_be_searched_paged_and_listed_newest_first(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for title in ("Alpha gala", "Beta gala", "Gamma concert"):
+            await client.post(
+                f"{BASE}/jobs",
+                json={"title": f"{title} paging-x", "venue_name": "Hall Q"},
+                headers=auth_headers,
+            )
+        res = await client.get(f"{BASE}/jobs", params={"search": "paging-x"}, headers=auth_headers)
+        assert res.headers["X-Total-Count"] == "3"
+        assert [j["title"] for j in res.json()] == [
+            "Alpha gala paging-x",
+            "Beta gala paging-x",
+            "Gamma concert paging-x",
+        ]
+        newest = await client.get(
+            f"{BASE}/jobs",
+            params={"search": "PAGING-X", "newest_first": True, "limit": 2},
+            headers=auth_headers,
+        )
+        assert [j["title"] for j in newest.json()] == [
+            "Gamma concert paging-x",
+            "Beta gala paging-x",
+        ]
+        assert newest.headers["X-Total-Count"] == "3"
+        rest = await client.get(
+            f"{BASE}/jobs",
+            params={"search": "paging-x", "newest_first": True, "skip": 2, "limit": 2},
+            headers=auth_headers,
+        )
+        assert [j["title"] for j in rest.json()] == ["Alpha gala paging-x"]
+        by_venue = await client.get(
+            f"{BASE}/jobs", params={"search": "hall q"}, headers=auth_headers
+        )
+        assert int(by_venue.headers["X-Total-Count"]) >= 3

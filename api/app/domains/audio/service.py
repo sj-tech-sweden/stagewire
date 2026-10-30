@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,9 +30,34 @@ async def create_job(db: AsyncSession, data: dict) -> ProductionJob:
     return job
 
 
-async def list_jobs(db: AsyncSession) -> list[ProductionJob]:
-    result = await db.execute(select(ProductionJob).order_by(ProductionJob.created_at))
-    return list(result.scalars().all())
+async def list_jobs(
+    db: AsyncSession,
+    *,
+    search: str | None = None,
+    newest_first: bool = False,
+    skip: int = 0,
+    limit: int | None = None,
+) -> tuple[list[ProductionJob], int]:
+    """Jobs, optionally filtered by a text in the title, venue or Stockwire id and paged.
+
+    Returns the page and the total number of matches, so a list can say how many there are.
+    """
+    query = select(ProductionJob)
+    if search and search.strip():
+        like = f"%{search.strip().lower()}%"
+        query = query.where(
+            or_(
+                func.lower(ProductionJob.title).like(like),
+                func.lower(ProductionJob.venue_name).like(like),
+                func.lower(func.coalesce(ProductionJob.stockwire_job_id, "")).like(like),
+            )
+        )
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    order = ProductionJob.created_at.desc() if newest_first else ProductionJob.created_at
+    query = query.order_by(order).offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    return list((await db.execute(query)).scalars().all()), int(total or 0)
 
 
 async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:

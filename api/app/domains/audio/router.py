@@ -56,8 +56,21 @@ async def create_job(
 
 
 @router.get("", response_model=list[schemas.ProductionJobRead])
-async def list_jobs(db: AsyncSession = Depends(get_db)) -> list[schemas.ProductionJobRead]:
-    jobs = await service.list_jobs(db)
+async def list_jobs(
+    response: Response,
+    search: str | None = None,
+    newest_first: bool = False,
+    skip: int = Query(0, ge=0),
+    limit: int | None = Query(None, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.ProductionJobRead]:
+    """Jobs; ``search`` matches title, venue and Stockwire id, ``skip``/``limit`` page the list
+    and ``X-Total-Count`` carries the number of matches. Without them the whole list is returned,
+    oldest first, as before."""
+    jobs, total = await service.list_jobs(
+        db, search=search, newest_first=newest_first, skip=skip, limit=limit
+    )
+    response.headers["X-Total-Count"] = str(total)
     return [schemas.ProductionJobRead.model_validate(j) for j in jobs]
 
 

@@ -318,6 +318,14 @@
                 data-testid="edit-stage-venue"
                 @click="stageVenueOpen = true"
               />
+              <q-btn
+                dense
+                no-caps
+                icon="add_location_alt"
+                :label="t('workspace.addOutletOnMap')"
+                data-testid="add-outlet-map"
+                @click="addOutletOnMap"
+              />
               <q-btn-dropdown
                 dense
                 no-caps
@@ -915,6 +923,60 @@ async function exportList(list, plugin) {
 const importInput = ref(null);
 const reportDialog = ref(false);
 const stageVenueOpen = ref(false);
+
+// Outlets belong to the venue. A job without a venue gets one (after a confirmation) made from its
+// current stage and venue sizes, so adding an outlet here needs no detour through the venues.
+async function ensureVenue() {
+  const current = plotFrame.job.value;
+  if (current?.venue_id) return current.venue_id;
+  const name = current?.venue_name || current?.title || t('workspace.newVenue');
+  const confirmed = await new Promise((resolve) => {
+    $q.dialog({
+      title: t('workspace.addOutletOnMap'),
+      message: t('workspace.createVenueConfirm', { name }),
+      cancel: true,
+      persistent: true,
+    })
+      .onOk(() => resolve(true))
+      .onCancel(() => resolve(false))
+      .onDismiss(() => resolve(false));
+  });
+  if (!confirmed) return null;
+  const frame = plotFrame.frame.value;
+  const { data: venue } = await api.post('/venues', {
+    name,
+    venue_width_cm: frame.venueW,
+    venue_height_cm: frame.venueH,
+    stage_x_cm: frame.stageX,
+    stage_y_cm: frame.stageY,
+    stage_width_cm: frame.stageW,
+    stage_height_cm: frame.stageH,
+    audience_polygon: frame.audience,
+  });
+  await api.put(`/jobs/${jobId}/venue`, { venue_id: venue.id });
+  await reloadJob();
+  return venue.id;
+}
+
+async function addOutletOnMap() {
+  try {
+    const venueId = await ensureVenue();
+    if (!venueId) return;
+    const centre = stageCentre(plotFrame.frame.value, 20);
+    const { data: outlet } = await api.post(`/venues/${venueId}/power-outlets`, {
+      name: `${t('workspace.venueOutlet')} ${plotFrame.outlets.value.length + 1}`,
+      connector: 'schuko',
+      x_cm: centre.x,
+      y_cm: centre.y,
+    });
+    await plotFrame.load();
+    plotFrame.show.outlets.value = true;
+    selectOutlet(outlet.id);
+    $q.notify({ type: 'positive', message: t('workspace.outletAdded', { name: outlet.name }) });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
 
 // A venue outlet picked on the map is shown in the inspector in place of a device.
 const selectedOutletId = ref(null);

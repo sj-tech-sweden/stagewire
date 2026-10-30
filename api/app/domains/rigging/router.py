@@ -426,6 +426,7 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
     loads = []
     for r in rows:
         power = evaluation.loads.get(r.id, {})
+        node = evaluation.nodes.get(r.power_node_id) if r.power_node_id else None
         loads.append(
             {
                 "id": r.id,
@@ -437,8 +438,12 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
                 "power_node_id": r.power_node_id,
                 "power_connector": r.power_connector,
                 "device_id": r.device_id,
-                "power_status": power.get(
-                    "status", "ok" if r.power_node_id is None else "unpowered"
+                # a load sits on its node: when the node is over its rating or close to it, so is
+                # the load (it is part of what overloads it), not "ok"
+                "power_status": (
+                    node["status"]
+                    if node and node["status"] in ("over", "warn")
+                    else power.get("status", "ok" if r.power_node_id is None else "unpowered")
                 ),
             }
         )

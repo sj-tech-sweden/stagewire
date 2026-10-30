@@ -157,6 +157,9 @@
                 <span v-if="graphNode(node.id)?.attributes?.outputs?.length">
                   · {{ outputsLabel(graphNode(node.id).attributes.outputs, connectorLabel) }}
                 </span>
+                <span v-if="venueOutletsOf(node.id).length">
+                  · {{ t('workspace.venueSourceOf', { outlets: venueOutletsOf(node.id).join(', ') }) }}
+                </span>
                 <span v-if="graphNode(node.id)?.attributes?.length_m">
                   · {{ graphNode(node.id).attributes.length_m }} m
                 </span>
@@ -862,6 +865,13 @@ const outletParents = computed(() =>
 const parentOptions = computed(() => [...nodeOptions.value, ...outletParents.value]);
 const groupNames = ref({});
 const groupName = (id) => groupNames.value[id] || '';
+// The venue outlets a source node stands for: all outlets of its power group, or its one outlet.
+const venueOutletsOf = (nodeId) => {
+  const attrs = graphNode(nodeId)?.attributes || {};
+  return outlets.value
+    .filter((o) => (attrs.venue_group_id && o.group_id === attrs.venue_group_id) || (attrs.venue_outlet_id && o.id === attrs.venue_outlet_id))
+    .map((o) => o.name || connectorLabel(o.connector));
+};
 const outletOf = (value) =>
   String(value || '').startsWith('outlet:') ? outlets.value.find((o) => `outlet:${o.id}` === value) : null;
 

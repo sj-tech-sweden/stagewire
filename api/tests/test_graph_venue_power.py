@@ -207,3 +207,7 @@ async def test_a_one_phase_group_carries_its_whole_load_on_one_phase_and_gear_ca
 
         load = (await client.get(f"{g}/power-load", headers=h)).json()
         assert load["L1"] == 3600 and load["L2"] == 0 and load["L3"] == 0
+        # one phase is all this supply can feed, so there is no imbalance to report
+        assert load["imbalance_pct"] == 0
+        # the gear on the overloaded group is over too, not "ok"
+        assert {row["power_status"] for row in summary["loads"]} == {"over"}

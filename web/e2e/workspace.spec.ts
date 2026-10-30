@@ -1406,3 +1406,29 @@ test('a plain device such as an LED wall can be hung on a rigging point', async 
   const wall = graph.devices.find((d: any) => d.name === 'LED wall');
   expect(wall.attributes.rigging_point_id).toBeTruthy();
 });
+
+test('an outlet is added straight from the map, creating the venue for the job when it has none', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (
+    await post(request, headers, '/jobs', { title: `E2E Map outlet ${Date.now()}`, stage_width_cm: 1000, stage_height_cm: 600 })
+  ).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('add-outlet-map').click();
+  await page.getByRole('button', { name: /^ok$/i }).click();
+  await expect(page.getByTestId('outlet-inspector')).toBeVisible();
+  const job = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}`, { headers })).json()) as any;
+  await expect.poll(async () => (await job()).venue_id).toBeTruthy();
+  expect((await job()).stage_width_cm).toBe(1000);
+  const outlets = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/power-outlets`, { headers })).json()) as any[];
+  await expect.poll(async () => (await outlets()).length).toBe(1);
+
+  // the venue now exists, so a second outlet needs no question
+  await page.getByTestId('add-outlet-map').click();
+  await expect.poll(async () => (await outlets()).length).toBe(2);
+});

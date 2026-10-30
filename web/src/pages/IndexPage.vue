@@ -13,6 +13,22 @@
       />
     </div>
 
+    <q-input
+      v-model="query"
+      dense
+      outlined
+      clearable
+      debounce="300"
+      class="q-mb-md"
+      :label="t('jobs.search')"
+      data-testid="job-search"
+      @update:model-value="(v) => store.fetchJobs({ search: v || '' })"
+    >
+      <template #prepend>
+        <q-icon name="search" />
+      </template>
+    </q-input>
+
     <q-banner
       v-if="store.error"
       class="bg-negative text-white q-mb-md"
@@ -55,6 +71,26 @@
         </q-item-section>
       </q-item>
     </q-list>
+
+    <div
+      v-if="store.jobs.length"
+      class="row items-center justify-center q-gutter-sm q-mt-sm"
+      data-testid="jobs-footer"
+    >
+      <span class="text-caption text-grey-6">
+        {{ t('jobs.showing', { n: store.jobs.length, total: store.total }) }}
+      </span>
+      <q-btn
+        v-if="store.hasMore"
+        flat
+        no-caps
+        icon="expand_more"
+        :label="t('jobs.loadMore')"
+        :loading="store.loading"
+        data-testid="jobs-more"
+        @click="store.loadMore()"
+      />
+    </div>
 
     <q-card
       v-else
@@ -126,6 +162,7 @@ function openJob(id) {
   router.push(`/jobs/${id}`)
 }
 const dialog = ref(false);
+const query = ref(store.search || '');
 const form = ref({
   title: '',
   venue_name: '',
@@ -143,7 +180,8 @@ async function create() {
   await store.createJob(payload);
   dialog.value = false;
   form.value = { title: '', venue_name: '', event_date: '', stockwire_job_id: '' };
-  await store.fetchJobs();
+  query.value = '';
+  await store.fetchJobs({ search: '' });
 }
 
 function formatDate(value) {
