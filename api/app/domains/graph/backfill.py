@@ -41,6 +41,26 @@ CHANNEL_FIELDS = (
 )
 OUTPUT_FIELDS = ("mode", "connector", "color_code")
 
+ELEMENT_FIELDS = (
+    "element_type",
+    "width_cm",
+    "height_cm",
+    "image_url",
+    "coverage_angle_h",
+    "coverage_distance_m",
+    "focal_mm",
+    "power_connector",
+)
+# legacy link column -> role of the ``link`` edge from the element node to its target
+ELEMENT_LINKS = {
+    "linked_channel_id": "channel",
+    "linked_device_id": "device",
+    "linked_patch_point_id": "patch_point",
+    "linked_output_point_id": "output_point",
+    "linked_video_input_id": "video_input",
+    "linked_lens_device_id": "lens",
+    "power_node_id": "power_node",
+}
 # Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
 # the graph even when the twin was edited there, because graph edits are mirrored back at once.
 OWNED_ATTRS: dict[str, set[str]] = {
@@ -52,6 +72,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
         "mixer_buses",
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
+    "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id"},
     "audio_devices": {
         "device_type",
         "weight_kg",
@@ -71,7 +92,13 @@ OWNED_DEVICE_FIELDS = (
     "stockwire_product_id",
     "stockwire_product_name",
 )
-MIRRORED_EDGE_TABLES = {"channel_patch_points", "output_patch_points", "channel_list_outputs"}
+MIRRORED_EDGE_TABLES = {
+    "channel_patch_points",
+    "output_patch_points",
+    "channel_list_outputs",
+    "stage_plot_elements.link",
+}
+CANVAS_OWNED_TABLES = {"stage_plot_elements"}
 
 
 def _table(ref: str) -> str:
@@ -198,6 +225,10 @@ class Backfill:
                 owned_new = fields.get("attributes") or {}
                 attrs.update({k: v for k, v in owned_new.items() if k in OWNED_ATTRS[table]})
                 existing.attributes = attrs
+                if table in CANVAS_OWNED_TABLES:
+                    for key in ("canvas_x_cm", "canvas_y_cm", "canvas_rotation"):
+                        if key in fields:
+                            setattr(existing, key, fields[key])
                 if table == "audio_devices":
                     existing.kind, existing.domain = fields["kind"], fields["domain"]
                     existing.ports = copy.deepcopy(fields.get("ports") or [])
@@ -672,6 +703,77 @@ class Backfill:
         ]
         self.result.removed = len(doomed) + len(gone_devices)
 
+    async def plot_elements(self) -> None:
+        """Stage plot elements become ``plot_element`` nodes; their links become ``link`` edges."""
+        elements = (
+            await self.db.scalars(
+                select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
+            )
+        ).all()
+        point_device = {
+            p.id: p.device_id
+            for p in (await self.db.scalars(select(ChannelPatchPoint))).all()
+            if p.device_id
+        }
+        out_device = {
+            p.id: p.device_id
+            for p in (await self.db.scalars(select(OutputPatchPoint))).all()
+            if p.device_id
+        }
+        for el in elements:
+            node = self.device(
+                f"stage_plot_elements:{el.id}",
+                domain="other",
+                kind="plot_element",
+                name=el.label or el.element_type,
+                position=0,
+                attributes={
+                    **{
+                        key: getattr(el, key)
+                        for key in ELEMENT_FIELDS
+                        if getattr(el, key) is not None
+                    },
+                    **(
+                        {"rigging_point_id": str(el.rigging_point_id)}
+                        if el.rigging_point_id
+                        else {}
+                    ),
+                },
+                ports=[],
+                canvas_x_cm=el.position_x,
+                canvas_y_cm=el.position_y,
+                canvas_rotation=el.rotation,
+            )
+            for column, role in ELEMENT_LINKS.items():
+                legacy_id = getattr(el, column)
+                if not legacy_id:
+                    continue
+                if role == "patch_point":
+                    target_ref = f"audio_devices:{point_device.get(legacy_id)}"
+                elif role == "output_point":
+                    target_ref = f"audio_devices:{out_device.get(legacy_id)}"
+                else:
+                    table = {
+                        "channel": "audio_channel_patches",
+                        "video_input": "video_inputs",
+                        "power_node": "power_nodes",
+                    }.get(role, "audio_devices")
+                    target_ref = f"{table}:{legacy_id}"
+                target = self.devices.get(target_ref) if target_ref in self.seen_devices else None
+                if target is None and role == "power_node":
+                    target = self.devices.get(target_ref)
+                if target is None:
+                    continue
+                self.edge(
+                    f"stage_plot_elements.link:{el.id}:{role}",
+                    "link",
+                    node,
+                    "link",
+                    target,
+                    role,
+                    attributes={"role": role, "legacy_target": str(legacy_id)},
+                )
+
     async def plot_links(self) -> None:
         """Point each stage plot element at its graph nodes.
 
@@ -902,6 +1004,7 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         await builder.audio_outputs()
         await builder.video()
         await builder.lighting()
+        await builder.plot_elements()
     with db.no_autoflush:
         await builder.write_edges()
         await builder.plot_links()

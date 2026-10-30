@@ -87,7 +87,11 @@ async def create_device(
     job_id: UUID, payload: schemas.GraphDeviceCreate, db: AsyncSession = Depends(get_db)
 ) -> GraphDevice:
     await _require_job(db, job_id)
-    device = GraphDevice(job_id=job_id, **payload.model_dump())
+    fields = payload.model_dump()
+    device = GraphDevice(job_id=job_id, **fields)
+    if device.kind == "plot_element":
+        element_id = await mirror.create_element_twin(db, job_id, fields)
+        device.legacy_ref = f"stage_plot_elements:{element_id}"
     db.add(device)
     await db.commit()
     await db.refresh(device)
@@ -187,6 +191,17 @@ async def create_edge(
     src = await _device(db, job_id, payload.src_device_id)
     dst = await _device(db, job_id, payload.dst_device_id)
     existing = await _all_edges(db, job_id)
+    link_attrs: dict | None = None
+    if payload.signal == "link":
+        link_attrs = await mirror.link_edge_to_legacy(db, src, dst, payload.dst_port)
+        for old in existing:
+            if (old.attributes or {}).get("legacy_ref") == link_attrs["legacy_ref"]:
+                await db.delete(old)
+        existing = [
+            e
+            for e in existing
+            if (e.attributes or {}).get("legacy_ref") != link_attrs["legacy_ref"]
+        ]
     if topology.would_create_cycle(
         [_as_dict(e) for e in existing if e.signal == payload.signal],
         str(src.id),
@@ -208,6 +223,8 @@ async def create_edge(
             },
         )
     edge = ConnectionEdge(job_id=job_id, **payload.model_dump())
+    if link_attrs:
+        edge.attributes = {**(edge.attributes or {}), **link_attrs}
     db.add(edge)
     await db.commit()
     await db.refresh(edge)

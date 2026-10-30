@@ -9,9 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import db as db_mod
 from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
-from app.domains.audio.models import ProductionJob
+from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
-from app.domains.graph.backfill import CHANNEL_FIELDS, OUTPUT_FIELDS, backfill_job
+from app.domains.graph.backfill import (
+    CHANNEL_FIELDS,
+    ELEMENT_FIELDS,
+    ELEMENT_LINKS,
+    OUTPUT_FIELDS,
+    backfill_job,
+)
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.video import service as video_service
 
@@ -130,6 +136,36 @@ def _output_changes(data: dict) -> dict:
     return out
 
 
+ELEMENT_NOT_NULL = {
+    "element_type",
+    "width_cm",
+    "height_cm",
+    "image_url",
+    "coverage_angle_h",
+    "coverage_distance_m",
+    "power_connector",
+}
+CANVAS_TO_ELEMENT = {
+    "canvas_x_cm": "position_x",
+    "canvas_y_cm": "position_y",
+    "canvas_rotation": "rotation",
+}
+
+
+def _element_changes(data: dict) -> dict:
+    out: dict = {}
+    attrs = data.get("attributes") or {}
+    if "name" in data and data["name"] is not None:
+        out["label"] = data["name"]
+    for graph_key, column in CANVAS_TO_ELEMENT.items():
+        if data.get(graph_key) is not None:
+            out[column] = data[graph_key]
+    for key in ELEMENT_FIELDS:
+        if key in attrs and not (attrs[key] is None and key in ELEMENT_NOT_NULL):
+            out[key] = attrs[key]
+    return out
+
+
 def _audio_device_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -179,6 +215,11 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
+    elif table == "stage_plot_elements":
+        changes = _element_changes(data)
+        if not changes:
+            return False
+        return await service.update_plot_element(db, job_id, legacy_id, changes) is not None
     elif table == "audio_devices":
         row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
         if row is None or not changes:
@@ -225,6 +266,8 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         list_id = row.channel_list_id
         await service.delete_output(db, row)
         await _publish_list(db, job_id, list_id)
+    elif table == "stage_plot_elements":
+        return await service.delete_plot_element(db, job_id, legacy_id)
     elif table == "audio_devices":
         row = await service.get_device(db, legacy_id)
         if row is None:
@@ -285,6 +328,10 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
 
 
 async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge) -> bool:
+    ref = (edge.attributes or {}).get("legacy_ref") or ""
+    if ref.startswith("stage_plot_elements.link:"):
+        _, element_id, role = ref.split(":")
+        return await _set_element_link(db, UUID(element_id), role, None)
     target = legacy_target(edge)
     if target is None:
         return False
@@ -314,3 +361,67 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         await _publish_list(db, job_id, output.channel_list_id)
         return True
     return False
+
+
+LINK_ROLES = {
+    "channel": "audio_channel_patches",
+    "device": "audio_devices",
+    "video_input": "video_inputs",
+    "lens": "audio_devices",
+    "power_node": "power_nodes",
+}
+
+
+async def _set_element_link(
+    db: AsyncSession, element_id: UUID, role: str, value: UUID | None
+) -> bool:
+    column = next((c for c, r in ELEMENT_LINKS.items() if r == role), None)
+    element = await db.get(StagePlotElement, element_id)
+    if column is None or element is None:
+        return False
+    setattr(element, column, value)
+    await db.commit()
+    return True
+
+
+async def link_edge_to_legacy(
+    db: AsyncSession, src: GraphDevice, dst: GraphDevice, role: str
+) -> dict:
+    """Validate a new ``link`` edge and write the element's legacy link column.
+
+    Returns the edge attributes that tie the edge to its legacy twin.
+    """
+    source = legacy_target(src)
+    target = legacy_target(dst)
+    if src.kind != "plot_element" or source is None or source[0] != "stage_plot_elements":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A link starts at a plot element"
+        )
+    if role not in LINK_ROLES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Link role must be one of {sorted(LINK_ROLES)}"
+        )
+    if target is None or target[0] != LINK_ROLES[role]:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"A {role} link must point at a {LINK_ROLES[role]} node",
+        )
+    await _set_element_link(db, source[1], role, target[1])
+    return {
+        "legacy_ref": f"stage_plot_elements.link:{source[1]}:{role}",
+        "role": role,
+        "legacy_target": str(target[1]),
+    }
+
+
+async def create_element_twin(db: AsyncSession, job_id: UUID, data: dict) -> UUID:
+    """Create the legacy plot element for a plot_element node made through the graph API."""
+    attrs = data.get("attributes") or {}
+    fields = {key: attrs[key] for key in ELEMENT_FIELDS if attrs.get(key) is not None}
+    fields.setdefault("element_type", "custom")
+    fields["label"] = data.get("name") or ""
+    fields["position_x"] = data.get("canvas_x_cm") or 0.0
+    fields["position_y"] = data.get("canvas_y_cm") or 0.0
+    fields["rotation"] = data.get("canvas_rotation") or 0.0
+    element = await service.create_plot_element(db, job_id, fields)
+    return element.id

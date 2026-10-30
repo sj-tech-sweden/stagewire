@@ -3,7 +3,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-SIGNALS = ("audio", "video", "dmx", "power", "data")
+SIGNALS = ("audio", "video", "dmx", "power", "data", "link")
 PHASES = ("L1", "L2", "L3")
 
 CONNECTOR_COMPAT: dict[str, frozenset[str]] = {
@@ -86,7 +86,7 @@ def trace(
     )
     index: dict[str, list[Mapping[str, Any]]] = {}
     for edge in edges:
-        if signal and edge["signal"] != signal:
+        if (signal and edge["signal"] != signal) or (not signal and edge["signal"] == "link"):
             continue
         index.setdefault(str(edge[near]), []).append(edge)
     result = Trace(root=root)
@@ -116,6 +116,8 @@ def validate_edge(
     edge_id = str(edge.get("id")) if edge.get("id") else None
     if src is None or dst is None:
         return [Issue("missing_device", "Edge references a missing device", edge_id)]
+    if edge["signal"] == "link":
+        return []
     issues: list[Issue] = []
 
     def add(code: str, message: str) -> None:

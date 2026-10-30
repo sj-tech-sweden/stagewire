@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 Domain = Literal["audio", "lighting", "video", "power", "rigging", "other"]
-Signal = Literal["audio", "video", "dmx", "power", "data"]
+Signal = Literal["audio", "video", "dmx", "power", "data", "link"]
 
 
 class Port(BaseModel):
