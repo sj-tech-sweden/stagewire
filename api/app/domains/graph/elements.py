@@ -23,6 +23,7 @@ from app.domains.audio.models import (
     StagePlotElement,
 )
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.lists import _by_ref
@@ -32,7 +33,9 @@ from app.domains.rigging.models import PowerNode, RiggingPoint
 from app.domains.video.models import VideoInput, VideoInputList
 
 router = APIRouter(
-    prefix="/jobs/{job_id}/graph", tags=["graph:elements"], dependencies=[Depends(get_current_user)]
+    prefix="/jobs/{job_id}/graph",
+    tags=["graph:elements"],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
 )
 
 

@@ -103,6 +103,26 @@
           />
         </q-td>
       </template>
+      <template #body-cell-inlet="slot">
+        <q-td :props="slot">
+          <q-select
+            :model-value="slot.row.attributes?.power_inlet || 'iec_c13'"
+            :options="POWER_INLETS"
+            emit-value
+            map-options
+            dense
+            borderless
+            data-testid="device-inlet"
+            @update:model-value="(v) => saveInlet(slot.row, v)"
+          />
+          <div
+            v-if="pluggedInto(slot.row)"
+            class="text-caption text-grey-6"
+          >
+            → {{ pluggedInto(slot.row) }}
+          </div>
+        </q-td>
+      </template>
       <template #body-cell-patched="slot">
         <q-td :props="slot">
           {{ effective(slot.row)?.patch_point_count || '' }}
@@ -147,7 +167,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import DeviceDialog from '@/components/DeviceDialog.vue';
-import { connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
+import { POWER_INLETS, connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();
@@ -166,6 +186,7 @@ const columns = computed(() => [
   { name: 'io', label: `${t('devices.inputs')} / ${t('devices.outputs')}`, field: () => '', align: 'left' },
   { name: 'weight', label: t('devices.weight'), field: () => '', align: 'right' },
   { name: 'power', label: t('devices.power'), field: () => '', align: 'right' },
+  { name: 'inlet', label: t('workspace.colInlet'), field: () => '', align: 'left' },
   { name: 'patched', label: t('workspace.chain'), field: () => '', align: 'right' },
   { name: 'actions', label: '', field: () => '', align: 'right' },
 ]);
@@ -176,6 +197,17 @@ const portsLabel = (device) =>
   portGroups(device.ports)
     .map((g) => `${{ in: '↓', out: '↑', both: '↕' }[g.direction]}${g.count || ''} ${connectorLabel(g.connector)}`.trim())
     .join(', ');
+
+// A device's power inlet is edited in the table; where it is plugged in comes from its node.
+const pluggedInto = (device) =>
+  graph.devices.find((d) => d.id === device.attributes?.power_node_id)?.name || '';
+async function saveInlet(device, value) {
+  try {
+    await graph.updateDevice(props.jobId, device.id, { attributes: { power_inlet: value } });
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
+  }
+}
 
 const refresh = () => graph.fetchEffective(props.jobId).catch(() => {});
 onMounted(refresh);

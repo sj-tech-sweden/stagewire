@@ -17,6 +17,7 @@ from app.domains.audio import service
 from app.domains.audio.models import ChannelPatchPoint, OutputPatchPoint
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.mirror import (
@@ -39,7 +40,9 @@ from app.domains.video.models import (
 )
 
 router = APIRouter(
-    prefix="/jobs/{job_id}/graph", tags=["graph:lists"], dependencies=[Depends(get_current_user)]
+    prefix="/jobs/{job_id}/graph",
+    tags=["graph:lists"],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
 )
 
 MAX_BATCH = 200

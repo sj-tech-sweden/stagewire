@@ -321,6 +321,14 @@
           <q-item-label caption>
             {{ load.weight_kg ?? '–' }} kg · {{ load.power_w ?? '–' }} W
           </q-item-label>
+          <q-item-label
+            caption
+            data-testid="load-cable"
+          >
+            {{ powerInletLabel(graphNode(load.id)?.attributes?.power_inlet) }}
+            <span v-if="load.power_node_id">· {{ cableFor(graphNode(load.id)?.attributes?.power_inlet, connectorLabel(load.power_connector)) }}</span>
+            <span v-else>· {{ t('workspace.notPlugged') }}</span>
+          </q-item-label>
         </q-item-section>
         <q-item-section>
           <div class="row q-col-gutter-xs">
@@ -446,14 +454,23 @@
             :label="t('workspace.powerParent')"
             data-testid="new-power-parent"
           />
+          <ConnectorSelect
+            v-if="form.kind === 'source'"
+            v-model="form.feed_connector"
+            power
+            class="col-12 col-sm-6"
+            :label="t('workspace.powerFeed')"
+            data-testid="new-power-feed"
+          />
           <q-select
+            v-else
             v-model="form.feed_connector"
             class="col-12 col-sm-6"
             dense
             outlined
             emit-value
             map-options
-            :options="form.kind === 'source' ? allConnectors : connectorsOf(form.parent_id)"
+            :options="connectorsOf(form.parent_id)"
             :label="t('workspace.powerFeed')"
             data-testid="new-power-feed"
           />
@@ -719,7 +736,8 @@ import { api } from '@/boot/api';
 import { useGraphStore } from '@/stores/graph';
 import OutputsField from '@/components/OutputsField.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
-import { loadStatusColor, longFeeds, outputsLabel, powerTreeRows } from '@/utils/workspace';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import { cableFor, loadStatusColor, longFeeds, outputsLabel, powerInletLabel, powerTreeRows } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();

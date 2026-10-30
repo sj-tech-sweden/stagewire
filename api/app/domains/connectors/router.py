@@ -17,12 +17,20 @@ router = APIRouter(
 
 class ConnectorKindCreate(BaseModel):
     label: str = Field(min_length=1, max_length=128)
+    power: bool = False
+    amps: int | None = Field(None, ge=0, le=1000)
+    phases: int | None = Field(None, ge=1, le=3)
+    circuits: int | None = Field(None, ge=1, le=24)
 
 
 class ConnectorKindRead(BaseModel):
     id: UUID
     key: str
     label: str
+    power: bool = False
+    amps: int | None = None
+    phases: int | None = None
+    circuits: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -50,7 +58,27 @@ async def create_kind(
     existing = await db.scalar(select(ConnectorKind).where(ConnectorKind.key == key))
     if existing is not None:
         return existing
-    row = ConnectorKind(key=key, label=payload.label.strip())
+    if payload.power and (payload.amps is None or payload.phases not in (1, 3)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A power connector needs its amps (0 for fixed installation) and 1 or 3 phases",
+        )
+    from app.domains.rigging import connectors as power_connectors
+
+    if (
+        payload.power
+        and power_connectors.known(key)
+        and not power_connectors.catalog_is_custom(key)
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "That is already a built-in power connector")
+    row = ConnectorKind(
+        key=key,
+        label=payload.label.strip(),
+        power=payload.power,
+        amps=payload.amps if payload.power else None,
+        phases=payload.phases if payload.power else None,
+        circuits=(payload.circuits or 1) if payload.power else None,
+    )
     db.add(row)
     await db.commit()
     await db.refresh(row)

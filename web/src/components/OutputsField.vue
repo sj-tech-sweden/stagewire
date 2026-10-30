@@ -9,14 +9,10 @@
       class="row q-col-gutter-xs items-center q-mb-xs"
       data-testid="output-row"
     >
-      <q-select
+      <ConnectorSelect
         :model-value="output.connector"
+        power
         class="col-12 col-sm-6"
-        dense
-        outlined
-        emit-value
-        map-options
-        :options="connectors"
         :label="t('workspace.outputConnector')"
         data-testid="output-connector"
         @update:model-value="(v) => change(i, { connector: v })"
@@ -65,6 +61,7 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },

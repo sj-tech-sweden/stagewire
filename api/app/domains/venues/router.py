@@ -9,11 +9,14 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service as audio_service
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.rigging import connectors
 from app.domains.venues import schemas, service
 from app.domains.venues.models import VenuePowerOutlet
 
-router = APIRouter(tags=["venues"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["venues"], dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)]
+)
 
 
 async def _get_venue_or_404(db: AsyncSession, venue_id: UUID):

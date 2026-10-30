@@ -68,6 +68,19 @@
           @update:model-value="(v) => linkElement({ linked_device_id: v || null })"
         />
       </div>
+      <q-select
+        v-if="device.kind !== 'plot_element' && !isVirtual(device)"
+        :model-value="device.attributes?.power_inlet || 'iec_c13'"
+        dense
+        outlined
+        emit-value
+        map-options
+        class="q-mb-sm"
+        :options="POWER_INLETS"
+        :label="t('workspace.powerInlet')"
+        data-testid="inspector-inlet"
+        @update:model-value="(v) => save({ attributes: { power_inlet: v } })"
+      />
       <div class="row q-col-gutter-sm q-mb-sm">
         <q-input
           :model-value="device.attributes?.width_cm"
@@ -255,7 +268,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { legacyId } from '@/utils/graphLegacy';
 import { isPlotElement, isVirtual } from '@/utils/workspace';
-import { DEVICE_BOX_CM, DOMAIN_SIGNAL, needsBookingRequest } from '@/utils/workspace';
+import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
 const props = defineProps({
   jobId: { type: String, required: true },

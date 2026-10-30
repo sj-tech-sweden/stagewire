@@ -498,3 +498,69 @@ async def test_extension_cords_breakouts_edits_and_plain_devices_on_the_power_tr
         assert res.status_code == 204, res.text
         summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
         assert next(r for r in summary["loads"] if r["kind"] == "device")["power_node_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_power_sheet_lists_inlets_cables_and_extension_cords(auth_headers):
+    from app.core import db as db_mod
+    from app.domains.reports.power_context import cable_for, cord_for, power_sheet_context
+
+    assert [cord_for(x) for x in (1, 5.1, 12, 60)] == [2, 10, 15, 60]
+    assert cable_for("", "schuko") == "IEC C13 → Schuko 16 A"
+    assert cable_for("attached_schuko", "schuko") == "Fixed cable (Schuko)"
+    assert cable_for("powercon", "powercon") == "powerCON → powerCON 20 A"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, post, source, distro = await _tree(client, h)
+        breakout = await post(
+            "power-nodes",
+            {
+                "name": "Breakout",
+                "kind": "breakout",
+                "parent_id": distro["id"],
+                "feed_connector": "schuko",
+                "outputs": [{"connector": "schuko", "count": 4}],
+            },
+        )
+        await post(f"power-nodes/{breakout['id']}/extension", {"length_m": 10, "name": "Skarv 10"})
+        amp = await post(
+            "audio-devices", {"name": "Amp", "device_type": "other", "power_watts": 800}
+        )
+        rack = await post(
+            "audio-devices",
+            {
+                "name": "Rack",
+                "device_type": "other",
+                "power_watts": 200,
+                "power_inlet": "attached_schuko",
+            },
+        )
+        await post("audio-devices", {"name": "Loose", "device_type": "other", "power_watts": 50})
+        for gear in (amp, rack):
+            res = await client.put(
+                f"{g}/loads/{gear['id']}",
+                json={"power_node_id": breakout["id"], "power_connector": "schuko"},
+                headers=h,
+            )
+            assert res.status_code == 200, res.text
+
+    async with db_mod.SessionLocal() as db:
+        ctx = await power_sheet_context(db, __import__("uuid").UUID(job_id))
+    loads = {row["device"]: row for row in ctx["power_loads"]}
+    assert loads["Amp"]["cable"] == "IEC C13 → Schuko 16 A" and loads["Amp"]["inlet"] == "IEC C13"
+    assert loads["Rack"]["cable"] == "Fixed cable (Schuko)"
+    assert loads["Loose"]["cable"] == "Not plugged in"
+    assert ctx["power_cords"][0]["name"] == "Skarv 10" and ctx["power_cords"][0]["length_m"] == 10
+    assert (
+        ctx["power_cords"][0]["from"] == "Stage distro"
+        and ctx["power_cords"][0]["to"] == "Breakout"
+    )
+    packed = {row["cable"]: row["count"] for row in ctx["power_cables"]}
+    assert packed == {
+        "IEC C13 → Schuko 16 A": 1,
+        "Fixed cable (Schuko)": 1,
+        "Extension cord 10 m": 1,
+    }
+    kinds = {row["name"]: row["kind"] for row in ctx["power_tree"]}
+    assert kinds["Skarv 10"] == "extension"

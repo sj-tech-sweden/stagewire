@@ -11,13 +11,16 @@ from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import backfill, mirror, readers, schemas, topology
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 
 router = APIRouter(
-    prefix="/jobs/{job_id}/graph", tags=["graph"], dependencies=[Depends(get_current_user)]
+    prefix="/jobs/{job_id}/graph",
+    tags=["graph"],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
 )
 
 MAX_BATCH = 200

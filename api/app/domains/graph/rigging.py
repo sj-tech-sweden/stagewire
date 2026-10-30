@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.domains.audio import service
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.lists import _by_ref, _device_twin
@@ -27,7 +28,7 @@ from app.domains.rigging.models import PowerNode
 router = APIRouter(
     prefix="/jobs/{job_id}/graph",
     tags=["graph:rigging"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
 )
 
 

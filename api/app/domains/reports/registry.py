@@ -12,6 +12,7 @@ from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
 from app.domains.reports.cable_routing import routed_cable_paths_from_graph
 from app.domains.reports.models import ReportTemplate
+from app.domains.reports.power_context import power_sheet_context
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
 from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
 
@@ -473,6 +474,71 @@ _PATCH_WIRELESS_COLUMNS_SV = (
     ReportField(key="wireless_frequency", label="Frekvens"),
 )
 
+_POWER_TREE_COLUMNS = (
+    ReportField(key="name", label="Node"),
+    ReportField(key="kind", label="Kind"),
+    ReportField(key="fed_from", label="Fed from"),
+    ReportField(key="connector", label="Feed connector"),
+    ReportField(key="rating_amps", label="Rating (A)"),
+    ReportField(key="load_w", label="Load (W)"),
+    ReportField(key="peak_amps", label="Peak (A/phase)"),
+    ReportField(key="length_m", label="Cable (m)"),
+    ReportField(key="status", label="Status"),
+)
+_POWER_LOAD_COLUMNS = (
+    ReportField(key="device", label="Device"),
+    ReportField(key="type", label="Type"),
+    ReportField(key="inlet", label="Power inlet"),
+    ReportField(key="plugged_into", label="Plugged into"),
+    ReportField(key="connector", label="Outlet"),
+    ReportField(key="power_w", label="Power (W)"),
+    ReportField(key="cable", label="Cable"),
+)
+_POWER_CORD_COLUMNS = (
+    ReportField(key="name", label="Extension cord"),
+    ReportField(key="from", label="From"),
+    ReportField(key="to", label="To"),
+    ReportField(key="connector", label="Connector"),
+    ReportField(key="length_m", label="Length (m)"),
+    ReportField(key="product", label="Stockwire product"),
+)
+_POWER_CABLE_COLUMNS = (
+    ReportField(key="cable", label="Cable"),
+    ReportField(key="count", label="Count"),
+)
+_POWER_TREE_COLUMNS_SV = (
+    ReportField(key="name", label="Nod"),
+    ReportField(key="kind", label="Typ"),
+    ReportField(key="fed_from", label="Matas från"),
+    ReportField(key="connector", label="Matningskontakt"),
+    ReportField(key="rating_amps", label="Märkström (A)"),
+    ReportField(key="load_w", label="Last (W)"),
+    ReportField(key="peak_amps", label="Topp (A/fas)"),
+    ReportField(key="length_m", label="Kabel (m)"),
+    ReportField(key="status", label="Status"),
+)
+_POWER_LOAD_COLUMNS_SV = (
+    ReportField(key="device", label="Enhet"),
+    ReportField(key="type", label="Typ"),
+    ReportField(key="inlet", label="Strömintag"),
+    ReportField(key="plugged_into", label="Inkopplad i"),
+    ReportField(key="connector", label="Uttag"),
+    ReportField(key="power_w", label="Effekt (W)"),
+    ReportField(key="cable", label="Kabel"),
+)
+_POWER_CORD_COLUMNS_SV = (
+    ReportField(key="name", label="Skarvsladd"),
+    ReportField(key="from", label="Från"),
+    ReportField(key="to", label="Till"),
+    ReportField(key="connector", label="Kontakt"),
+    ReportField(key="length_m", label="Längd (m)"),
+    ReportField(key="product", label="Stockwire-produkt"),
+)
+_POWER_CABLE_COLUMNS_SV = (
+    ReportField(key="cable", label="Kabel"),
+    ReportField(key="count", label="Antal"),
+)
+
 REPORT_DEFINITIONS = (
     ReportDefinition(
         domain="audio",
@@ -691,6 +757,65 @@ REPORT_DEFINITIONS = (
                 key="fixture_patch",
                 label="Armaturer",
                 columns=list(_FIXTURE_COLUMNS_SV),
+            ),
+        ),
+    ),
+    ReportDefinition(
+        domain="power",
+        report_type="power-sheet",
+        name="Power & cables",
+        description=(
+            "The power tree with its load, every device with its power inlet and the cable it "
+            "needs, the extension cords and a count of the power cables to pack."
+        ),
+        default_html=(
+            "<h1>{{job.title}} — Power</h1>"
+            "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+            "<h2>Power tree</h2>{{table:power_tree}}"
+            "<h2>Devices</h2>{{table:power_loads}}"
+            "<h2>Extension cords</h2>{{table:power_cords}}"
+            "<h2>Cables to pack</h2>{{table:power_cables}}"
+        ),
+        fields=(
+            ReportField(key="job.title", label="Job title"),
+            ReportField(key="job.venue_name", label="Venue"),
+        ),
+        tables=(
+            ReportTable(key="power_tree", label="Power tree", columns=list(_POWER_TREE_COLUMNS)),
+            ReportTable(key="power_loads", label="Devices", columns=list(_POWER_LOAD_COLUMNS)),
+            ReportTable(
+                key="power_cords", label="Extension cords", columns=list(_POWER_CORD_COLUMNS)
+            ),
+            ReportTable(
+                key="power_cables", label="Cables to pack", columns=list(_POWER_CABLE_COLUMNS)
+            ),
+        ),
+        context_builder=power_sheet_context,
+        name_sv="Ström och kablar",
+        description_sv=(
+            "Strömträdet med last, varje enhet med strömintag och kabeln den behöver, "
+            "skarvsladdarna och en sammanställning av strömkablar att packa."
+        ),
+        default_html_sv=(
+            "<h1>{{job.title}} — Ström</h1>"
+            "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+            "<h2>Strömträd</h2>{{table:power_tree}}"
+            "<h2>Enheter</h2>{{table:power_loads}}"
+            "<h2>Skarvsladdar</h2>{{table:power_cords}}"
+            "<h2>Kablar att packa</h2>{{table:power_cables}}"
+        ),
+        fields_sv=(
+            ReportField(key="job.title", label="Jobbtitel"),
+            ReportField(key="job.venue_name", label="Spelplats"),
+        ),
+        tables_sv=(
+            ReportTable(key="power_tree", label="Strömträd", columns=list(_POWER_TREE_COLUMNS_SV)),
+            ReportTable(key="power_loads", label="Enheter", columns=list(_POWER_LOAD_COLUMNS_SV)),
+            ReportTable(
+                key="power_cords", label="Skarvsladdar", columns=list(_POWER_CORD_COLUMNS_SV)
+            ),
+            ReportTable(
+                key="power_cables", label="Kablar att packa", columns=list(_POWER_CABLE_COLUMNS_SV)
             ),
         ),
     ),

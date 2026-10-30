@@ -8,6 +8,7 @@ from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.audio.models import StagePlotElement
 from app.domains.auth.deps import get_current_user
+from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting.models import LightingFixture
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
@@ -15,7 +16,9 @@ from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
 from app.domains.venues.schemas import VenuePowerOutletRead
 
 router = APIRouter(
-    tags=["rigging"], dependencies=[Depends(get_current_user)], route_class=MirrorToGraphRoute
+    tags=["rigging"],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
+    route_class=MirrorToGraphRoute,
 )
 
 

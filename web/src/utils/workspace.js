@@ -730,3 +730,16 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
   if (!sourceLabel) return roots;
   return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
 }
+
+export const powerInletLabel = (inlet) =>
+  POWER_INLETS.find((i) => i.value === (inlet || 'iec_c13'))?.label || inlet;
+
+// The lead a device needs to reach a node outlet: a detachable inlet (IEC C13 unless stated) needs
+// a cable to the outlet's connector, a fixed Schuko cable only fits a Schuko outlet. Same wording as
+// the power sheet (api/app/domains/reports/power_context.py).
+export function cableFor(inlet, outletLabel) {
+  const kind = inlet || 'iec_c13';
+  if (kind === 'iec_c13') return `IEC C13 → ${outletLabel}`;
+  if (kind === 'attached_schuko') return /schuko/i.test(outletLabel) || !outletLabel ? 'Fixed cable (Schuko)' : `Fixed Schuko → ${outletLabel}`;
+  return `${powerInletLabel(kind)} → ${outletLabel}`;
+}

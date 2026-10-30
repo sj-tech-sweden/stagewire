@@ -928,3 +928,50 @@ test('a device is created from a Stockwire product with its connectors and power
     ]),
   );
 });
+
+test('power inlets show in the device list, a new power connector asks for its rating and the power sheet is a report', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Inlets ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Amp', device_type: 'other', power_watts: 500 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await expect(page.getByTestId('device-inlet')).toHaveCount(1);
+  await expect(page.getByTestId('device-inlet')).toHaveValue('IEC C13');
+  await page.getByTestId('device-inlet').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Attached cable, Schuko' }).click();
+  await expect
+    .poll(async () => ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as { power_inlet: string }[])[0]?.power_inlet)
+    .toBe('attached_schuko');
+
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('add-power-node').click();
+  const label = `Hubbell ${String(Date.now()).slice(-4)} A`;
+  await page.getByTestId('new-power-feed').click();
+  await page.keyboard.type(label);
+  await page.keyboard.press('Enter');
+  await page.locator('input[data-autofocus="true"]').fill('30');
+  await page.getByRole('button', { name: 'OK' }).click();
+  await expect(page.locator('input[data-autofocus="true"]')).toHaveCount(1);
+  await expect(page.locator('input[data-autofocus="true"]')).toHaveValue('1');
+  await page.locator('input[data-autofocus="true"]').fill('1');
+  await page.getByRole('button', { name: 'OK' }).click();
+  const kinds = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as {
+      label: string;
+      power: boolean;
+      amps: number;
+      phases: number;
+    }[];
+  await expect.poll(async () => (await kinds()).find((k) => k.label === label)).toMatchObject({ power: true, amps: 30, phases: 1 });
+
+  await page.keyboard.press('Escape');
+  await page.getByTestId('open-reports').click();
+  await page.getByRole('combobox', { name: /^template$|^mall$/i }).click();
+  await expect(page.locator('.q-menu .q-item', { hasText: /power & cables|ström och kablar/i })).toBeVisible();
+});
