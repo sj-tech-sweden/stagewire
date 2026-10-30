@@ -423,6 +423,8 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
         ),
         service.to_tree_loads(rows),
     )
+    weights = calc.summarize_weights(points, service.weight_loads(rows))
+    point_over = {str(p["id"]): bool(p["over"]) for p in weights}
     loads = []
     for r in rows:
         power = evaluation.loads.get(r.id, {})
@@ -438,6 +440,14 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
                 "power_node_id": r.power_node_id,
                 "power_connector": r.power_connector,
                 "device_id": r.device_id,
+                # hung on a point that carries more than its capacity is "over" for everything on it
+                "rigging_status": (
+                    "none"
+                    if not r.rigging_point_id
+                    else "over"
+                    if point_over.get(r.rigging_point_id)
+                    else "ok"
+                ),
                 # a load sits on its node: when the node is over its rating or close to it, so is
                 # the load (it is part of what overloads it), not "ok"
                 "power_status": (
@@ -448,7 +458,7 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
             }
         )
     return {
-        "points": calc.summarize_weights(points, service.weight_loads(rows)),
+        "points": weights,
         "nodes": list(evaluation.nodes.values()),
         "loads": loads,
         "errors": evaluation.errors,

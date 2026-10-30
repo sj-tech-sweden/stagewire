@@ -169,7 +169,7 @@
             <q-item-section side>
               <q-badge
                 :color="loadStatusColor(node.status)"
-                :label="node.status"
+                :label="statusLabel(node.status)"
               />
             </q-item-section>
             <q-item-section side>
@@ -381,10 +381,19 @@
           </div>
         </q-item-section>
         <q-item-section side>
-          <q-badge
-            :color="loadStatusColor(load.power_status)"
-            :label="load.power_status"
-          />
+          <div class="column items-end q-gutter-xs">
+            <q-badge
+              :color="loadStatusColor(load.power_status)"
+              :label="`${t('workspace.powerWord')}: ${statusLabel(load.power_status)}`"
+              data-testid="load-power-status"
+            />
+            <q-badge
+              v-if="load.weight_kg || load.rigging_point_id"
+              :color="loadStatusColor(load.rigging_status === 'none' ? 'unpowered' : load.rigging_status)"
+              :label="`${t('workspace.riggingWord')}: ${t(`workspace.riggingStatus.${load.rigging_status}`)}`"
+              data-testid="load-rigging-status"
+            />
+          </div>
         </q-item-section>
       </q-item>
     </q-list>
@@ -895,6 +904,8 @@ function connectorsOf(nodeId) {
     label: connectorLabel(value),
   }));
 }
+
+const statusLabel = (status) => t(`workspace.status.${status}`, status);
 
 const failed = (err) =>
   $q.notify({

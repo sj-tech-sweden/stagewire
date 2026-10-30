@@ -204,6 +204,7 @@ async def test_a_one_phase_group_carries_its_whole_load_on_one_phase_and_gear_ca
         assert node["amps"]["L1"] == 15.65 and node["amps"]["L2"] == 0
         assert node["status"] == "over" and node["percent"] > 150
         assert next(p for p in summary["points"] if p["name"] == "Truss A")["load_kg"] == 80
+        assert {row["rigging_status"] for row in summary["loads"]} == {"ok"}
 
         load = (await client.get(f"{g}/power-load", headers=h)).json()
         assert load["L1"] == 3600 and load["L2"] == 0 and load["L3"] == 0
