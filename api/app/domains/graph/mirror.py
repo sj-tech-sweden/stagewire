@@ -231,6 +231,8 @@ def _element_changes(data: dict) -> dict:
     attrs = data.get("attributes") or {}
     if "name" in data and data["name"] is not None:
         out["label"] = data["name"]
+    if "label" in attrs and data.get("name") is None:
+        out["label"] = attrs["label"] or ""
     for graph_key, column in CANVAS_TO_ELEMENT.items():
         if data.get(graph_key) is not None:
             out[column] = data[graph_key]
@@ -852,7 +854,7 @@ async def create_element_twin(db: AsyncSession, job_id: UUID, data: dict) -> UUI
     attrs = data.get("attributes") or {}
     fields = {key: attrs[key] for key in ELEMENT_FIELDS if attrs.get(key) is not None}
     fields.setdefault("element_type", "custom")
-    fields["label"] = data.get("name") or ""
+    fields["label"] = attrs["label"] if "label" in attrs else data.get("name") or ""
     fields["position_x"] = data.get("canvas_x_cm") or 0.0
     fields["position_y"] = data.get("canvas_y_cm") or 0.0
     fields["rotation"] = data.get("canvas_rotation") or 0.0

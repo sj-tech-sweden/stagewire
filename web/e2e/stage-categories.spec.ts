@@ -29,7 +29,7 @@ test('categories of the stage plot can be hidden, and the choice is remembered',
     height_cm: 60,
   });
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.waitForLoadState('networkidle');

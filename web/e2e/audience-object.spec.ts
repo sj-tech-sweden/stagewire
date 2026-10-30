@@ -12,7 +12,7 @@ test('the audience area is an object in the element palette that starts drawing'
   const created = await request.post(`${API_BASE}/api/v1/jobs`, { headers, data: { title: `E2E Audience ${Date.now()}` } });
   const jobId = (await created.json()).id as string;
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.waitForLoadState('networkidle');

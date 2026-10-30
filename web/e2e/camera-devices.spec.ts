@@ -73,7 +73,7 @@ test('a placed camera can create a new camera device from the stage plot', async
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Camera Link ${Date.now()}` })).id as string;
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.getByText('Camera', { exact: true }).first().click();

@@ -14,19 +14,70 @@ export const legacyId = (node) => {
 const byPosition = (a, b) => (a.position || 0) - (b.position || 0);
 const byCreated = (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || (a.id < b.id ? -1 : 1);
 
+const LINK_COLUMNS = {
+  channel: 'linked_channel_id',
+  device: 'linked_device_id',
+  patch_point: 'linked_patch_point_id',
+  output_point: 'linked_output_point_id',
+  video_input: 'linked_video_input_id',
+  lens: 'linked_lens_device_id',
+  power_node: 'power_node_id',
+};
+
+// A plot element node as the plot page knows it: legacy element id, geometry, appearance and the
+// legacy ids of what it links to (a link edge carries them as ``legacy_target``).
+export function elementFromNode(node, links = {}, nodes = new Map()) {
+  const attrs = node.attributes || {};
+  const hung = attrs.rigging_point_id ? nodes.get(attrs.rigging_point_id) : null;
+  return {
+    id: legacyId(node),
+    job_id: node.job_id,
+    created_at: node.created_at,
+    element_type: attrs.element_type,
+    label: attrs.label || '',
+    position_x: node.canvas_x_cm ?? 0,
+    position_y: node.canvas_y_cm ?? 0,
+    rotation: node.canvas_rotation || 0,
+    width_cm: attrs.width_cm ?? 60,
+    height_cm: attrs.height_cm ?? 60,
+    image_url: attrs.image_url || '',
+    coverage_angle_h: attrs.coverage_angle_h ?? 0,
+    coverage_distance_m: attrs.coverage_distance_m ?? 0,
+    focal_mm: attrs.focal_mm ?? null,
+    power_connector: attrs.power_connector || '',
+    rigging_point_id: hung ? legacyId(hung) : null,
+    ...Object.fromEntries(Object.entries(LINK_COLUMNS).map(([role, column]) => [column, links[role] || null])),
+  };
+}
+
+export function elementLinks(edges) {
+  const links = new Map();
+  for (const edge of edges) {
+    if (edge.signal !== 'link') continue;
+    const attrs = edge.attributes || {};
+    if (!links.has(edge.src_device_id)) links.set(edge.src_device_id, {});
+    links.get(edge.src_device_id)[attrs.role] = attrs.legacy_target;
+  }
+  return links;
+}
+
+export function elementsFromGraph(devices, edges) {
+  const links = elementLinks(edges);
+  const nodes = new Map(devices.map((d) => [d.id, d]));
+  return devices
+    .filter((d) => d.kind === 'plot_element')
+    .sort(byCreated)
+    .map((node) => elementFromNode(node, links.get(node.id) || {}, nodes));
+}
+
 export function legacyViewFromGraph(devices, edges) {
   const nodes = new Map(devices.map((d) => [d.id, d]));
   const chainEdges = new Map();
-  const links = new Map();
   for (const edge of edges) {
     const attrs = edge.attributes || {};
-    if (edge.signal === 'link') {
-      if (!links.has(edge.src_device_id)) links.set(edge.src_device_id, {});
-      links.get(edge.src_device_id)[attrs.role] = attrs.legacy_target;
-    } else if (attrs.chain) {
-      if (!chainEdges.has(attrs.chain)) chainEdges.set(attrs.chain, []);
-      chainEdges.get(attrs.chain).push(edge);
-    }
+    if (edge.signal === 'link' || !attrs.chain) continue;
+    if (!chainEdges.has(attrs.chain)) chainEdges.set(attrs.chain, []);
+    chainEdges.get(attrs.chain).push(edge);
   }
   const deviceId = (graphId) => legacyId(nodes.get(graphId));
 
@@ -137,29 +188,7 @@ export function legacyViewFromGraph(devices, edges) {
     outputs: g.outputs.sort((a, b) => a.output_number - b.output_number),
   }));
 
-  const elements = devices
-    .filter((d) => d.kind === 'plot_element')
-    .sort(byCreated)
-    .map((node) => {
-      const to = links.get(node.id) || {};
-      const attrs = node.attributes || {};
-      return {
-        id: legacyId(node),
-        element_type: attrs.element_type,
-        label: attrs.label || '',
-        position_x: node.canvas_x_cm,
-        position_y: node.canvas_y_cm,
-        rotation: node.canvas_rotation || 0,
-        width_cm: attrs.width_cm ?? 60,
-        height_cm: attrs.height_cm ?? 60,
-        linked_channel_id: to.channel || null,
-        linked_device_id: to.device || null,
-        linked_patch_point_id: to.patch_point || null,
-        linked_output_point_id: to.output_point || null,
-        linked_video_input_id: to.video_input || null,
-        linked_lens_device_id: to.lens || null,
-      };
-    });
+  const elements = elementsFromGraph(devices, edges);
 
   const plain = devices
     .filter((d) => d.kind !== 'plot_element' && d.kind !== 'channel_list')
@@ -168,19 +197,43 @@ export function legacyViewFromGraph(devices, edges) {
   return { lists, videoLists, elements, devices: plain };
 }
 
-const GEOMETRY = ['position_x', 'position_y', 'rotation', 'width_cm', 'height_cm', 'label'];
+const NODE_ATTRIBUTES = [
+  'element_type',
+  'width_cm',
+  'height_cm',
+  'image_url',
+  'coverage_angle_h',
+  'coverage_distance_m',
+  'focal_mm',
+  'power_connector',
+];
+const CANVAS = { position_x: 'canvas_x_cm', position_y: 'canvas_y_cm', rotation: 'canvas_rotation' };
+const LINKS = [
+  'linked_channel_id',
+  'linked_device_id',
+  'linked_patch_point_id',
+  'linked_output_point_id',
+  'linked_video_input_id',
+  'linked_lens_device_id',
+  'power_node_id',
+  'rigging_point_id',
+];
 
-// ``liveElements`` are the plot's own (possibly mid-drag) elements: their geometry wins over
-// the graph's so cables follow the cursor, while chains and links still come from the graph.
-export function buildCableRowsFromGraph({ devices, edges, plan, audience, stageOffset, liveElements }) {
-  const view = legacyViewFromGraph(devices, edges);
-  if (liveElements?.length) {
-    const live = new Map(liveElements.map((e) => [e.id, e]));
-    view.elements = view.elements.map((el) => {
-      const mine = live.get(el.id);
-      if (!mine) return el;
-      return { ...el, ...Object.fromEntries(GEOMETRY.map((k) => [k, mine[k] ?? el[k]])) };
-    });
+// What an element edit changes on the node, and which of it is a link (set by legacy id).
+export function splitElementChanges(payload) {
+  const node = {};
+  const attributes = {};
+  const links = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (CANVAS[key]) node[CANVAS[key]] = value;
+    else if (key === 'label') attributes.label = value ?? '';
+    else if (NODE_ATTRIBUTES.includes(key)) attributes[key] = value;
+    else if (LINKS.includes(key)) links[key] = value ?? null;
   }
-  return buildCableRows({ ...view, plan, audience, stageOffset });
+  if (Object.keys(attributes).length) node.attributes = attributes;
+  return { node, links };
+}
+
+export function buildCableRowsFromGraph({ devices, edges, plan, audience, stageOffset }) {
+  return buildCableRows({ ...legacyViewFromGraph(devices, edges), plan, audience, stageOffset });
 }

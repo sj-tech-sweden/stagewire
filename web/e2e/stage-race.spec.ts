@@ -46,7 +46,7 @@ test('a slow stage save does not undo a cableway preference change', async ({ pa
     await route.continue();
   });
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.waitForLoadState('networkidle');

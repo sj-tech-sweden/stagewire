@@ -23,7 +23,7 @@ test('on a phone the stage plot comes first and fits the screen width', async ({
   await post(request, headers, `/jobs/${jobId}/plot-elements`, { element_type: 'performer', label: 'Singer', position_x: 100, position_y: 100, width_cm: 60, height_cm: 60 });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.waitForLoadState('networkidle');

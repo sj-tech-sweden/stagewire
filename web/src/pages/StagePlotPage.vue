@@ -3360,7 +3360,6 @@ const cableRows = computed(() => {
     return buildCableRowsFromGraph({
       devices: graphStore.devices,
       edges: graphStore.edges,
-      liveElements: store.elements,
       ...common,
     });
   }
@@ -3654,7 +3653,6 @@ onMounted(() => {
   devicesStore.fetchDevices(jobId);
   store.fetchElements(jobId);
   loadLights();
-  graphStore.backfill(jobId).catch((err) => console.error('Could not load the graph', err));
   jobSocket.connect();
 });
 </script>

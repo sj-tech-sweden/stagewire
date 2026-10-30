@@ -201,3 +201,188 @@ async def test_elements_can_be_created_linked_unlinked_and_deleted_through_the_g
         )
         assert gone.status_code == 204
         assert made["id"] not in await _elements(client, h, job_id)
+
+
+@pytest.mark.asyncio
+async def test_element_links_are_set_and_cleared_with_legacy_ids_and_labels_can_be_emptied(
+    auth_headers,
+):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, ch, box, mic, _stage = await _setup(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        graph = (await client.get(g, headers=h)).json()
+        node = next(
+            d for d in graph["devices"] if d["legacy_ref"] == f"stage_plot_elements:{mic['id']}"
+        )
+
+        res = await client.put(
+            f"{g}/plot-elements/{node['id']}/links",
+            json={"linked_device_id": box["id"], "linked_channel_id": None},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        legacy = next(
+            e
+            for e in (await client.get(f"{BASE}/jobs/{job_id}/plot-elements", headers=h)).json()
+            if e["id"] == mic["id"]
+        )
+        assert legacy["linked_device_id"] == box["id"] and legacy["linked_channel_id"] is None
+        links = {
+            e["attributes"]["role"]: e["attributes"]["legacy_target"]
+            for e in (await client.get(g, headers=h)).json()["edges"]
+            if e["signal"] == "link"
+        }
+        assert links == {"device": box["id"]}
+
+        other = await client.post(f"{BASE}/jobs", json={"title": "Other"}, headers=h)
+        stranger = (
+            await client.post(
+                f"{BASE}/jobs/{other.json()['id']}/devices",
+                json={"name": "Elsewhere", "device_type": "other"},
+                headers=h,
+            )
+        ).json()
+        every = await client.put(
+            f"{g}/plot-elements/{node['id']}/links",
+            json={"linked_channel_id": ch["id"], "linked_device_id": box["id"]},
+            headers=h,
+        )
+        assert every.status_code == 200, every.text
+        roles = {
+            e["attributes"]["role"]
+            for e in (await client.get(g, headers=h)).json()["edges"]
+            if e["signal"] == "link"
+        }
+        assert roles == {"channel", "device"}
+        refused = await client.put(
+            f"{g}/plot-elements/{node['id']}/links",
+            json={"linked_device_id": stranger["id"]},
+            headers=h,
+        )
+        assert refused.status_code == 422
+
+        wrong = await client.put(
+            f"{g}/plot-elements/{box['id']}/links", json={"linked_device_id": None}, headers=h
+        )
+        assert wrong.status_code == 404
+
+        node = next(
+            d for d in (await client.get(g, headers=h)).json()["devices"] if d["id"] == node["id"]
+        )
+        res = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"attributes": {"label": ""}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        legacy = next(
+            e
+            for e in (await client.get(f"{BASE}/jobs/{job_id}/plot-elements", headers=h)).json()
+            if e["id"] == mic["id"]
+        )
+        assert legacy["label"] == ""
+        assert res.json()["name"] == "microphone"
+
+
+@pytest.mark.asyncio
+async def test_a_plot_element_created_with_an_empty_label_keeps_it_empty(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Empty"}, headers=h)).json()[
+            "id"
+        ]
+        g = f"{BASE}/jobs/{job_id}/graph"
+        res = await client.post(
+            f"{g}/devices",
+            json={
+                "domain": "other",
+                "kind": "plot_element",
+                "name": "custom",
+                "attributes": {"element_type": "custom", "label": ""},
+                "canvas_x_cm": 10,
+                "canvas_y_cm": 20,
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        legacy = (await client.get(f"{BASE}/jobs/{job_id}/plot-elements", headers=h)).json()
+        assert [e["label"] for e in legacy] == [""]
+
+
+@pytest.mark.asyncio
+async def test_every_link_role_validates_and_links(auth_headers, monkeypatch):
+    from app.domains.audio import router as audio_router
+
+    async def none(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", none)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, ch, box, mic, _stage = await _setup(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        graph = await _graph(client, h, job_id)
+        by_ref = {d["legacy_ref"]: d for d in graph["devices"]}
+        element = by_ref[f"stage_plot_elements:{mic['id']}"]
+        list_node = next(d for d in graph["devices"] if d["kind"] == "channel_list")
+        ch_node = by_ref[f"audio_channel_patches:{ch['id']}"]
+        box_node = by_ref[f"audio_devices:{box['id']}"]
+
+        out = (
+            await client.post(
+                f"{g}/lists/{list_node['id']}/outputs", json={"name": "Main"}, headers=h
+            )
+        ).json()
+        for chain in (f"channels/{ch_node['id']}", f"outputs/{out['id']}"):
+            res = await client.put(
+                f"{g}/{chain}/chain", json={"steps": [{"device_id": box_node["id"]}]}, headers=h
+            )
+            assert res.status_code == 200, res.text
+        lists = (await client.get(f"{BASE}/jobs/{job_id}/channel-lists", headers=h)).json()
+        patch_point = lists[0]["channels"][0]["patch_points"][0]["id"]
+        output_point = lists[0]["outputs"][0]["points"][0]["id"]
+
+        vlist = (await client.post(f"{g}/video-lists", json={}, headers=h)).json()
+        vin = (
+            await client.post(f"{g}/video-lists/{vlist['id']}/inputs", json={}, headers=h)
+        ).json()
+        video_input = vin["legacy_ref"].split(":")[1]
+        source = (
+            await client.post(
+                f"{g}/power-nodes",
+                json={"kind": "source", "feed_connector": "cee63_3p", "rating_amps": 63},
+                headers=h,
+            )
+        ).json()
+        point = (await client.post(f"{g}/rigging-points", json={"name": "T"}, headers=h)).json()
+
+        res = await client.put(
+            f"{g}/plot-elements/{element['id']}/links",
+            json={
+                "linked_patch_point_id": patch_point,
+                "linked_output_point_id": output_point,
+                "linked_video_input_id": video_input,
+                "linked_lens_device_id": box["id"],
+                "power_node_id": source["legacy_ref"].split(":")[1],
+                "rigging_point_id": point["legacy_ref"].split(":")[1],
+            },
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        roles = {
+            e["attributes"]["role"]: e["attributes"]["legacy_target"]
+            for e in (await _graph(client, h, job_id))["edges"]
+            if e["signal"] == "link"
+        }
+        assert roles["patch_point"] == patch_point and roles["output_point"] == output_point
+        assert roles["video_input"] == video_input and roles["lens"] == box["id"]
+        assert res.json()["attributes"]["rigging_point_id"] == point["id"]
+
+        for column in ("linked_patch_point_id", "linked_output_point_id", "linked_video_input_id"):
+            bad = await client.put(
+                f"{g}/plot-elements/{element['id']}/links",
+                json={column: "00000000-0000-0000-0000-000000000001"},
+                headers=h,
+            )
+            assert bad.status_code == 422, column

@@ -55,3 +55,32 @@ test('any stage element can link to a channel and a video input, and the names s
     })
     .not.toBeNull();
 });
+
+test('the stage plot reads and writes its elements through the graph only', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Stage Graph ${Date.now()}` })).id as string;
+  const video = await post(request, headers, `/jobs/${jobId}/video-lists`, { name: 'Cameras' });
+  await post(request, headers, `/jobs/${jobId}/video-lists/${video.id}/inputs`, { source_label: 'Cam 1' });
+
+  const legacyCalls: string[] = [];
+  page.on('request', (req) => {
+    if (req.url().includes(`/jobs/${jobId}/plot-elements`)) legacyCalls.push(`${req.method()} ${req.url()}`);
+  });
+  await page.goto(`/jobs/${jobId}/stage-plot`);
+  await page.getByText('Custom', { exact: true }).first().click();
+  await page.getByLabel('Label').first().fill('Riser');
+  await page.getByLabel('Label').first().press('Enter');
+  await page.getByLabel('Linked video input').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Cameras · 1: Cam 1' }).click();
+
+  await expect
+    .poll(async () => {
+      const res = await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers });
+      const elements = (await res.json()) as Array<{ label: string; linked_video_input_id: string | null }>;
+      return elements.length === 1 && elements[0].label === 'Riser' && !!elements[0].linked_video_input_id;
+    })
+    .toBe(true);
+  expect(legacyCalls.filter((c) => !c.startsWith('GET'))).toEqual([]);
+  expect(legacyCalls).toEqual([]);
+});

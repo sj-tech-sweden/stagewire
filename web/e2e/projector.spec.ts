@@ -21,7 +21,7 @@ test('a projector without throw values asks for them, with or without a screen',
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Projector ${Date.now()}` })).id as string;
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.getByText('Projector', { exact: true }).first().click();
@@ -42,7 +42,7 @@ test('a projector next to a screen asks for its throw ratio, and the screen can 
     rotation: 0,
   });
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.getByText('Projector', { exact: true }).first().click();
@@ -54,7 +54,7 @@ test('a projector has no linked video input on the plot; a camera still does', a
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Projector Link ${Date.now()}` })).id as string;
 
-  const loaded = page.waitForResponse((res) => res.url().includes('/plot-elements') && res.ok());
+  const loaded = page.waitForResponse((res) => res.request().method() === 'GET' && /\/graph$/.test(res.url()) && res.ok());
   await page.goto(`/jobs/${jobId}/stage-plot`);
   await loaded;
   await page.getByText('Projector', { exact: true }).first().click();
