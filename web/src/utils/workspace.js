@@ -132,6 +132,7 @@ export const VIRTUAL_KINDS = new Set([
   'output',
   'video_input',
   'video_destination',
+  'dmx_universe',
 ]);
 
 export const isVirtual = (device) => VIRTUAL_KINDS.has(device.kind);
@@ -183,7 +184,7 @@ export function chainSteps(node, edges, devices) {
   const steps = [];
   for (const edge of edges) {
     const attrs = edge.attributes || {};
-    if (attrs.chain !== node.id) continue;
+    if (attrs.chain !== node.id || (edge.dst_device_id === node.id && !attrs.first_point)) continue;
     if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, name: names.get(edge.src_device_id) });
     } else {
@@ -211,15 +212,17 @@ export function chainForm(node, edges, devices) {
   const byPos = [];
   for (const edge of edges) {
     const attrs = edge.attributes || {};
-    if (attrs.chain !== node.id) continue;
+    if (attrs.chain !== node.id || (edge.dst_device_id === node.id && !attrs.first_point)) continue;
     const point = attrs.first_point || attrs;
     byPos.push({
       position: point.position || 0,
       device_id: attrs.first_point ? edge.src_device_id : edge.dst_device_id,
       connector: point.connector || '',
       patch_label: point.patch_label || '',
+      in_port: point.in_port || '',
+      out_port: point.out_port || '',
       notes: point.notes || '',
-      point_id: point.point_id,
+      point_id: point.point_id || point.step_id,
       parent_id: point.parent_id || null,
     });
   }
@@ -231,6 +234,8 @@ export function chainForm(node, edges, devices) {
       device_id: p.device_id,
       connector: p.connector,
       patch_label: p.patch_label,
+      in_port: p.in_port,
+      out_port: p.out_port,
       notes: p.notes,
       parent_index: p.parent_id && index.has(p.parent_id) ? index.get(p.parent_id) : null,
     }));
@@ -384,3 +389,44 @@ export const fixturesOf = (devices) =>
         (a.attributes?.dmx_address ?? 1e9) - (b.attributes?.dmx_address ?? 1e9) ||
         a.name.localeCompare(b.name),
     );
+
+export const universesOf = (devices) =>
+  devices.filter((d) => d.kind === 'dmx_universe').sort((a, b) => a.position - b.position);
+
+// The device feeding a universe: the source of the edge that ends at the universe node.
+export const universeSource = (universe, edges) =>
+  edges.find(
+    (e) => e.dst_device_id === universe.id && e.attributes?.chain === universe.id,
+  )?.src_device_id || null;
+
+// The step tree of a universe in the shape the DMX flow diagram draws.
+export function dmxTree(universe, edges, devices) {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const steps = edges
+    .filter((e) => e.attributes?.chain === universe.id && e.attributes?.step_id)
+    .map((e) => {
+      const a = e.attributes;
+      const target = byId.get(e.dst_device_id);
+      return {
+        id: a.step_id,
+        parent: a.parent_id || null,
+        position: a.position || 0,
+        kind: target && isFixtureNode(target) ? 'fixture' : 'device',
+        label: target?.name || '?',
+        device_id: e.dst_device_id,
+        in_port: a.in_port || '',
+        out_port: a.out_port || '',
+        connector: a.connector || '',
+        notes: a.notes || '',
+        children: [],
+      };
+    })
+    .sort((x, y) => x.position - y.position);
+  const index = new Map(steps.map((s) => [s.id, s]));
+  const roots = [];
+  for (const step of steps) {
+    const parent = step.parent ? index.get(step.parent) : null;
+    (parent ? parent.children : roots).push(step);
+  }
+  return roots;
+}

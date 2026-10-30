@@ -478,3 +478,40 @@ test('fixtures are patched in the lights editor and DMX overlaps are flagged', a
   await address.press('Enter');
   await expect(page.getByTestId('dmx-conflict')).toHaveCount(0);
 });
+
+test('a DMX universe is built in the lights editor with a source, a chain and an imported fixture', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E DMX ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Lighting desk', device_type: 'other' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(lights|ljus)$/i).click();
+
+  const csv = 'universe,address,type,mode,footprint,location,purpose\n1,1,LED wash,8ch,8,Truss 1,Wash A\n1,9,LED wash,8ch,8,Truss 1,Wash B\n';
+  await page.getByTestId('import-file').setInputFiles({ name: 'rig.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(page.getByTestId('fixture-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(2);
+
+  await page.getByTestId('add-universe').click();
+  await expect(page.getByTestId('universe-row')).toHaveCount(1);
+  await page.getByTestId('universe-source').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Lighting desk' }).click();
+  await page.getByTestId('edit-universe-chain').click();
+  for (let i = 0; i < 2; i += 1) await page.getByTestId('chain-add-step').click();
+  const devices = page.getByTestId('chain-device');
+  await devices.nth(0).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Wash A' }).click();
+  await devices.nth(1).click();
+  await page.locator('.q-menu .q-item', { hasText: 'Wash B' }).click();
+  await page.getByTestId('chain-save').click();
+
+  const universe = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/dmx-universes`, { headers })).json())[0];
+  await expect.poll(async () => (await universe())?.steps?.length).toBe(2);
+  expect((await universe()).source_label).toBe('Lighting desk');
+  await page.getByText(/flow diagram|flödesdiagram/i).click();
+  await expect(page.getByText('Wash B').first()).toBeVisible();
+});

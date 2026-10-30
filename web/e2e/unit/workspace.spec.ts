@@ -3,6 +3,9 @@ import {
   catalogQuery,
   deviceFromProduct,
   boxFor,
+  dmxTree,
+  universeSource,
+  universesOf,
   fixturesOf,
   isFixtureNode,
   deviceCreateBody,
@@ -168,8 +171,8 @@ test('a channel chain reads in order and rebuilds into the dialog form', () => {
   ];
   expect(chainSteps({ id: 'ch' }, edges, names)).toEqual(['Stagebox', 'Desk']);
   expect(chainForm({ id: 'ch' }, edges, names)).toEqual([
-    { device_id: 'box', connector: 'XLR', patch_label: 'In 3', notes: '', parent_index: null },
-    { device_id: 'desk', connector: 'Dante', patch_label: '', notes: '', parent_index: null },
+    { device_id: 'box', connector: 'XLR', patch_label: 'In 3', in_port: '', out_port: '', notes: '', parent_index: null },
+    { device_id: 'desk', connector: 'Dante', patch_label: '', in_port: '', out_port: '', notes: '', parent_index: null },
   ]);
 });
 
@@ -253,4 +256,42 @@ test('fixtures are found by their DMX patch and listed by universe then address'
   ];
   expect(isFixtureNode(devices[3])).toBe(false);
   expect(fixturesOf(devices).map((d) => d.id)).toEqual(['c', 'b', 'a']);
+});
+
+test('a universe chain skips its source edge, finds its source device and keeps parents', () => {
+  const uni = { id: 'u1', kind: 'dmx_universe', name: 'U1', position: 1 };
+  const edges = [
+    { src_device_id: 'desk', dst_device_id: 'u1', attributes: { chain: 'u1' } },
+    { src_device_id: 'u1', dst_device_id: 'box', attributes: { chain: 'u1', position: 0, step_id: 's0', connector: 'XLR5', in_port: 'In' } },
+    { src_device_id: 'box', dst_device_id: 'amp', attributes: { chain: 'u1', position: 1, step_id: 's1', parent_id: 's0' } },
+  ];
+  expect(universeSource(uni, edges)).toBe('desk');
+  expect(chainSteps(uni, edges, names)).toEqual(['Stagebox', 'Amp']);
+  const form = chainForm(uni, edges, names);
+  expect(form.map((s) => s.parent_index)).toEqual([null, 0]);
+  expect(form[0]).toMatchObject({ connector: 'XLR5', in_port: 'In' });
+  expect(universesOf([{ id: 'x', kind: 'fixture', position: 0 }, uni, { id: 'u0', kind: 'dmx_universe', position: 0 }]).map((d) => d.id)).toEqual(['u0', 'u1']);
+});
+
+test('universe nodes are virtual: never drawn on the canvas or listed as gear', () => {
+  expect(isVirtual({ kind: 'dmx_universe' })).toBe(true);
+});
+
+test('the DMX flow tree nests steps under their parents and tells fixtures from devices', () => {
+  const uni = { id: 'u1' };
+  const devices = [
+    { id: 'a', name: 'Wash A', kind: 'fixture', attributes: { universe: 1 } },
+    { id: 'b', name: 'Wash B', kind: 'fixture', attributes: { universe: 1 } },
+    { id: 's', name: 'Splitter', kind: 'other', attributes: {} },
+  ];
+  const edges = [
+    { src_device_id: 'u1', dst_device_id: 'a', attributes: { chain: 'u1', step_id: 's0', position: 0, connector: 'XLR5' } },
+    { src_device_id: 'a', dst_device_id: 'b', attributes: { chain: 'u1', step_id: 's1', position: 1, parent_id: 's0' } },
+    { src_device_id: 'u1', dst_device_id: 's', attributes: { chain: 'u1', step_id: 's2', position: 2 } },
+    { src_device_id: 'desk', dst_device_id: 'u1', attributes: { chain: 'u1' } },
+  ];
+  const tree = dmxTree(uni, edges, devices);
+  expect(tree.map((n) => [n.label, n.kind])).toEqual([['Wash A', 'fixture'], ['Splitter', 'device']]);
+  expect(tree[0].children.map((n) => n.label)).toEqual(['Wash B']);
+  expect(tree[0].connector).toBe('XLR5');
 });

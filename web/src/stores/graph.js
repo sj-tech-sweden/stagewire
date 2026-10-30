@@ -219,7 +219,8 @@ export const useGraphStore = defineStore('graph', {
       return data;
     },
     async replaceChain(jobId, kind, nodeId, steps) {
-      const url = `${base(jobId)}/${kind === 'output' ? 'outputs' : 'channels'}/${nodeId}/chain`;
+      const route = { output: 'outputs', universe: 'universes' }[kind] || 'channels';
+      const url = `${base(jobId)}/${route}/${nodeId}/chain`;
       const { data } = await api.put(url, { steps });
       // the server synced; refetch so devices created for the chain and edge changes all arrive
       await this.fetchGraph(jobId);
@@ -233,6 +234,22 @@ export const useGraphStore = defineStore('graph', {
     async createFixture(jobId, payload) {
       const { data } = await api.post(`${base(jobId)}/fixtures`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async createUniverse(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/universes`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async setUniverseSource(jobId, universeId, deviceId, port) {
+      await api.put(`${base(jobId)}/universes/${universeId}/source`, { device_id: deviceId, port });
+      await this.fetchGraph(jobId);
+    },
+    async importFixtures(jobId, file) {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post(`/jobs/${jobId}/fixtures/import`, form);
+      await this.fetchGraph(jobId);
       return data;
     },
     async fetchEffective(jobId) {

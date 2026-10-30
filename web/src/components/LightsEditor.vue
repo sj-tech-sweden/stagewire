@@ -19,6 +19,22 @@
         :label="t('workspace.addFixtures', { n: 8 })"
         @click="addFixtures(8)"
       />
+      <q-btn
+        flat
+        no-caps
+        icon="upload_file"
+        :label="t('workspace.importFixtures')"
+        data-testid="import-fixtures"
+        @click="fileInput.click()"
+      />
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".csv,.mvr"
+        class="hidden"
+        data-testid="import-file"
+        @change="importFile"
+      >
     </div>
 
     <div
@@ -145,25 +161,160 @@
         </q-td>
       </template>
     </q-table>
+
+    <div class="row items-center q-mt-xl q-mb-sm">
+      <div class="text-subtitle1 col">
+        {{ t('workspace.universes') }}
+      </div>
+      <q-btn
+        flat
+        no-caps
+        icon="add"
+        :label="t('workspace.addUniverse')"
+        data-testid="add-universe"
+        @click="addUniverse"
+      />
+    </div>
+    <q-list
+      bordered
+      separator
+    >
+      <q-item
+        v-for="uni in universes"
+        :key="uni.id"
+        class="column"
+        data-testid="universe-row"
+      >
+        <div class="row items-center q-col-gutter-sm full-width">
+          <div class="col-auto text-weight-bold">
+            U{{ uni.attributes.number }}
+          </div>
+          <q-input
+            :model-value="uni.name"
+            class="col"
+            dense
+            borderless
+            @change="(v) => save(uni, { name: v })"
+          />
+          <q-select
+            :model-value="sourceOf(uni)"
+            class="col-12 col-sm-3"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            :options="gearOptions"
+            :label="t('workspace.universeSource')"
+            data-testid="universe-source"
+            @update:model-value="(v) => setSource(uni, v)"
+          />
+          <q-input
+            :model-value="uni.attributes.source_port"
+            class="col-6 col-sm-2"
+            dense
+            outlined
+            :label="t('workspace.sourcePort')"
+            @change="(v) => saveAttr(uni, 'source_port', v)"
+          />
+          <q-btn
+            flat
+            dense
+            no-caps
+            icon="route"
+            :label="t('workspace.editChain')"
+            data-testid="edit-universe-chain"
+            @click="openChain(uni)"
+          />
+          <q-btn
+            flat
+            dense
+            round
+            color="negative"
+            icon="delete"
+            :aria-label="t('workspace.remove')"
+            @click="remove(uni)"
+          />
+        </div>
+        <div class="text-caption text-grey-6">
+          {{ chainText(uni) || t('workspace.chainEmpty') }}
+        </div>
+        <q-expansion-item
+          v-if="treeOf(uni).length"
+          dense
+          icon="account_tree"
+          :label="t('workspace.flowDiagram')"
+          class="full-width"
+        >
+          <DmxFlowDiagram
+            :steps="treeOf(uni)"
+            :universe-number="uni.attributes.number"
+          />
+        </q-expansion-item>
+      </q-item>
+      <q-item v-if="!universes.length">
+        <q-item-section class="text-grey-6">
+          {{ t('workspace.noUniverses') }}
+        </q-item-section>
+      </q-item>
+    </q-list>
+
+    <ChainDialog
+      v-model="chainOpen"
+      :title="`${t('workspace.editChain')}: ${chainNode?.name || ''}`"
+      :initial="chainInitial"
+      :devices="chainDevices"
+      :fields="dmxFields"
+      branching
+      @save="saveChain"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
+import ChainDialog from '@/components/ChainDialog.vue';
+import DmxFlowDiagram from '@/components/DmxFlowDiagram.vue';
 import { dmxFlags } from '@/utils/dmx';
-import { fixtureView, fixturesOf } from '@/utils/workspace';
+import {
+  chainForm,
+  chainSteps,
+  dmxTree,
+  fixtureView,
+  fixturesOf,
+  isGear,
+  universeSource,
+  universesOf,
+} from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 
+const fileInput = ref(null);
+const chainOpen = ref(false);
+const chainNode = ref(null);
+const chainInitial = ref([]);
+const dmxFields = [
+  { key: 'connector', label: 'workspace.stepConnector' },
+  { key: 'in_port', label: 'workspace.stepIn' },
+  { key: 'out_port', label: 'workspace.stepOut' },
+];
 const numberFields = ['universe', 'dmx_address', 'footprint'];
 const textFields = ['fixture_type', 'channel_mode', 'location', 'gel', 'purpose'];
 const fixtures = computed(() => fixturesOf(graph.devices));
+const universes = computed(() => universesOf(graph.devices));
+const chainDevices = computed(() => graph.devices.filter(isGear));
+const gearOptions = computed(() =>
+  chainDevices.value.map((d) => ({ label: d.name, value: d.id })),
+);
+const sourceOf = (uni) => universeSource(uni, graph.edges);
+const treeOf = (uni) => dmxTree(uni, graph.edges, graph.devices);
+const chainText = (uni) => chainSteps(uni, graph.edges, graph.devices).join(' → ');
 const flags = computed(() => dmxFlags(fixtures.value.map(fixtureView)));
 const flagsOf = (fixture) => flags.value.get(fixture.id) || { conflict: false, overflow: false };
 
@@ -189,6 +340,60 @@ async function saveAttr(node, key, value) {
     await graph.updateDevice(props.jobId, node.id, { attributes: { ...node.attributes, [key]: value } });
   } catch (err) {
     if (err.response?.status !== 409) failed(err);
+  }
+}
+
+async function save(node, changes) {
+  try {
+    await graph.updateDevice(props.jobId, node.id, changes);
+  } catch (err) {
+    if (err.response?.status !== 409) failed(err);
+  }
+}
+
+async function addUniverse() {
+  try {
+    await graph.createUniverse(props.jobId, {});
+  } catch (err) {
+    failed(err);
+  }
+}
+
+async function setSource(uni, deviceId) {
+  try {
+    await graph.setUniverseSource(props.jobId, uni.id, deviceId || null, uni.attributes.source_port || '');
+  } catch (err) {
+    failed(err);
+  }
+}
+
+function openChain(uni) {
+  chainNode.value = uni;
+  chainInitial.value = chainForm(uni, graph.edges, graph.devices);
+  chainOpen.value = true;
+}
+
+async function saveChain(steps) {
+  try {
+    await graph.replaceChain(props.jobId, 'universe', chainNode.value.id, steps);
+    chainOpen.value = false;
+  } catch (err) {
+    failed(err);
+  }
+}
+
+async function importFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const result = await graph.importFixtures(props.jobId, file);
+    $q.notify({
+      type: result.errors?.length ? 'warning' : 'positive',
+      message: t('workspace.imported', { n: result.created }),
+    });
+  } catch (err) {
+    failed(err);
   }
 }
 

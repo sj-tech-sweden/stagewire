@@ -38,18 +38,14 @@
             @filter="filterDevices"
           />
           <q-input
-            v-model="step.connector"
+            v-for="field in fields"
+            :key="field.key"
+            v-model="step[field.key]"
             class="col-6 col-sm-2"
             dense
             outlined
-            :label="t('workspace.stepConnector')"
-          />
-          <q-input
-            v-model="step.patch_label"
-            class="col-6 col-sm-2"
-            dense
-            outlined
-            :label="t('workspace.stepLabel')"
+            :label="t(field.label)"
+            :data-testid="`chain-${field.key}`"
           />
           <q-select
             v-if="branching && i > 0"
@@ -132,13 +128,28 @@ const props = defineProps({
   initial: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
   branching: { type: Boolean, default: false },
+  fields: {
+    type: Array,
+    default: () => [
+      { key: 'connector', label: 'workspace.stepConnector' },
+      { key: 'patch_label', label: 'workspace.stepLabel' },
+    ],
+  },
 });
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const steps = ref([]);
 const filtered = ref([]);
 
-const blank = () => ({ device_id: null, connector: '', patch_label: '', notes: '', parent_index: null });
+const blank = () => ({
+  device_id: null,
+  connector: '',
+  patch_label: '',
+  in_port: '',
+  out_port: '',
+  notes: '',
+  parent_index: null,
+});
 const options = () => props.devices.map((d) => ({ label: d.name, value: d.id }));
 
 watch(
@@ -171,8 +182,7 @@ function move(i, delta) {
 function cleaned() {
   return steps.value.map((s) => ({
     device_id: s.device_id,
-    connector: s.connector || '',
-    patch_label: s.patch_label || '',
+    ...Object.fromEntries(props.fields.map((f) => [f.key, s[f.key] || ''])),
     notes: s.notes || '',
     ...(props.branching ? { parent_index: s.parent_index ?? null } : {}),
   }));
