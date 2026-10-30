@@ -234,6 +234,10 @@ class StagePlotElement(Base):
         ForeignKey("graph_devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
     graph_link_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    graph_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("graph_devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    graph_source_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 

@@ -1,5 +1,4 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
 from app.domains.audio.models import (
@@ -13,7 +12,6 @@ from app.domains.audio.models import (
     StagePlotElement,
 )
 from app.domains.reports import registry
-from app.main import app
 
 BASE = "/api/v1"
 
@@ -128,29 +126,21 @@ async def _seed():
         return job.id
 
 
-def _by_name(sheets):
-    return [{**s, "id": s["name"]} for s in sheets]
-
-
 @pytest.mark.asyncio
 async def test_graph_report_contexts_match_the_legacy_contexts(auth_headers):
     job_id = await _seed()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        res = await client.post(f"{BASE}/jobs/{job_id}/graph/backfill", headers=auth_headers)
-        assert res.status_code == 200, res.text
-
     async with db_mod.SessionLocal() as db:
-        legacy_channels = await registry._channel_list_context(db, job_id)
-        graph_channels = await registry._channel_list_context_from_graph(db, job_id)
-        legacy_sheets = await registry._patch_sheet_context(db, job_id)
-        graph_sheets = await registry._patch_sheet_context_from_graph(db, job_id)
+        legacy_channels = await registry._channel_list_context_legacy(db, job_id)
+        graph_channels = await registry._channel_list_context(db, job_id)
+        legacy_sheets = await registry._patch_sheet_context_legacy(db, job_id)
+        graph_sheets = await registry._patch_sheet_context(db, job_id)
 
     assert [r["source_label"] for r in legacy_channels["channels"]] == ["Vox", "Snare", "Keys"]
     assert graph_channels["channels"] == legacy_channels["channels"]
     assert any(r["performer_name"] == "Alex on stage" for r in graph_channels["channels"])
 
-    legacy_view = _by_name(legacy_sheets["patchpoint_sheets"])
-    graph_view = _by_name(graph_sheets["patchpoint_sheets"])
+    legacy_view = legacy_sheets["patchpoint_sheets"]
+    graph_view = graph_sheets["patchpoint_sheets"]
     assert [s["name"] for s in legacy_view] == ["Amp", "Desk", "Stagebox", "Wedge"]
     assert graph_view == legacy_view
     desk_rows = next(s for s in graph_view if s["name"] == "Desk")["rows"]

@@ -57,6 +57,8 @@ async def _seed():
                 ("Amp", "amp"),
                 ("Matrix", "switcher"),
                 ("Scaler", "other"),
+                ("Camrig", "other"),
+                ("Wedge", "monitor"),
             )
         }
         db.add_all(devices.values())
@@ -94,8 +96,8 @@ async def _seed():
         vin = VideoInput(list_id=vlist.id, input_number=1, source_label="Cam")
         db.add(vin)
         await db.flush()
-        db.add(VideoPatchPoint(input_id=vin.id, position=0, device_id=devices["Matrix"].id))
-        db.add(VideoPatchPoint(input_id=vin.id, position=1, device_id=devices["Scaler"].id))
+        for position, name in enumerate(("Camrig", "Matrix", "Scaler")):
+            db.add(VideoPatchPoint(input_id=vin.id, position=position, device_id=devices[name].id))
         vout = VideoOutput(list_id=vlist.id, output_number=1, destination_label="LED")
         db.add(vout)
         await db.flush()
@@ -115,9 +117,23 @@ async def _seed():
                 _element(j, "stagebox", 300, 300, linked_device_id=devices["Stagebox"].id),
                 _element(j, "mixer", 600, 300, linked_device_id=devices["Desk"].id),
                 _element(j, "amp", 500, 500, linked_device_id=devices["Amp"].id),
-                _element(j, "speaker", 700, 500, linked_output_point_id=p1.id),
+                _element(
+                    j,
+                    "speaker",
+                    700,
+                    500,
+                    linked_output_point_id=p1.id,
+                    linked_device_id=devices["Wedge"].id,
+                ),
                 _element(j, "speaker", 800, 500, linked_device_id=devices["Amp"].id),
-                _element(j, "camera", 50, 400, linked_video_input_id=vin.id),
+                _element(
+                    j,
+                    "camera",
+                    50,
+                    400,
+                    linked_video_input_id=vin.id,
+                    linked_device_id=devices["Camrig"].id,
+                ),
                 _element(j, "projector", 60, 420, linked_video_input_id=vin.id),
                 _element(j, "switcher", 400, 50, linked_device_id=devices["Matrix"].id),
                 _element(j, "other", 450, 80, linked_device_id=devices["Scaler"].id),
@@ -147,8 +163,14 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
             await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
         ).all()
 
-    roles = {e.element_type + str(i): e.graph_link_role for i, e in enumerate(elements)}
-    assert set(roles.values()) == {"channel", "device", "output_point", "video_input"}
+    assert {e.graph_source_role for e in elements} == {
+        "channel",
+        "output_point",
+        "video_input",
+        None,
+    }
+    both = [e for e in elements if e.graph_device_id and e.graph_source_id]
+    assert len(both) >= 2  # a speaker with an output point and a camera with a video input
 
     legacy = derive_cables(list(lists), list(elements), list(vlists))
     graph = derive_cables_from_graph(list(devices), list(edges), list(elements))

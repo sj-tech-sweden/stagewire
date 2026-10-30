@@ -29,6 +29,9 @@ from app.domains.audio.models import (
 from app.domains.audio.speaker_specs import resolve_speaker_specs
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.graph import readers as graph_readers
+from app.domains.graph.backfill import backfill_job
+from app.domains.graph.models import GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 from app.domains.video import service as video_service
@@ -199,7 +202,19 @@ async def export_channel_list(
     exporter: ConsoleExporter | None = get_exporter(plugin)
     if exporter is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown export plugin")
-    result = exporter.export(channel_list, channel_list.channels, channel_list.outputs)
+    await backfill_job(db, job_id)
+    container = (
+        await db.scalars(
+            select(GraphDevice).where(
+                GraphDevice.job_id == job_id,
+                GraphDevice.legacy_ref == f"audio_channel_lists:{list_id}",
+            )
+        )
+    ).first()
+    view = container and await graph_readers.load_channel_list(db, job_id, container.id)
+    if view is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    result = exporter.export(*view)
     return Response(
         content=result.content,
         media_type=result.media_type,

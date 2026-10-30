@@ -17,11 +17,11 @@ from app.domains.graph.readers import channel_view
 
 def _performer_names(elements: list[Any]) -> dict[str, str]:
     return {
-        str(e.graph_device_id): e.label
+        str(e.graph_source_id): e.label
         for e in elements
         if e.element_type == "performer"
-        and e.graph_link_role == "channel"
-        and e.graph_device_id
+        and e.graph_source_role == "channel"
+        and e.graph_source_id
         and e.label
     }
 
@@ -112,12 +112,18 @@ def patch_sheets(devices: list[Any], edges: list[Any], elements: list[Any]) -> l
             "",
         )
 
+    def public_id(graph_id: str) -> str:
+        """Sheets are selected by the legacy device id, so keep it when there is one."""
+        ref = getattr(by_id.get(graph_id), "legacy_ref", None) or ""
+        table, _, legacy_id = ref.partition(":")
+        return legacy_id if table == "audio_devices" and legacy_id else graph_id
+
     def add_row(point: dict, row: dict) -> None:
         key = point["device_id"]
         sheet = sheets.setdefault(
             key,
             {
-                "id": key,
+                "id": public_id(key),
                 "name": names.get(key) or key,
                 "type": point.get("point_type") or "mixer",
                 "rows": [],

@@ -109,6 +109,8 @@ class Backfill:
         self.loaded_devices: set[str] = set()
         self.loaded_edges: set[str] = set()
         self.loaded_revisions: dict[uuid.UUID, int] = {}
+        self.new_edges: list[ConnectionEdge] = []
+        self.edge_updates: list[tuple[ConnectionEdge, dict]] = []
         self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
         self.result = BackfillResult()
@@ -215,15 +217,24 @@ class Backfill:
         if ref in self.edge_refs:
             existing = self.edge_rows.get(ref)
             if existing is not None and not existing.graph_edited:
-                existing.signal = signal
-                existing.src_device_id, existing.src_port = src.id, sport
-                existing.dst_device_id, existing.dst_port = dst.id, dport
-                existing.phase = phase if phase in ("L1", "L2", "L3") else None
-                existing.attributes = {"legacy_ref": ref, **(attributes or {})}
+                self.edge_updates.append(
+                    (
+                        existing,
+                        {
+                            "signal": signal,
+                            "src_device_id": src.id,
+                            "src_port": sport,
+                            "dst_device_id": dst.id,
+                            "dst_port": dport,
+                            "phase": phase if phase in ("L1", "L2", "L3") else None,
+                            "attributes": {"legacy_ref": ref, **(attributes or {})},
+                        },
+                    )
+                )
             self.result.skipped += 1
             return
         self.edge_refs.add(ref)
-        self.db.add(
+        self.new_edges.append(
             ConnectionEdge(
                 id=uuid.uuid4(),
                 job_id=self.job_id,
@@ -556,6 +567,17 @@ class Backfill:
                     attributes={"output_id": str(vout.id)},
                 )
 
+    async def write_edges(self) -> None:
+        """Insert devices first; nothing in the ORM orders edge inserts after them."""
+        await self.db.flush()
+        for edge, values in self.edge_updates:
+            for key, value in values.items():
+                setattr(edge, key, value)
+        self.db.add_all(self.new_edges)
+        await self.db.flush()
+        for edge in self.new_edges:
+            self.edge_rows[edge.attributes["legacy_ref"]] = edge
+
     async def prune(self) -> None:
         """Remove untouched graph rows whose legacy source no longer exists."""
         gone_edges = [
@@ -580,16 +602,18 @@ class Backfill:
                 doomed[edge.id] = edge
         for edge in doomed.values():
             await self.db.delete(edge)
+        await self.db.flush()
         for device in gone_devices.values():
             await self.db.delete(device)
         self.result.removed = len(doomed) + len(gone_devices)
 
     async def plot_links(self) -> None:
-        """Point each stage plot element at the graph node its legacy links resolve to.
+        """Point each stage plot element at its graph nodes.
 
-        Recomputed on every sync while the plot editor still writes the legacy links.
-        An element can carry several legacy links; one graph node is kept, in this priority:
-        channel, video input, output point, device, patch point.
+        Recomputed on every sync while the plot editor still writes the legacy links. An element
+        has up to two graph links: ``graph_device_id`` (its device, which places it on the plot)
+        and a source link (``graph_source_id`` + role) for its cable, chosen by priority:
+        channel, video input, output point, patch point.
         """
         elements = (
             await self.db.scalars(
@@ -606,7 +630,14 @@ class Backfill:
             for p in (await self.db.scalars(select(OutputPatchPoint))).all()
             if p.device_id
         }
+
+        def node(ref: str):
+            return self.devices.get(ref) if ref in self.seen_devices else None
+
         for el in elements:
+            device = node(f"audio_devices:{el.linked_device_id}") if el.linked_device_id else None
+            el.graph_device_id = device.id if device else None
+            el.graph_link_role = None
             candidates = [
                 ("channel", f"audio_channel_patches:{el.linked_channel_id}")
                 if el.linked_channel_id
@@ -617,21 +648,15 @@ class Backfill:
                 ("output_point", f"audio_devices:{out_device.get(el.linked_output_point_id)}")
                 if el.linked_output_point_id in out_device
                 else None,
-                ("device", f"audio_devices:{el.linked_device_id}") if el.linked_device_id else None,
                 ("patch_point", f"audio_devices:{point_device.get(el.linked_patch_point_id)}")
                 if el.linked_patch_point_id in point_device
                 else None,
             ]
-            candidates = [c for c in candidates if c]
-            if len(candidates) > 1:
-                self.result.notes.append(
-                    f"plot element {el.id} has {len(candidates)} links; kept {candidates[0][0]}"
-                )
-            el.graph_device_id, el.graph_link_role = None, None
-            for role, ref in candidates:
-                node = self.devices.get(ref)
-                if node is not None:
-                    el.graph_device_id, el.graph_link_role = node.id, role
+            el.graph_source_id, el.graph_source_role = None, None
+            for role, ref in (c for c in candidates if c):
+                source = node(ref)
+                if source is not None:
+                    el.graph_source_id, el.graph_source_role = source.id, role
                     break
 
     async def lighting(self) -> None:
@@ -812,6 +837,8 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         await builder.audio_outputs()
         await builder.video()
         await builder.lighting()
+    with db.no_autoflush:
+        await builder.write_edges()
         await builder.plot_links()
         await builder.prune()
     await db.flush()

@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
+from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
-from app.domains.reports.cable_routing import routed_cable_paths
+from app.domains.reports.cable_routing import routed_cable_paths_from_graph
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
 from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
@@ -86,7 +87,7 @@ async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job}
 
 
-async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
+async def _channel_list_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     performer_names = {
         str(element.linked_channel_id): element.label
@@ -175,14 +176,15 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]
 
 
 async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    video_lists = await _load_video_lists(db, job_id)
+    graph_devices, graph_edges, _ = await graph_context.load_graph(db, job_id)
     audience = [(float(x), float(y)) for x, y in (job.audience_polygon or [])]
-    cables = routed_cable_paths(
+    cables = routed_cable_paths_from_graph(
         cable_plan=job.cable_plan,
-        channel_lists=job.channel_lists,
+        devices=graph_devices,
+        edges=graph_edges,
         elements=job.plot_elements,
-        video_lists=video_lists,
         audience=audience,
         stage_offset=(float(job.stage_x_cm or 0), float(job.stage_y_cm or 0)),
     )
@@ -234,19 +236,21 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job, "fixture_patch": rows}
 
 
-async def _channel_list_context_from_graph(db: AsyncSession, job_id: UUID) -> dict:
+async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
     devices, _, elements = await graph_context.load_graph(db, job_id)
     return {"job": job, "channels": graph_context.channel_rows(devices, elements)}
 
 
-async def _patch_sheet_context_from_graph(db: AsyncSession, job_id: UUID) -> dict:
+async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
     devices, edges, elements = await graph_context.load_graph(db, job_id)
     return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges, elements)}
 
 
-async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
+async def _patch_sheet_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     sheets: dict[str, dict] = {}
     performer_names = {

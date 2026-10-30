@@ -478,7 +478,7 @@ def derive_cables_from_graph(
         if src.kind in ("channel", "video_input"):
             role = src.kind
             linked = [
-                e for e in elements if e.graph_device_id == src.id and e.graph_link_role == role
+                e for e in elements if e.graph_source_id == src.id and e.graph_source_role == role
             ]
             if role == "channel":
                 mics = [e for e in linked if e.element_type in MIC_TYPES]
@@ -507,13 +507,13 @@ def derive_cables_from_graph(
     for element in elements:
         if (
             element.element_type in SPEAKER_TYPES
-            and element.graph_link_role == "output_point"
-            and element.graph_device_id
+            and element.graph_source_role == "output_point"
+            and element.graph_source_id
         ):
             cables.append(
                 Cable(
                     key=f"spk:{element.id}",
-                    from_device_id=str(element.graph_device_id),
+                    from_device_id=str(element.graph_source_id),
                     to_element_id=str(element.id),
                 )
             )
@@ -528,7 +528,6 @@ def _graph_centres(elements: list[Any]) -> tuple[dict[str, Point], dict[str, Poi
         centre_of_element[str(element.id)] = centre
         if (
             element.graph_device_id
-            and element.graph_link_role == "device"
             and element.element_type not in SPEAKER_TYPES
             and str(element.graph_device_id) not in centre_of_device
         ):

@@ -278,7 +278,8 @@ class StagePlotElementBase(BaseModel):
     coverage_angle_h: float = 0.0
     coverage_distance_m: float = 0.0
     graph_device_id: UUID | None = None
-    graph_link_role: str | None = None
+    graph_source_id: UUID | None = None
+    graph_source_role: str | None = None
 
 
 class StagePlotElementCreate(StagePlotElementBase):
