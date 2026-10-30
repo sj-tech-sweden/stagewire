@@ -19,6 +19,26 @@ from app.domains.video.models import VideoInputList
 
 FAN_OUT = 64
 
+CHANNEL_FIELDS = (
+    "channel_number",
+    "input_type",
+    "connector",
+    "device",
+    "stand_type",
+    "instrument_group",
+    "performer_name",
+    "wireless_pack",
+    "wireless_frequency",
+    "phantom_power",
+    "stereo",
+    "stereo_channel",
+    "color_code",
+    "stockwire_asset_id",
+    "stand_product_id",
+    "stand_product_name",
+)
+OUTPUT_FIELDS = ("mode", "connector", "color_code")
+
 
 @dataclass
 class BackfillResult:
@@ -87,6 +107,13 @@ class Backfill:
     def device(self, ref: str, **fields) -> GraphDevice:
         existing = self.devices.get(ref)
         if existing is not None:
+            missing = {
+                k: v
+                for k, v in (fields.get("attributes") or {}).items()
+                if k not in existing.attributes
+            }
+            if missing:
+                existing.attributes = {**existing.attributes, **missing}
             self.result.skipped += 1
             return existing
         device = GraphDevice(id=uuid.uuid4(), job_id=self.job_id, legacy_ref=ref, **fields)
@@ -207,6 +234,36 @@ class Backfill:
                 stockwire_product_name=row.stockwire_product_name,
             )
 
+    async def channel_lists(self) -> None:
+        lists = (
+            await self.db.scalars(select(ChannelList).where(ChannelList.job_id == self.job_id))
+        ).all()
+        for row in lists:
+            self.device(
+                f"audio_channel_lists:{row.id}",
+                domain="audio",
+                kind="channel_list",
+                name=row.name,
+                position=row.position,
+                attributes={
+                    k: v
+                    for k, v in {
+                        "mixer_product_id": row.mixer_product_id,
+                        "mixer_product_name": row.mixer_product_name,
+                        "mixer_inputs": row.mixer_inputs,
+                        "mixer_buses": row.mixer_buses,
+                    }.items()
+                    if v is not None
+                },
+                ports=[],
+                stockwire_product_id=row.mixer_product_id,
+                stockwire_product_name=row.mixer_product_name,
+            )
+
+    def _list_id(self, legacy_list_id: uuid.UUID) -> str:
+        container = self.devices.get(f"audio_channel_lists:{legacy_list_id}")
+        return str(container.id) if container is not None else str(legacy_list_id)
+
     async def channels(self) -> None:
         channels = (
             await self.db.scalars(
@@ -232,11 +289,15 @@ class Backfill:
                 kind="channel",
                 name=channel.source_label or f"Ch {channel.channel_number}",
                 position=channel.channel_number,
+                notes=channel.notes or "",
                 attributes={
-                    "channel_number": channel.channel_number,
+                    "list_id": self._list_id(channel.channel_list_id),
                     "channel_list_id": str(channel.channel_list_id),
-                    "input_type": channel.input_type,
-                    "instrument_group": channel.instrument_group,
+                    **{
+                        field: getattr(channel, field)
+                        for field in CHANNEL_FIELDS
+                        if getattr(channel, field) is not None
+                    },
                 },
                 ports=[{"id": "out", "direction": "out", "signal": "audio"}],
                 stockwire_product_id=channel.stockwire_product_id,
@@ -290,9 +351,13 @@ class Backfill:
                 notes=output.notes or "",
                 position=output.position,
                 attributes={
-                    "mode": output.mode,
-                    "color_code": output.color_code,
+                    "list_id": self._list_id(output.channel_list_id),
                     "channel_list_id": str(output.channel_list_id),
+                    **{
+                        field: getattr(output, field)
+                        for field in OUTPUT_FIELDS
+                        if getattr(output, field) is not None
+                    },
                 },
                 ports=[
                     {"id": "in", "direction": "in", "signal": "audio"},
@@ -617,6 +682,7 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     await builder.load_existing()
     await builder.audio_devices()
     await builder.power()
+    await builder.channel_lists()
     await builder.channels()
     await builder.audio_outputs()
     await builder.video()

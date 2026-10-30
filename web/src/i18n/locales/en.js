@@ -52,6 +52,8 @@ export default {
     discard: 'Discard my changes',
   },
   workspace: {
+    export: 'Export',
+    exportFailed: 'Export failed',
     connectTool: 'Connect tool',
     noFreePorts: 'No free matching ports between {from} and {to}',
     title: 'Workspace',

@@ -52,6 +52,8 @@ export default {
     discard: 'Släng mina ändringar',
   },
   workspace: {
+    export: 'Exportera',
+    exportFailed: 'Exporten misslyckades',
     connectTool: 'Kopplingsverktyg',
     noFreePorts: 'Inga lediga matchande portar mellan {from} och {to}',
     title: 'Arbetsyta',

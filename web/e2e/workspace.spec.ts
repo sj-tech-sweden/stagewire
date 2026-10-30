@@ -255,3 +255,23 @@ test('the phase chips use the rating of the power sources', async ({ page, reque
   await expect(chip).toContainText('6000 W');
   await expect(chip).toHaveClass(/bg-warning/);
 });
+
+test('a channel list can be exported from the graph', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Export ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/channel-lists`, { name: 'FOH Inputs' });
+  await post(request, headers, `/jobs/${jobId}/channel-lists/${lst.id}/channels`, {
+    channel_number: 1,
+    source_label: 'Kick',
+  });
+  await post(request, headers, `/jobs/${jobId}/graph/backfill`, {});
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await page.getByTestId('export-menu').click();
+  const download = page.waitForEvent('download');
+  await page.getByTestId('export-generic_csv').click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/\.zip$/);
+});

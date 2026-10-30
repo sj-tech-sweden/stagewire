@@ -1,15 +1,17 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
+from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
-from app.domains.graph import backfill, schemas, topology
+from app.domains.graph import backfill, readers, schemas, topology
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -392,4 +394,38 @@ async def backfill_graph(job_id: UUID, db: AsyncSession = Depends(get_db)) -> sc
     result = await backfill.backfill_job(db, job_id)
     return schemas.BackfillRead(
         devices=result.devices, edges=result.edges, skipped=result.skipped, notes=result.notes
+    )
+
+
+@router.get("/export-plugins")
+async def export_plugins(job_id: UUID, db: AsyncSession = Depends(get_db)) -> list[dict]:
+    await _require_job(db, job_id)
+    return [
+        {
+            "key": e.key,
+            "label": e.label,
+            "description": e.description,
+            "extension": e.file_extension,
+        }
+        for e in list_exporters()
+    ]
+
+
+@router.get("/lists/{list_id}/export")
+async def export_list(
+    job_id: UUID, list_id: UUID, plugin: str, db: AsyncSession = Depends(get_db)
+) -> Response:
+    """Console export of a channel list read from the graph (same plugins as the legacy export)."""
+    await _require_job(db, job_id)
+    exporter = get_exporter(plugin)
+    if exporter is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown export plugin")
+    view = await readers.load_channel_list(db, job_id, list_id)
+    if view is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    result = exporter.export(*view)
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
     )

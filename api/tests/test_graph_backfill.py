@@ -86,9 +86,9 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 3 devices + 2 channels + 2 power nodes
+        # 3 devices + 1 channel list + 2 channels + 2 power nodes
         # 4 chain edges + 1 power feed + 1 dmx + 1 fixture power
-        assert first.json()["devices"] == 7
+        assert first.json()["devices"] == 8
         assert first.json()["edges"] == 7
 
         second = await client.post(f"{g}/backfill", headers=auth_headers)
@@ -201,8 +201,8 @@ async def test_backfill_maps_output_chains_and_video(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 8 devices + bus + video input + video destination
-        assert first.json()["devices"] == 11
+        # 8 devices + channel list + bus + video input + video destination
+        assert first.json()["devices"] == 12
         # console->bus, bus->amp, amp->spkA, bus->spkB, cam->matrix,
         # matrix->scaler, scaler->led, led->dest
         assert first.json()["edges"] == 8

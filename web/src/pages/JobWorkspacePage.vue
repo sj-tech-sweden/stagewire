@@ -45,6 +45,38 @@
         data-testid="open-catalog"
         @click="catalogOpen = true"
       />
+      <q-btn-dropdown
+        v-if="graph.channelLists.length"
+        flat
+        no-caps
+        icon="file_download"
+        :label="t('workspace.export')"
+        data-testid="export-menu"
+        @before-show="loadPlugins"
+      >
+        <q-list>
+          <template
+            v-for="list in graph.channelLists"
+            :key="list.id"
+          >
+            <q-item-label header>
+              {{ list.name }}
+            </q-item-label>
+            <q-item
+              v-for="plugin in plugins"
+              :key="`${list.id}-${plugin.key}`"
+              v-close-popup
+              clickable
+              :data-testid="`export-${plugin.key}`"
+              @click="exportList(list, plugin)"
+            >
+              <q-item-section>
+                <q-item-label>{{ plugin.label }}</q-item-label>
+              </q-item-section>
+            </q-item>
+          </template>
+        </q-list>
+      </q-btn-dropdown>
       <q-btn
         flat
         no-caps
@@ -249,6 +281,7 @@ const catalogOpen = ref(false);
 const importing = ref(false);
 const zoom = ref(0.8);
 const connectMode = ref(false);
+const plugins = ref([]);
 const layers = reactive({ audio: true, lighting: true, video: true, power: true });
 
 const phases = computed(() => phaseStatus(graph.loads));
@@ -357,6 +390,25 @@ async function onProductDrop(event) {
     $q.notify({ type: 'positive', message: t('workspace.added', { n: created.length }) });
   } catch (err) {
     $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+
+async function loadPlugins() {
+  if (plugins.value.length) return;
+  plugins.value = await graph.exportPlugins(jobId).catch(() => []);
+}
+
+async function exportList(list, plugin) {
+  try {
+    const { blob, filename } = await graph.exportList(jobId, list.id, plugin.key);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: t('workspace.exportFailed') });
   }
 }
 

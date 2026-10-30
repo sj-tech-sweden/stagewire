@@ -26,6 +26,8 @@ export const useGraphStore = defineStore('graph', {
     selectedDevice: (state) => state.devices.find((d) => d.id === state.selectedDeviceId) || null,
     unbooked: (state) =>
       state.devices.filter((d) => d.stockwire_product_id && d.stockwire_booked === false),
+    channelLists: (state) =>
+      state.devices.filter((d) => d.kind === 'channel_list').sort((a, b) => a.position - b.position),
     unplaced: (state) => state.devices.filter((d) => d.canvas_x_cm == null),
     devicesByDomain: (state) => (domain) => state.devices.filter((d) => d.domain === domain),
   },
@@ -187,6 +189,18 @@ export const useGraphStore = defineStore('graph', {
           });
         }
       }
+    },
+    async exportPlugins(jobId) {
+      const { data } = await api.get(`${base(jobId)}/export-plugins`);
+      return data;
+    },
+    async exportList(jobId, listId, plugin) {
+      const response = await api.get(`${base(jobId)}/lists/${listId}/export`, {
+        params: { plugin },
+        responseType: 'blob',
+      });
+      const match = /filename="([^"]+)"/.exec(response.headers['content-disposition'] || '');
+      return { blob: response.data, filename: match ? match[1] : `${plugin}.bin` };
     },
     setMode(mode) {
       this.mode = mode === 'list' ? 'list' : 'canvas';
