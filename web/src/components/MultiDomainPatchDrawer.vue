@@ -201,6 +201,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -261,7 +262,7 @@ async function update(row, changes) {
     await graph.updateEdge(props.jobId, row.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) {
-      $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+      $q.notify({ type: 'negative', message: apiErrorText(err) });
     }
   }
 }
@@ -271,7 +272,7 @@ async function remove(row) {
     await graph.deleteEdge(props.jobId, row.id);
   } catch (err) {
     if (!isRevisionConflict(err)) {
-      $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+      $q.notify({ type: 'negative', message: apiErrorText(err) });
     }
   }
 }

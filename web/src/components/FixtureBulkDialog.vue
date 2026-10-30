@@ -210,7 +210,7 @@ const busy = ref(false);
 const typeOptions = ref([]);
 
 const total = computed(() =>
-  rows.value.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) || 0), 0),
+  rows.value.reduce((sum, row) => sum + Math.min(200, Math.max(0, Math.floor(Number(row.quantity) || 0))), 0),
 );
 
 watch(
@@ -242,23 +242,25 @@ function pickMode(row, name) {
 async function create() {
   busy.value = true;
   try {
-    const created = await graph.createFixturesBulk(props.jobId, {
+    let created;
+    created = await graph.createFixturesBulk(props.jobId, {
       universe: Number(universe.value) || 1,
       start_address: startAddress.value === '' ? null : Number(startAddress.value),
       spacing: Number(spacing.value) || 0,
-      items: rows.value.map((row) => ({
+      items: rows.value.filter((row) => (Number(row.quantity) || 0) >= 1).map((row) => ({
         fixture_type: row.fixture_type || '',
         channel_mode: row.channel_mode || '',
         footprint: Number(row.footprint) || null,
-        quantity: Math.max(1, Number(row.quantity) || 1),
+        quantity: Math.min(200, Math.floor(Number(row.quantity))),
         label: row.label,
         location: row.location,
         gel: row.gel,
       })),
     });
-    await library.fetch(props.jobId);
     emit('created', created);
     emit('update:modelValue', false);
+    // the fixtures exist now; a failed library refresh must not look like a failed create
+    library.fetch(props.jobId).catch(() => {});
   } catch (err) {
     emit('error', err);
   } finally {

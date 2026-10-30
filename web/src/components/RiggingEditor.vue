@@ -764,6 +764,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -888,7 +889,7 @@ function connectorsOf(nodeId) {
 const failed = (err) =>
   $q.notify({
     type: 'negative',
-    message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message,
+    message: apiErrorText(err),
   });
 
 async function refresh() {
@@ -924,12 +925,16 @@ onMounted(async () => {
 });
 watch(() => [graph.devices.length, graph.edges.length], refresh);
 
+// True when the change was saved; a refused change is reported (a revision conflict has its own
+// dialog) and the caller can keep its form open.
 async function save(node, changes) {
   try {
     await graph.updateDevice(props.jobId, node.id, changes);
     await refresh();
+    return true;
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
+    return false;
   }
 }
 const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
@@ -1035,7 +1040,7 @@ const edgeToParent = (node) =>
 async function saveEdit() {
   const node = graphNode(editing.value.id);
   if (!node) return;
-  await save(node, {
+  const saved = await save(node, {
     name: editForm.name || node.name,
     notes: editForm.notes,
     ...(editForm.kind !== editing.value.kind ? { kind: editForm.kind } : {}),
@@ -1046,6 +1051,7 @@ async function saveEdit() {
       ...(editForm.kind === 'extension' ? { length_m: editForm.length_m || null } : {}),
     },
   });
+  if (!saved) return;
   const moved =
     editing.value.kind !== 'source' &&
     (editForm.parent_id !== editing.value.parent_id ||
@@ -1101,8 +1107,13 @@ async function insertExtension(node, extra = {}) {
 
 async function plugAll() {
   const connector = connectorsOf(plugTarget.value)[0]?.value || '';
-  const resolved = await resolveSource(plugTarget.value, connector);
-  const target = resolved.id;
+  let target;
+  try {
+    target = (await resolveSource(plugTarget.value, connector)).id;
+  } catch (err) {
+    failed(err);
+    return;
+  }
   let done = 0;
   for (const load of unplugged.value) {
     try {

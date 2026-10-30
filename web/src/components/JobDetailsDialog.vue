@@ -177,6 +177,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
@@ -208,7 +209,7 @@ const loading = ref(false);
 let timer = null;
 
 const venueOptions = computed(() => venues.venues.map((v) => ({ value: v.id, label: v.name })));
-const failure = (err) => err?.response?.data?.detail || err?.message || t('stockwire.noIntegration');
+const failure = (err) => apiErrorText(err) || t('stockwire.noIntegration');
 
 watch(
   () => props.modelValue,
@@ -293,9 +294,13 @@ async function link(existingId) {
 }
 
 async function openInStockwire() {
+  const tab = window.open('', '_blank');
   try {
-    window.open(await stockwire.jobDeeplink(props.jobId), '_blank');
+    const url = await stockwire.jobDeeplink(props.jobId);
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
   } catch (err) {
+    tab?.close();
     error.value = true;
     message.value = failure(err);
   }
@@ -307,11 +312,16 @@ async function sync() {
   error.value = false;
   try {
     const { data } = await api.post(`/jobs/${props.jobId}/sync-stockwire`);
-    message.value = t('workspace.stockwireSynced', {
+    const summary = t('workspace.stockwireSynced', {
       added: data.added.length,
       updated: data.updated.length,
       removed: data.removed.length,
     });
+    // items Stockwire refused are listed, not hidden behind a green message
+    error.value = Boolean(data.errors?.length);
+    message.value = data.errors?.length
+      ? `${summary}. ${t('workspace.syncErrors', { n: data.errors.length })}: ${data.errors.slice(0, 3).join('; ')}`
+      : summary;
   } catch (err) {
     error.value = true;
     message.value = failure(err);

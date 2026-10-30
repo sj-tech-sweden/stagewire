@@ -195,6 +195,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -232,7 +233,7 @@ async function run(action) {
   } catch (err) {
     $q.notify({
       type: 'negative',
-      message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message,
+      message: apiErrorText(err),
     });
   }
 }

@@ -10,12 +10,6 @@
     <q-card flat>
       <q-card-section>
         <div class="row items-center q-gutter-sm q-mb-sm">
-          <q-toggle
-            :model-value="show"
-            :label="t('cables.show')"
-            data-testid="show-cables"
-            @update:model-value="(v) => emit('update:show', v)"
-          />
           <q-btn
             v-if="!drawing"
             outline
@@ -240,11 +234,10 @@ const props = defineProps({
   rows: { type: Array, default: () => [] },
   settings: { type: Object, required: true },
   cableways: { type: Array, default: () => [] },
-  show: { type: Boolean, default: false },
   drawing: { type: Boolean, default: false },
   drawPoints: { type: Array, default: () => [] },
 });
-const emit = defineEmits(['update:show', 'settings', 'draw-start', 'draw-finish', 'draw-undo', 'draw-cancel', 'delete-way']);
+const emit = defineEmits(['settings', 'draw-start', 'draw-finish', 'draw-undo', 'draw-cancel', 'delete-way']);
 const { t } = useI18n();
 
 const caption = computed(() => `${props.rows.length} · ${props.cableways.length} ${t('cables.waysTitle').toLowerCase()}`);

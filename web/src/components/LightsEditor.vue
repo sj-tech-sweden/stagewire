@@ -329,6 +329,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -399,7 +400,7 @@ const columns = computed(() => [
 ]);
 
 const failed = (err) =>
-  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+  $q.notify({ type: 'negative', message: apiErrorText(err) });
 
 async function saveAttr(node, key, value) {
   try {

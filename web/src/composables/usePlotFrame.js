@@ -1,4 +1,7 @@
 import { computed, ref, watch } from 'vue';
+import { Notify } from 'quasar';
+import { i18n } from '@/i18n';
+import { apiErrorText } from '@/utils/errors';
 import { api } from '@/boot/api';
 import { buildCoverageCanvas, frameFromJob } from '@/utils/plotFrame';
 import { cameraShapes, projectorShapes } from '@/utils/plotViews';
@@ -18,8 +21,10 @@ const saved = (key, fallback) => {
 // Coverage is computed on the server from the placed speakers, so it is only requested while
 // the layer is on and the job has a venue size.
 export function usePlotFrame(jobId) {
+  const t = (key) => i18n.global.t(key);
   const job = ref(null);
   const outlets = ref([]);
+  const groups = ref([]);
   const coverage = ref(null);
   const show = {
     outlets: ref(saved('sw_ws_outlets', true)),
@@ -37,12 +42,15 @@ export function usePlotFrame(jobId) {
   let planSeq = 0;
   async function savePlan(next) {
     const seq = ++planSeq;
+    const previous = job.value?.cable_plan;
     job.value = { ...job.value, cable_plan: next };
     try {
       const { data } = await api.patch(`/jobs/${jobId}`, { cable_plan: next });
       if (seq === planSeq) job.value = { ...job.value, cable_plan: data.cable_plan };
     } catch (err) {
-      console.error('Failed to save the cable plan', err);
+      // show what is really saved again, and say so, instead of a plan that is gone after a reload
+      if (seq === planSeq) job.value = { ...job.value, cable_plan: previous };
+      Notify.create({ type: 'negative', message: `${t('cables.saveFailed')}: ${apiErrorText(err)}` });
     }
   }
   const cameraSpecs = ref({});
@@ -69,7 +77,7 @@ export function usePlotFrame(jobId) {
     try {
       coverage.value = (await api.get(`/jobs/${jobId}/coverage`, { params: { cell_cm: 25 } })).data;
     } catch (err) {
-      console.error('Failed to load coverage', err);
+      Notify.create({ type: 'warning', message: `${t('workspace.coverageFailed')}: ${apiErrorText(err)}` });
     }
   }
 
@@ -81,8 +89,9 @@ export function usePlotFrame(jobId) {
       ]);
       job.value = jobRes.data;
       outlets.value = outletRes.data.filter((o) => o.x_cm != null && o.y_cm != null);
+      groups.value = job.value.venue_id ? (await api.get(`/venues/${job.value.venue_id}/power-groups`)).data : [];
     } catch (err) {
-      console.error('Failed to load the stage frame', err);
+      Notify.create({ type: 'negative', message: `${t('workspace.frameFailed')}: ${apiErrorText(err)}` });
     }
     await Promise.all([loadCoverage(), loadCameraSpecs()]);
   }
@@ -93,7 +102,7 @@ export function usePlotFrame(jobId) {
     try {
       cameraSpecs.value = (await api.get(`/jobs/${jobId}/camera-specs`)).data || {};
     } catch (err) {
-      console.error('Failed to load camera specs', err);
+      Notify.create({ type: 'warning', message: `${t('workspace.cameraSpecsFailed')}: ${apiErrorText(err)}` });
     }
   }
 
@@ -129,6 +138,7 @@ export function usePlotFrame(jobId) {
     job,
     frame,
     outlets,
+    groups,
     coverageImage,
     show,
     cameraMode,

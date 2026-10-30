@@ -72,6 +72,7 @@ class VenuePowerGroupBase(BaseModel):
     name: str = ""
     rating_amps: float | None = Field(None, gt=0)
     phases: int = Field(1, ge=1, le=3)
+    phase: Literal["L1", "L2", "L3"] | None = None
     notes: str = ""
 
 
@@ -83,6 +84,7 @@ class VenuePowerGroupUpdate(BaseModel):
     name: str | None = None
     rating_amps: float | None = Field(None, gt=0)
     phases: int | None = Field(None, ge=1, le=3)
+    phase: Literal["L1", "L2", "L3"] | None = None
     notes: str | None = None
 
 

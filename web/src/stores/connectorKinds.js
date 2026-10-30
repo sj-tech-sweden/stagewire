@@ -21,11 +21,9 @@ export const useConnectorKindsStore = defineStore('connectorKinds', {
   actions: {
     async fetch() {
       if (this.loaded) return;
-      try {
-        this.custom = (await api.get('/connector-kinds')).data;
-      } finally {
-        this.loaded = true;
-      }
+      // only a successful load counts, so a failed one is tried again by the next field
+      this.custom = (await api.get('/connector-kinds')).data;
+      this.loaded = true;
     },
     async fetchPower() {
       this.power = (await api.get('/power-connectors')).data;

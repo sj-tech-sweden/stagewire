@@ -100,7 +100,14 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
         if str(device.id) in covered or device.id in powered_by_node:
             continue
         name, weight, power = values(device.id)
-        if device.power_inlet == "none" or (not power and device.power_node_id is None):
+        if device.power_inlet == "none":
+            power = None
+        if (
+            not power
+            and not weight
+            and device.power_node_id is None
+            and device.rigging_point_id is None
+        ):
             continue
         rows.append(
             LoadRow(
@@ -109,7 +116,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
                 label=name or device.name,
                 weight_kg=weight,
                 power_w=power,
-                rigging_point_id=None,
+                rigging_point_id=str(device.rigging_point_id) if device.rigging_point_id else None,
                 power_node_id=str(device.power_node_id) if device.power_node_id else None,
                 power_connector=device.power_connector or "",
                 device_id=str(device.id),

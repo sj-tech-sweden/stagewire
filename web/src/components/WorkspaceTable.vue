@@ -108,6 +108,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -140,7 +141,7 @@ async function save(row, changes) {
     await graph.updateDevice(props.jobId, row.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) {
-      $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+      $q.notify({ type: 'negative', message: apiErrorText(err) });
     }
   }
 }

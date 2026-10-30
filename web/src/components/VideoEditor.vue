@@ -302,6 +302,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -385,7 +386,7 @@ watch(
 
 const chain = (node) => videoChainNames(node, graph.edges, graph.devices).join(' → ');
 const failed = (err) =>
-  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+  $q.notify({ type: 'negative', message: apiErrorText(err) });
 
 async function save(node, changes) {
   try {

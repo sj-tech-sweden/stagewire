@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiErrorText } from '../../src/utils/errors';
 import {
   catalogQuery,
   deviceFromProduct,
@@ -498,4 +499,17 @@ test('the lead a device needs follows its power inlet and the outlet it is plugg
   expect(cableFor('attached_schuko', 'Schuko 16 A')).toBe('Fixed cable (Schuko)');
   expect(cableFor('attached_schuko', 'powerCON 20 A')).toBe('Fixed Schuko → powerCON 20 A');
   expect(cableFor('powercon', 'powerCON 20 A')).toBe('powerCON → powerCON 20 A');
+});
+
+test('API errors become readable text: strings, validation lists, objects and a fallback', () => {
+  const err = (detail: unknown, status = 422) => ({ response: { status, data: { detail } }, message: 'Request failed' });
+  expect(apiErrorText(err('Power group not found'))).toBe('Power group not found');
+  expect(apiErrorText(err([{ msg: 'Input should be greater than 0' }, { msg: 'Field required' }]))).toBe(
+    'Input should be greater than 0; Field required',
+  );
+  expect(apiErrorText(err({ message: 'Revision moved on' }, 409))).toBe('Revision moved on');
+  expect(apiErrorText(err({ code: 'invalid_connection', issues: [{ message: 'not an input' }] }))).toBe('not an input');
+  expect(apiErrorText(err(undefined, 502))).toContain('Stockwire');
+  expect(apiErrorText(new Error('Network Error'))).toBe('Network Error');
+  expect(apiErrorText({}, 'fallback')).toBe('fallback');
 });

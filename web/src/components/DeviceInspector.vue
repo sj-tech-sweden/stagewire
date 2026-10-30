@@ -102,7 +102,7 @@
             :label="t('workspace.powerInlet')"
             :hint="t('workspace.elementInletHint')"
             data-testid="element-inlet"
-            @update:model-value="(v) => graph.updateDevice(jobId, linkedGear.id, { attributes: { power_inlet: v } }).catch(() => {})"
+            @update:model-value="setLinkedInlet"
           />
           <q-btn
             v-else
@@ -307,6 +307,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -356,13 +357,24 @@ const linkedGear = computed(() =>
     ? graph.devices.find((d) => d.legacy_ref === `audio_devices:${elementLinks.value.linked_device_id}`) || null
     : null,
 );
+async function setLinkedInlet(value) {
+  try {
+    await graph.updateDevice(props.jobId, linkedGear.value.id, { attributes: { power_inlet: value } });
+  } catch (err) {
+    if (!isRevisionConflict(err)) $q.notify({ type: 'negative', message: apiErrorText(err) });
+  }
+}
+
 // A speaker or screen without a device gets one (named after it) so its power can be set.
 async function createDeviceForElement() {
+  let created = null;
   try {
-    const created = await graph.createAudioDevice(props.jobId, { name: props.device.name, device_type: 'other' });
+    created = await graph.createAudioDevice(props.jobId, { name: props.device.name, device_type: 'other' });
     await stagePlot.updateElement(props.jobId, legacyId(props.device), { linked_device_id: legacyId(created) });
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+    // a device made but not linked would be left behind (and made again on the next try)
+    if (created) await graph.deleteDevice(props.jobId, created.id).catch(() => {});
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 // Gear plugged into a power node shows where, and can be unplugged (the node keeps its other loads).
@@ -375,7 +387,7 @@ async function unplug() {
   try {
     await graph.assignLoad(props.jobId, props.device.id, { power_node_id: null });
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 
@@ -383,7 +395,7 @@ async function linkElement(links) {
   try {
     await stagePlot.updateElement(props.jobId, legacyId(props.device), links);
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 });
@@ -428,7 +440,7 @@ async function save(changes) {
     await graph.updateDevice(props.jobId, props.device.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) {
-      $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+      $q.notify({ type: 'negative', message: apiErrorText(err) });
     }
   }
 }

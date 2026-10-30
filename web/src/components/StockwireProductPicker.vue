@@ -38,7 +38,7 @@
     <template #no-option>
       <q-item>
         <q-item-section class="text-grey">
-          {{ t('stockwire.typeToSearch') }}
+          {{ searchFailed ? `${t('stockwire.searchFailed')}: ${searchFailed}` : t('stockwire.typeToSearch') }}
         </q-item-section>
       </q-item>
     </template>
@@ -47,6 +47,8 @@
 
 <script setup>
 import { ref } from 'vue';
+import { Notify } from 'quasar';
+import { apiErrorText } from '@/utils/errors';
 import { useI18n } from 'vue-i18n';
 import { useStockwireStore } from '@/stores/stockwire';
 
@@ -67,6 +69,7 @@ const { t } = useI18n({ useScope: 'global' });
 const store = useStockwireStore();
 
 const options = ref([]);
+const searchFailed = ref('');
 
 const optionLabel = (o) => (o && typeof o === 'object' ? o.name || '' : String(o ?? ''));
 const optionValue = (o) => (o && typeof o === 'object' ? `${o.id ?? ''}|${o.name ?? ''}` : String(o ?? ''));
@@ -134,10 +137,13 @@ async function onFilter(val, update) {
     }
   }
   let items = [];
+  searchFailed.value = '';
   try {
     items = await searchCatalog(q);
-  } catch {
-    items = [];
+  } catch (err) {
+    // not "no results": say the search itself failed (the typed text can still be used)
+    searchFailed.value = apiErrorText(err);
+    Notify.create({ type: 'warning', message: `${t('stockwire.searchFailed')}: ${searchFailed.value}` });
   }
   const needle = q.toLowerCase();
   const local = props.localItems

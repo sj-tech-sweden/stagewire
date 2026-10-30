@@ -55,6 +55,8 @@
             :key="outlet.id"
             :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y, draggable: !connectMode && !panning }"
             @dragend="(e) => onOutletDrop(outlet, e)"
+            @click="emit('select-outlet', outlet.id)"
+            @tap="emit('select-outlet', outlet.id)"
           >
             <v-circle :config="{ radius: connectMode ? 11 : 7, fill: '#FFEB3B', stroke: '#F9A825', strokeWidth: 2 }" />
             <v-text :config="{ text: outlet.label, fontSize: 10, x: 14, y: -5, fill: '#ddd', listening: false }" />
@@ -151,7 +153,7 @@ const props = defineProps({
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'draw-point']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point']);
 
 const $q = useQuasar();
 const host = ref(null);

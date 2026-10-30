@@ -386,6 +386,15 @@ async def power_load(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schema
     await _require_job(db, job_id)
     devices = {str(d.id): _as_dict(d) for d in await _all_devices(db, job_id)}
     loads = topology.phase_loads(devices, [_as_dict(e) for e in await _all_edges(db, job_id)])
+    from app.domains.rigging import router as rigging_router
+
+    # With a power tree the load is what the tree evaluates (everything plugged in, spread over the
+    # phases as the outputs say), summed over the sources; the per-edge figure above only knows
+    # edges that carry a phase and so reads 0 for gear plugged into a node.
+    tree = await rigging_router.rigging_summary(job_id, db)
+    sources = [n for n in tree["nodes"] if n["kind"] == "source"]
+    if sources:
+        loads = {p: round(sum(n["watts"].get(p, 0.0) for n in sources), 1) for p in topology.PHASES}
     peak, low = max(loads.values()), min(loads.values())
     return schemas.PhaseLoadRead(
         **loads,

@@ -28,6 +28,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -54,8 +55,12 @@ const shown = ref([]);
 const all = () => (props.power ? kinds.powerOptions : kinds.options);
 
 onMounted(async () => {
-  await kinds.fetch().catch(() => {});
-  if (props.power) await kinds.fetchPower().catch(() => {});
+  try {
+    await kinds.fetch();
+    if (props.power) await kinds.fetchPower();
+  } catch (err) {
+    $q.notify({ type: 'warning', message: `${t('workspace.connectorsFailed')}: ${apiErrorText(err)}` });
+  }
   shown.value = all();
 });
 
@@ -80,9 +85,17 @@ function ask(title, message, model) {
 
 async function addPower(label) {
   const amps = await ask(label, t('workspace.powerAmpsAsk'), '16');
-  if (amps == null || Number.isNaN(amps)) return null;
+  if (amps == null) return null;
+  if (Number.isNaN(amps) || amps < 0) {
+    $q.notify({ type: 'warning', message: t('workspace.powerAmpsInvalid') });
+    return null;
+  }
   const phases = await ask(label, t('workspace.powerPhasesAsk'), '1');
-  if (phases == null || ![1, 3].includes(phases)) return null;
+  if (phases == null) return null;
+  if (![1, 3].includes(phases)) {
+    $q.notify({ type: 'warning', message: t('workspace.powerPhasesInvalid') });
+    return null;
+  }
   return kinds.addPower({ label, amps, phases });
 }
 
@@ -103,7 +116,7 @@ async function onNew(value, done) {
     done(key, 'add-unique');
     $q.notify({ type: 'positive', message: t('workspace.connectorAdded', { name: typed }) });
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 </script>

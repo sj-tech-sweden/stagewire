@@ -295,11 +295,13 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { computed, reactive, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import { useI18n } from 'vue-i18n';
+import { useQuasar } from 'quasar';
 import {
   CAMERA_TYPES,
   CONNECTOR_PRESETS,
@@ -317,6 +319,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
+const $q = useQuasar();
 const form = reactive(deviceForm(null));
 const typeOptions = computed(() => DEVICE_TYPES.map((v) => ({ value: v, label: t(`devices.types.${v}`) })));
 
@@ -327,8 +330,10 @@ async function importProduct(product) {
   try {
     const { data } = await api.get(`/stockwire/products/${product.id}/device-specs`);
     fillFormFromSpecs(form, product, data);
-  } catch {
+  } catch (err) {
+    // the product is still chosen; its connectors, inlet and weight have to be filled in by hand
     fillFormFromSpecs(form, product, {});
+    $q.notify({ type: 'warning', message: `${t('devices.specsFailed')}: ${apiErrorText(err)}` });
   }
 }
 

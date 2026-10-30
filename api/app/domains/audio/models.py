@@ -186,6 +186,11 @@ class AudioDevice(Base):
         index=True,
     )
     power_connector: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    # Where a device that is hung (an LED wall, a screen) hangs; fixtures and plot elements carry
+    # their own rigging point.
+    rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

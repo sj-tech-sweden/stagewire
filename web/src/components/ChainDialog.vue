@@ -157,6 +157,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { nextTick, ref, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
@@ -222,7 +223,7 @@ async function addFromStockwire(step, product) {
     }
     step.device_id = created.id;
   } catch (err) {
-    $q.notify({ type: 'negative', message: err.response?.data?.detail || err.message });
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 

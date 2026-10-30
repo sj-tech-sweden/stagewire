@@ -57,7 +57,7 @@ async def test_a_power_group_becomes_one_source_with_an_output_per_outlet(auth_h
         nodes = (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
         source = next(n for n in nodes if n["name"] == "Stage left")
         assert source["rating_amps"] == 16
-        assert source["outputs"] == [{"connector": "schuko", "count": 3, "phase": None}]
+        assert source["outputs"] == [{"connector": "schuko", "count": 3, "phase": "L1"}]
 
         # an outlet added to the group later is picked up the next time the group is used
         extra = (
@@ -139,3 +139,71 @@ async def test_power_groups_are_validated(auth_headers):
         assert gone.status_code == 204
         outlets = (await client.get(f"{BASE}/venues/{venue_id}/power-outlets", headers=h)).json()
         assert outlets[0]["group_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_one_phase_group_carries_its_whole_load_on_one_phase_and_gear_can_hang(
+    auth_headers,
+):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        venue_id, job_id = await _venue_job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        group = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/power-groups",
+                json={"name": "Wall", "rating_amps": 10, "phases": 1},
+                headers=h,
+            )
+        ).json()
+        outlet = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/power-outlets",
+                json={"name": "W1", "connector": "schuko", "group_id": group["id"]},
+                headers=h,
+            )
+        ).json()
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-outlets",
+            json={"name": "W2", "connector": "schuko", "group_id": group["id"]},
+            headers=h,
+        )
+        source = (
+            await client.post(f"{g}/venue-power/outlets/{outlet['id']}/source", headers=h)
+        ).json()
+        point = (
+            await client.post(f"{g}/rigging-points", json={"name": "Truss A"}, headers=h)
+        ).json()
+        for name, watts in (("Projector", 100), ("LED wall", 3500)):
+            gear = (
+                await client.post(
+                    f"{g}/audio-devices",
+                    json={
+                        "name": name,
+                        "device_type": "other",
+                        "power_watts": watts,
+                        "weight_kg": 40,
+                    },
+                    headers=h,
+                )
+            ).json()
+            res = await client.put(
+                f"{g}/loads/{gear['id']}",
+                json={
+                    "power_node_id": source["node"]["id"],
+                    "power_connector": "schuko",
+                    "rigging_point_id": point["id"],
+                },
+                headers=h,
+            )
+            assert res.status_code == 200, res.text
+            assert res.json()["attributes"]["rigging_point_id"] == point["id"]
+        summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
+        node = next(n for n in summary["nodes"] if n["name"] == "Wall")
+        # 3600 W on one phase of a 10 A group is 15.7 A: over its rating, not a third of it
+        assert node["amps"]["L1"] == 15.65 and node["amps"]["L2"] == 0
+        assert node["status"] == "over" and node["percent"] > 150
+        assert next(p for p in summary["points"] if p["name"] == "Truss A")["load_kg"] == 80
+
+        load = (await client.get(f"{g}/power-load", headers=h)).json()
+        assert load["L1"] == 3600 and load["L2"] == 0 and load["L3"] == 0

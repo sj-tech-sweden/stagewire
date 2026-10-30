@@ -426,6 +426,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -496,7 +497,7 @@ watch(
 
 const chain = (node) => chainSteps(node, graph.edges, graph.devices).join(' → ');
 const failed = (err) =>
-  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+  $q.notify({ type: 'negative', message: apiErrorText(err) });
 
 async function save(node, changes) {
   try {
@@ -589,11 +590,13 @@ async function syncStockwire() {
     const { data } = await api.post(`/jobs/${props.jobId}/sync-stockwire`);
     $q.notify({
       type: data.errors?.length ? 'warning' : 'positive',
-      message: t('workspace.stockwireSynced', {
-        added: data.added.length,
-        updated: data.updated.length,
-        removed: data.removed.length,
-      }),
+      message: data.errors?.length
+        ? `${t('workspace.stockwireSynced', { added: data.added.length, updated: data.updated.length, removed: data.removed.length })}. ${t('workspace.syncErrors', { n: data.errors.length })}: ${data.errors.slice(0, 3).join('; ')}`
+        : t('workspace.stockwireSynced', {
+            added: data.added.length,
+            updated: data.updated.length,
+            removed: data.removed.length,
+          }),
     });
   } catch (err) {
     failed(err);

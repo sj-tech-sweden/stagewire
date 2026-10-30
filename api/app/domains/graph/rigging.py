@@ -169,7 +169,13 @@ async def _single_outlet_source(db: AsyncSession, job_id: UUID, outlet: VenuePow
             feed_connector=outlet.connector,
             rating_amps=outlet.rating_amps,
             venue_outlet_id=outlet.id,
-            outputs=[rigging_schemas.PowerOutput(connector=outlet.connector, count=1)],
+            outputs=[
+                rigging_schemas.PowerOutput(
+                    connector=outlet.connector,
+                    count=1,
+                    phase="L1" if connectors.connector(outlet.connector).phases == 1 else None,
+                )
+            ],
         ),
         db,
     )
@@ -185,8 +191,10 @@ async def _group_source(db: AsyncSession, job_id: UUID, group_id: UUID) -> UUID:
     for item in outlets:
         if item.connector:
             counts[item.connector] = counts.get(item.connector, 0) + 1
+    # A one-phase group puts all its load on one phase; a three-phase group is spread by the tree.
+    phase = (group.phase or "L1") if group.phases == 1 else None
     outputs = [
-        rigging_schemas.PowerOutput(connector=key, count=min(count, 99))
+        rigging_schemas.PowerOutput(connector=key, count=min(count, 99), phase=phase)
         for key, count in sorted(counts.items())
     ]
     existing = await db.scalar(

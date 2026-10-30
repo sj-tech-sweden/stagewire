@@ -52,6 +52,8 @@ class VenuePowerGroup(Base):
     name: Mapped[str] = mapped_column(String(255), default="")
     rating_amps: Mapped[float | None] = mapped_column(Float, nullable=True)
     phases: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Which phase a one-phase group is on (L1 when not set); a three-phase group spreads its load.
+    phase: Mapped[str | None] = mapped_column(String(2), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
 
 

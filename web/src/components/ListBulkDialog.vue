@@ -96,7 +96,7 @@
           no-caps
           :disable="!(form.count >= 1) || busy"
           :loading="busy"
-          :label="t('workspace.bulkCreate', { n: form.count || 0 })"
+          :label="t('workspace.bulkCreate', { n: Math.min(200, Math.max(0, Math.floor(form.count || 0))) })"
           data-testid="list-bulk-create"
           @click="create"
         />

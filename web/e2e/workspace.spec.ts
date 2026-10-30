@@ -1146,7 +1146,13 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
     })
     .toEqual(['Stage left', 'schuko']);
   const nodes = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/power-nodes`, { headers })).json()) as any[];
-  expect(nodes.find((n) => n.name === 'Stage left')).toMatchObject({ rating_amps: 16, outputs: [{ connector: 'schuko', count: 2 }] });
+  expect(nodes.find((n) => n.name === 'Stage left')).toMatchObject({
+    rating_amps: 16,
+    outputs: [{ connector: 'schuko', count: 2, phase: 'L1' }],
+  });
+  // the phase chips show what is plugged in: all of it on the group's one phase
+  await expect(page.getByTestId('phase-L1')).toContainText('500');
+  await expect(page.getByTestId('phase-L2')).toContainText('0 W');
 
   // the venue power panel lists the groups and outlets and an outlet can be fed from in the tree
   await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
@@ -1177,6 +1183,10 @@ test('an outlet is moved on the map and its position is edited in the venue powe
   const box = (await canvas.boundingBox())!;
   const zoom = Number(await canvas.getAttribute('data-zoom'));
   const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
+  // a click on an outlet marker opens it in the inspector
+  await page.mouse.click(from.x, from.y);
+  await expect(page.getByTestId('outlet-inspector')).toBeVisible();
+  await expect(page.getByTestId('outlet-name')).toHaveValue('SL 1');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x + 50 * zoom, from.y + 40 * zoom, { steps: 6 });
@@ -1377,4 +1387,22 @@ test('a patch point can search Stockwire for a device and a video input takes a 
       return cam && [cam.device_type, cam.ports.length];
     })
     .toEqual(['camera', 1]);
+});
+
+test('a plain device such as an LED wall can be hung on a rigging point', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Hang ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  await post(request, headers, `${g}/rigging-points`, { name: 'Truss A', weight_capacity_kg: 500 });
+  await post(request, headers, `${g}/audio-devices`, { name: 'LED wall', device_type: 'screen', power_watts: 3500, weight_kg: 120 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('load-row').first().getByTestId('load-point').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Truss A' }).click();
+  await expect(page.getByTestId('truss-load')).toContainText('120');
+  const graph = (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  const wall = graph.devices.find((d: any) => d.name === 'LED wall');
+  expect(wall.attributes.rigging_point_id).toBeTruthy();
 });

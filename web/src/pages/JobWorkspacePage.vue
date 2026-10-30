@@ -19,7 +19,7 @@
     />
     <ConflictDialog
       :conflict="graph.conflict"
-      @resolve="(r) => graph.resolveConflict(r).catch(() => {})"
+      @resolve="resolveConflict"
       @discard="graph.clearConflict()"
     />
 
@@ -209,6 +209,22 @@
       </q-chip>
     </div>
 
+    <q-banner
+      v-if="graph.error"
+      class="bg-negative text-white q-mb-md"
+      data-testid="graph-error"
+    >
+      {{ t('workspace.loadFailed') }}: {{ graph.error }}
+      <template #action>
+        <q-btn
+          flat
+          no-caps
+          :label="t('workspace.retry')"
+          @click="loadWorkspace"
+        />
+      </template>
+    </q-banner>
+
     <div class="row q-col-gutter-md">
       <div
         class="col-12 col-md"
@@ -331,6 +347,15 @@
               <q-btn
                 dense
                 no-caps
+                icon="cable"
+                :color="plotFrame.show.cables.value ? 'primary' : undefined"
+                :label="t('cables.title')"
+                data-testid="layer-cables"
+                @click="plotFrame.show.cables.value = !plotFrame.show.cables.value"
+              />
+              <q-btn
+                dense
+                no-caps
                 icon="power"
                 :color="plotFrame.show.outlets.value ? 'primary' : undefined"
                 :label="t('workspace.layerOutlets')"
@@ -432,6 +457,7 @@
               @draw-point="(p) => drawPoints.push(p)"
               @pan="(p) => (pan = p)"
               @move-outlet="moveOutlet"
+              @select-outlet="selectOutlet"
               @select="select"
               @move="move"
               @connect="connectDevices"
@@ -469,7 +495,6 @@
 
         <CableRoutingPanel
           v-if="graph.mode === 'canvas'"
-          v-model:show="plotFrame.show.cables.value"
           :rows="cableRows"
           :settings="plotFrame.cablePlan.value.settings"
           :cableways="plotFrame.cablePlan.value.cableways"
@@ -499,7 +524,17 @@
           bordered
           class="inspector-sticky"
         >
+          <OutletInspector
+            v-if="selectedOutlet"
+            :outlet="selectedOutlet"
+            :groups="plotFrame.groups.value"
+            :venue-id="plotFrame.job.value.venue_id"
+            :job-id="jobId"
+            @close="selectedOutletId = null"
+            @changed="plotFrame.load()"
+          />
           <DeviceInspector
+            v-else
             :job-id="jobId"
             :device="graph.selectedDevice"
             @request-booking="requestBooking"
@@ -513,10 +548,20 @@
       v-if="$q.screen.lt.md"
       :model-value="inspectorOpen"
       position="bottom"
-      @update:model-value="(v) => !v && (graph.selectedDeviceId = null)"
+      @update:model-value="(v) => !v && ((graph.selectedDeviceId = null), (selectedOutletId = null))"
     >
       <q-card style="width: 100%; max-height: 80vh; overflow: auto">
+        <OutletInspector
+          v-if="selectedOutlet"
+          :outlet="selectedOutlet"
+          :groups="plotFrame.groups.value"
+          :venue-id="plotFrame.job.value.venue_id"
+          :job-id="jobId"
+          @close="selectedOutletId = null"
+          @changed="plotFrame.load()"
+        />
         <DeviceInspector
+          v-else
           :job-id="jobId"
           :device="graph.selectedDevice"
           @request-booking="requestBooking"
@@ -534,7 +579,9 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
+import OutletInspector from '@/components/OutletInspector.vue';
 import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
 import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import JobDetailsDialog from '@/components/JobDetailsDialog.vue';
@@ -661,10 +708,10 @@ const viewShapes = computed(() => {
 const canvasEdges = computed(() =>
   graph.edges.filter((e) => e.signal !== 'link' && layers[SIGNAL_LAYER[e.signal]] !== false),
 );
-const inspectorOpen = computed(() => Boolean(graph.selectedDevice));
+const inspectorOpen = computed(() => Boolean(graph.selectedDevice) || Boolean(selectedOutlet.value));
 
 const modeKey = `sw_ws_mode_${jobId}`;
-const errorText = (err) => err.response?.data?.detail?.message || err.response?.data?.detail || err.message;
+const errorText = (err) => apiErrorText(err);
 
 let checkTimer = null;
 function scheduleChecks() {
@@ -679,7 +726,20 @@ const socket = useJobSocket(jobId, (event) => {
   }
 });
 
+// The user's own changes after a conflict are sent again; if that fails they are told why (the
+// dialog has already closed, so the draft is part of the message).
+async function resolveConflict(resolution) {
+  try {
+    await graph.resolveConflict(resolution);
+  } catch (err) {
+    if (!isRevisionConflict(err)) {
+      $q.notify({ type: 'negative', message: `${t('workspace.conflictFailed')}: ${errorText(err)}` });
+    }
+  }
+}
+
 function select(id) {
+  selectedOutletId.value = null;
   graph.selectedDeviceId = id;
 }
 
@@ -773,7 +833,10 @@ async function connectDevices({ srcId, dstId }) {
           {
             label: t('workspace.connectForce'),
             color: 'white',
-            handler: () => graph.createEdge(jobId, payload, { force: true }).catch(() => {}),
+            handler: () =>
+              graph
+                .createEdge(jobId, payload, { force: true })
+                .catch((e) => $q.notify({ type: 'negative', message: errorText(e) })),
           },
         ],
       });
@@ -853,6 +916,16 @@ const importInput = ref(null);
 const reportDialog = ref(false);
 const stageVenueOpen = ref(false);
 
+// A venue outlet picked on the map is shown in the inspector in place of a device.
+const selectedOutletId = ref(null);
+const selectedOutlet = computed(
+  () => plotFrame.outlets.value.find((o) => o.id === selectedOutletId.value) || null,
+);
+function selectOutlet(id) {
+  selectedOutletId.value = id;
+  graph.selectedDeviceId = null;
+}
+
 // Cables are derived from the chains and routed along the cableways (utils/cables.js); only the
 // settings and the cableways are stored, on the job. Drawing a cableway adds points with a click
 // on the map and saves the way when finished.
@@ -906,10 +979,16 @@ async function reloadJob() {
   }
 }
 
+// The tab is opened first and pointed at the link once it is known: a window opened after the
+// wait would be blocked as a popup by iOS Safari and installed apps.
 async function openInStockwire() {
+  const tab = window.open('', '_blank');
   try {
-    window.open(await stockwireStore.jobDeeplink(jobId), '_blank');
+    const url = await stockwireStore.jobDeeplink(jobId);
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
   } catch (err) {
+    tab?.close();
     $q.notify({ type: 'negative', message: errorText(err) });
   }
 }
@@ -951,7 +1030,9 @@ async function importFixturesFile(event) {
     const result = await graph.importFixtures(jobId, file);
     $q.notify({
       type: result.errors?.length ? 'warning' : 'positive',
-      message: t('workspace.imported', { n: result.created }),
+      message: result.errors?.length
+        ? `${t('workspace.imported', { n: result.created })} ${t('workspace.importSkipped', { n: result.errors.length, why: result.errors.slice(0, 3).map((e) => e.message || e.error || e).join('; ') })}`
+        : t('workspace.imported', { n: result.created }),
     });
     scheduleChecks();
   } catch (err) {
@@ -964,9 +1045,12 @@ async function importFixturesFile(event) {
 async function requestBooking(device) {
   try {
     await graph.requestStockwireBooking(jobId, device.id);
+    $q.notify({ type: 'positive', message: t('workspace.requestSent', { name: device.name }) });
   } catch (err) {
     const message =
-      err.response?.status === 409 ? t('workspace.requestNoJob') : t('workspace.requestFailed');
+      err.response?.status === 409
+        ? t('workspace.requestNoJob')
+        : `${t('workspace.requestFailed')}: ${errorText(err)}`;
     $q.notify({ type: 'negative', message });
   }
 }
@@ -1017,6 +1101,12 @@ watch(
   },
 );
 
+// fetchGraph reports its own failure in graph.error (shown as a banner with a retry); the stage
+// frame reports its own too.
+async function loadWorkspace() {
+  await Promise.all([graph.fetchGraph(jobId), plotFrame.load()]);
+}
+
 onMounted(async () => {
   // capture phase: Quasar buttons stop Space from bubbling when one has focus
   window.addEventListener('keydown', onKey, true);
@@ -1024,8 +1114,8 @@ onMounted(async () => {
   try {
     const { data } = await api.get(`/jobs/${jobId}`);
     job.value = data;
-  } catch {
-    /* the page still works without the job header */
+  } catch (err) {
+    $q.notify({ type: 'warning', message: `${t('workspace.jobLoadFailed')}: ${errorText(err)}` });
   }
   try {
     graph.setMode(localStorage.getItem(modeKey) || 'canvas');
@@ -1033,7 +1123,7 @@ onMounted(async () => {
     graph.setMode('canvas');
   }
   graph.selectedDeviceId = null;
-  await Promise.all([graph.fetchGraph(jobId), plotFrame.load()]);
+  await loadWorkspace();
   fitCanvas();
   scheduleChecks();
   socket.connect();

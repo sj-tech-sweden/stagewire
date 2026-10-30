@@ -67,6 +67,18 @@
             :label="t('workspace.venueGroupPhases')"
             @update:model-value="(v) => saveGroup(group, { phases: v })"
           />
+          <q-select
+            v-if="group.phases === 1"
+            :model-value="group.phase || 'L1'"
+            class="col-4 col-sm-2"
+            dense
+            outlined
+            emit-value
+            :options="['L1', 'L2', 'L3']"
+            :label="t('workspace.outputPhase')"
+            data-testid="venue-group-phase"
+            @update:model-value="(v) => saveGroup(group, { phase: v })"
+          />
           <q-btn
             flat
             dense
@@ -182,6 +194,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -207,7 +220,7 @@ const caption = computed(() =>
 );
 
 const failed = (err) =>
-  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+  $q.notify({ type: 'negative', message: apiErrorText(err) });
 
 async function load() {
   try {
@@ -239,11 +252,26 @@ async function run(call) {
 const addGroup = () =>
   run(() => api.post(`/venues/${venueId.value}/power-groups`, { name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`, rating_amps: 16, phases: 1 }));
 const saveGroup = (group, changes) => run(() => api.patch(`/venues/${venueId.value}/power-groups/${group.id}`, changes));
-const removeGroup = (group) => run(() => api.delete(`/venues/${venueId.value}/power-groups/${group.id}`));
+// A group or outlet belongs to the venue, so deleting one changes every job held there: it is
+// confirmed first and says what it detaches.
+function confirmDelete(message, call) {
+  $q.dialog({ title: t('workspace.remove'), message, cancel: true, persistent: true }).onOk(() => run(call));
+}
+const removeGroup = (group) =>
+  confirmDelete(
+    t('workspace.venueGroupDeleteWarn', {
+      name: group.name || '—',
+      n: outlets.value.filter((o) => o.group_id === group.id).length,
+    }),
+    () => api.delete(`/venues/${venueId.value}/power-groups/${group.id}`),
+  );
 const addOutlet = () =>
   run(() => api.post(`/venues/${venueId.value}/power-outlets`, { name: `${t('workspace.venueOutlet')} ${outlets.value.length + 1}`, connector: 'schuko', x_cm: 100, y_cm: 100 }));
 const saveOutlet = (outlet, changes) => run(() => api.patch(`/venues/${venueId.value}/power-outlets/${outlet.id}`, changes));
-const removeOutlet = (outlet) => run(() => api.delete(`/venues/${venueId.value}/power-outlets/${outlet.id}`));
+const removeOutlet = (outlet) =>
+  confirmDelete(t('workspace.venueOutletDeleteWarn', { name: outlet.name || '—' }), () =>
+    api.delete(`/venues/${venueId.value}/power-outlets/${outlet.id}`),
+  );
 
 onMounted(load);
 </script>

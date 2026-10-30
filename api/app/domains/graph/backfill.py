@@ -1181,6 +1181,18 @@ class Backfill:
         Only plain devices use the columns on the device row; a device that has fixtures gets its
         load attributes from them (see ``lighting``). The edge is mirrored back like a fixture's.
         """
+        hung = (
+            await self.db.scalars(
+                select(AudioDevice).where(
+                    AudioDevice.job_id == self.job_id, AudioDevice.rigging_point_id.is_not(None)
+                )
+            )
+        ).all()
+        for row in hung:
+            node = self.devices.get(f"audio_devices:{row.id}")
+            point = self.devices.get(f"rigging_points:{row.rigging_point_id}")
+            if node is not None and point is not None:
+                node.attributes = {**node.attributes, "rigging_point_id": str(point.id)}
         plugged = (
             await self.db.scalars(
                 select(AudioDevice).where(

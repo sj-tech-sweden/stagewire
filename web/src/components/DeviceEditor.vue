@@ -162,6 +162,7 @@
 </template>
 
 <script setup>
+import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -215,7 +216,7 @@ onMounted(refresh);
 watch(() => graph.devices.length, refresh);
 
 const failed = (err) =>
-  $q.notify({ type: 'negative', message: err.response?.data?.detail?.message || err.response?.data?.detail || err.message });
+  $q.notify({ type: 'negative', message: apiErrorText(err) });
 
 function openDialog(device) {
   editing.value = device;
