@@ -176,3 +176,26 @@ async def test_outputs_are_added_in_bulk(auth_headers):
             f"{g}/lists/{lst['id']}/outputs/batch", json=[{"name": "x"}] * 201, headers=h
         )
         assert too_many.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_channel_without_a_label_exports_an_empty_label_not_its_fallback_name(auth_headers):
+    import uuid
+
+    from app.core import db as db_mod
+    from app.domains.reports import registry
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Blank"}, headers=h)).json()[
+            "id"
+        ]
+        g = f"{BASE}/jobs/{job_id}/graph"
+        lst = (await client.post(f"{g}/lists", json={"name": "FOH"}, headers=h)).json()
+        res = await client.post(f"{g}/lists/{lst['id']}/channels", json={}, headers=h)
+        assert res.status_code == 201
+        assert res.json()["name"].startswith("Ch ")
+    async with db_mod.SessionLocal() as db:
+        rows = (await registry._channel_list_context(db, uuid.UUID(job_id)))["channels"]
+        old = (await registry._channel_list_context_legacy(db, uuid.UUID(job_id)))["channels"]
+    assert [r["source_label"] for r in rows] == [""] == [r["source_label"] for r in old]

@@ -94,7 +94,7 @@ ELEMENT_LINKS = {
 # Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
 # the graph even when the twin was edited there, because graph edits are mirrored back at once.
 OWNED_ATTRS: dict[str, set[str]] = {
-    "audio_channel_patches": {*CHANNEL_FIELDS, "list_id", "channel_list_id"},
+    "audio_channel_patches": {*CHANNEL_FIELDS, "list_id", "channel_list_id", "source_label"},
     "audio_channel_lists": {
         "mixer_product_id",
         "mixer_product_name",
@@ -515,6 +515,9 @@ class Backfill:
                 attributes={
                     "list_id": self._list_id(channel.channel_list_id),
                     "channel_list_id": str(channel.channel_list_id),
+                    # the node name falls back to "Ch N" when there is no label; the label itself
+                    # is kept so exports show what was typed (an empty label stays empty)
+                    "source_label": channel.source_label or "",
                     **{
                         field: getattr(channel, field)
                         for field in CHANNEL_FIELDS

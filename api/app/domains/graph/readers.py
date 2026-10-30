@@ -28,7 +28,7 @@ def channel_view(device: GraphDevice) -> SimpleNamespace:
     attrs = {**CHANNEL_DEFAULTS, **(device.attributes or {})}
     return SimpleNamespace(
         id=device.id,
-        source_label=device.name,
+        source_label=attrs.get("source_label", device.name),
         notes=device.notes or "",
         **{key: attrs[key] for key in CHANNEL_DEFAULTS},
     )
