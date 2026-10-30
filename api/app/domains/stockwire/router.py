@@ -91,16 +91,19 @@ async def search_catalog(
     category: list[str] | None = Query(default=None),
     manufacturer: list[str] | None = Query(default=None),
     attr: list[str] | None = Query(default=None, description="key:value spec filters"),
-    available_from: str | None = None,
-    available_to: str | None = None,
-    job_id: str | None = None,
+    job_id: str | None = Query(default=None, description="Stockwire rental job id"),
     skip: int = 0,
     limit: int = 50,
     db=Depends(get_db),
 ) -> dict:
     sw = await _catalog_client(db)
     if sw is None:
-        return {"items": [], "total": 0, "facets": {}}
+        return {
+            "items": [],
+            "total": 0,
+            "facets": {},
+            "availability": {"date_range_supported": False},
+        }
     attributes = dict(pair.split(":", 1) for pair in attr or [] if ":" in pair)
     try:
         return await sw.search_catalog(
@@ -108,8 +111,6 @@ async def search_catalog(
             categories=category,
             manufacturers=manufacturer,
             attributes=attributes,
-            available_from=available_from,
-            available_to=available_to,
             job_id=job_id,
             skip=skip,
             limit=limit,
