@@ -79,22 +79,11 @@
             :label="t('devices.direction')"
             data-testid="port-direction"
           />
-          <q-select
+          <ConnectorSelect
             v-model="port.connector"
             class="col-5 col-sm-5"
-            dense
-            outlined
-            use-input
-            hide-selected
-            fill-input
-            emit-value
-            map-options
-            new-value-mode="add-unique"
-            input-debounce="0"
-            :options="connectorOptions"
             :label="t('channels.patchPoint.connector')"
             data-testid="port-connector"
-            @filter="filterConnectors"
           />
           <q-input
             v-model.number="port.count"
@@ -286,11 +275,11 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, reactive, watch } from 'vue';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import { useI18n } from 'vue-i18n';
 import {
   CAMERA_TYPES,
-  CONNECTOR_CHOICES,
   CONNECTOR_PRESETS,
   DEVICE_TYPES,
   IO_DEVICE_TYPES,
@@ -305,17 +294,6 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const form = reactive(deviceForm(null));
-const connectorOptions = ref(CONNECTOR_CHOICES);
-
-// The connector list is a suggestion: a typed value that is not in it is kept as it is.
-function filterConnectors(value, update) {
-  update(() => {
-    const needle = value.toLowerCase();
-    connectorOptions.value = CONNECTOR_CHOICES.filter(
-      (c) => c.label.toLowerCase().includes(needle) || c.value.includes(needle),
-    );
-  });
-}
 const typeOptions = computed(() => DEVICE_TYPES.map((v) => ({ value: v, label: t(`devices.types.${v}`) })));
 
 watch(

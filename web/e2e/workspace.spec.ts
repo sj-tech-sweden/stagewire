@@ -633,7 +633,11 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   await page.getByTestId('chain-add-step').click();
   await page.getByTestId('chain-device').first().click();
   await page.locator('.q-menu .q-item', { hasText: 'Switcher A' }).click();
-  await page.getByTestId('chain-connector').fill('SDI');
+  // the connector field offers the shared list; a name that is not in it is added to the list
+  await page.getByTestId('chain-connector').click();
+  const kind = `Neon plug ${String(Date.now()).slice(-5)}`;
+  await page.keyboard.type(kind);
+  await page.keyboard.press('Enter');
   await page.getByTestId('chain-save').click();
   await expect(row.getByTestId('edit-video-chain')).toContainText('Switcher A');
 
@@ -647,7 +651,9 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
       const input = (await legacy())[0]?.inputs[0];
       return input && [input.source_label, input.patch_points[0]?.connector];
     })
-    .toEqual(['Cam 1', 'SDI']);
+    .toEqual(['Cam 1', kind.toLowerCase().replace(/ /g, '-')]);
+  const kinds = (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as { label: string }[];
+  expect(kinds.map((k) => k.label)).toContain(kind);
 
   await page.getByTestId('add-video-output').click();
   await expect(page.getByTestId('video-video_output-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(1);
@@ -698,4 +704,53 @@ test('rigging points and the power tree are built in the rigging editor and fixt
       return fx && [fx.rigging_point_id !== null, fx.power_node_id !== null, fx.power_connector];
     })
     .toEqual([true, true, 'schuko']);
+});
+
+test('fixtures are added in bulk by kind and quantity, and the header offers import, export and PDF reports', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Bulk ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await expect(page.getByTestId('open-catalog')).toBeVisible();
+  await expect(page.getByTestId('import-menu')).toBeVisible();
+  await expect(page.getByTestId('open-reports')).toBeVisible();
+  await page.getByTestId('open-reports').click();
+  await expect(page.locator('.q-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('mode-toggle').getByText(/^lights$|^ljus$/i).click();
+  await page.getByTestId('bulk-fixtures').click();
+  await page.getByTestId('bulk-type').first().click();
+  await page.keyboard.type('Wash');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('bulk-footprint').first().fill('16');
+  await page.getByTestId('bulk-quantity').first().fill('3');
+  await page.getByTestId('bulk-add-kind').click();
+  await page.getByTestId('bulk-type').nth(1).click();
+  await page.keyboard.type('Spot');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('bulk-footprint').nth(1).fill('40');
+  await page.getByTestId('bulk-quantity').nth(1).fill('2');
+  await page.getByTestId('bulk-start').fill('1');
+  await expect(page.getByTestId('bulk-total')).toContainText('5');
+  await page.getByTestId('bulk-create').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixtures`, { headers })).json()) as {
+      dmx_address: number;
+      universe: number;
+      fixture_type: string;
+    }[];
+  await expect.poll(async () => (await legacy()).map((f) => [f.fixture_type, f.universe, f.dmx_address])).toEqual([
+    ['Wash', 1, 1],
+    ['Wash', 1, 17],
+    ['Wash', 1, 33],
+    ['Spot', 1, 49],
+    ['Spot', 1, 89],
+  ]);
 });

@@ -17,7 +17,7 @@
         <div
           v-for="(step, i) in steps"
           :key="i"
-          class="row q-col-gutter-xs items-center q-mb-sm"
+          class="row q-col-gutter-xs items-center q-mb-md chain-step"
           data-testid="chain-step"
         >
           <div class="col-auto text-grey-6">
@@ -25,7 +25,7 @@
           </div>
           <q-select
             v-model="step.device_id"
-            class="col-12 col-sm"
+            class="col"
             dense
             outlined
             emit-value
@@ -36,28 +36,6 @@
             :label="t('workspace.stepDevice')"
             data-testid="chain-device"
             @filter="filterDevices"
-          />
-          <q-input
-            v-for="field in fields"
-            :key="field.key"
-            v-model="step[field.key]"
-            class="col-6 col-sm-2"
-            dense
-            outlined
-            :label="t(field.label)"
-            :data-testid="`chain-${field.key}`"
-          />
-          <q-select
-            v-if="branching && i > 0"
-            v-model="step.parent_index"
-            class="col-6 col-sm-2"
-            dense
-            outlined
-            emit-value
-            map-options
-            clearable
-            :options="parentOptions(i)"
-            :label="t('workspace.stepFrom')"
           />
           <div class="col-auto">
             <q-btn
@@ -88,6 +66,40 @@
               @click="steps.splice(i, 1)"
             />
           </div>
+          <div class="col-12 chain-fields-gap" />
+          <template
+            v-for="field in fields"
+            :key="field.key"
+          >
+            <ConnectorSelect
+              v-if="field.key === 'connector'"
+              v-model="step.connector"
+              class="col-6 col-sm"
+              :label="t(field.label)"
+              :data-testid="`chain-${field.key}`"
+            />
+            <q-input
+              v-else
+              v-model="step[field.key]"
+              class="col-6 col-sm"
+              dense
+              outlined
+              :label="t(field.label)"
+              :data-testid="`chain-${field.key}`"
+            />
+          </template>
+          <q-select
+            v-if="branching && i > 0"
+            v-model="step.parent_index"
+            class="col-6 col-sm"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="parentOptions(i)"
+            :label="t('workspace.stepFrom')"
+          />
         </div>
         <q-btn
           flat
@@ -120,6 +132,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({

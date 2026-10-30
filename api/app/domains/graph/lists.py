@@ -651,6 +651,89 @@ async def create_fixture(
     return await _read(db, job_id, ref)
 
 
+class FixtureBulkItem(BaseModel):
+    """One kind of fixture to add and how many of it."""
+
+    fixture_type: str = ""
+    channel_mode: str = ""
+    device_name: str | None = None
+    label: str = ""
+    quantity: int = Field(1, ge=1, le=200)
+    footprint: int | None = Field(None, ge=1, le=512)
+    location: str = ""
+    gel: str = ""
+    notes: str = ""
+
+
+class FixtureBulk(BaseModel):
+    items: list[FixtureBulkItem] = Field(min_length=1, max_length=20)
+    universe: int = Field(1, ge=1)
+    start_address: int | None = Field(None, ge=1, le=512)
+    spacing: int = Field(0, ge=0, le=512)
+
+
+MAX_BULK_FIXTURES = 300
+
+
+@router.post("/fixtures/bulk", response_model=list[schemas.GraphDeviceRead], status_code=201)
+async def create_fixtures_bulk(
+    job_id: UUID, payload: FixtureBulk, db: AsyncSession = Depends(get_db)
+) -> list[schemas.GraphDeviceRead]:
+    """Add several kinds of fixture at once, each a given number of times.
+
+    Placement: with ``start_address`` the fixtures are laid out one after another from that
+    address (footprint plus ``spacing`` apart), moving to the next universe when one does not fit
+    before channel 512. Without it each one takes the first free address, starting in ``universe``.
+    The footprint comes from the library type and mode (``apply_type``), so a mode chosen here
+    sets it exactly as when adding a single fixture.
+    """
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if sum(item.quantity for item in payload.items) > MAX_BULK_FIXTURES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BULK_FIXTURES} fixtures at once"
+        )
+    universe, cursor = payload.universe, payload.start_address
+    refs: list[str] = []
+    async with job_lock(job_id):
+        for item in payload.items:
+            base = item.model_dump(exclude={"quantity", "label"}, exclude_none=True)
+            resolved = await lighting_service.apply_type(db, job_id, dict(base))
+            footprint = resolved.get("footprint") or 1
+            for number in range(1, item.quantity + 1):
+                data = dict(base)
+                label = item.label or item.fixture_type
+                if label:
+                    data["purpose"] = f"{label} {number}" if item.quantity > 1 else label
+                data["universe"] = universe
+                if cursor is not None:
+                    if cursor + footprint - 1 > lighting_service.DMX_CHANNELS_PER_UNIVERSE:
+                        universe, cursor = universe + 1, 1
+                        data["universe"] = universe
+                    data["dmx_address"] = cursor
+                    cursor += footprint + payload.spacing
+                else:
+                    free = lighting_service.first_free_address(
+                        await lighting_service.list_fixtures(db, job_id), universe, footprint
+                    )
+                    if free is None:
+                        universe += 1
+                        data["universe"] = universe
+                fixture = await lighting_service.create_fixture(db, job_id, data)
+                universe = fixture.universe or universe
+                refs.append(
+                    f"audio_devices:{fixture.device_id}"
+                    if fixture.device_id
+                    else f"lighting_fixtures:{fixture.id}"
+                )
+    db.expire_all()
+    await backfill_job(db, job_id)
+    out: list[schemas.GraphDeviceRead] = []
+    for ref in dict.fromkeys(refs):
+        out.append(schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref)))
+    return out
+
+
 class UniverseCreate(BaseModel):
     number: int | None = Field(None, ge=1)
     name: str = ""

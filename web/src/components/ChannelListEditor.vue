@@ -174,7 +174,7 @@
           </q-td>
         </template>
         <template
-          v-for="field in ['device', 'stand_type', 'connector']"
+          v-for="field in ['device', 'stand_type']"
           #[`body-cell-${field}`]="slot"
           :key="field"
         >
@@ -184,6 +184,15 @@
               dense
               borderless
               @change="(v) => saveAttr(slot.row, field, v)"
+            />
+          </q-td>
+        </template>
+        <template #body-cell-connector="slot">
+          <q-td :props="slot">
+            <ConnectorSelect
+              :model-value="slot.row.attributes.connector || ''"
+              borderless
+              @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
             />
           </q-td>
         </template>
@@ -319,6 +328,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
   chainForm,
   chainSteps,

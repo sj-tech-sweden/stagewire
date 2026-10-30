@@ -185,11 +185,10 @@
           </template>
           <template #body-cell-connector="slot">
             <q-td :props="slot">
-              <q-input
-                :model-value="slot.row.attributes.connector"
-                dense
+              <ConnectorSelect
+                :model-value="slot.row.attributes.connector || ''"
                 borderless
-                @change="(v) => saveAttr(slot.row, 'connector', v)"
+                @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
               />
             </q-td>
           </template>
@@ -265,6 +264,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import { isPlotElement, isVirtual, videoChainForm, videoChainNames, videoRowsOf } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });

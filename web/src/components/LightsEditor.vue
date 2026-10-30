@@ -16,8 +16,9 @@
         flat
         no-caps
         icon="playlist_add"
-        :label="t('workspace.addFixtures', { n: 8 })"
-        @click="addFixtures(8)"
+        :label="t('workspace.bulkFixtures')"
+        data-testid="bulk-fixtures"
+        @click="bulkOpen = true"
       />
       <q-btn
         flat
@@ -303,6 +304,12 @@
       </q-item>
     </q-list>
 
+    <FixtureBulkDialog
+      v-model="bulkOpen"
+      :job-id="jobId"
+      @created="(nodes) => $q.notify({ type: 'positive', message: t('workspace.bulkDone', { n: nodes.length }) })"
+      @error="failed"
+    />
     <FixtureLibraryDialog
       v-model="libraryOpen"
       :job-id="jobId"
@@ -327,6 +334,7 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
 import DmxFlowDiagram from '@/components/DmxFlowDiagram.vue';
+import FixtureBulkDialog from '@/components/FixtureBulkDialog.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
 import { useFixtureLibraryStore } from '@/stores/fixtureLibrary';
 import { dmxFlags } from '@/utils/dmx';
@@ -481,6 +489,8 @@ async function importFile(event) {
     failed(err);
   }
 }
+
+const bulkOpen = ref(false);
 
 async function addFixtures(count) {
   try {

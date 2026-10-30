@@ -1,5 +1,9 @@
 <template>
   <q-page padding>
+    <ReportGenerationDialog
+      v-model="reportDialog"
+      :job-id="jobId"
+    />
     <ConflictDialog
       :conflict="graph.conflict"
       @resolve="(r) => graph.resolveConflict(r).catch(() => {})"
@@ -25,24 +29,6 @@
           {{ job.title }}
         </div>
       </div>
-      <q-btn-toggle
-        :model-value="graph.mode"
-        no-caps
-        unelevated
-        toggle-color="primary"
-        :options="[
-          { label: t('workspace.modeCanvas'), value: 'canvas', icon: 'map' },
-          { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
-          { label: t('workspace.modeLists'), value: 'lists', icon: 'queue_music' },
-          { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
-          { label: t('workspace.modeLights'), value: 'lights', icon: 'lightbulb' },
-          { label: t('workspace.modeVideo'), value: 'video', icon: 'videocam' },
-          { label: t('workspace.modePower'), value: 'power', icon: 'bolt' },
-        ]"
-        style="max-width: 100%; overflow-x: auto"
-        data-testid="mode-toggle"
-        @update:model-value="switchMode"
-      />
       <q-btn
         color="primary"
         no-caps
@@ -51,6 +37,37 @@
         data-testid="open-catalog"
         @click="catalogOpen = true"
       />
+      <q-btn-dropdown
+        flat
+        no-caps
+        icon="file_upload"
+        :label="t('workspace.import')"
+        data-testid="import-menu"
+      >
+        <q-list>
+          <q-item
+            v-close-popup
+            clickable
+            data-testid="import-fixtures-file"
+            @click="importInput.click()"
+          >
+            <q-item-section>
+              <q-item-label>{{ t('workspace.importFixtures') }}</q-item-label>
+              <q-item-label caption>
+                CSV, MVR
+              </q-item-label>
+            </q-item-section>
+          </q-item>
+        </q-list>
+      </q-btn-dropdown>
+      <input
+        ref="importInput"
+        type="file"
+        accept=".csv,.mvr"
+        class="hidden"
+        data-testid="header-import-file"
+        @change="importFixturesFile"
+      >
       <q-btn-dropdown
         v-if="graph.channelLists.length"
         flat
@@ -86,13 +103,33 @@
       <q-btn
         flat
         no-caps
-        icon="download"
-        :loading="importing"
-        :label="t('workspace.importLegacy')"
-        data-testid="import-legacy"
-        @click="importLegacy"
+        icon="picture_as_pdf"
+        :label="t('workspace.pdfReports')"
+        data-testid="open-reports"
+        @click="reportDialog = true"
       />
     </div>
+
+    <q-tabs
+      :model-value="graph.mode"
+      dense
+      no-caps
+      align="left"
+      mobile-arrows
+      active-color="primary"
+      indicator-color="primary"
+      class="q-mb-md workspace-tabs"
+      data-testid="mode-toggle"
+      @update:model-value="switchMode"
+    >
+      <q-tab
+        v-for="tab in modeTabs"
+        :key="tab.value"
+        :name="tab.value"
+        :icon="tab.icon"
+        :label="tab.label"
+      />
+    </q-tabs>
 
     <div class="row items-center q-gutter-sm q-mb-md">
       <span class="text-caption text-grey-6">{{ t('workspace.layers') }}</span>
@@ -322,6 +359,7 @@
 
 <script setup>
 import { isRevisionConflict } from '@/utils/graph';
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 import { usePlotFrame } from '@/composables/usePlotFrame';
 import { fitZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
 import { computed, onMounted, ref, watch, reactive } from 'vue';
@@ -373,6 +411,15 @@ const jobId = String(route.params.jobId);
 const job = ref(null);
 const catalogOpen = ref(false);
 const importing = ref(false);
+const modeTabs = computed(() => [
+  { label: t('workspace.modeCanvas'), value: 'canvas', icon: 'map' },
+  { label: t('workspace.modeList'), value: 'list', icon: 'table_rows' },
+  { label: t('workspace.modeLists'), value: 'lists', icon: 'queue_music' },
+  { label: t('workspace.modeDevices'), value: 'devices', icon: 'developer_board' },
+  { label: t('workspace.modeLights'), value: 'lights', icon: 'lightbulb' },
+  { label: t('workspace.modeVideo'), value: 'video', icon: 'videocam' },
+  { label: t('workspace.modePower'), value: 'power', icon: 'bolt' },
+]);
 const zoom = ref(0.3);
 const plotFrame = usePlotFrame(jobId);
 const connectMode = ref(false);
@@ -567,13 +614,21 @@ async function exportList(list, plugin) {
   }
 }
 
-async function importLegacy() {
+const importInput = ref(null);
+const reportDialog = ref(false);
+
+// Import brings in what was made elsewhere: today a fixture patch (CSV, or an MVR export from
+// Capture, MA, Vectorworks or WYSIWYG). Fixtures land in the lights editor like added ones.
+async function importFixturesFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
   importing.value = true;
   try {
-    const result = await graph.backfill(jobId);
+    const result = await graph.importFixtures(jobId, file);
     $q.notify({
-      type: 'positive',
-      message: t('workspace.importDone', { devices: result.devices, edges: result.edges }),
+      type: result.errors?.length ? 'warning' : 'positive',
+      message: t('workspace.imported', { n: result.created }),
     });
     scheduleChecks();
   } catch (err) {

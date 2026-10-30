@@ -260,6 +260,11 @@ export const useGraphStore = defineStore('graph', {
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
+    async createFixturesBulk(jobId, payload) {
+      const { data } = await api.post(`${base(jobId)}/fixtures/bulk`, payload);
+      data.forEach((node) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: node }));
+      return data;
+    },
     async createUniverse(jobId, payload) {
       const { data } = await api.post(`${base(jobId)}/universes`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
