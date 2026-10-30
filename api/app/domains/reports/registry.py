@@ -184,7 +184,6 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
         cable_plan=job.cable_plan,
         devices=graph_devices,
         edges=graph_edges,
-        elements=job.plot_elements,
         audience=audience,
         stage_offset=(float(job.stage_x_cm or 0), float(job.stage_y_cm or 0)),
     )
@@ -239,15 +238,15 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
 async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
     await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    devices, _, elements = await graph_context.load_graph(db, job_id)
-    return {"job": job, "channels": graph_context.channel_rows(devices, elements)}
+    devices, edges, _ = await graph_context.load_graph(db, job_id)
+    return {"job": job, "channels": graph_context.channel_rows(devices, edges)}
 
 
 async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
     await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    devices, edges, elements = await graph_context.load_graph(db, job_id)
-    return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges, elements)}
+    devices, edges, _ = await graph_context.load_graph(db, job_id)
+    return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges)}
 
 
 async def _patch_sheet_context_legacy(db: AsyncSession, job_id: UUID) -> dict:

@@ -15,15 +15,19 @@ from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.readers import channel_view
 
 
-def _performer_names(elements: list[Any]) -> dict[str, str]:
-    return {
-        str(e.graph_source_id): e.label
-        for e in elements
-        if e.element_type == "performer"
-        and e.graph_source_role == "channel"
-        and e.graph_source_id
-        and e.label
+def _performer_names(devices: list[Any], edges: list[Any]) -> dict[str, str]:
+    """Channel node id -> label of the performer element linked to it."""
+    labels = {
+        str(d.id): (d.attributes or {}).get("label")
+        for d in devices
+        if d.kind == "plot_element" and (d.attributes or {}).get("element_type") == "performer"
     }
+    names: dict[str, str] = {}
+    for edge in sorted(edges, key=lambda e: str(e.id)):
+        label = labels.get(str(edge.src_device_id))
+        if edge.signal == "link" and (edge.attributes or {}).get("role") == "channel" and label:
+            names[str(edge.dst_device_id)] = label
+    return names
 
 
 def _lists(devices: list[Any]) -> list[Any]:
@@ -36,8 +40,8 @@ def _in_list(devices: list[Any], kind: str, list_id: Any) -> list[Any]:
     ]
 
 
-def channel_rows(devices: list[Any], elements: list[Any]) -> list[dict]:
-    performers = _performer_names(elements)
+def channel_rows(devices: list[Any], edges: list[Any]) -> list[dict]:
+    performers = _performer_names(devices, edges)
     rows = []
     for channel_list in _lists(devices):
         nodes = sorted(
@@ -96,8 +100,8 @@ def _chain_points(node: Any, edges: list[Any]) -> list[dict]:
     return sorted(points, key=lambda p: p.get("position") or 0)
 
 
-def patch_sheets(devices: list[Any], edges: list[Any], elements: list[Any]) -> list[dict]:
-    performers = _performer_names(elements)
+def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
+    performers = _performer_names(devices, edges)
     by_id = {str(d.id): d for d in devices}
     names = {key: d.name for key, d in by_id.items()}
     sheets: dict[str, dict] = {}

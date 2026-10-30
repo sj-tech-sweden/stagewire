@@ -72,7 +72,7 @@ OWNED_ATTRS: dict[str, set[str]] = {
         "mixer_buses",
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
-    "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id"},
+    "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "audio_devices": {
         "device_type",
         "weight_kg",
@@ -733,6 +733,7 @@ class Backfill:
                         for key in ELEMENT_FIELDS
                         if getattr(el, key) is not None
                     },
+                    "label": el.label or "",
                     **(
                         {"rigging_point_id": str(el.rigging_point_id)}
                         if el.rigging_point_id

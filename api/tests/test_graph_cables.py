@@ -173,33 +173,35 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
     assert len(both) >= 2  # a speaker with an output point and a camera with a video input
 
     legacy = derive_cables(list(lists), list(elements), list(vlists))
-    graph = derive_cables_from_graph(list(devices), list(edges), list(elements))
+    graph = derive_cables_from_graph(list(devices), list(edges))
     assert len(legacy) == len(graph) > 0
 
-    def shape(cables, names):
+    def shape(cables, names, element_ids):
         return sorted(
             (
                 c.key,
                 names.get(c.from_device_id),
                 names.get(c.to_device_id),
-                c.from_element_id,
-                c.to_element_id,
+                element_ids.get(c.from_element_id),
+                element_ids.get(c.to_element_id),
             )
             for c in cables
         )
 
     legacy_names = {str(d.id): d.name for d in (await _legacy_devices(job_id))}
     graph_names = {str(d.id): d.name for d in devices}
-    assert shape(legacy, legacy_names) == shape(graph, graph_names)
+    legacy_elements = {str(e.id): str(e.id) for e in elements}
+    graph_elements = {
+        str(d.id): d.legacy_ref.split(":")[1] for d in devices if d.kind == "plot_element"
+    }
+    assert shape(legacy, legacy_names, legacy_elements) == shape(graph, graph_names, graph_elements)
 
     plan = {"routes": {str(hidden_point_id): {"hidden": True}}}
     args = {"cable_plan": plan, "audience": [], "stage_offset": (0.0, 0.0)}
     legacy_paths = routed_cable_paths(
         channel_lists=list(lists), elements=list(elements), video_lists=list(vlists), **args
     )
-    graph_paths = routed_cable_paths_from_graph(
-        devices=list(devices), edges=list(edges), elements=list(elements), **args
-    )
+    graph_paths = routed_cable_paths_from_graph(devices=list(devices), edges=list(edges), **args)
     assert len(legacy_paths) > 0
     assert sorted(legacy_paths, key=lambda p: p["key"]) == sorted(
         graph_paths, key=lambda p: p["key"]
