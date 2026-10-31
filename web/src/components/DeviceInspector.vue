@@ -88,6 +88,93 @@
           @update:model-value="(v) => linkElement({ linked_device_id: v || null })"
         />
         <div
+          v-if="isSpeaker"
+          class="q-mt-sm"
+          data-testid="speaker-section"
+        >
+          <div class="text-subtitle2">
+            {{ t('stagePlot.speakerSection') }}
+          </div>
+          <div class="row q-col-gutter-sm q-mt-xs">
+            <q-input
+              :model-value="device.attributes?.coverage_angle_h ?? 0"
+              class="col-6"
+              dense
+              outlined
+              type="number"
+              :label="t('stagePlot.coverageAngle')"
+              data-testid="coverage-angle"
+              @change="(v) => save({ attributes: { coverage_angle_h: Number(v) || 0 } })"
+            />
+            <q-input
+              :model-value="device.attributes?.coverage_distance_m ?? 0"
+              class="col-6"
+              dense
+              outlined
+              type="number"
+              :label="t('stagePlot.coverageDistance')"
+              data-testid="coverage-distance"
+              @change="(v) => save({ attributes: { coverage_distance_m: Number(v) || 0 } })"
+            />
+          </div>
+          <q-select
+            :model-value="elementLinks.linked_output_point_id"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            class="q-mt-sm"
+            :options="outputPoints"
+            :label="t('stagePlot.linkOutput')"
+            data-testid="element-output-point"
+            @update:model-value="(v) => linkElement({ linked_output_point_id: v || null })"
+          />
+        </div>
+        <div
+          v-if="isCameraOrProjector"
+          class="q-mt-sm"
+          data-testid="camera-section"
+        >
+          <q-select
+            :model-value="elementLinks.linked_video_input_id"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            class="q-mb-sm"
+            :options="videoInputOptions"
+            :label="t('stagePlot.linkVideo')"
+            data-testid="element-video-input"
+            @update:model-value="(v) => linkElement({ linked_video_input_id: v || null })"
+          />
+          <q-select
+            v-if="device.attributes?.element_type === 'camera'"
+            :model-value="elementLinks.linked_lens_device_id"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            class="q-mb-sm"
+            :options="lensOptions"
+            :label="t('stagePlot.linkLens')"
+            data-testid="element-lens"
+            @update:model-value="(v) => linkElement({ linked_lens_device_id: v || null })"
+          />
+          <q-input
+            v-if="device.attributes?.element_type === 'camera'"
+            :model-value="device.attributes?.focal_mm"
+            dense
+            outlined
+            type="number"
+            :label="t('stagePlot.focalLength')"
+            data-testid="element-focal"
+            @change="(v) => save({ attributes: { focal_mm: v === '' ? null : Number(v) } })"
+          />
+        </div>
+        <div
           v-if="isPowerable"
           class="q-mt-sm"
         >
@@ -315,7 +402,8 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { legacyId } from '@/utils/graphLegacy';
-import { isPlotElement, isPowerNode, isVirtual } from '@/utils/workspace';
+import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
+import { isSpeakerType } from '@/utils/plotObjects';
 import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
 const props = defineProps({
@@ -348,6 +436,21 @@ const gearOptions = computed(() =>
 );
 // Elements that can draw power (an active speaker, a screen, a rack ...) take their power inlet
 // from the device they are linked to; people, tables and risers do not.
+const isSpeaker = computed(() => isSpeakerType(props.device?.attributes?.element_type));
+const isCameraOrProjector = computed(() =>
+  ['camera', 'projector'].includes(props.device?.attributes?.element_type),
+);
+const outputPoints = computed(() => outputPointOptions(graph.devices, graph.edges));
+const videoInputOptions = computed(() =>
+  graph.devices
+    .filter((d) => d.kind === 'video_input')
+    .map((d) => ({ value: legacyId(d), label: `${d.attributes.input_number || ''} ${d.name}`.trim() })),
+);
+const lensOptions = computed(() =>
+  graph.devices
+    .filter((d) => d.kind === 'lens')
+    .map((d) => ({ value: legacyId(d), label: d.name })),
+);
 const NO_POWER_ELEMENTS = new Set(['performer', 'instrument', 'table', 'chair', 'riser', 'dais', 'custom', 'microphone']);
 const isPowerable = computed(
   () => props.device?.kind === 'plot_element' && !NO_POWER_ELEMENTS.has(props.device.attributes?.element_type),

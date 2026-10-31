@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { apiErrorText } from '../../src/utils/errors';
+import { GEAR_ELEMENTS, isSpeakerType } from '../../src/utils/plotObjects';
 import {
   catalogQuery,
   deviceFromProduct,
@@ -22,6 +23,7 @@ import {
   videoChainNames,
   videoRowsOf,
   addConnector,
+  outputPointOptions,
   cableFor,
   powerInletLabel,
   flowTree,
@@ -512,4 +514,27 @@ test('API errors become readable text: strings, validation lists, objects and a 
   expect(apiErrorText(err(undefined, 502))).toContain('Stockwire');
   expect(apiErrorText(new Error('Network Error'))).toBe('Network Error');
   expect(apiErrorText({}, 'fallback')).toBe('fallback');
+});
+
+test('speakers carry coverage defaults and the output points of every chain can be linked', () => {
+  const main = GEAR_ELEMENTS.find((g) => g.type === 'speaker_main')!;
+  expect([main.coverageAngle, main.coverageDistance, main.rotation]).toEqual([90, 30, 180]);
+  expect(isSpeakerType('monitor')).toBe(true);
+  expect(isSpeakerType('camera')).toBe(false);
+  expect(GEAR_ELEMENTS.find((g) => g.type === 'camera')).toMatchObject({ deviceType: 'camera', createDevice: true });
+
+  const devices = [
+    { id: 'o1', kind: 'output', name: 'Main' },
+    { id: 'a', name: 'Console' },
+    { id: 'b', name: 'Amp' },
+  ];
+  const edges = [
+    { src_device_id: 'a', dst_device_id: 'o1', attributes: { chain: 'o1', first_point: { point_id: 'p0', connector: 'XLR' } } },
+    { src_device_id: 'o1', dst_device_id: 'b', attributes: { chain: 'o1', point_id: 'p1', patch_label: 'Out 3' } },
+    { src_device_id: 'a', dst_device_id: 'b', attributes: { chain: 'other', point_id: 'x' } },
+  ];
+  expect(outputPointOptions(devices, edges)).toEqual([
+    { value: 'p0', label: 'Main · XLR · Console' },
+    { value: 'p1', label: 'Main · Out 3 · Amp' },
+  ]);
 });

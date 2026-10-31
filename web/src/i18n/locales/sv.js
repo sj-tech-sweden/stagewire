@@ -74,6 +74,15 @@ export default {
     modeLights: 'Ljus',
     modeVideo: 'Video',
     modePower: 'Rigg & ström',
+    addGearElement: 'Lägg till utrustning',
+    objectDi: 'DI',
+    objectMulticore: 'Multikabel',
+    objectMonitor: 'Monitor',
+    gearGroup: {
+      audio: 'Ljud',
+      video: 'Video',
+      lighting: 'Ljus',
+    },
     powerWord: 'Ström',
     riggingWord: 'Rigg',
     status: {

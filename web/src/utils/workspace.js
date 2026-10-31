@@ -778,3 +778,22 @@ export function deviceTypeFromCategory(category) {
   if (/mixer|console/.test(c)) return 'mixer';
   return 'other';
 }
+
+// The output patch points a speaker can be fed from: each point of each output's chain, labelled
+// "output - label or connector - device" and valued with the legacy point id the element links to.
+export function outputPointOptions(devices, edges) {
+  const names = new Map(devices.map((d) => [d.id, d.name]));
+  const options = [];
+  for (const out of devices.filter((d) => d.kind === 'output')) {
+    for (const edge of edges) {
+      const attrs = edge.attributes || {};
+      if (attrs.chain !== out.id) continue;
+      const point = attrs.first_point || attrs;
+      if (!point.point_id) continue;
+      const device = names.get(attrs.first_point ? edge.src_device_id : edge.dst_device_id);
+      const bits = [out.name, point.patch_label || point.connector, device].filter(Boolean);
+      options.push({ value: point.point_id, label: bits.join(' · ') });
+    }
+  }
+  return options;
+}

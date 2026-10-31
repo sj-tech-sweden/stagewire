@@ -1434,3 +1434,38 @@ test('an outlet is added straight from the map, creating the venue for the job w
   await page.getByTestId('add-outlet-map').click();
   await expect.poll(async () => (await outlets()).length).toBe(2);
 });
+
+test('a speaker is added from the gear menu with its coverage and linked to an output point', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Speaker ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const out = await post(request, headers, `${g}/lists/${list.id}/outputs`, { name: 'Main L' });
+  const amp = await post(request, headers, `${g}/audio-devices`, { name: 'Amp', device_type: 'other' });
+  const chain = await request.put(`${API_BASE}/api/v1${g}/outputs/${out.id}/chain`, { headers, data: { steps: [{ device_id: amp.id }] } });
+  expect(chain.status()).toBe(200);
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  await page.getByTestId('add-gear-element').click();
+  await page.getByTestId('add-gear-speaker_main').click();
+  const elements = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/plot-elements`, { headers })).json()) as any[];
+  await expect.poll(async () => (await elements())[0]?.element_type).toBe('speaker_main');
+  expect([(await elements())[0].coverage_angle_h, (await elements())[0].coverage_distance_m]).toEqual([90, 30]);
+  await expect(page.getByTestId('speaker-section')).toBeVisible();
+
+  await page.getByTestId('coverage-distance').fill('45');
+  await page.getByTestId('coverage-distance').press('Enter');
+  await expect.poll(async () => (await elements())[0]?.coverage_distance_m).toBe(45);
+  await page.getByTestId('element-output-point').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Main L' }).click();
+  await expect.poll(async () => (await elements())[0]?.linked_output_point_id).toBeTruthy();
+
+  // a camera takes (or makes) a camera device
+  await page.getByTestId('add-gear-element').click();
+  await page.getByTestId('add-gear-camera').click();
+  await expect.poll(async () => (await elements()).find((e) => e.element_type === 'camera')?.linked_device_id).toBeTruthy();
+  await expect(page.getByTestId('camera-section')).toBeVisible();
+});

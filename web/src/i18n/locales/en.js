@@ -74,6 +74,15 @@ export default {
     modeLights: 'Lights',
     modeVideo: 'Video',
     modePower: 'Rigging & power',
+    addGearElement: 'Add gear',
+    objectDi: 'DI',
+    objectMulticore: 'Multicore',
+    objectMonitor: 'Monitor',
+    gearGroup: {
+      audio: 'Audio',
+      video: 'Video',
+      lighting: 'Lighting',
+    },
     powerWord: 'Power',
     riggingWord: 'Rigging',
     status: {

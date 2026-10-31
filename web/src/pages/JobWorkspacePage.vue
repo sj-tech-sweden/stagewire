@@ -329,6 +329,40 @@
               <q-btn-dropdown
                 dense
                 no-caps
+                icon="speaker"
+                :label="t('workspace.addGearElement')"
+                data-testid="add-gear-element"
+              >
+                <q-list>
+                  <template
+                    v-for="group in ['audio', 'video', 'lighting']"
+                    :key="group"
+                  >
+                    <q-item-label header>
+                      {{ t(`workspace.gearGroup.${group}`) }}
+                    </q-item-label>
+                    <q-item
+                      v-for="gear in GEAR_ELEMENTS.filter((g) => g.group === group)"
+                      :key="gear.type"
+                      v-close-popup
+                      clickable
+                      :data-testid="`add-gear-${gear.type}`"
+                      @click="addGearElement(gear)"
+                    >
+                      <q-item-section avatar>
+                        <q-icon
+                          :name="gear.icon"
+                          :style="{ color: gear.color }"
+                        />
+                      </q-item-section>
+                      <q-item-section>{{ objectLabel(gear) }}</q-item-section>
+                    </q-item>
+                  </template>
+                </q-list>
+              </q-btn-dropdown>
+              <q-btn-dropdown
+                dense
+                no-caps
                 icon="category"
                 :label="t('workspace.addObject')"
                 data-testid="add-object"
@@ -598,7 +632,7 @@ import StageVenueDialog from '@/components/StageVenueDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 import { elementsFromGraph, legacyId } from '@/utils/graphLegacy';
 import { usePlotFrame } from '@/composables/usePlotFrame';
-import { OBJECT_TYPES } from '@/utils/plotObjects';
+import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { fitWidthZoom, stageCentre, stagePosition } from '@/utils/plotFrame';
 import { computed, onBeforeUnmount, onMounted, ref, watch, reactive } from 'vue';
@@ -1064,6 +1098,40 @@ async function stageVenueSaved() {
 
 // A plot object (performer, table, riser, ...) is a plot element: it has a position and size and
 // can be linked to a channel or device, but it is not gear. It is placed in the middle of the stage.
+// Gear on the plot (speakers, cameras, projectors, lights, mixers ...) is an element linked to a
+// device: an unplaced device of the type is taken, else one is made for types that need it. A
+// speaker also gets the coverage it throws, which feeds the sound coverage layer.
+async function addGearElement(gear) {
+  const centre = stageCentre(plotFrame.frame.value, Math.max(gear.w, gear.h));
+  try {
+    const placed = new Set(stagePlot.elements.map((e) => e.linked_device_id).filter(Boolean));
+    let device = gear.deviceType
+      ? graph.devices.find((d) => d.kind === gear.deviceType && d.legacy_ref?.startsWith('audio_devices:') && !placed.has(legacyId(d)))
+      : null;
+    if (!device && gear.createDevice) {
+      const count = graph.devices.filter((d) => d.kind === gear.deviceType).length;
+      device = await graph.createAudioDevice(jobId, {
+        name: `${objectLabel(gear)} ${count + 1}`,
+        device_type: gear.deviceType,
+      });
+    }
+    const created = await stagePlot.createElement(jobId, {
+      element_type: gear.type,
+      label: device?.name || objectLabel(gear),
+      position_x: centre.x,
+      position_y: centre.y,
+      rotation: gear.rotation ?? 0,
+      width_cm: gear.w,
+      height_cm: gear.h,
+      linked_device_id: device ? legacyId(device) : null,
+      ...(gear.coverageAngle ? { coverage_angle_h: gear.coverageAngle, coverage_distance_m: gear.coverageDistance } : {}),
+    });
+    graph.selectedDeviceId = stagePlot.nodeOf(created.id)?.id || null;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+
 async function addObject(object) {
   const centre = stageCentre(plotFrame.frame.value, Math.max(object.w, object.h));
   try {
