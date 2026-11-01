@@ -1469,3 +1469,30 @@ test('a speaker is added from the gear menu with its coverage and linked to an o
   await expect.poll(async () => (await elements()).find((e) => e.element_type === 'camera')?.linked_device_id).toBeTruthy();
   await expect(page.getByTestId('camera-section')).toBeVisible();
 });
+
+test('the audience area is outlined on the map, saved on the job, cleared and kept on the venue', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Audience ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  const job = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}`, { headers })).json()) as any;
+  const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+
+  await page.getByTestId('audience-menu').click();
+  await page.getByTestId('audience-draw').click();
+  await expect(page.getByTestId('audience-bar')).toBeVisible();
+  await expect(page.getByTestId('audience-finish')).toBeDisabled();
+  const box = (await canvas.boundingBox())!;
+  for (const [x, y] of [[60, 200], [260, 200], [260, 300]]) {
+    await canvas.click({ position: { x: Math.min(x, box.width - 5), y: Math.min(y, box.height - 5) } });
+  }
+  await expect(page.getByTestId('audience-finish')).toBeEnabled();
+  await page.getByTestId('audience-finish').click();
+  await expect.poll(async () => (await job()).audience_polygon.length).toBe(3);
+
+  await page.getByTestId('audience-menu').click();
+  await page.getByTestId('audience-clear').click();
+  await expect.poll(async () => (await job()).audience_polygon.length).toBe(0);
+});

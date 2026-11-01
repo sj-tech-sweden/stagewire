@@ -329,6 +329,42 @@
               <q-btn-dropdown
                 dense
                 no-caps
+                icon="groups"
+                :label="t('stagePlot.audienceDraw')"
+                data-testid="audience-menu"
+              >
+                <q-list>
+                  <q-item
+                    v-close-popup
+                    clickable
+                    data-testid="audience-draw"
+                    @click="startAudience"
+                  >
+                    <q-item-section>{{ t('stagePlot.audienceDraw') }}</q-item-section>
+                  </q-item>
+                  <q-item
+                    v-if="plotFrame.frame.value.audience.length"
+                    v-close-popup
+                    clickable
+                    data-testid="audience-clear"
+                    @click="saveAudience([])"
+                  >
+                    <q-item-section>{{ t('stagePlot.audienceClear') }}</q-item-section>
+                  </q-item>
+                  <q-item
+                    v-if="plotFrame.frame.value.audience.length && plotFrame.job.value?.venue_id"
+                    v-close-popup
+                    clickable
+                    data-testid="audience-save-venue"
+                    @click="saveAudienceToVenue"
+                  >
+                    <q-item-section>{{ t('stagePlot.audienceSaveVenue') }}</q-item-section>
+                  </q-item>
+                </q-list>
+              </q-btn-dropdown>
+              <q-btn-dropdown
+                dense
+                no-caps
                 icon="speaker"
                 :label="t('workspace.addGearElement')"
                 data-testid="add-gear-element"
@@ -442,6 +478,39 @@
               />
             </div>
             <div
+              v-if="drawingAudience"
+              class="row items-center q-gutter-xs q-mb-xs"
+              data-testid="audience-bar"
+            >
+              <span class="text-caption text-grey-6">{{ t('stagePlot.audienceHint') }}</span>
+              <q-btn
+                dense
+                no-caps
+                color="primary"
+                icon="check"
+                :label="t('stagePlot.audienceFinish')"
+                :disable="audiencePoints.length < 3"
+                data-testid="audience-finish"
+                @click="finishAudience"
+              />
+              <q-btn
+                flat
+                dense
+                no-caps
+                icon="undo"
+                :label="t('cables.undoPoint')"
+                :disable="!audiencePoints.length"
+                @click="audiencePoints.pop()"
+              />
+              <q-btn
+                flat
+                dense
+                no-caps
+                :label="t('common.cancel')"
+                @click="cancelAudience"
+              />
+            </div>
+            <div
               v-if="plotFrame.show.camera.value"
               class="row items-center q-gutter-xs q-mb-xs"
               data-testid="camera-view-options"
@@ -495,7 +564,10 @@
               :cableways="plotFrame.cablePlan.value.cableways"
               :draw-points="drawPoints"
               :drawing="drawingWay"
+              :audience-draft="audiencePoints"
+              :audience-drawing="drawingAudience"
               :connect-mode="connectMode"
+              @audience-point="(p) => audiencePoints.push(p)"
               @draw-point="(p) => drawPoints.push(p)"
               @pan="(p) => (pan = p)"
               @move-outlet="moveOutlet"
@@ -1026,6 +1098,44 @@ function selectOutlet(id) {
 // settings and the cableways are stored, on the job. Drawing a cableway adds points with a click
 // on the map and saves the way when finished.
 const drawingWay = ref(false);
+
+// The audience area (venue cm) is outlined with clicks on the map and saved on the job; cables
+// avoid it. "Save as the venue's area" keeps it for the next job in that venue.
+const drawingAudience = ref(false);
+const audiencePoints = ref([]);
+const startAudience = () => {
+  cancelDrawWay();
+  audiencePoints.value = [];
+  drawingAudience.value = true;
+};
+const cancelAudience = () => {
+  drawingAudience.value = false;
+  audiencePoints.value = [];
+};
+async function saveAudience(polygon) {
+  try {
+    await api.patch(`/jobs/${jobId}`, { audience_polygon: polygon });
+    await plotFrame.load();
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
+async function finishAudience() {
+  if (audiencePoints.value.length < 3) return;
+  const polygon = audiencePoints.value;
+  cancelAudience();
+  await saveAudience(polygon);
+}
+async function saveAudienceToVenue() {
+  try {
+    await api.patch(`/venues/${plotFrame.job.value.venue_id}`, {
+      audience_polygon: plotFrame.frame.value.audience,
+    });
+    $q.notify({ type: 'positive', message: t('workspace.audienceSavedToVenue') });
+  } catch (err) {
+    $q.notify({ type: 'negative', message: errorText(err) });
+  }
+}
 const drawPoints = ref([]);
 const cableRows = computed(() => {
   if (!graph.devices.length) return [];
@@ -1039,6 +1149,7 @@ const cableRows = computed(() => {
   });
 });
 const startDrawWay = () => {
+  cancelAudience();
   drawPoints.value = [];
   drawingWay.value = true;
 };

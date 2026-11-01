@@ -50,6 +50,10 @@
             v-if="draftLine"
             :config="draftLine"
           />
+          <v-line
+            v-if="audienceDraftLine"
+            :config="audienceDraftLine"
+          />
           <v-group
             v-for="outlet in outletMarks"
             :key="outlet.id"
@@ -144,6 +148,9 @@ const props = defineProps({
   cableways: { type: Array, default: () => [] },
   drawPoints: { type: Array, default: () => [] },
   drawing: { type: Boolean, default: false },
+  // the audience area being outlined (venue cm) and whether a click adds a corner of it
+  audienceDraft: { type: Array, default: () => [] },
+  audienceDrawing: { type: Boolean, default: false },
   devices: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
@@ -153,7 +160,7 @@ const props = defineProps({
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point', 'audience-point']);
 
 const $q = useQuasar();
 const host = ref(null);
@@ -283,10 +290,28 @@ const draftLine = computed(() =>
 
 // While a cableway is being drawn a click on the map adds a point (stage-relative cm).
 function onStageClick(event) {
-  if (!props.drawing || event.target !== stageRef.value?.getStage()) return;
+  const drawingAny = props.drawing || props.audienceDrawing;
+  if (!drawingAny || event.target !== stageRef.value?.getStage()) return;
   const pos = stageRef.value.getStage().getRelativePointerPosition();
+  if (props.audienceDrawing) {
+    // the audience area is in venue coordinates: no stage offset
+    emit('audience-point', [Math.round(pos.x / props.zoom), Math.round(pos.y / props.zoom)]);
+    return;
+  }
   emit('draw-point', [Math.round(pos.x / props.zoom - origin.value.x), Math.round(pos.y / props.zoom - origin.value.y)]);
 }
+
+const audienceDraftLine = computed(() =>
+  props.audienceDrawing && props.audienceDraft.length
+    ? {
+        points: props.audienceDraft.flatMap(([x, y]) => [x * props.zoom, y * props.zoom]),
+        stroke: '#e53935',
+        strokeWidth: 3,
+        dash: [6, 4],
+        listening: false,
+      }
+    : null,
+);
 
 const audienceLine = computed(() => {
   const polygon = props.frame?.audience || [];

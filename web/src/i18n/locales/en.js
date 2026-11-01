@@ -74,6 +74,7 @@ export default {
     modeLights: 'Lights',
     modeVideo: 'Video',
     modePower: 'Rigging & power',
+    audienceSavedToVenue: 'The audience area was saved on the venue',
     addGearElement: 'Add gear',
     objectDi: 'DI',
     objectMulticore: 'Multicore',

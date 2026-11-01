@@ -74,6 +74,7 @@ export default {
     modeLights: 'Ljus',
     modeVideo: 'Video',
     modePower: 'Rigg & ström',
+    audienceSavedToVenue: 'Publikytan sparades på lokalen',
     addGearElement: 'Lägg till utrustning',
     objectDi: 'DI',
     objectMulticore: 'Multikabel',
