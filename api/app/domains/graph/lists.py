@@ -18,7 +18,7 @@ from app.domains.audio.models import AudioDevice, ChannelPatchPoint, OutputPatch
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import dmx_native, schemas, video_native
+from app.domains.graph import dmx_native, fixtures_native, schemas, video_native
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.mirror import (
@@ -709,12 +709,8 @@ async def create_fixture(
     fixture = await lighting_service.create_fixture(
         db, job_id, payload.model_dump(exclude_unset=True)
     )
-    ref = (
-        f"audio_devices:{fixture.device_id}"
-        if fixture.device_id
-        else f"lighting_fixtures:{fixture.id}"
-    )
-    return await _read(db, job_id, ref)
+    host = await fixtures_native.host_of(db, job_id, fixture.id)
+    return schemas.GraphDeviceRead.model_validate(host)
 
 
 class FixtureBulkItem(BaseModel):
@@ -760,7 +756,7 @@ async def create_fixtures_bulk(
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BULK_FIXTURES} fixtures at once"
         )
     universe, cursor = payload.universe, payload.start_address
-    refs: list[str] = []
+    fixture_ids: list[UUID] = []
     async with job_lock(job_id):
         for item in payload.items:
             base = item.model_dump(exclude={"quantity", "label"}, exclude_none=True)
@@ -787,17 +783,10 @@ async def create_fixtures_bulk(
                         data["universe"] = universe
                 fixture = await lighting_service.create_fixture(db, job_id, data)
                 universe = fixture.universe or universe
-                refs.append(
-                    f"audio_devices:{fixture.device_id}"
-                    if fixture.device_id
-                    else f"lighting_fixtures:{fixture.id}"
-                )
-    db.expire_all()
-    await backfill_job(db, job_id)
-    out: list[schemas.GraphDeviceRead] = []
-    for ref in dict.fromkeys(refs):
-        out.append(schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref)))
-    return out
+                fixture_ids.append(fixture.id)
+    hosts = await fixtures_native.host_nodes(db, job_id)
+    unique = {hosts[fid].id: hosts[fid] for fid in fixture_ids}
+    return [schemas.GraphDeviceRead.model_validate(host) for host in unique.values()]
 
 
 class UniverseCreate(BaseModel):
@@ -843,8 +832,8 @@ async def _step_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> GraphDevi
     node = await db.get(GraphDevice, node_id)
     if node is None or node.job_id != job_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
-    target = legacy_target(node)
-    if target is None or target[0] != "lighting_fixtures":
+    own_fixture = fixtures_native.fixture_id_of(node) is not None and not node.legacy_ref
+    if not own_fixture:  # a fixture node of its own is a step as it is; any other gear is a device
         await _device_twin(db, job_id, node_id)
     return node
 

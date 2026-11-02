@@ -17,7 +17,6 @@ from app.domains.audio.models import (
 )
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
-from app.domains.lighting.models import LightingFixture
 
 FAN_OUT = 64
 
@@ -102,18 +101,14 @@ OWNED_ATTRS: dict[str, set[str]] = {
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
-    "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
     "audio_devices": {
         "power_inlet",
         *DEVICE_SPEC_FIELDS,
-        *FIXTURE_ONLY_ATTRS,
         "device_type",
         "weight_kg",
         "power_w",
         "input_override",
         "output_override",
-        "fixture_type",
-        "channel_mode",
         "footprint_channels",
         "default_gel",
     },
@@ -130,7 +125,6 @@ MIRRORED_EDGE_TABLES = {
     "output_patch_points",
     "channel_list_outputs",
     "stage_plot_elements.link",
-    "lighting_fixtures.power",
     "audio_devices.power",
 }
 CANVAS_OWNED_TABLES = {"stage_plot_elements"}
@@ -280,7 +274,13 @@ class Backfill:
                         if key in fields:
                             setattr(existing, key, fields[key])
                 if table == "audio_devices":
-                    existing.kind, existing.domain = fields["kind"], fields["domain"]
+                    existing.kind = fields["kind"]
+                    # a device that carries a fixture belongs to lighting (fixtures_native)
+                    existing.domain = (
+                        "lighting"
+                        if (existing.attributes or {}).get("fixture_id")
+                        else fields["domain"]
+                    )
                     existing.ports = copy.deepcopy(fields.get("ports") or [])
             self.result.skipped += 1
             return existing
@@ -782,69 +782,6 @@ class Backfill:
                     el.graph_source_id, el.graph_source_role = source.id, role
                     break
 
-    async def lighting(self) -> None:
-        fixtures = (
-            await self.db.scalars(
-                select(LightingFixture).where(LightingFixture.job_id == self.job_id)
-            )
-        ).all()
-        fixture_nodes: dict[uuid.UUID, GraphDevice] = {}
-        for fx in fixtures:
-            dmx = {
-                "universe": fx.universe,
-                "dmx_address": fx.dmx_address,
-                "fixture_type": fx.fixture_type,
-                "channel_mode": fx.channel_mode,
-                "footprint": fx.footprint,
-                "location": fx.location,
-                "gel": fx.gel,
-                "purpose": fx.purpose,
-            }
-            dmx = {k: v for k, v in dmx.items() if v not in (None, "")}
-            rigging = self.rigging_points.get(fx.rigging_point_id)
-            feeder = self.power_nodes.get(fx.power_node_id)
-            dmx.update(
-                rigging_point_id=str(rigging.id) if rigging else None,
-                power_node_id=str(feeder.id) if feeder else None,
-                power_connector=(fx.power_connector or None) if feeder else None,
-            )
-            linked = self.devices.get(f"audio_devices:{fx.device_id}") if fx.device_id else None
-            if linked is not None:
-                if not linked.graph_edited:
-                    linked.attributes = {**linked.attributes, **dmx}
-                    linked.domain = "lighting"
-                else:
-                    kept = {
-                        k: v for k, v in linked.attributes.items() if k not in FIXTURE_ONLY_ATTRS
-                    }
-                    linked.attributes = {**kept, **dmx}
-                fixture_nodes[fx.id] = linked
-                continue
-            fixture_nodes[fx.id] = self.device(
-                f"lighting_fixtures:{fx.id}",
-                domain="lighting",
-                kind="fixture",
-                name=fx.purpose or fx.fixture_type or "Fixture",
-                notes=fx.notes or "",
-                position=fx.position,
-                attributes=dmx,
-                ports=[],
-            )
-        for fx in fixtures:
-            if fx.power_node_id:
-                node = fixture_nodes[fx.id]
-                src = self.power_nodes.get(fx.power_node_id)
-                if src is not None:
-                    self.edge(
-                        f"lighting_fixtures.power:{fx.id}",
-                        "power",
-                        src,
-                        self.port(src, "out", "power", fx.power_connector),
-                        node,
-                        self.port(node, "in", "power", fx.power_connector),
-                        attributes={"connector": fx.power_connector},
-                    )
-
     async def power(self) -> None:
         """Power nodes live on the graph (power_native.py); the sync only draws what plugs in."""
         await self._device_power()
@@ -895,12 +832,32 @@ class Backfill:
             )
 
 
-_JOB_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
+class _JobLock(asyncio.Lock):
+    """An asyncio lock that remembers which task holds it, so that task can sync inside it.
+
+    A handler that holds the job lock (a bulk create) and then needs the graph synced (a fixture on
+    a device it just made) must not wait for itself: ``backfill_job`` runs the sync directly when
+    the caller already owns the lock.
+    """
+
+    owner: asyncio.Task | None = None
+
+    async def acquire(self) -> bool:
+        await super().acquire()
+        self.owner = asyncio.current_task()
+        return True
+
+    def release(self) -> None:
+        self.owner = None
+        super().release()
+
+
+_JOB_LOCKS: dict[uuid.UUID, _JobLock] = {}
 
 
 def job_lock(job_id: uuid.UUID) -> asyncio.Lock:
     """The per-job lock syncs queue on; also used to make check-then-insert writes atomic."""
-    return _JOB_LOCKS.setdefault(job_id, asyncio.Lock())
+    return _JOB_LOCKS.setdefault(job_id, _JobLock())
 
 
 async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
@@ -910,7 +867,10 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
     duplicates, so syncs queue on a per-job lock (in this process) and on a Postgres advisory
     lock (across workers, held until the sync commits).
     """
-    async with job_lock(job_id):
+    lock = job_lock(job_id)
+    if getattr(lock, "owner", None) is asyncio.current_task():
+        return await _backfill_job_locked(db, job_id)  # this task already holds the lock
+    async with lock:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
@@ -933,7 +893,6 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
         await builder.channel_lists()
         await builder.channels()
         await builder.audio_outputs()
-        await builder.lighting()
         await builder.plot_elements()
     with db.no_autoflush:
         await builder.write_edges()

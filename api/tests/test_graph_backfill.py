@@ -9,7 +9,6 @@ from app.domains.audio.models import (
     ChannelPatchPoint,
     ProductionJob,
 )
-from app.domains.lighting.models import LightingFixture
 from app.main import app
 
 BASE = "/api/v1"
@@ -53,14 +52,6 @@ async def _seed() -> str:
                     ChannelPatchPoint(channel_id=channel.id, position=1, device_id=desk.id),
                 ]
             )
-        fixture = LightingFixture(
-            job_id=job.id,
-            device_id=node.id,
-            universe=1,
-            dmx_address=1,
-            fixture_type="Spot",
-        )
-        db.add(fixture)
         await db.commit()
         return str(job.id)
 
@@ -92,8 +83,6 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
             "label": "",
         }
         assert stagebox["attributes"]["power_w"] == 120
-        fixture = next(d for d in graph["devices"] if d["name"] == "Moving head")
-        assert fixture["domain"] == "lighting" and fixture["attributes"]["dmx_address"] == 1
 
         mic = next(d for d in graph["devices"] if d["name"] == "Mic 1")
         trace = await client.get(

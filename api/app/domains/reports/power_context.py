@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import AudioDevice
-from app.domains.graph import power_native
+from app.domains.graph import fixtures_native, power_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.models import GraphDevice
 from app.domains.rigging import connectors
@@ -122,6 +122,7 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
             select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == job.venue_id)
         )
     }
+    fixture_hosts = await fixtures_native.host_nodes(db, job_id)
     power_hosts = await power_native.host_nodes(db, job_id)
     power_rows = {str(pid): power_native.node_view(pid, host) for pid, host in power_hosts.items()}
 
@@ -194,10 +195,12 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         inlet = device.power_inlet if device else ""
         node = nodes.get(load["power_node_id"]) if load["power_node_id"] else None
         cable = cable_for(inlet, load["power_connector"]) if node else ""
-        gear_ref = {"fixture": "lighting_fixtures", "element": "stage_plot_elements"}.get(
-            load["kind"], "audio_devices"
-        )
-        gear_node = graph.get(f"{gear_ref}:{load['id']}") or (
+        if load["kind"] == "fixture":
+            gear_found = fixture_hosts.get(UUID(load["id"]))
+        else:
+            gear_ref = {"element": "stage_plot_elements"}.get(load["kind"], "audio_devices")
+            gear_found = graph.get(f"{gear_ref}:{load['id']}")
+        gear_node = gear_found or (
             graph.get(f"audio_devices:{load['device_id']}") if load.get("device_id") else None
         )
         gear_spot = _spot(gear_node)

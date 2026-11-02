@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -9,10 +10,7 @@ from app.domains.audio import service as audio_service
 from app.domains.auth.deps import get_current_user
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting import importers, schemas, service
-from app.domains.lighting.models import (
-    FixtureType,
-    LightingFixture,
-)
+from app.domains.lighting.models import FixtureType
 from app.domains.rigging import service as rigging_service
 
 router = APIRouter(
@@ -27,7 +25,7 @@ async def _job_or_404(db: AsyncSession, job_id: UUID) -> None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
 
 
-async def _fixture_or_404(db: AsyncSession, job_id: UUID, fixture_id: UUID) -> LightingFixture:
+async def _fixture_or_404(db: AsyncSession, job_id: UUID, fixture_id: UUID) -> SimpleNamespace:
     await _job_or_404(db, job_id)
     fixture = await service.get_fixture(db, job_id, fixture_id)
     if fixture is None:
@@ -52,9 +50,7 @@ async def _type_or_404(db: AsyncSession, job_id: UUID, type_id: UUID) -> Fixture
     return fixture_type
 
 
-async def _reads(
-    db: AsyncSession, job_id: UUID, fixtures: list[LightingFixture]
-) -> list[schemas.FixtureRead]:
+async def _reads(db: AsyncSession, job_id: UUID, fixtures: list) -> list[schemas.FixtureRead]:
     names = {str(d.id): d.name for d in await audio_service.list_devices(db, job_id)}
     flags = service.dmx_flags(fixtures)
     reads = []
@@ -66,7 +62,7 @@ async def _reads(
     return reads
 
 
-async def _read(db: AsyncSession, job_id: UUID, fixture: LightingFixture) -> schemas.FixtureRead:
+async def _read(db: AsyncSession, job_id: UUID, fixture) -> schemas.FixtureRead:
     reads = await _reads(db, job_id, await service.list_fixtures(db, job_id))
     return next(read for read in reads if read.id == fixture.id)
 

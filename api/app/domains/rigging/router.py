@@ -10,9 +10,9 @@ from app.domains.audio import service as audio_service
 from app.domains.audio.models import StagePlotElement
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import power_native
+from app.domains.graph import fixtures_native, power_native
 from app.domains.graph.mirror import MirrorToGraphRoute
-from app.domains.lighting.models import LightingFixture
+from app.domains.lighting import service as lighting_service
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
 from app.domains.venues.schemas import VenuePowerOutletRead
 
@@ -483,10 +483,15 @@ async def assign_load(
     await _reject(_problems(evaluation, row.label, target_name))
 
     if kind == "fixture":
-        fixture = await db.get(LightingFixture, load_id)
-        if fixture is None or fixture.job_id != job_id:
+        if await lighting_service.get_fixture(db, job_id, load_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
-        target = fixture
+        # fixtures live on the graph: their load links are set by the fixture store
+        changes = {k: v for k, v in data.items() if k in ("power_node_id", "rigging_point_id")}
+        if "power_connector" in data:
+            changes["power_connector"] = data["power_connector"] or ""
+        await fixtures_native.update_fixture(db, job_id, load_id, changes)
+        await db.commit()
+        return
     elif kind == "device":
         device = await audio_service.get_device(db, load_id)
         if device is None or device.job_id != job_id:

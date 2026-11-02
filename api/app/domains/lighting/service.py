@@ -1,11 +1,13 @@
 import uuid
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import AudioDevice
-from app.domains.lighting.models import FixtureMode, FixtureType, LightingFixture
+from app.domains.graph import fixtures_native
+from app.domains.lighting.models import FixtureMode, FixtureType
 
 FIXTURE_DEVICE_TYPE = "fixture"
 DMX_CHANNELS_PER_UNIVERSE = 512
@@ -42,13 +44,9 @@ DEVICE_DEFAULT_KEYS = {
 }
 
 
-async def list_fixtures(db: AsyncSession, job_id: UUID) -> list[LightingFixture]:
-    result = await db.execute(
-        select(LightingFixture)
-        .where(LightingFixture.job_id == job_id)
-        .order_by(LightingFixture.position, LightingFixture.created_at)
-    )
-    return list(result.scalars().all())
+async def list_fixtures(db: AsyncSession, job_id: UUID):
+    """The job's fixtures (graph-backed objects shaped like the old rows)."""
+    return await fixtures_native.load_fixtures(db, job_id)
 
 
 async def list_types(db: AsyncSession, job_id: UUID) -> list[FixtureType]:
@@ -156,16 +154,11 @@ async def apply_type(db: AsyncSession, job_id: UUID, data: dict) -> dict:
     return data
 
 
-async def get_fixture(db: AsyncSession, job_id: UUID, fixture_id: UUID) -> LightingFixture | None:
-    result = await db.execute(
-        select(LightingFixture).where(
-            LightingFixture.id == fixture_id, LightingFixture.job_id == job_id
-        )
-    )
-    return result.scalars().first()
+async def get_fixture(db: AsyncSession, job_id: UUID, fixture_id: UUID):
+    return await fixtures_native.get_fixture(db, job_id, fixture_id)
 
 
-def dmx_flags(fixtures: list[LightingFixture]) -> dict[UUID, tuple[bool, bool]]:
+def dmx_flags(fixtures: list) -> dict[UUID, tuple[bool, bool]]:
     """Per fixture: (overlaps another fixture in its universe, runs past channel 512)."""
     flags: dict[UUID, list[bool]] = {f.id: [False, False] for f in fixtures}
     spans: dict[int, list[tuple[int, int, UUID]]] = {}
@@ -240,7 +233,7 @@ def _clean(data: dict) -> dict:
 
 
 def first_free_address(
-    fixtures: list[LightingFixture], universe: int, footprint: int, exclude_id: UUID | None = None
+    fixtures: list, universe: int, footprint: int, exclude_id: UUID | None = None
 ) -> int | None:
     """The lowest DMX address where a fixture of this footprint fits in the universe."""
     taken = [False] * (DMX_CHANNELS_PER_UNIVERSE + 1)
@@ -257,7 +250,17 @@ def first_free_address(
     return None
 
 
-async def create_fixture(db: AsyncSession, job_id: UUID, data: dict) -> LightingFixture:
+async def _device_node_ready(db: AsyncSession, job_id: UUID, data: dict) -> None:
+    """A fixture on a device lives on the device's graph node, which the sync makes: sync first
+    when the device is new (the sync runs inside the job lock when the caller already holds it)."""
+    if data.get("device_id"):
+        from app.domains.graph.backfill import backfill_job
+
+        await db.flush()
+        await backfill_job(db, job_id)
+
+
+async def create_fixture(db: AsyncSession, job_id: UUID, data: dict):
     data = await apply_type(db, job_id, dict(data))
     data, _ = await apply_device(db, job_id, data)
     if data.get("dmx_address") is None:
@@ -266,30 +269,29 @@ async def create_fixture(db: AsyncSession, job_id: UUID, data: dict) -> Lighting
         data["dmx_address"] = first_free_address(
             await list_fixtures(db, job_id), universe, data.get("footprint") or 1
         )
-    position = await db.scalar(
-        select(func.count(LightingFixture.id)).where(LightingFixture.job_id == job_id)
-    )
-    fixture = LightingFixture(job_id=job_id, position=position or 0, **_clean(data))
-    db.add(fixture)
+    await _device_node_ready(db, job_id, data)
+    fixture = await fixtures_native.create_fixture(db, job_id, _clean(data))
     await db.commit()
-    await db.refresh(fixture)
     return fixture
 
 
-async def update_fixture(
-    db: AsyncSession, job_id: UUID, fixture: LightingFixture, data: dict
-) -> LightingFixture:
+async def update_fixture(db: AsyncSession, job_id: UUID, fixture, data: dict):
     data = await apply_type(db, job_id, dict(data))
     data, _ = await apply_device(db, job_id, data)
-    for key, value in _clean(data).items():
-        setattr(fixture, key, value)
+    cleaned = _clean(data)
+    if "device_id" in cleaned and cleaned["device_id"] != fixture.device_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A fixture's device cannot be changed; make a new fixture",
+        )
+    cleaned.pop("device_id", None)
+    updated = await fixtures_native.update_fixture(db, job_id, fixture.id, cleaned)
     await db.commit()
-    await db.refresh(fixture)
-    return fixture
+    return updated
 
 
-async def delete_fixture(db: AsyncSession, fixture: LightingFixture) -> None:
-    await db.delete(fixture)
+async def delete_fixture(db: AsyncSession, fixture) -> None:
+    await fixtures_native.delete_fixture(db, fixture.job_id, fixture.id)
     await db.commit()
 
 
@@ -299,30 +301,18 @@ async def import_rows(
     """Insert parsed rows as one import batch. Returns (created, devices created, cleared)."""
     cleared = 0
     if clear_imported:
-        result = await db.execute(
-            delete(LightingFixture).where(
-                LightingFixture.job_id == job_id,
-                LightingFixture.import_batch_id.is_not(None),
-            )
-        )
-        cleared = result.rowcount or 0
+        for fixture in await list_fixtures(db, job_id):
+            if fixture.import_batch_id is not None:
+                await fixtures_native.delete_fixture(db, job_id, fixture.id)
+                cleared += 1
     batch = uuid.uuid4()
-    start = await db.scalar(
-        select(func.count(LightingFixture.id)).where(LightingFixture.job_id == job_id)
-    )
     devices_created = 0
-    for index, row in enumerate(rows):
+    for row in rows:
         data = await apply_type(db, job_id, dict(row))
         data, created = await apply_device(db, job_id, data)
         devices_created += int(created)
-        db.add(
-            LightingFixture(
-                job_id=job_id,
-                position=(start or 0) + index,
-                import_batch_id=batch,
-                **_clean(data),
-            )
-        )
+        await _device_node_ready(db, job_id, data)
+        await fixtures_native.create_fixture(db, job_id, {**_clean(data), "import_batch_id": batch})
     await db.commit()
     return len(rows), devices_created, cleared
 

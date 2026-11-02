@@ -15,13 +15,12 @@ from app.core.db import get_db
 from app.domains.audio import service
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import power_native, rigging_native, schemas
+from app.domains.graph import fixtures_native, power_native, rigging_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.lists import _device_twin
 from app.domains.graph.mirror import _fixtures_on_device, legacy_target
 from app.domains.graph.models import GraphDevice
-from app.domains.lighting.models import LightingFixture
 from app.domains.rigging import connectors
 from app.domains.rigging import router as rigging_router
 from app.domains.rigging import schemas as rigging_schemas
@@ -377,14 +376,15 @@ async def add_power_feed(
 
 
 async def _load_target(db: AsyncSession, job_id: UUID, node: GraphDevice) -> tuple[str, UUID]:
+    fixture_id = fixtures_native.fixture_id_of(node)
+    if fixture_id is not None:  # a fixture's host: the fixture is the load (even on a device)
+        return "fixture", fixture_id
     target = legacy_target(node)
     if target is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node cannot carry a load")
     table, legacy_id = target
     if table == "stage_plot_elements":
         return "element", legacy_id
-    if table == "lighting_fixtures":
-        return "fixture", legacy_id
     if table == "audio_devices":
         fixtures = await _fixtures_on_device(db, job_id, legacy_id)
         return ("fixture", fixtures[-1].id) if fixtures else ("device", legacy_id)
@@ -406,9 +406,10 @@ async def assign_load(
     data = payload.model_dump(exclude_unset=True)
     chosen = data.pop("load_id", None)
     if chosen is not None:
-        if kind == "fixture" and chosen not in {
-            f.id for f in await _fixtures_on_device(db, job_id, legacy_target(node)[1])
-        } | {legacy_target(node)[1]}:
+        allowed = {load_id}
+        if node.legacy_ref and node.legacy_ref.startswith("audio_devices:"):
+            allowed |= {f.id for f in await _fixtures_on_device(db, job_id, public_id(node))}
+        if kind == "fixture" and chosen not in allowed:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Load is not on that node")
         load_id = chosen if kind == "fixture" else load_id
     if "rigging_point_id" in data:
@@ -438,11 +439,8 @@ async def _id_map(db: AsyncSession, job_id: UUID) -> dict[str, str]:
             out[str(public_id(row))] = str(row.id)
     for power_id, host in (await power_native.host_nodes(db, job_id)).items():
         out[str(power_id)] = str(host.id)
-    for fx in (
-        await db.scalars(select(LightingFixture).where(LightingFixture.job_id == job_id))
-    ).all():
-        if fx.device_id and f"audio_devices:{fx.device_id}" in by_ref:
-            out[str(fx.id)] = by_ref[f"audio_devices:{fx.device_id}"]
+    for fid, host in (await fixtures_native.host_nodes(db, job_id)).items():
+        out[str(fid)] = str(host.id)
     return out
 
 

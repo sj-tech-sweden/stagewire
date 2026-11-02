@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.audio.models import AudioDevice, StagePlotElement
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import GraphDevice
-from app.domains.lighting.models import LightingFixture
 
 
 def point_node(job_id: uuid.UUID, position: int, data: dict, legacy_id=None) -> GraphDevice:
@@ -74,7 +73,13 @@ async def get_point(
 
 async def clear_references(db: AsyncSession, node: GraphDevice) -> None:
     ref = public_id(node)
-    for model in (AudioDevice, LightingFixture, StagePlotElement):
+    for model in (AudioDevice, StagePlotElement):
         await db.execute(
             update(model).where(model.rigging_point_id == ref).values(rigging_point_id=None)
         )
+    # fixtures live on the graph: their link holds the point's graph node id
+    for host in (
+        await db.scalars(select(GraphDevice).where(GraphDevice.job_id == node.job_id))
+    ).all():
+        if (host.attributes or {}).get("rigging_point_id") == str(node.id):
+            host.attributes = {k: v for k, v in host.attributes.items() if k != "rigging_point_id"}

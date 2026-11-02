@@ -11,7 +11,7 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
 from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
-from app.domains.graph import dmx_native, power_native, video_native
+from app.domains.graph import dmx_native, fixtures_native, power_native, video_native
 from app.domains.graph.backfill import (
     CHANNEL_FIELDS,
     DEVICE_SPEC_FIELDS,
@@ -259,12 +259,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
-    elif table == "lighting_fixtures":
-        row = await lighting_service.get_fixture(db, job_id, legacy_id)
-        changes = _fixture_changes(data)
-        if row is None or not changes:
-            return False
-        await lighting_service.update_fixture(db, job_id, row, changes)
     elif table == "stage_plot_elements":
         changes = _element_changes(data)
         if not changes:
@@ -272,16 +266,9 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         return await service.update_plot_element(db, job_id, legacy_id, changes) is not None
     elif table == "audio_devices":
         row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
-        fixture_changes = _fixture_changes(data)
         if row is None:
             return False
         persisted = False
-        if fixture_changes:
-            # a device node shows its last fixture, so that is the one edits go to
-            fixtures = await _fixtures_on_device(db, job_id, legacy_id)
-            if fixtures:
-                await lighting_service.update_fixture(db, job_id, fixtures[-1], fixture_changes)
-                persisted = True
         if changes:
             row = await service.update_device(db, row, changes)
             persisted = True
@@ -330,11 +317,6 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
-    elif table == "lighting_fixtures":
-        fixture = await lighting_service.get_fixture(db, job_id, legacy_id)
-        if fixture is None:
-            return False
-        await lighting_service.delete_fixture(db, fixture)
     elif table == "audio_devices":
         row = await service.get_device(db, legacy_id)
         if row is None:
@@ -362,7 +344,6 @@ def _point_changes(attrs: dict) -> dict:
 
 
 POWER_EDGE_TABLES = {
-    "lighting_fixtures.power",
     "audio_devices.power",
 }
 
@@ -411,6 +392,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
         return False
     if await power_native.edge_patch(db, job_id, edge, data):
         return False
+    if await fixtures_native.edge_patch(db, job_id, edge, data):
+        return False
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
     if target is not None and target[0] in POWER_EDGE_TABLES:
@@ -453,6 +436,8 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         return False
     if await power_native.edge_delete(db, job_id, edge):
         return False
+    if await fixtures_native.edge_delete(db, job_id, edge):
+        return False
     ref = (edge.attributes or {}).get("legacy_ref") or ""
     if ref.startswith("stage_plot_elements.link:"):
         _, element_id, role = ref.split(":")
@@ -461,7 +446,7 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
     if target is None:
         return False
     table, legacy_id = target
-    if table in ("lighting_fixtures.power", "audio_devices.power"):
+    if table == "audio_devices.power":
         from app.domains.rigging import router as rigging_router
         from app.domains.rigging import schemas as rigging_schemas
 

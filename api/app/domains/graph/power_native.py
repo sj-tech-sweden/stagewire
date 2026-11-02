@@ -57,7 +57,8 @@ async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, Gra
 
 
 def _hosted(host: GraphDevice) -> bool:
-    return host.kind not in POWER_KINDS or host.domain != "power"
+    """On a device's own node (it has its legacy device row), not a node made for the power."""
+    return bool(host.legacy_ref and host.legacy_ref.startswith("audio_devices:"))
 
 
 def node_view(power_id: uuid.UUID, host: GraphDevice) -> SimpleNamespace:
@@ -162,7 +163,9 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
                 for n in (
                     await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
                 ).all()
-                if power_id_of(n) is None and n.domain != "power" and public_id(n) == device_id
+                if power_id_of(n) is None
+                and (n.legacy_ref or "").startswith("audio_devices:")
+                and public_id(n) == device_id
             ),
             None,
         )

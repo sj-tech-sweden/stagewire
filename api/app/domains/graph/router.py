@@ -15,6 +15,7 @@ from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
     backfill,
     dmx_native,
+    fixtures_native,
     mirror,
     power_native,
     readers,
@@ -160,6 +161,7 @@ async def update_device(
         await db.flush()  # the version check fails here, before the legacy row is touched
         await dmx_native.after_patch(db, device, data)
         await power_native.after_patch(db, job_id, device, data)
+        await fixtures_native.after_patch(db, job_id, device, data)
         mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         await db.commit()
         if mirrored:
