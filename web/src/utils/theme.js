@@ -17,7 +17,8 @@ export const THEME_STORAGE_KEY = 'sw_theme_mode';
 export function resolveDark(mode, systemPrefersDark) {
   if (mode === 'light') return false;
   if (mode === 'dark') return true;
-  // 'auto' (or anything unexpected) follows the system, defaulting to dark.
+  // Anything other than the explicit 'light'/'dark' (including 'auto' and any
+  // unexpected value) follows the OS preference, so it never hard-locks to dark.
   return systemPrefersDark !== false;
 }
 

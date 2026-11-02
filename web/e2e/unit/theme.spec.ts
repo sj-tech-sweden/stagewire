@@ -32,8 +32,9 @@ test('resolveDark maps modes and auto to a boolean', () => {
   expect(resolveDark('auto', false)).toBe(false);
 });
 
-test('resolveDark defaults unknown modes to dark', () => {
-  expect(resolveDark('banana', false)).toBe(true);
+test('resolveDark treats unknown modes as auto (follows the OS)', () => {
+  expect(resolveDark('banana', false)).toBe(false);
+  expect(resolveDark('banana', true)).toBe(true);
 });
 
 test('modeIcon returns the right material icon per mode', () => {
