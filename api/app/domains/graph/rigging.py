@@ -246,11 +246,9 @@ async def create_power_node(
 
 async def _decorate(db: AsyncSession, node: GraphDevice, extra: dict) -> schemas.GraphDeviceRead:
     """Put what only the graph knows about a power node on it: the length of an extension cord
-    (``length_m``) and the Stockwire product it is rented as. These are not legacy columns, so the
-    attribute makes the node ``graph_edited`` and the sync leaves it alone."""
+    (``length_m``) and the Stockwire product it is rented as."""
     if extra.get("length_m") is not None:
         node.attributes = {**node.attributes, "length_m": extra["length_m"]}
-        node.graph_edited = True
     for key in ("stockwire_product_id", "stockwire_product_name"):
         if extra.get(key) is not None:
             setattr(node, key, extra[key])
@@ -385,7 +383,7 @@ async def _load_target(db: AsyncSession, job_id: UUID, node: GraphDevice) -> tup
     if target is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node cannot carry a load")
     table, legacy_id = target
-    if table == "audio_devices":
+    if table == "device":
         fixtures = await _fixtures_on_device(db, job_id, legacy_id)
         return ("fixture", fixtures[-1].id) if fixtures else ("device", legacy_id)
     raise HTTPException(
@@ -407,7 +405,7 @@ async def assign_load(
     chosen = data.pop("load_id", None)
     if chosen is not None:
         allowed = {load_id}
-        if node.legacy_ref and node.legacy_ref.startswith("audio_devices:"):
+        if node.legacy_ref and node.legacy_ref.startswith("device:"):
             allowed |= {f.id for f in await _fixtures_on_device(db, job_id, public_id(node))}
         if kind == "fixture" and chosen not in allowed:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Load is not on that node")

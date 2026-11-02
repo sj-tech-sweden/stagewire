@@ -50,9 +50,6 @@ class GraphDevice(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
-    graph_edited: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=false()
-    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __mapper_args__ = {"version_id_col": revision}

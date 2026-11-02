@@ -25,7 +25,7 @@ MIRRORED_EDGE_TABLES = {
     "output_patch_points",
     "channel_list_outputs",
     "stage_plot_elements.link",
-    "audio_devices.power",
+    "device.power",
 }
 
 
@@ -88,7 +88,7 @@ class Backfill:
         ).all():
             if device.legacy_ref:
                 self.devices[device.legacy_ref] = device
-                if not device.legacy_ref.startswith("audio_devices:"):
+                if not device.legacy_ref.startswith("device:"):
                     self.loaded_devices.add(device.legacy_ref)  # a device's ref is its identity
                 self.loaded_revisions[device.id] = device.revision
             power_id = power_id_of(device)
@@ -281,7 +281,7 @@ class Backfill:
         """
         hosts = {str(h.id): h for h in self.power_nodes.values()}
         for ref, node in list(self.devices.items()):
-            if not ref.startswith("audio_devices:"):
+            if not ref.startswith("device:"):
                 continue
             attributes = node.attributes or {}
             feeder = hosts.get(attributes.get("power_node_id"))
@@ -289,7 +289,7 @@ class Backfill:
                 continue
             connector = attributes.get("power_connector") or ""
             self.edge(
-                f"audio_devices.power:{ref.partition(':')[2]}",
+                f"device.power:{ref.partition(':')[2]}",
                 "power",
                 feeder,
                 self.port(feeder, "out", "power", connector),
@@ -345,12 +345,14 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
 
 
 async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
-    """Sync a job's legacy audio/lighting/video/power rows into the unified graph.
+    """Draw a job's derived edges from its graph nodes (every domain is graph-native).
 
-    Rows and edges carry a ``legacy_ref``. A run adds what is new, refreshes graph rows that
-    were never edited in the graph, removes untouched rows whose legacy source is gone, and
-    leaves anything edited in the graph (``graph_edited``) alone. Audio output chains hang off a
-    bus node fed by the first patch point (the console).
+    Nodes hold the data; this adds, refreshes and prunes the edges that are derived from it: the
+    patch edges from the points of channels and outputs (``audio_native.sync_edges``), the plot
+    element links (``plot_native.sync_links``) and the power edge of a plugged device. An edge
+    carries a ``legacy_ref`` that names what it was derived from (the point id, the element and
+    role), so a run keeps ids stable, updates what changed and removes what no longer follows
+    from a node. An edge whose ``phase`` was set in the graph (``graph_edited``) keeps it.
     """
     builder = Backfill(db, job_id)
     await builder.load_existing()

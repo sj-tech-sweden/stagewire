@@ -58,7 +58,7 @@ async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, Gra
 
 def _hosted(host: GraphDevice) -> bool:
     """On a device's own node (it has its legacy device row), not a node made for the power."""
-    return bool(host.legacy_ref and host.legacy_ref.startswith("audio_devices:"))
+    return bool(host.legacy_ref and host.legacy_ref.startswith("device:"))
 
 
 def node_view(power_id: uuid.UUID, host: GraphDevice) -> SimpleNamespace:
@@ -164,7 +164,7 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
                     await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
                 ).all()
                 if power_id_of(n) is None
-                and (n.legacy_ref or "").startswith("audio_devices:")
+                and (n.legacy_ref or "").startswith("device:")
                 and public_id(n) == device_id
             ),
             None,
@@ -179,7 +179,6 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
             "power_notes": data.get("notes") or "",
             "power_position": position,
         }
-        host.graph_edited = True  # the sync must not replace these attributes
     else:
         host = GraphDevice(
             id=uuid.uuid4(),

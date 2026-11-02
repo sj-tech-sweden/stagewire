@@ -1,7 +1,7 @@
 """Channel lists, channels, outputs and their patch points on the graph (no legacy tables).
 
 Nodes (no ``legacy_ref``; the public id, ``ids.public_id``, is the legacy id of an imported row and
-the node id of a new one, so plot links, cable routes and ``audio_devices.sound_list_id`` keep
+the node id of a new one, so plot links, cable routes and a device's ``sound_list_id`` keep
 working):
 
 - ``channel_list`` (domain ``audio``): name, position and the mixer attributes
@@ -23,7 +23,7 @@ are pruned like every mirrored edge; the legacy ids in the edge refs are the poi
 
 The ``*_row`` functions return objects shaped like the old ORM rows (with ``patch_points`` /
 ``points`` / ``channels`` / ``outputs`` nested), so the audio service, router, exports and reports
-are unchanged. Devices are still rows (``audio_devices``): ``device_id`` in a row is the device's
+are unchanged. ``device_id`` in a row is the device's
 public id, in a point the device's node id.
 """
 
@@ -115,11 +115,9 @@ def _native(node: GraphDevice | None, kind: str) -> bool:
 
 
 def _device_public(nodes: list[GraphDevice]) -> dict[uuid.UUID, uuid.UUID]:
-    """Device node id -> the device's public id (the row id of ``audio_devices``)."""
+    """Device node id -> the device's public id (the id in its ``device:`` ref)."""
     return {
-        n.id: public_id(n)
-        for n in nodes
-        if n.legacy_ref and n.legacy_ref.startswith("audio_devices:")
+        n.id: public_id(n) for n in nodes if n.legacy_ref and n.legacy_ref.startswith("device:")
     }
 
 
@@ -142,7 +140,7 @@ async def device_node(
 ) -> GraphDevice | None:
     """The graph node of a device row (made by a sync, which every legacy write triggers)."""
     query = select(GraphDevice).where(
-        GraphDevice.job_id == job_id, GraphDevice.legacy_ref == f"audio_devices:{device_id}"
+        GraphDevice.job_id == job_id, GraphDevice.legacy_ref == f"device:{device_id}"
     )
     return (await db.scalars(query)).first()
 

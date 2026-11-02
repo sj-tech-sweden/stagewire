@@ -65,7 +65,6 @@ class GraphDeviceRead(GraphDeviceBase):
     id: UUID
     job_id: UUID
     stockwire_request_status: str | None = None
-    graph_edited: bool = False
     legacy_ref: str | None = None
     created_at: datetime
     revision: int

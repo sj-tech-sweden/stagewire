@@ -1,4 +1,4 @@
-"""Devices on the graph: a device is a node (its ``audio_devices:<id>`` ref is its identity) and
+"""Devices on the graph: a device is a node (its ``device:<id>`` ref is its identity) and
 the legacy device API, the load tree and the lists read and write that node."""
 
 import pytest
@@ -40,7 +40,7 @@ async def test_a_device_is_a_node_with_its_specs_ports_and_domain(auth_headers):
         assert res.status_code == 201, res.text
         dev = res.json()
         node = (await _nodes(client, h, api))[dev["id"]]  # a new device's id is its node id
-        assert node["legacy_ref"] == f"audio_devices:{dev['id']}"
+        assert node["legacy_ref"] == f"device:{dev['id']}"
         assert (node["kind"], node["domain"], node["name"]) == (
             "analog_stagebox",
             "audio",
@@ -184,7 +184,7 @@ async def test_a_catalog_node_becomes_a_device_in_place_and_deleting_a_device_dr
         )
         assert res.status_code == 200, res.text
         node = (await _nodes(client, h, api))[catalog["id"]]
-        assert node["legacy_ref"] == f"audio_devices:{catalog['id']}"  # the same node, now a device
+        assert node["legacy_ref"] == f"device:{catalog['id']}"  # the same node, now a device
         assert [d["id"] for d in (await client.get(f"{api}/devices", headers=h)).json()] == [
             catalog["id"]
         ]

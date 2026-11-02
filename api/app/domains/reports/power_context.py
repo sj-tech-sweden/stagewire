@@ -198,9 +198,9 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         elif load["kind"] == "element":
             gear_found = element_hosts.get(UUID(load["id"]))
         else:
-            gear_found = graph.get(f"audio_devices:{load['id']}")
+            gear_found = graph.get(f"device:{load['id']}")
         gear_node = gear_found or (
-            graph.get(f"audio_devices:{load['device_id']}") if load.get("device_id") else None
+            graph.get(f"device:{load['device_id']}") if load.get("device_id") else None
         )
         gear_spot = _spot(gear_node)
         metres = (

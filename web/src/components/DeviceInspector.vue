@@ -480,7 +480,7 @@ const isPowerable = computed(
 );
 const linkedGear = computed(() =>
   elementLinks.value.linked_device_id
-    ? graph.devices.find((d) => d.legacy_ref === `audio_devices:${elementLinks.value.linked_device_id}`) || null
+    ? graph.devices.find((d) => d.legacy_ref === `device:${elementLinks.value.linked_device_id}`) || null
     : null,
 );
 async function setLinkedInlet(value) {

@@ -86,12 +86,11 @@ async def test_a_canvas_move_does_not_freeze_a_node_against_legacy_edits(auth_he
         stagebox = next(
             d for d in (await _graph(client, h, job_id))["devices"] if d["name"] == "Stagebox"
         )
-        moved = await client.patch(
+        await client.patch(
             f"{g}/devices/{stagebox['id']}",
             json={"canvas_x_cm": 10, "expected_revision": stagebox["revision"]},
             headers=h,
         )
-        assert moved.json()["graph_edited"] is False
         await client.patch(
             f"{BASE}/jobs/{job_id}/devices/{box['id']}", json={"name": "Stagebox SL"}, headers=h
         )

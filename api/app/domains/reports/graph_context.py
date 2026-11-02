@@ -120,7 +120,7 @@ def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
         """Sheets are selected by the legacy device id, so keep it when there is one."""
         ref = getattr(by_id.get(graph_id), "legacy_ref", None) or ""
         table, _, legacy_id = ref.partition(":")
-        return legacy_id if table == "audio_devices" and legacy_id else graph_id
+        return legacy_id if table == "device" and legacy_id else graph_id
 
     def add_row(point: dict, row: dict) -> None:
         key = point["device_id"]

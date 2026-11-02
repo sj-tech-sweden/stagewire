@@ -170,7 +170,7 @@ def _point_changes(attrs: dict) -> dict:
 
 
 POWER_EDGE_TABLES = {
-    "audio_devices.power",
+    "device.power",
 }
 
 
@@ -189,7 +189,7 @@ async def _power_edge_to_legacy(
     if not changes:
         return False
     try:
-        kind = "device" if table == "audio_devices.power" else "fixture"
+        kind = "device" if table == "device.power" else "fixture"
         await _assign_fixture_load(db, job_id, legacy_id, changes, kind)
     except HTTPException:
         await db.rollback()
@@ -255,13 +255,13 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
     if target is None:
         return False
     table, legacy_id = target
-    if table == "audio_devices.power":
+    if table == "device.power":
         from app.domains.rigging import router as rigging_router
         from app.domains.rigging import schemas as rigging_schemas
 
         await rigging_router.assign_load(
             job_id,
-            "device" if table == "audio_devices.power" else "fixture",
+            "device" if table == "device.power" else "fixture",
             legacy_id,
             rigging_schemas.LoadAssign(power_node_id=None),
             db,
@@ -272,9 +272,9 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
 
 LINK_ROLES = {
     "channel": "audio_channel_patches",
-    "device": "audio_devices",
+    "device": "device",
     "video_input": "video_inputs",
-    "lens": "audio_devices",
+    "lens": "device",
     "power_node": "power_nodes",
 }
 

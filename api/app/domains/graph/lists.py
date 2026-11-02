@@ -142,7 +142,7 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
     if node is None or node.job_id != job_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
     target = legacy_target(node)
-    if target is not None and target[0] == "audio_devices":
+    if target is not None and target[0] == "device":
         return target[1]
     if target is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
@@ -516,7 +516,7 @@ async def fill_video_list_from_switcher(
 ) -> dict:
     """Make the list match its switcher, the way a sound list follows its mixer.
 
-    The switcher is a gear device tagged with the list (``audio_devices.video_list_id`` = the
+    The switcher is a gear device tagged with the list (a device's ``video_list_id`` = the
     list's public id), made on first use. Inputs and outputs with no connection get one to it, and
     missing ones are added up to the switcher's size.
     """
@@ -539,7 +539,7 @@ async def fill_video_list_from_switcher(
         )
     # the sync takes the job lock itself, so it runs before this handler takes it for the rows
     await backfill_job(db, job_id)
-    switcher = await _by_ref(db, job_id, f"audio_devices:{device.id}")
+    switcher = await _by_ref(db, job_id, f"device:{device.id}")
     counts = {"inputs_added": 0, "inputs_patched": 0, "outputs_added": 0, "outputs_patched": 0}
     async with job_lock(job_id):
         for kind, wanted_key, make, noun in (
@@ -638,7 +638,7 @@ async def create_audio_device(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
-    return await _read(db, job_id, f"audio_devices:{device.id}")
+    return await _read(db, job_id, f"device:{device.id}")
 
 
 @router.get("/effective")
@@ -652,7 +652,7 @@ async def effective_values(job_id: UUID, db: AsyncSession = Depends(get_db)) -> 
     nodes = (
         await db.scalars(
             select(GraphDevice).where(
-                GraphDevice.job_id == job_id, GraphDevice.legacy_ref.like("audio_devices:%")
+                GraphDevice.job_id == job_id, GraphDevice.legacy_ref.like("device:%")
             )
         )
     ).all()

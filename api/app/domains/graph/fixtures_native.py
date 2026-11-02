@@ -76,7 +76,7 @@ def _uuid(value) -> uuid.UUID | None:
 
 def _hosted(host: GraphDevice) -> bool:
     """On a device's own node (which has its legacy device row), not a node made for the fixture."""
-    return bool(host.legacy_ref and host.legacy_ref.startswith("audio_devices:"))
+    return bool(host.legacy_ref and host.legacy_ref.startswith("device:"))
 
 
 async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, GraphDevice]:
@@ -226,7 +226,7 @@ async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
                 for n in (
                     await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
                 ).all()
-                if (n.legacy_ref or "").startswith("audio_devices:") and public_id(n) == device_id
+                if (n.legacy_ref or "").startswith("device:") and public_id(n) == device_id
             ),
             None,
         )
@@ -234,7 +234,6 @@ async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found")
     if host is not None and fixture_id_of(host) is None:
         host.attributes = {**(host.attributes or {}), **attributes}
-        host.graph_edited = True  # the sync must not replace these attributes
     else:
         if host is not None:  # a further fixture on a device that already carries one
             attributes["fixture_device_id"] = str(device_id)

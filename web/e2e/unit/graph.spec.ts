@@ -63,7 +63,7 @@ test('edits to different attribute keys merge, the same key changed twice still 
 });
 
 test('a node is known by its legacy id, then the legacy id kept as an attribute, then its own id', () => {
-  expect(legacyId({ id: 'n1', legacy_ref: 'audio_devices:abc' })).toBe('abc');
+  expect(legacyId({ id: 'n1', legacy_ref: 'device:abc' })).toBe('abc');
   expect(legacyId({ id: 'n2', legacy_ref: null, attributes: { legacy_id: 'old-input' } })).toBe('old-input');
   expect(legacyId({ id: 'n3', legacy_ref: null, attributes: {} })).toBe('n3');
 });

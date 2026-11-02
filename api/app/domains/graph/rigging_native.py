@@ -2,7 +2,7 @@
 
 A ``rigging_point`` node (domain ``rigging``) holds ``attributes.trim_height_cm`` and
 ``attributes.weight_capacity_kg``; its name, position and notes are the node's. Loads refer to it by
-its public id (``ids.public_id``): the ``rigging_point_id`` column of ``audio_devices``,
+its public id (``ids.public_id``): the ``rigging_point_id`` attribute of a device,
 ``lighting_fixtures`` and ``stage_plot_elements`` holds the legacy id for a point that came from
 the old table and the node's own id for a new one. ``clear_references`` clears those columns when a
 point is deleted, as ``ON DELETE SET NULL`` used to.

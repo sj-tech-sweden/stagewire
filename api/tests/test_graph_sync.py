@@ -68,7 +68,7 @@ async def test_a_second_sync_changes_nothing_and_channels_edit_through_the_api(a
         assert res.status_code == 200, res.text
         devices = (await _graph(client, auth_headers, job_id))["devices"]
         node = next(d for d in devices if d["name"] == "Kick In")
-        assert node["notes"] == "moved" and node["graph_edited"] is False
+        assert node["notes"] == "moved"
 
 
 @pytest.mark.asyncio

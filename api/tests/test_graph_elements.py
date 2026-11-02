@@ -325,7 +325,7 @@ async def test_every_link_role_validates_and_links(auth_headers, monkeypatch):
         element = next(d for d in graph["devices"] if d["id"] == mic["id"])
         list_node = next(d for d in graph["devices"] if d["kind"] == "channel_list")
         ch_node = next(d for d in graph["devices"] if d["id"] == ch["id"])
-        box_node = by_ref[f"audio_devices:{box['id']}"]
+        box_node = by_ref[f"device:{box['id']}"]
 
         out = (
             await client.post(

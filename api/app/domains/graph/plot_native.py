@@ -431,10 +431,10 @@ async def sync_links(builder) -> None:
             elif role in ("patch_point", "output_point"):
                 owners = targets[f"{role}_device"]
                 gone = value not in owners
-                target = None if gone else builder.devices.get(f"audio_devices:{owners[value]}")
+                target = None if gone else builder.devices.get(f"device:{owners[value]}")
             else:  # device, lens
                 gone = str(value) not in devices
-                target = None if gone else builder.devices.get(f"audio_devices:{value}")
+                target = None if gone else builder.devices.get(f"device:{value}")
             if gone:  # what it pointed at was deleted: the link goes with it
                 attributes.pop(column)
                 continue

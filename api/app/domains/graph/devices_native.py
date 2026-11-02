@@ -1,6 +1,6 @@
 """Gear (stageboxes, mixers, cameras, speakers, fixtures' devices, ...) on the graph.
 
-A device is a graph node whose ``legacy_ref`` is ``audio_devices:<id>``. The ref is no longer a
+A device is a graph node whose ``legacy_ref`` is ``device:<id>``. The ref is no longer a
 link to a table (there is none): it is the device's identity, the marker every module tests
 (``is_device``), the id plot links, patch points, loads and cable routes hold (``ids.public_id``
 is that id), and what the web app finds a device node by. A device made in the graph has its own
@@ -37,7 +37,7 @@ from app.domains.graph import power_native
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 
-REF = "audio_devices:"
+REF = "device:"
 SPEC_FIELDS = (
     "sensor_width_mm",
     "focal_min_mm",

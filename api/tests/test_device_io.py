@@ -120,7 +120,7 @@ async def test_switcher_io_comes_from_video_inputs_then_stockwire_then_override(
         ).json()
         graph = (await client.get(g, headers=auth_headers)).json()
         switcher_node = next(
-            d for d in graph["devices"] if d["legacy_ref"] == f"audio_devices:{switcher['id']}"
+            d for d in graph["devices"] if d["legacy_ref"] == f"device:{switcher['id']}"
         )
         for n in range(2):
             cam = (

@@ -1290,7 +1290,7 @@ async function addGearElement(gear) {
   try {
     const placed = new Set(stagePlot.elements.map((e) => e.linked_device_id).filter(Boolean));
     let device = gear.deviceType
-      ? graph.devices.find((d) => d.kind === gear.deviceType && d.legacy_ref?.startsWith('audio_devices:') && !placed.has(legacyId(d)))
+      ? graph.devices.find((d) => d.kind === gear.deviceType && d.legacy_ref?.startsWith('device:') && !placed.has(legacyId(d)))
       : null;
     if (!device && gear.createDevice) {
       const count = graph.devices.filter((d) => d.kind === gear.deviceType).length;

@@ -73,7 +73,7 @@ test('the cable list built from the graph equals the one built from the legacy d
 
   // video lives only on the graph: lists and chains are written there, with graph node ids
   const nodes = ((await (await request.get(`${API_BASE}/api/v1${job}/graph`, { headers: h })).json()) as any).devices as any[];
-  const nodeOf = (legacy: { id: string }) => nodes.find((d) => d.legacy_ref === `audio_devices:${legacy.id}`).id;
+  const nodeOf = (legacy: { id: string }) => nodes.find((d) => d.legacy_ref === `device:${legacy.id}`).id;
   const vlist = await post(`${job}/graph/video-lists`, { name: 'Video' });
   const vin = await post(`${job}/graph/video-lists/${vlist.id}/inputs`, { source_label: 'Cam 1' });
   await send(request, h, 'put', `${job}/graph/video-inputs/${vin.id}/chain`, {

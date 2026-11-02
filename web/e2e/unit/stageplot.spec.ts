@@ -41,7 +41,7 @@ test('a native element keeps an imported legacy id and otherwise uses its node i
 });
 
 test('elements come from plot_element nodes only, with links read from the link edges', () => {
-  const devices = [node(), { id: 'd', kind: 'mixer', legacy_ref: 'audio_devices:d1', attributes: {} }];
+  const devices = [node(), { id: 'd', kind: 'mixer', legacy_ref: 'device:d1', attributes: {} }];
   const edges = [
     { signal: 'link', src_device_id: 'n1', attributes: { role: 'device', legacy_target: 'd1' } },
     { signal: 'audio', src_device_id: 'n1', attributes: { legacy_target: 'ignored' } },
