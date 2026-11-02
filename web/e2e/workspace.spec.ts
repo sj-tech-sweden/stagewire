@@ -1519,3 +1519,40 @@ test('the audience area is outlined on the map, saved on the job, cleared and ke
   await page.getByTestId('audience-clear').click();
   await expect.poll(async () => (await job()).audience_polygon.length).toBe(0);
 });
+
+test('a channel is paired as stereo with its neighbour and a wireless channel keeps pack and frequency', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Stereo ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { channel_number: 1, source_label: 'Piano', input_type: 'wireless' });
+  const channels = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[])
+      .filter((d) => d.kind === 'channel')
+      .sort((a, b) => a.attributes.channel_number - b.attributes.channel_number);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await page.getByTestId('wireless-pack').fill('Shure P10T');
+  await page.getByTestId('wireless-pack').press('Enter');
+  // the second edit waits for the first save: both patch the same row, so it needs the new revision
+  await expect.poll(async () => (await channels())[0].attributes.wireless_pack).toBe('Shure P10T');
+  await page.getByTestId('wireless-frequency').fill('606.250');
+  await page.getByTestId('wireless-frequency').press('Enter');
+  await expect.poll(async () => (await channels())[0].attributes.wireless_pack).toBe('Shure P10T');
+  await expect.poll(async () => (await channels())[0].attributes.wireless_frequency).toBe('606.250');
+
+  // ticking stereo makes the missing partner channel 2 and labels the legs L and R
+  await page.getByTestId('channel-stereo').first().click();
+  await expect.poll(async () => (await channels()).length).toBe(2);
+  await expect.poll(async () => (await channels()).map((c) => c.name)).toEqual(['Piano L', 'Piano R']);
+  const both = await channels();
+  expect(both.map((c) => c.attributes.stereo_channel)).toEqual([2, 1]);
+  expect(both[1].attributes.input_type).toBe('wireless');
+  await expect(page.getByTestId('stereo-side')).toHaveText([/L/, /R/]);
+
+  await page.getByTestId('channel-stereo').first().click();
+  await expect.poll(async () => (await channels()).every((c) => !c.attributes.stereo)).toBe(true);
+});

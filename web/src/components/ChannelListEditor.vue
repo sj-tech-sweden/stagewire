@@ -190,6 +190,27 @@
               :options="inputTypes"
               @update:model-value="(v) => saveAttr(slot.row, 'input_type', v)"
             />
+            <div
+              v-if="slot.row.attributes.input_type === 'wireless'"
+              class="row no-wrap q-gutter-xs"
+            >
+              <q-input
+                :model-value="slot.row.attributes.wireless_pack"
+                dense
+                borderless
+                :placeholder="t('channels.fieldWirelessPack')"
+                data-testid="wireless-pack"
+                @change="(v) => saveAttr(slot.row, 'wireless_pack', v)"
+              />
+              <q-input
+                :model-value="slot.row.attributes.wireless_frequency"
+                dense
+                borderless
+                :placeholder="t('channels.fieldWirelessFrequency')"
+                data-testid="wireless-frequency"
+                @change="(v) => saveAttr(slot.row, 'wireless_frequency', v)"
+              />
+            </div>
           </q-td>
         </template>
         <template #body-cell-device="slot">
@@ -235,8 +256,29 @@
             />
           </q-td>
         </template>
+        <template #body-cell-stereo="slot">
+          <q-td :props="slot">
+            <q-checkbox
+              :model-value="!!slot.row.attributes.stereo"
+              dense
+              data-testid="channel-stereo"
+              @update:model-value="(v) => setStereo(slot.row, v)"
+            />
+            <q-chip
+              v-if="stereoView(slot.row, channels).linked"
+              dense
+              color="primary"
+              text-color="white"
+              size="sm"
+              data-testid="stereo-side"
+            >
+              {{ stereoView(slot.row, channels).isL ? 'L' : 'R' }}
+              <q-tooltip>{{ t('channels.stereoLinkedTo', { ch: slot.row.attributes.stereo_channel }) }}</q-tooltip>
+            </q-chip>
+          </q-td>
+        </template>
         <template
-          v-for="flag in ['phantom_power', 'stereo']"
+          v-for="flag in ['phantom_power']"
           #[`body-cell-${flag}`]="slot"
           :key="flag"
         >
@@ -449,6 +491,8 @@ import {
   isVirtual,
   nextChannelNumber,
   outputsOf,
+  stereoPairPlan,
+  stereoView,
 } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
@@ -507,6 +551,22 @@ async function save(node, changes) {
   }
 }
 const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
+// Ticking "stereo" pairs the channel with its odd/even neighbour (see stereoPairPlan); unticking
+// releases both. The partner is made first so the main row never points at a channel that is not
+// there yet.
+async function setStereo(node, on) {
+  const plan = stereoPairPlan(node, channels.value, on);
+  try {
+    if (plan.partnerCreate) {
+      await graph.createChannels(props.jobId, listId.value, [plan.partnerCreate]);
+    } else if (plan.partner && plan.partnerChanges) {
+      await graph.updateDevice(props.jobId, plan.partner.id, plan.partnerChanges);
+    }
+    await graph.updateDevice(props.jobId, node.id, plan.main);
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
+  }
+}
 const setNumber = (node, value) =>
   save(node, { position: value, attributes: { channel_number: value } });
 

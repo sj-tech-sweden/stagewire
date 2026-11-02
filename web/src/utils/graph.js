@@ -32,6 +32,18 @@ export function applyGraphEvent(state, event) {
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+// `attributes` is sent as a partial object that the server merges key by key, so two edits to
+// different attribute keys (a wireless pack and then its frequency) do not conflict even though the
+// whole `attributes` object changed in between. A key both sides changed to different values is a
+// real conflict and still falls back to the whole-field conflict below.
+function attributesDisjoint(field, mine, base, theirs) {
+  if (field !== 'attributes' || !mine || typeof mine !== 'object') return false;
+  return Object.entries(mine).every(
+    ([key, value]) =>
+      same(base?.attributes?.[key], theirs?.attributes?.[key]) || same(value, theirs?.attributes?.[key]),
+  );
+}
+
 // base: row the user started editing, mine: the fields they changed,
 // theirs: the row the server now has. Fields only one side touched merge
 // cleanly; fields both sides changed to different values are conflicts.
@@ -41,7 +53,7 @@ export function threeWayMerge(base, mine, theirs) {
   for (const [field, value] of Object.entries(mine)) {
     if (IGNORED_FIELDS.has(field)) continue;
     const theirsChanged = !same(base?.[field], theirs?.[field]);
-    if (!theirsChanged || same(value, theirs?.[field])) {
+    if (!theirsChanged || same(value, theirs?.[field]) || attributesDisjoint(field, value, base, theirs)) {
       merged[field] = value;
     } else {
       conflicts.push({ field, base: base?.[field], mine: value, theirs: theirs?.[field] });

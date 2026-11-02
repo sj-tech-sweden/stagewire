@@ -797,3 +797,74 @@ export function outputPointOptions(devices, edges) {
   }
   return options;
 }
+
+// Stereo pairing links two neighbouring channels (odd/even) as the L and R of one source. The pair
+// is stored on both rows (stereo + stereo_channel = the other's number) and the lower number is
+// L. The label gets a " L"/" R" suffix on both rows; the suffix is stripped first so toggling or
+// renumbering never stacks suffixes. The partner is created when it does not exist yet and
+// inherits the main row's input type, connector and phantom power, because both legs are the
+// same source. Unpairing clears both rows but leaves the labels the user may have edited.
+export const stripStereoSuffix = (label) => (label || '').replace(/\s+(L|R)$/, '');
+
+export function stereoPairPlan(channel, channels, on) {
+  const attrs = channel.attributes || {};
+  const number = Number(attrs.channel_number);
+  const partnerNumber = Number(attrs.stereo_channel) || (number % 2 === 0 ? number - 1 : number + 1);
+  const partner =
+    channels.find((c) => c.id !== channel.id && c.attributes?.channel_number === partnerNumber) || null;
+  if (!on) {
+    return {
+      partner,
+      main: { attributes: { stereo: false, stereo_channel: null } },
+      partnerChanges: partner ? { attributes: { stereo: false, stereo_channel: null } } : null,
+      partnerCreate: null,
+    };
+  }
+  const lowerIsMain = number < partnerNumber;
+  const base = stripStereoSuffix(channel.name) || `Input ${number}`;
+  const shared = {
+    input_type: attrs.input_type ?? null,
+    connector: attrs.connector ?? null,
+    phantom_power: !!attrs.phantom_power,
+  };
+  return {
+    partner,
+    partnerNumber,
+    main: {
+      name: `${base} ${lowerIsMain ? 'L' : 'R'}`,
+      attributes: { stereo: true, stereo_channel: partnerNumber },
+    },
+    partnerChanges: partner
+      ? {
+          name: `${base} ${lowerIsMain ? 'R' : 'L'}`,
+          attributes: { ...shared, stereo: true, stereo_channel: number },
+        }
+      : null,
+    partnerCreate: partner
+      ? null
+      : {
+          channel_number: partnerNumber,
+          source_label: `${base} ${lowerIsMain ? 'R' : 'L'}`,
+          ...shared,
+          stereo: true,
+          stereo_channel: number,
+        },
+  };
+}
+
+// The L/R badge of a stereo channel and whether its partner sits directly above or below it, for
+// the link line between the two rows. A channel whose partner is gone reads as mono.
+export function stereoView(channel, channels) {
+  const attrs = channel.attributes || {};
+  if (!attrs.stereo || !attrs.stereo_channel) return { linked: false };
+  const isL = attrs.channel_number < attrs.stereo_channel;
+  const idx = channels.findIndex((c) => c.id === channel.id);
+  const partner = channels.find((c) => c.attributes?.channel_number === attrs.stereo_channel);
+  return {
+    linked: !!partner,
+    isL,
+    partner: attrs.stereo_channel,
+    top: isL && channels[idx + 1]?.id === partner?.id,
+    bottom: !isL && channels[idx - 1]?.id === partner?.id,
+  };
+}

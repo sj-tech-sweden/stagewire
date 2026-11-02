@@ -18,6 +18,8 @@ import {
   portGroups,
   portsFromGroups,
   chainForm,
+  stereoPairPlan,
+  stereoView,
   chainSteps,
   videoChainForm,
   videoChainNames,
@@ -537,4 +539,51 @@ test('speakers carry coverage defaults and the output points of every chain can 
     { value: 'p0', label: 'Main · XLR · Console' },
     { value: 'p1', label: 'Main · Out 3 · Amp' },
   ]);
+});
+
+const chan = (id: string, n: number, name: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  name,
+  kind: 'channel',
+  attributes: { channel_number: n, ...extra },
+});
+
+test('stereo pairing links a channel with its odd/even neighbour and labels the legs L and R', () => {
+  const odd = chan('a', 3, 'Keys');
+  const plan = stereoPairPlan(odd, [odd, chan('b', 4, '')], true);
+  expect(plan.partnerNumber).toBe(4);
+  expect(plan.main.name).toBe('Keys L');
+  expect(plan.partnerChanges?.name).toBe('Keys R');
+  expect(plan.partnerChanges?.attributes.stereo_channel).toBe(3);
+
+  const even = chan('b', 4, 'Keys');
+  const lowerPartner = stereoPairPlan(even, [chan('a', 3, ''), even], true);
+  expect(lowerPartner.partnerNumber).toBe(3);
+  expect(lowerPartner.main.name).toBe('Keys R');
+});
+
+test('stereo pairing makes a missing partner, copies the shared fields and never stacks suffixes', () => {
+  const main = chan('a', 1, 'Piano L', { input_type: 'di', connector: 'xlr', phantom_power: true });
+  const plan = stereoPairPlan(main, [main], true);
+  expect(plan.partnerCreate).toMatchObject({
+    channel_number: 2,
+    source_label: 'Piano R',
+    input_type: 'di',
+    connector: 'xlr',
+    phantom_power: true,
+    stereo: true,
+    stereo_channel: 1,
+  });
+  expect(plan.main.name).toBe('Piano L');
+});
+
+test('unpairing clears both legs and stereoView reads the L/R side and neighbour', () => {
+  const a = chan('a', 1, 'X L', { stereo: true, stereo_channel: 2 });
+  const b = chan('b', 2, 'X R', { stereo: true, stereo_channel: 1 });
+  const off = stereoPairPlan(a, [a, b], false);
+  expect(off.main.attributes).toEqual({ stereo: false, stereo_channel: null });
+  expect(off.partnerChanges?.attributes).toEqual({ stereo: false, stereo_channel: null });
+  expect(stereoView(a, [a, b])).toMatchObject({ linked: true, isL: true, top: true });
+  expect(stereoView(b, [a, b])).toMatchObject({ linked: true, isL: false, bottom: true });
+  expect(stereoView(chan('c', 5, '', { stereo: true, stereo_channel: 6 }), [a, b]).linked).toBe(false);
 });
