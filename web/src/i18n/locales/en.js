@@ -548,7 +548,7 @@ export default {
     fieldWirelessFrequencyMhz: "Frequency (MHz)",
     fieldWirelessGroup: "Group",
     fieldWirelessChannel: "Channel",
-    importWirelessWorkbench: "Import Wireless Workbench",
+    importWirelessWorkbench: "Import Wireless Workbench (.shw)",
     wwbImportedUpdated: "Updated {count} of {total} rows",
     wwbImportUnmatched: "{count} rows did not match a channel",
     wirelessDetails: "Wireless details",

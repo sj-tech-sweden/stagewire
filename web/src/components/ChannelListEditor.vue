@@ -119,7 +119,7 @@
         <input
           ref="wwbFileInput"
           type="file"
-          accept=".csv,text/csv"
+          accept=".shw,application/xml"
           class="hidden"
           data-testid="wwb-file"
           @change="onWwbFile"
@@ -869,7 +869,7 @@ async function save(node, changes) {
 const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
 
-// Import a Wireless Workbench frequency-list CSV onto the current list's wireless
+// Import a Shure Wireless Workbench .shw show file onto the current list's wireless
 // channels. The backend matches rows to channels and returns how many were updated.
 async function onWwbFile(event) {
   const file = event.target.files?.[0];

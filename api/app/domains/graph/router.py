@@ -1,3 +1,4 @@
+import xml.etree.ElementTree as ET
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -10,7 +11,7 @@ from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
-from app.domains.audio.wwb import match_wireless_rows, parse_wwb_frequency_csv
+from app.domains.audio.wwb import match_wireless_rows, parse_wwb_show_file
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
@@ -552,15 +553,21 @@ async def import_wireless_workbench(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Import a Wireless Workbench frequency-list CSV onto the list's wireless channels.
+    """Import a Shure Wireless Workbench ``.shw`` show file onto the list's wireless channels.
 
-    Rows are matched to existing wireless channels by pack label (or channel number +
-    source label); matched channels have their frequency, group and channel updated.
-    Returns how many were matched/updated and which rows did not match any channel.
+    Channels are matched to existing wireless channels by name (channel name, pack or
+    source label), falling back to channel number + source; matched channels have their
+    frequency, group and channel updated. Returns how many were matched/updated and which
+    rows did not match any channel.
     """
     await _require_job(db, job_id)
     raw = (await file.read()).decode("utf-8-sig")
-    rows = parse_wwb_frequency_csv(raw)
+    try:
+        rows = parse_wwb_show_file(raw)
+    except ET.ParseError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Invalid Wireless Workbench file: {exc}"
+        ) from exc
     view = await readers.load_channel_list(db, job_id, list_id)
     if view is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
@@ -580,7 +587,7 @@ async def import_wireless_workbench(
         "updated": len(updated_ids),
         "rows": len(rows),
         "unmatched": [
-            row.get("wireless_pack") or row.get("source_label") or f"row {index + 1}"
+            row.get("name") or row.get("wireless_pack") or f"row {index + 1}"
             for index, row in enumerate(unmatched)
         ],
     }

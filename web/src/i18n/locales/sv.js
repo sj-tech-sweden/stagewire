@@ -549,7 +549,7 @@ export default {
     fieldWirelessFrequencyMhz: "Frekvens (MHz)",
     fieldWirelessGroup: "Grupp",
     fieldWirelessChannel: "Kanal",
-    importWirelessWorkbench: "Importera Wireless Workbench",
+    importWirelessWorkbench: "Importera Wireless Workbench (.shw)",
     wwbImportedUpdated: "Uppdaterade {count} av {total} rader",
     wwbImportUnmatched: "{count} rader matchade ingen kanal",
     wirelessDetails: "Trådlös information",

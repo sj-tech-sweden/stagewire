@@ -1,23 +1,24 @@
 """Helpers for associating wireless channels with Shure Wireless Workbench.
 
-Wireless Workbench (WWB) coordinates RF and can export a frequency list as CSV.
-We support two directions:
+Shure Wireless Workbench (WWB) stores coordinated RF in its ``.shw`` show file,
+which is a plain UTF-8 XML document (not a zip). We support both directions:
 
-- **Export**: the ``wireless_workbench`` console exporter turns the job's wireless
-  channels (those with ``input_type == 'wireless'``) into a WWB-style CSV
-  (pack, frequency in MHz, group, channel) that can be opened back in WWB.
-- **Import**: a WWB frequency-list CSV is parsed here and matched to the job's
-  existing wireless channels by pack label (or channel number + source) so the
-  coordinated frequencies land on the right channels.
+- **Export**: the ``wireless_workbench`` console exporter turns the list's wireless
+  channels (those with ``input_type == 'wireless'``) into a ``.shw`` show file whose
+  coordinated channels carry the frequency (in kHz), group/channel and name, so the
+  file can be opened back in WWB or re-imported into Stagewire.
+- **Import**: a ``.shw`` show file is parsed here and matched to the job's existing
+  wireless channels by name (channel name, pack or source label), falling back to
+  channel number + source, so the coordinated frequencies land on the right channels.
 
-Frequencies are stored as structured fields on the channel (``wireless_frequency_mhz``,
-``wireless_group``, ``wireless_channel``); the historical free-text ``wireless_frequency``
-string is parsed on read for backwards compatibility and removed by a migration.
+Frequencies in a ``.shw`` are integers in **kHz**; we divide by 1000 to store MHz.
+The historical free-text ``wireless_frequency`` string is parsed on read for
+backwards compatibility and removed by a migration.
 """
 
-import csv
-import io
 import re
+import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import Element
 
 # A number with an optional decimal point or comma (European decimals).
 _NUMBER_RE = re.compile(r"(\d+(?:[.,]\d+)?)")
@@ -55,23 +56,6 @@ def _to_float(value: str) -> float | None:
         return None
 
 
-# Header aliases -> normalised field. Order matters: a header is bound to the first
-# matching set, so more specific names come before generic ones.
-_HEADER_MAP = [
-    ("wireless_pack", {"wireless_pack", "pack", "bodypack", "beltpack", "receiver", "rx"}),
-    ("source_label", {"source_label", "source", "label", "performer", "device"}),
-    (
-        "wireless_frequency_mhz",
-        {"wireless_frequency_mhz", "frequency", "freq", "frequency_mhz", "tx_frequency", "tx_freq"},
-    ),
-    ("wireless_group", {"wireless_group", "group", "freq_group", "tv_group"}),
-]
-
-# "Channel" on its own is ambiguous: WWB uses it for the Shure channel number when a
-# "Group" column is present, otherwise it means our channel number. Resolved per-file.
-_CHANNEL_NUMBER_HEADERS = {"channel_number", "ch", "input", "input_channel", "input_number"}
-
-
 def normalize_wireless_attributes(attributes: dict | None) -> dict:
     """Return the structured wireless fields, converting a legacy ``wireless_frequency`` string.
 
@@ -90,54 +74,84 @@ def normalize_wireless_attributes(attributes: dict | None) -> dict:
     return fields
 
 
-def _canonical_header(header: str, has_group: bool) -> str | None:
-    key = re.sub(r"[^a-z0-9]", "", header.strip().lower())
-    for field, aliases in _HEADER_MAP:
-        if key in aliases:
-            return field
-    if key in _CHANNEL_NUMBER_HEADERS:
-        return "channel_number"
-    # bare "channel" is the Shure channel when a group exists, else our channel number
-    if key == "channel":
-        return "wireless_channel" if has_group else "channel_number"
-    return None
+def _text(element: Element | None) -> str | None:
+    if element is None or element.text is None:
+        return None
+    return element.text.strip()
 
 
-def parse_wwb_frequency_csv(text: str) -> list[dict]:
-    """Parse a WWB-style frequency-list CSV into normalised wireless rows.
+def _parent_map(root: Element) -> dict[Element, Element | None]:
+    """Map every element to its direct parent (ElementTree does not track parents)."""
+    return {child: parent for parent in root.iter() for child in parent}
 
-    Each returned dict has some of: ``channel_number``, ``source_label``,
-    ``wireless_pack``, ``wireless_frequency_mhz``, ``wireless_group``,
-    ``wireless_channel`` (only the columns present in the file are included). Rows
-    without a frequency and without a pack/source are skipped.
+
+def _parse_gr_ch(value: str | None) -> tuple[str | None, str | None]:
+    """Parse a WWB group/channel string into ``(group, channel)``.
+
+    Handles both ``"G:50 Ch:12"`` (``<gr_ch>``) and ``"50,12"``
+    (``<group_channel>``); unset markers such as ``"G:-- Ch:--"`` or ``"--,--"``
+    yield ``(None, None)``.
     """
-    reader = csv.DictReader(io.StringIO(text))
-    headers = reader.fieldnames or []
-    group_headers = {"wireless_group", "group", "freq_group", "tv_group"}
-    has_group = any(re.sub(r"[^a-z0-9]", "", h.strip().lower()) in group_headers for h in headers)
-    columns = {}
-    for index, header in enumerate(headers):
-        field = _canonical_header(header, has_group)
-        if field:
-            columns[index] = field
+    if not value:
+        return None, None
+    explicit = re.search(r"G:\s*(\d+)\s*Ch:\s*(\d+)", value)
+    if explicit:
+        return explicit.group(1), explicit.group(2)
+    comma = re.search(r"(\d+)\s*,\s*(\d+)", value)
+    if comma:
+        return comma.group(1), comma.group(2)
+    return None, None
 
+
+def parse_wwb_show_file(xml_text: str) -> list[dict]:
+    """Parse a Shure Wireless Workbench ``.shw`` show file into wireless rows.
+
+    Returns a list of dicts, each with some of: ``name``, ``wireless_frequency_mhz``,
+    ``wireless_group``, ``wireless_channel``, ``wireless_pack``, ``channel_number``.
+    Only channels that carry a tuned frequency (``<frequency>``) are returned; the many
+    TV-avoidance ``<channel>`` entries in a show file have no ``<frequency>`` and are
+    skipped. Frequencies are integers in kHz and are converted to MHz.
+    """
+    root = ET.fromstring(xml_text)
+    parents = _parent_map(root)
     rows: list[dict] = []
-    for raw in reader:
-        values = list(raw.values())
-        row: dict = {}
-        for index, field in columns.items():
-            cell = (values[index] or "").strip()
-            if not cell:
-                continue
-            if field == "channel_number":
-                as_int = _to_float(cell)
-                row[field] = int(as_int) if as_int is not None else None
-            elif field == "wireless_frequency_mhz":
-                row[field] = parse_mhz(cell)
-            else:
-                row[field] = cell
-        if row:
-            rows.append(row)
+    for channel in root.iter("channel"):
+        freq_el = channel.find("frequency")
+        khz = _to_float(_text(freq_el)) if freq_el is not None else None
+        if khz is None:
+            continue
+        name = _text(channel.find("channel_name")) or ""
+        group, chan = _parse_gr_ch(
+            _text(channel.find("gr_ch")) or _text(channel.find("group_channel"))
+        )
+        # Walk up to the enclosing <device> for model/band context.
+        device = None
+        node = parents.get(channel)
+        while node is not None and node.tag != "device":
+            node = parents.get(node)
+        if node is not None and node.tag == "device":
+            device = node
+        model = _text(device.find("model")) if device is not None else None
+        band = _text(device.find("band")) if device is not None else None
+        channel_number = None
+        if device is not None:
+            for index, sibling in enumerate(device.findall("channel"), start=1):
+                if sibling is channel:
+                    channel_number = index
+                    break
+        pack = f"{model} {band}".strip() if (model or band) else None
+        if not name and pack and channel_number:
+            name = f"{pack} {channel_number}"
+        rows.append(
+            {
+                "name": name or None,
+                "wireless_frequency_mhz": round(khz / 1000.0, 3),
+                "wireless_group": group,
+                "wireless_channel": chan,
+                "wireless_pack": pack,
+                "channel_number": channel_number,
+            }
+        )
     return rows
 
 
@@ -146,17 +160,19 @@ def match_wireless_rows(channels: list, rows: list[dict]) -> tuple[list[tuple], 
 
     Returns ``(matched, unmatched)`` where ``matched`` is a list of
     ``(channel, row)`` for channels whose ``input_type == 'wireless'`` and whose
-    pack label (or channel number + source label) matches a row. ``unmatched`` is the
-    list of rows that did not match any channel.
+    name (pack or source label) matches a row's ``name`` or ``wireless_pack``,
+    falling back to channel number + source. ``unmatched`` is the list of rows that
+    matched no channel.
     """
-    by_pack: dict[str, list] = {}
+    by_name: dict[str, list] = {}
     by_number_source: dict[tuple, list] = {}
     for channel in channels:
         if getattr(channel, "input_type", None) != "wireless":
             continue
-        pack = (getattr(channel, "wireless_pack", None) or "").strip().lower()
-        if pack:
-            by_pack.setdefault(pack, []).append(channel)
+        for field in ("wireless_pack", "source_label"):
+            key = (getattr(channel, field, None) or "").strip().lower()
+            if key:
+                by_name.setdefault(key, []).append(channel)
         number = getattr(channel, "channel_number", None)
         source = (getattr(channel, "source_label", None) or "").strip().lower()
         if number is not None:
@@ -166,12 +182,16 @@ def match_wireless_rows(channels: list, rows: list[dict]) -> tuple[list[tuple], 
     seen_channel_ids = set()
     unmatched: list[dict] = []
     for row in rows:
-        row_pack = (row.get("wireless_pack") or "").strip().lower()
-        row_number = row.get("channel_number")
-        row_source = (row.get("source_label") or "").strip().lower()
-        candidates = by_pack.get(row_pack, []) if row_pack else []
-        if not candidates and row_number is not None:
-            candidates = by_number_source.get((row_number, row_source), [])
+        candidates: list = []
+        for field in ("name", "wireless_pack"):
+            key = (row.get(field) or "").strip().lower()
+            if key:
+                candidates.extend(by_name.get(key, []))
+        if not candidates and row.get("channel_number") is not None:
+            candidates = by_number_source.get(
+                (row["channel_number"], (row.get("source_label") or "").strip().lower()),
+                [],
+            )
         channel = next((c for c in candidates if id(c) not in seen_channel_ids), None)
         if channel is None:
             unmatched.append(row)
