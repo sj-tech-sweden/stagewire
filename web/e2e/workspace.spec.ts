@@ -1710,6 +1710,8 @@ test('the gear behind a channel or a video input is edited from its list', async
   // the console is on the list's mixer card and on the channel's chain; both open its dialog
   await expect(page.getByTestId('list-mixer-devices')).toContainText('Desk');
   await page.getByTestId('channel-table').getByTestId('chain-device').first().click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Desk');
+  await page.getByTestId('inspector-edit-details').click();
   await expect(page.getByTestId('device-name')).toHaveValue('Desk');
   await page.getByTestId('device-name').fill('Console FOH');
   await page.getByTestId('device-save').click();
@@ -1719,4 +1721,63 @@ test('the gear behind a channel or a video input is edited from its list', async
     ).name;
   await expect.poll(named).toBe('Console FOH');
   await expect(page.getByTestId('list-mixer-devices')).toContainText('Console FOH');
+});
+
+test('a channel source is a device that opens in the inspector', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Source ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+  await post(request, headers, `${g}/audio-devices`, { name: 'SM58 Vox', device_type: 'other' });
+  const channelNode = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d) => d.id === channel.id,
+    );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // picking a device of the job links it to the channel
+  await expect(page.getByTestId('open-source-device')).toHaveCount(0);
+  await page.getByTestId('source-picker').click();
+  await page.keyboard.type('SM58');
+  await page.locator('.q-menu .q-item', { hasText: 'SM58 Vox' }).click();
+  await expect.poll(async () => (await channelNode()).attributes.source_device_id).toBeTruthy();
+  expect((await channelNode()).attributes.device).toBe('SM58 Vox');
+
+  // and one click opens that device in the inspector, with its details dialog a click away
+  await page.getByTestId('open-source-device').click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('SM58 Vox');
+  await page.getByTestId('inspector-edit-details').click();
+  await expect(page.getByTestId('device-name')).toHaveValue('SM58 Vox');
+});
+
+test('each device box in the show flow and each step in the edit flow has an edit button', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E FlowEdit ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Kick' });
+  const box = await post(request, headers, `${g}/audio-devices`, { name: 'Stagebox F', device_type: 'analog_stagebox' });
+  const put = await request.put(`${API_BASE}/api/v1${g}/channels/${channel.id}/chain`, {
+    headers,
+    data: { steps: [{ device_id: box.id }] },
+  });
+  expect(put.status()).toBe(200);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // show flow: the box opens the device in the inspector and the flow closes
+  await page.getByRole('button', { name: /show signal flow|visa signalväg|flow/i }).first().click();
+  await page.getByTestId('flow-edit-device').first().click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox F');
+
+  // edit flow: a step opens the device dialog on top of the chain dialog
+  await page.getByTestId('edit-chain').first().click();
+  await page.getByTestId('chain-edit-device').first().click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Stagebox F');
 });

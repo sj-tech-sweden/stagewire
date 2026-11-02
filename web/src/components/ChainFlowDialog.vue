@@ -18,6 +18,8 @@
           v-if="steps.length"
           :steps="steps"
           readonly
+          inspectable
+          @edit-device="(id) => emit('device', id)"
         />
         <div
           v-else
@@ -58,7 +60,7 @@ defineProps({
   title: { type: String, default: '' },
   steps: { type: Array, default: () => [] },
 });
-const emit = defineEmits(['update:modelValue', 'edit']);
+const emit = defineEmits(['update:modelValue', 'edit', 'device']);
 const { t } = useI18n();
 </script>
 

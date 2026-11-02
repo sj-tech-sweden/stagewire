@@ -745,6 +745,8 @@ export function fillFormFromSpecs(form, product, specs) {
 export function flowTree(sourceLabel, steps, devices, { separateRoots = false } = {}) {
   const nodes = steps.map((step, i) => ({
     id: `step-${i}`,
+    // the device node behind the box, so the flow can open it for editing
+    device_id: step.device_id || null,
     label: devices.find((d) => d.id === step.device_id)?.name || '?',
     kind: 'device',
     in_port: step.in_port || step.input_port || '',

@@ -37,6 +37,18 @@
             data-testid="chain-device"
             @filter="filterDevices"
           />
+          <q-btn
+            flat
+            dense
+            round
+            icon="edit"
+            :disable="!step.device_id"
+            :aria-label="t('workspace.editDevice')"
+            data-testid="chain-edit-device"
+            @click="editedId = step.device_id"
+          >
+            <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+          </q-btn>
           <StockwireProductPicker
             class="col-12 col-sm-4"
             :model-value="null"
@@ -154,12 +166,19 @@
       </q-card-actions>
     </q-card>
   </q-dialog>
+  <DeviceEditDialog
+    :model-value="!!editedId"
+    :device="editedDevice"
+    :job-id="jobId"
+    @update:model-value="(v) => !v && (editedId = null)"
+  />
 </template>
 
 <script setup>
 import { apiErrorText } from '@/utils/errors';
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
+import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { useGraphStore } from '@/stores/graph';
 import { useQuasar } from 'quasar';
@@ -185,6 +204,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const graph = useGraphStore();
+// a step's device can be opened for editing without leaving the chain being edited
+const editedId = ref(null);
+const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
 const $q = useQuasar();
 const steps = ref([]);
 const filtered = ref([]);

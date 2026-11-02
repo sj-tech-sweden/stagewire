@@ -19,6 +19,17 @@
         data-testid="inspector-name"
         @change="(v) => save({ name: v })"
       />
+      <q-btn
+        v-if="canEditDetails"
+        flat
+        dense
+        no-caps
+        icon="tune"
+        class="q-mb-sm"
+        :label="t('workspace.editDetails')"
+        data-testid="inspector-edit-details"
+        @click="detailsOpen = true"
+      />
       <q-input
         :model-value="device.notes"
         dense
@@ -396,6 +407,11 @@
       />
     </template>
   </div>
+  <DeviceEditDialog
+    v-model="detailsOpen"
+    :device="device"
+    :job-id="jobId"
+  />
 </template>
 
 <script setup>
@@ -409,6 +425,7 @@ import { useStagePlotStore } from '@/stores/stageplot';
 import { legacyId } from '@/utils/graphLegacy';
 import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
+import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import { isSpeakerType } from '@/utils/plotObjects';
 import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
@@ -511,6 +528,12 @@ const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 }
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });
 
+// Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
+// power, camera specs. It opens from here so any device reached through the inspector can use it.
+const detailsOpen = ref(false);
+const canEditDetails = computed(
+  () => props.device && !isPlotElement(props.device) && !isPowerNode(props.device) && !isVirtual(props.device),
+);
 const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
 const otherDevices = computed(() =>
   graph.devices

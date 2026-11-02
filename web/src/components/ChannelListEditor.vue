@@ -290,6 +290,17 @@
               data-testid="source-picker"
               @update:model-value="(p) => setSource(slot.row, p)"
             />
+            <q-btn
+              v-if="sourceDevice(slot.row)"
+              flat
+              dense
+              no-caps
+              size="sm"
+              icon="edit"
+              :label="t('workspace.editSource')"
+              data-testid="open-source-device"
+              @click="editDevice(sourceDevice(slot.row))"
+            />
           </q-td>
         </template>
         <template #body-cell-stand_type="slot">
@@ -519,11 +530,6 @@
       :busy="bulkBusy"
       @create="(items) => bulkCreate('outputs', items)"
     />
-    <DeviceEditDialog
-      v-model="deviceOpen"
-      :device="editedDevice"
-      :job-id="jobId"
-    />
     <MixerDialog
       v-model="mixerOpen"
       :list="list"
@@ -535,6 +541,7 @@
       :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
       :steps="flowSteps"
       @edit="editFromFlow"
+      @device="(id) => editDevice({ id })"
     />
     <ChainDialog
       v-model="chainOpen"
@@ -561,7 +568,6 @@ import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import ListBulkDialog from '@/components/ListBulkDialog.vue';
 import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
-import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import MixerDialog from '@/components/MixerDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
@@ -678,14 +684,11 @@ async function addChannels(count) {
   }
 }
 
-// The gear in this list's chains can be edited from the list: a chip next to a chain opens that
-// device, and the mixer card lists the mixers (consoles) the list's channels are patched into.
-const deviceOpen = ref(false);
-const editedId = ref(null);
-const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
+// The gear in this list's chains is edited from the list: a chip next to a chain selects that
+// device in the inspector (which also opens its full dialog), and the mixer card lists the mixers (consoles) the list's channels are patched into.
 function editDevice(device) {
-  editedId.value = device.id;
-  deviceOpen.value = true;
+  flowOpen.value = false;
+  graph.selectedDeviceId = device.id;
 }
 const listMixers = computed(() => {
   const seen = new Map();
@@ -776,16 +779,39 @@ const gearItems = computed(() =>
     .filter((d) => !isVirtual(d) && !isPlotElement(d))
     .map((d) => ({ id: d.id, name: d.name, stockwire_product_id: d.stockwire_product_id })),
 );
+// The source of a channel (the microphone, DI or other gear it comes from) is a real device in the
+// job: picking a job device links it, picking one of the company's own Stockwire products makes a
+// device from it (connectors and power from the product) and links that, and typed text is just a
+// label. The link is `attributes.source_device_id`; `attributes.device` keeps the name for lists
+// and exports. A linked device carries the Stockwire product (it counts once in the sync), so the
+// channel's own product is cleared then; an unlinked own product stays on the channel as before.
+const sourceDevice = (node) => graph.devices.find((d) => d.id === node.attributes.source_device_id) || null;
 const sourceOf = (node) => {
-  const name = node.attributes.device || node.stockwire_product_name;
-  return name ? { id: node.stockwire_product_id || null, name } : null;
+  const linked = sourceDevice(node);
+  const name = linked?.name || node.attributes.device || node.stockwire_product_name;
+  return name ? { id: linked ? null : node.stockwire_product_id || null, name, job_device_id: linked?.id || null } : null;
 };
-const setSource = (node, pick) =>
-  save(node, {
-    attributes: { device: pick?.name || '' },
-    stockwire_product_id: pick?.id ? String(pick.id) : null,
-    stockwire_product_name: pick?.id ? pick.name : null,
-  });
+async function setSource(node, pick) {
+  try {
+    if (!pick) {
+      await graph.updateDevice(props.jobId, node.id, {
+        attributes: { device: '', source_device_id: null },
+        stockwire_product_id: null,
+        stockwire_product_name: null,
+      });
+      return;
+    }
+    let device = pick.job_device_id ? graph.devices.find((d) => d.id === pick.job_device_id) : null;
+    if (!device && pick.id) device = await graph.createDeviceFromProduct(props.jobId, pick);
+    await graph.updateDevice(props.jobId, node.id, {
+      attributes: { device: device?.name || pick.name, source_device_id: device?.id || null },
+      stockwire_product_id: !device && pick.id ? String(pick.id) : null,
+      stockwire_product_name: !device && pick.id ? pick.name : null,
+    });
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
+  }
+}
 
 const syncing = ref(false);
 async function syncStockwire() {

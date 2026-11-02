@@ -215,6 +215,8 @@ export default {
     cableNone: 'Inga ej inkopplade enheter.',
     unplugged: 'Inte inkopplad',
     editDevice: 'Redigera enheten',
+    editSource: 'Öppna enheten',
+    editDetails: 'Redigera detaljer',
     bulkFixtures: 'Lägg till flera',
     bulkHint: 'Lägg till flera sorters armaturer på en gång. De läggs efter varandra från startadressen, eller på första lediga adresser.',
     bulkQuantity: 'Antal',

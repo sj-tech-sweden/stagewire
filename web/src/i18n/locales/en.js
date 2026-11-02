@@ -215,6 +215,8 @@ export default {
     cableNone: 'No unplugged devices.',
     unplugged: 'Not plugged in',
     editDevice: 'Edit this device',
+    editSource: 'Open device',
+    editDetails: 'Edit details',
     bulkFixtures: 'Bulk add',
     bulkHint: 'Add several kinds of fixture in one go. They are laid out one after another from the start address, or on the first free addresses.',
     bulkQuantity: 'How many',

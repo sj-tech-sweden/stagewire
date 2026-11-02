@@ -67,6 +67,18 @@
           {{ subLabel(n.node) }}
         </div>
         <q-btn
+          v-if="inspectable && n.node.device_id"
+          class="dmx-flow-edit"
+          round
+          dense
+          size="sm"
+          icon="edit"
+          color="primary"
+          :aria-label="t('workspace.editDevice')"
+          data-testid="flow-edit-device"
+          @click.stop="$emit('edit-device', n.node.device_id)"
+        />
+        <q-btn
           v-if="!readonly"
           class="dmx-flow-add"
           round
@@ -102,9 +114,11 @@ const props = defineProps({
   universeNumber: { type: Number, default: 0 },
   // a read-only diagram has no add/delete buttons (used for chains edited elsewhere)
   readonly: { type: Boolean, default: false },
+  // boxes that stand for a device get an edit button (`edit-device` with the device id)
+  inspectable: { type: Boolean, default: false },
 });
 
-defineEmits(['edit', 'add-child', 'delete']);
+defineEmits(['edit', 'add-child', 'delete', 'edit-device']);
 
 const { t } = useI18n();
 
@@ -256,6 +270,11 @@ function nodeStyle(n) {
   right: -10px;
   top: 50%;
   transform: translateY(-50%);
+}
+.dmx-flow-edit {
+  position: absolute;
+  left: -10px;
+  top: -10px;
 }
 .dmx-flow-del {
   position: absolute;

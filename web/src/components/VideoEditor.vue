@@ -311,16 +311,12 @@
       </div>
     </template>
 
-    <DeviceEditDialog
-      v-model="deviceOpen"
-      :device="editedDevice"
-      :job-id="jobId"
-    />
     <ChainFlowDialog
       v-model="flowOpen"
       :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
       :steps="flowSteps"
       @edit="editFromFlow"
+      @device="(id) => editDevice({ id })"
     />
     <ChainDialog
       v-model="chainOpen"
@@ -344,7 +340,6 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
 import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
-import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
@@ -382,14 +377,11 @@ const sourceTypes = ['camera', 'computer', 'other'].map((v) => ({
 const list = computed(() => graph.videoLists.find((l) => l.id === listId.value) || null);
 const gear = computed(() => graph.devices.filter((d) => !isVirtual(d) && !isPlotElement(d)));
 
-// The gear in this list's chains can be edited from the list: a chip next to a chain opens that
-// device, and the toolbar lists the switchers and routers the list's inputs and outputs use.
-const deviceOpen = ref(false);
-const editedId = ref(null);
-const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
+// The gear in this list's chains is edited from the list: a chip next to a chain selects that
+// device in the inspector (which also opens its full dialog), and the toolbar lists the switchers and routers the list's inputs and outputs use.
 function editDevice(device) {
-  editedId.value = device.id;
-  deviceOpen.value = true;
+  flowOpen.value = false;
+  graph.selectedDeviceId = device.id;
 }
 const listSwitchers = computed(() => {
   const seen = new Map();

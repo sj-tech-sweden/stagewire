@@ -199,3 +199,49 @@ async def test_a_channel_without_a_label_exports_an_empty_label_not_its_fallback
         rows = (await registry._channel_list_context(db, uuid.UUID(job_id)))["channels"]
         old = (await registry._channel_list_context_legacy(db, uuid.UUID(job_id)))["channels"]
     assert [r["source_label"] for r in rows] == [""] == [r["source_label"] for r in old]
+
+
+@pytest.mark.asyncio
+async def test_a_channel_keeps_its_source_device_link_across_syncs(auth_headers):
+    """`source_device_id` is a graph-only attribute: it must survive the legacy sync and edits."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        lst = (await client.post(f"{g}/lists", json={"name": "FOH"}, headers=h)).json()
+        channel = (
+            await client.post(
+                f"{g}/lists/{lst['id']}/channels", json={"source_label": "Vox"}, headers=h
+            )
+        ).json()
+        mic = (
+            await client.post(
+                f"{g}/audio-devices", json={"name": "SM58 #1", "device_type": "other"}, headers=h
+            )
+        ).json()
+
+        patched = await client.patch(
+            f"{g}/devices/{channel['id']}",
+            json={
+                "attributes": {"device": "SM58 #1", "source_device_id": mic["id"]},
+                "expected_revision": channel["revision"],
+            },
+            headers=h,
+        )
+        assert patched.status_code == 200, patched.text
+
+        # reading the graph runs the sync from the legacy rows, and a later edit of another
+        # attribute merges instead of replacing the link
+        graph = (await client.get(g, headers=h)).json()
+        node = next(d for d in graph["devices"] if d["id"] == channel["id"])
+        assert node["attributes"]["source_device_id"] == mic["id"]
+        again = await client.patch(
+            f"{g}/devices/{channel['id']}",
+            json={"attributes": {"phantom_power": True}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert again.json()["attributes"]["source_device_id"] == mic["id"]
+        graph = (await client.get(g, headers=h)).json()
+        node = next(d for d in graph["devices"] if d["id"] == channel["id"])
+        assert node["attributes"]["source_device_id"] == mic["id"]
+        assert node["attributes"]["phantom_power"] is True
