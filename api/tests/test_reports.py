@@ -165,7 +165,9 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
                 "connector": "XLR",
                 "performer_name": "Alex Presenter",
                 "wireless_pack": "Beltpack 2",
-                "wireless_frequency": "518.125 MHz",
+                "wireless_frequency_mhz": 518.125,
+                "wireless_group": "G50",
+                "wireless_channel": "12",
             },
             headers=auth_headers,
         )
@@ -556,7 +558,9 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
                 "stand_type": "Tall boom",
                 "performer_name": "Alex",
                 "wireless_pack": "Beltpack 2",
-                "wireless_frequency": "518.125 MHz",
+                "wireless_frequency_mhz": 518.125,
+                "wireless_group": "G50",
+                "wireless_channel": "12",
                 "phantom_power": True,
                 "notes": "Channel notes",
             },
@@ -682,7 +686,9 @@ async def test_patch_sheet_report_targets_selected_device_patchpoint(auth_header
         assert "Console input 7" in normalized_text
         assert "Alex" in normalized_text
         assert "Beltpack 2" in normalized_text
-        assert "518.125 MHz" in normalized_text
+        assert "518.125" in normalized_text
+        assert "G50" in normalized_text
+        assert "12" in normalized_text
         assert "vocals" in normalized_text
         assert "Yes" in normalized_text
         assert "Main PA" in normalized_text

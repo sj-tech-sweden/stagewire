@@ -289,14 +289,18 @@ _PATCH_WIRELESS_COLUMNS = (
     ReportField(key="channel_number", label="Channel #"),
     ReportField(key="performer_name", label="Actor / presenter"),
     ReportField(key="wireless_pack", label="Bodypack / beltpack"),
-    ReportField(key="wireless_frequency", label="Frequency"),
+    ReportField(key="wireless_frequency_mhz", label="Frequency (MHz)"),
+    ReportField(key="wireless_group", label="Group"),
+    ReportField(key="wireless_channel", label="Channel"),
 )
 
 _PATCH_WIRELESS_COLUMNS_SV = (
     ReportField(key="channel_number", label="Kanal #"),
     ReportField(key="performer_name", label="Artist / presentatör"),
     ReportField(key="wireless_pack", label="Fick- / bältespaket"),
-    ReportField(key="wireless_frequency", label="Frekvens"),
+    ReportField(key="wireless_frequency_mhz", label="Frekvens (MHz)"),
+    ReportField(key="wireless_group", label="Grupp"),
+    ReportField(key="wireless_channel", label="Kanal"),
 )
 
 _POWER_TREE_COLUMNS = (

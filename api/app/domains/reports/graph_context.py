@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.audio.wwb import wireless_frequency_summary
 from app.domains.graph import plot_native
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.readers import channel_view
@@ -67,13 +68,19 @@ def channel_rows(devices: list[Any], edges: list[Any]) -> list[dict]:
                     ),
                     "performer_name": performer,
                     "wireless_pack": channel.wireless_pack or "",
-                    "wireless_frequency": channel.wireless_frequency or "",
+                    "wireless_frequency_mhz": channel.wireless_frequency_mhz,
+                    "wireless_group": channel.wireless_group or "",
+                    "wireless_channel": channel.wireless_channel or "",
                     "wireless_details": " · ".join(
                         v
                         for v in (
                             performer,
                             channel.wireless_pack or "",
-                            channel.wireless_frequency or "",
+                            wireless_frequency_summary(
+                                channel.wireless_frequency_mhz,
+                                channel.wireless_group,
+                                channel.wireless_channel,
+                            ),
                         )
                         if v
                     ),
@@ -156,7 +163,9 @@ def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
                         or channel.performer_name
                         or "",
                         "wireless_pack": channel.wireless_pack or "",
-                        "wireless_frequency": channel.wireless_frequency or "",
+                        "wireless_frequency_mhz": channel.wireless_frequency_mhz,
+                        "wireless_group": channel.wireless_group or "",
+                        "wireless_channel": channel.wireless_channel or "",
                         "phantom_power": channel.phantom_power,
                         "patch_assignment": " / ".join(
                             v
@@ -184,7 +193,9 @@ def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
                         "stand_type": "",
                         "performer_name": "",
                         "wireless_pack": "",
-                        "wireless_frequency": "",
+                        "wireless_frequency_mhz": None,
+                        "wireless_group": "",
+                        "wireless_channel": "",
                         "phantom_power": False,
                         "bus_connector": point.get("bus_connector") or "",
                         "patch_assignment": " / ".join(

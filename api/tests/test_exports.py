@@ -23,6 +23,7 @@ def test_registry_has_expected_plugins() -> None:
         "allen_heath_qu",
         "allen_heath_cq",
         "allen_heath_gld",
+        "wireless_workbench",
     }
 
 
@@ -67,7 +68,7 @@ async def test_export_plugins_listed(auth_headers: dict) -> None:
         )
         plugins = await client.get(f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/export-plugins")
         assert plugins.status_code == 200
-        assert len(plugins.json()) == 5
+        assert len(plugins.json()) == 6
 
 
 async def test_export_csv(auth_headers: dict) -> None:

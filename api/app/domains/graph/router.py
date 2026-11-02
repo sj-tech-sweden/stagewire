@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
+from app.domains.audio.wwb import match_wireless_rows, parse_wwb_frequency_csv
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
@@ -539,3 +540,47 @@ async def export_list(
         media_type=result.media_type,
         headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
     )
+
+
+_WWB_WIRELESS_FIELDS = ("wireless_frequency_mhz", "wireless_group", "wireless_channel")
+
+
+@router.post("/lists/{list_id}/wireless-workbench/import")
+async def import_wireless_workbench(
+    job_id: UUID,
+    list_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Import a Wireless Workbench frequency-list CSV onto the list's wireless channels.
+
+    Rows are matched to existing wireless channels by pack label (or channel number +
+    source label); matched channels have their frequency, group and channel updated.
+    Returns how many were matched/updated and which rows did not match any channel.
+    """
+    await _require_job(db, job_id)
+    raw = (await file.read()).decode("utf-8-sig")
+    rows = parse_wwb_frequency_csv(raw)
+    view = await readers.load_channel_list(db, job_id, list_id)
+    if view is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    _, channels, _ = view
+    matched, unmatched = match_wireless_rows(channels, rows)
+    updated_ids: list[UUID] = []
+    for channel, row in matched:
+        data = {key: row[key] for key in _WWB_WIRELESS_FIELDS if key in row}
+        await audio_native.update_channel(db, channel.id, data, job_id)
+        updated_ids.append(channel.id)
+    await db.commit()
+    await audio_native.publish_nodes(db, job_id, updated_ids)
+    if updated_ids:
+        await publish_job_event(job_id, "list.upsert", {"id": str(list_id)})
+    return {
+        "matched": len(matched),
+        "updated": len(updated_ids),
+        "rows": len(rows),
+        "unmatched": [
+            row.get("wireless_pack") or row.get("source_label") or f"row {index + 1}"
+            for index, row in enumerate(unmatched)
+        ],
+    }

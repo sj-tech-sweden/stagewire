@@ -91,7 +91,9 @@ async def test_create_and_list_job(auth_headers: dict) -> None:
                 "device": "SM58",
                 "performer_name": "Alex",
                 "wireless_pack": "Beltpack 2",
-                "wireless_frequency": "518.125 MHz",
+                "wireless_frequency_mhz": 518.125,
+                "wireless_group": "G50",
+                "wireless_channel": "12",
                 "expected_revision": 1,
             },
         )
@@ -100,7 +102,9 @@ async def test_create_and_list_job(auth_headers: dict) -> None:
         assert updated.json()["device"] == "SM58"
         assert updated.json()["performer_name"] == "Alex"
         assert updated.json()["wireless_pack"] == "Beltpack 2"
-        assert updated.json()["wireless_frequency"] == "518.125 MHz"
+        assert updated.json()["wireless_frequency_mhz"] == 518.125
+        assert updated.json()["wireless_group"] == "G50"
+        assert updated.json()["wireless_channel"] == "12"
 
         performer = await client.post(
             f"{BASE}/jobs/{job_id}/plot-elements",

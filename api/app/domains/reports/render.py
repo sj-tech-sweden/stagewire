@@ -1045,7 +1045,9 @@ async def render_report_pdf(
             for row in patchpoint["rows"]
             if row.get("performer_name")
             or row.get("wireless_pack")
-            or row.get("wireless_frequency")
+            or row.get("wireless_frequency_mhz") is not None
+            or row.get("wireless_group")
+            or row.get("wireless_channel")
         ]
     elif patchpoint_id is not None:
         raise ReportRenderError("This report type cannot be filtered by patchpoint")

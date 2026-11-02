@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.audio.wwb import normalize_wireless_attributes
 from app.domains.graph.models import GraphDevice
 
 CHANNEL_DEFAULTS = {
@@ -15,7 +16,9 @@ CHANNEL_DEFAULTS = {
     "instrument_group": "other",
     "performer_name": None,
     "wireless_pack": None,
-    "wireless_frequency": None,
+    "wireless_frequency_mhz": None,
+    "wireless_group": None,
+    "wireless_channel": None,
     "phantom_power": False,
     "stereo": False,
     "stereo_channel": None,
@@ -26,6 +29,9 @@ OUTPUT_DEFAULTS = {"mode": "mono", "connector": None, "color_code": None}
 
 def channel_view(device: GraphDevice) -> SimpleNamespace:
     attrs = {**CHANNEL_DEFAULTS, **(device.attributes or {})}
+    # fold the structured MHz (or a legacy free-text ``wireless_frequency`` string) into
+    # the read model so unmigrated rows still expose ``wireless_frequency_mhz``
+    attrs = {**attrs, **normalize_wireless_attributes(attrs)}
     return SimpleNamespace(
         id=device.id,
         source_label=attrs.get("source_label", device.name),
