@@ -29,7 +29,7 @@
         round
         icon="arrow_back"
         :aria-label="t('workspace.back')"
-        @click="router.push(`/jobs/${jobId}`)"
+        @click="router.push('/')"
       />
       <div class="col">
         <div class="text-h6">
@@ -1431,10 +1431,13 @@ onMounted(async () => {
   } catch (err) {
     $q.notify({ type: 'warning', message: `${t('workspace.jobLoadFailed')}: ${errorText(err)}` });
   }
+  // ?view= opens a mode directly (the old page URLs redirect here with it); otherwise the mode
+  // this browser used last
+  const wanted = modeTabs.value.find((m) => m.value === route.query.view)?.value;
   try {
-    graph.setMode(localStorage.getItem(modeKey) || 'canvas');
+    graph.setMode(wanted || localStorage.getItem(modeKey) || 'canvas');
   } catch {
-    graph.setMode('canvas');
+    graph.setMode(wanted || 'canvas');
   }
   graph.selectedDeviceId = null;
   await loadWorkspace();

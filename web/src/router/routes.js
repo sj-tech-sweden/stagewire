@@ -4,19 +4,24 @@ const routes = [
     component: () => import('@/layouts/MainLayout.vue'),
     children: [
       { path: '', component: () => import('@/pages/IndexPage.vue') },
-      { path: 'jobs/:jobId', component: () => import('@/pages/JobDetailPage.vue') },
-      { path: 'jobs/:jobId/workspace', component: () => import('@/pages/JobWorkspacePage.vue') },
-      { path: 'jobs/:jobId/patch-sheets', component: () => import('@/pages/PatchSheetsPage.vue') },
-      { path: 'jobs/:jobId/stage-plot', component: () => import('@/pages/StagePlotPage.vue') },
-      { path: 'jobs/:jobId/devices', component: () => import('@/pages/DevicesPage.vue') },
+      // The workspace is the job page. /workspace is kept as an alias, and the URLs of the old
+      // pages (stage plot, patch sheets, devices, lights, video) open the matching workspace mode,
+      // so bookmarks and links in exported reports keep working.
       {
-        path: 'jobs/:jobId/lights',
-        redirect: (to) => ({ path: `/jobs/${to.params.jobId}`, query: { view: 'lights' } }),
+        path: 'jobs/:jobId',
+        alias: 'jobs/:jobId/workspace',
+        component: () => import('@/pages/JobWorkspacePage.vue'),
       },
-      {
-        path: 'jobs/:jobId/video',
-        redirect: (to) => ({ path: `/jobs/${to.params.jobId}`, query: { view: 'video' } }),
-      },
+      ...Object.entries({
+        'stage-plot': 'canvas',
+        'patch-sheets': 'lists',
+        devices: 'devices',
+        lights: 'lights',
+        video: 'video',
+      }).map(([segment, view]) => ({
+        path: `jobs/:jobId/${segment}`,
+        redirect: (to) => ({ path: `/jobs/${to.params.jobId}`, query: { view } }),
+      })),
       { path: 'reports', component: () => import('@/pages/ReportsPage.vue') },
       { path: 'venues', component: () => import('@/pages/VenuesPage.vue') },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue') },
