@@ -16,6 +16,33 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#3F873F" />
     <script src="/env-config.js"></script>
+    <!-- Apply the saved theme before first paint to avoid a flash of the wrong mode.
+         Mirrors the logic in src/stores/theme.js; Quasar's Dark plugin reconciles this
+         once the app boots. -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('sw_theme_mode') || 'auto'
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches
+          var isDark
+          if (mode === 'light') isDark = false
+          else if (mode === 'dark') isDark = true
+          else isDark = !!prefersDark // 'auto' (the default) follows the OS
+          var root = document.documentElement
+          if (isDark) {
+            root.classList.add('q-dark')
+            document.body.classList.add('body--dark')
+          } else {
+            root.classList.remove('q-dark')
+            document.body.classList.remove('body--dark')
+          }
+        } catch (e) {
+          /* localStorage / matchMedia unavailable; Quasar applies the default later */
+        }
+      })()
+    </script>
   </head>
   <body>
     <!-- quasar:entry-point -->
