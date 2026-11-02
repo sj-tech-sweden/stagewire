@@ -318,12 +318,19 @@
       separator
       data-testid="load-list"
     >
+      <!-- On a phone a load is stacked: what it is and its cable first, then its status badges,
+           then the three pickers one under the other at full width (the sections are reordered
+           with `order`, since in a row they would squeeze the pickers to nothing). -->
       <q-item
         v-for="load in loads"
         :key="`${load.kind}:${load.load_id}`"
+        :class="{ 'column items-stretch': $q.screen.lt.sm }"
         data-testid="load-row"
       >
-        <q-item-section class="col-12 col-sm-3">
+        <q-item-section
+          class="col-12 col-sm-3"
+          :style="$q.screen.lt.sm ? { order: 1 } : null"
+        >
           <q-item-label>{{ load.label }}</q-item-label>
           <q-item-label caption>
             {{ load.weight_kg ?? '–' }} kg · {{ load.power_w ?? '–' }} W
@@ -337,7 +344,7 @@
             <span v-else>· {{ t('workspace.notPlugged') }}</span>
           </q-item-label>
         </q-item-section>
-        <q-item-section>
+        <q-item-section :style="$q.screen.lt.sm ? { order: 3, paddingTop: '8px' } : null">
           <div class="row q-col-gutter-xs">
             <q-select
               :model-value="load.rigging_point_id"
@@ -380,8 +387,11 @@
             />
           </div>
         </q-item-section>
-        <q-item-section side>
-          <div class="column items-end q-gutter-xs">
+        <q-item-section
+          side
+          :style="$q.screen.lt.sm ? { order: 2, paddingLeft: 0, alignItems: 'flex-start' } : null"
+        >
+          <div :class="$q.screen.lt.sm ? 'row q-gutter-xs' : 'column items-end q-gutter-xs'">
             <q-badge
               :color="loadStatusColor(load.power_status)"
               :label="`${t('workspace.powerWord')}: ${statusLabel(load.power_status)}`"

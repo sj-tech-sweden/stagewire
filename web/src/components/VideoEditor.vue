@@ -110,58 +110,116 @@
         <div class="text-subtitle1">
           {{ section.title }}
         </div>
-        <q-list
+        <!-- Phones get one card per row with the same editors as the table: number, name and the
+             chain actions in the header, a summary line, and the rest under "Details". -->
+        <div
           v-if="$q.screen.lt.sm"
-          separator
-          bordered
+          class="column q-gutter-sm"
+          :data-testid="`video-${section.kind}-cards`"
         >
-          <q-item
+          <q-card
             v-for="row in section.rows"
             :key="row.id"
+            flat
+            bordered
+            data-testid="video-card"
           >
-            <q-item-section avatar>
-              {{ row.position }}
-            </q-item-section>
-            <q-item-section>
-              <q-input
-                :model-value="row.name"
-                dense
-                borderless
-                @change="(v) => save(row, { name: v })"
-              />
-              <q-item-label caption>
+            <q-card-section class="q-pa-sm">
+              <div class="row items-center no-wrap">
+                <div class="text-subtitle2 q-pr-sm">
+                  {{ row.position }}
+                </div>
+                <q-input
+                  :model-value="row.name"
+                  dense
+                  borderless
+                  class="col"
+                  @change="(v) => save(row, { name: v })"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="route"
+                  :aria-label="t('workspace.editChain')"
+                  @click="openChain(row, section.kind)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="account_tree"
+                  :aria-label="t('workspace.showFlow')"
+                  @click="openFlow(row, section.kind)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  color="negative"
+                  icon="delete"
+                  :aria-label="t('workspace.remove')"
+                  @click="removeNode(row)"
+                />
+              </div>
+              <div class="text-caption text-grey-6">
+                {{ videoSummary(row, section.kind) || t('workspace.chainEmpty') }}
+              </div>
+              <div class="text-caption text-grey-6">
                 {{ chain(row) || t('workspace.chainEmpty') }}
-              </q-item-label>
-            </q-item-section>
-            <q-item-section side>
-              <q-btn
-                flat
-                dense
-                round
-                icon="route"
-                :aria-label="t('workspace.editChain')"
-                @click="openChain(row, section.kind)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="account_tree"
-                :aria-label="t('workspace.showFlow')"
-                @click="openFlow(row, section.kind)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeNode(row)"
-              />
-            </q-item-section>
-          </q-item>
-        </q-list>
+              </div>
+            </q-card-section>
+            <q-expansion-item
+              dense
+              :label="t('workspace.details')"
+              header-class="text-caption"
+            >
+              <div class="q-pa-sm q-gutter-sm">
+                <template v-if="section.kind === 'video_input'">
+                  <StockwireProductPicker
+                    :model-value="sourceOf(row)"
+                    own
+                    :local-items="gearItems"
+                    gear-type="video"
+                    :label="t('workspace.videoSource')"
+                    :hint="''"
+                    @update:model-value="(p) => setSource(row, p)"
+                  />
+                  <q-select
+                    :model-value="row.attributes.source_type"
+                    :options="sourceTypes"
+                    emit-value
+                    map-options
+                    dense
+                    outlined
+                    :label="t('workspace.colSourceType')"
+                    @update:model-value="(v) => saveAttr(row, 'source_type', v)"
+                  />
+                </template>
+                <q-input
+                  v-else
+                  :model-value="row.attributes.name"
+                  dense
+                  outlined
+                  :label="t('workspace.colName')"
+                  @change="(v) => saveAttr(row, 'name', v)"
+                />
+                <ConnectorSelect
+                  :model-value="row.attributes.connector || ''"
+                  @update:model-value="(v) => saveAttr(row, 'connector', v)"
+                />
+                <q-input
+                  :model-value="row.notes"
+                  dense
+                  outlined
+                  autogrow
+                  :label="t('workspace.colNotes')"
+                  @change="(v) => save(row, { notes: v })"
+                />
+              </div>
+            </q-expansion-item>
+          </q-card>
+        </div>
         <q-table
           v-else
           flat
@@ -431,6 +489,15 @@ watch(
   { immediate: true },
 );
 
+// One line saying what a video row has set, for the phone card.
+const videoSummary = (row, kind) =>
+  [
+    kind === 'video_input' ? sourceOf(row)?.name : row.attributes.name,
+    kind === 'video_input' ? sourceTypes.find((o) => o.value === row.attributes.source_type)?.label : '',
+    row.attributes.connector,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 const chain = (node) => videoChainNames(node, graph.edges, graph.devices).join(' → ');
 const failed = (err) =>
   $q.notify({ type: 'negative', message: apiErrorText(err) });

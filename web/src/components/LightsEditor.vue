@@ -53,42 +53,113 @@
       {{ t('workspace.noFixtures') }}
     </div>
 
-    <q-list
+    <!-- Phones: one card per fixture with the same editors as the table row. The header has the
+         name and delete, the summary says universe, address and status, "Details" has the rest. -->
+    <div
       v-else-if="$q.screen.lt.sm"
-      bordered
-      separator
+      class="column q-gutter-sm"
+      data-testid="fixture-cards"
     >
-      <q-item
+      <q-card
         v-for="fixture in fixtures"
         :key="fixture.id"
+        flat
+        bordered
+        data-testid="fixture-card"
       >
-        <q-item-section>
-          <q-item-label>{{ fixture.name }}</q-item-label>
-          <q-item-label caption>
+        <q-card-section class="q-pa-sm">
+          <div class="row items-center no-wrap">
+            <q-input
+              :model-value="fixture.name"
+              dense
+              borderless
+              class="col"
+              @change="(v) => save(fixture, { name: v })"
+            />
+            <q-btn
+              flat
+              dense
+              round
+              color="negative"
+              icon="delete"
+              :aria-label="t('workspace.remove')"
+              @click="remove(fixture)"
+            />
+          </div>
+          <div class="text-caption text-grey-6">
             U{{ fixture.attributes.universe ?? '–' }} · {{ fixture.attributes.dmx_address ?? '–' }}
-            · {{ fixture.attributes.footprint ?? 1 }} ch · {{ fixture.attributes.fixture_type || '' }}
-          </q-item-label>
-          <q-item-label
+            · {{ fixture.attributes.footprint ?? 1 }} ch
+            <span v-if="fixture.attributes.fixture_type">· {{ fixture.attributes.fixture_type }}</span>
+            <span v-if="fixture.attributes.channel_mode">· {{ fixture.attributes.channel_mode }}</span>
+          </div>
+          <div
             v-if="flagsOf(fixture).conflict || flagsOf(fixture).overflow"
-            class="text-negative"
-            caption
+            class="text-negative text-caption"
           >
             {{ flagsOf(fixture).conflict ? t('lights.conflict') : t('lights.overflow') }}
-          </q-item-label>
-        </q-item-section>
-        <q-item-section side>
-          <q-btn
-            flat
-            dense
-            round
-            color="negative"
-            icon="delete"
-            :aria-label="t('workspace.remove')"
-            @click="remove(fixture)"
-          />
-        </q-item-section>
-      </q-item>
-    </q-list>
+          </div>
+        </q-card-section>
+        <q-expansion-item
+          dense
+          :label="t('workspace.details')"
+          header-class="text-caption"
+        >
+          <div class="q-pa-sm">
+            <div class="row q-col-gutter-sm">
+              <q-input
+                v-for="field in numberFields"
+                :key="field"
+                :model-value="fixture.attributes[field]"
+                class="col-4"
+                dense
+                outlined
+                type="number"
+                :label="t(`lights.col${{ universe: 'Universe', dmx_address: 'Address', footprint: 'Footprint' }[field]}`)"
+                @change="(v) => saveAttr(fixture, field, v === '' ? null : Number(v))"
+              />
+              <q-select
+                :model-value="fixture.attributes.fixture_type"
+                class="col-12"
+                dense
+                outlined
+                use-input
+                hide-dropdown-icon
+                input-debounce="0"
+                new-value-mode="add-unique"
+                :options="typeOptions"
+                :label="t('lights.colFixtureType')"
+                @filter="filterTypes"
+                @update:model-value="(v) => saveAttr(fixture, 'fixture_type', v || null)"
+              />
+              <q-select
+                :model-value="fixture.attributes.channel_mode"
+                class="col-12"
+                dense
+                outlined
+                use-input
+                hide-dropdown-icon
+                input-debounce="0"
+                new-value-mode="add-unique"
+                :options="modeOptions"
+                :label="t('lights.colChannelMode')"
+                @filter="(v, update) => filterModes(fixture, v, update)"
+                @update:model-value="(v) => chooseMode(fixture, v)"
+              />
+              <q-input
+                v-for="field in textFields"
+                :key="field"
+                :model-value="fixture.attributes[field]"
+                class="col-12"
+                dense
+                outlined
+                :label="t(`lights.col${{ location: 'Location', gel: 'Gel', purpose: 'Purpose' }[field]}`)"
+                @change="(v) => saveAttr(fixture, field, v || null)"
+              />
+            </div>
+          </div>
+        </q-expansion-item>
+      </q-card>
+    </div>
 
     <q-table
       v-else

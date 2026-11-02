@@ -1859,3 +1859,63 @@ test('on a phone every channel is a card with its kind, source, stand, connector
   const box = await page.getByTestId('channel-cards').boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
 });
+
+test('on a phone lights and video rows are cards with every editor, and power loads stack', async ({ page, request }) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 800 });
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Phone2 ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  await post(request, headers, `${g}/fixtures`, { purpose: 'Wash 1', footprint: 8, fixture_type: 'MAC Aura' });
+  const vlist = await post(request, headers, `${g}/video-lists`, { name: 'Cameras' });
+  await post(request, headers, `${g}/video-lists/${vlist.id}/inputs`, { source_label: 'Cam 1', connector: 'sdi' });
+  await post(request, headers, `${g}/rigging-points`, { name: 'Truss A', weight_capacity_kg: 500 });
+  await post(request, headers, `${g}/power-nodes`, {
+    name: 'Mains',
+    kind: 'source',
+    feed_connector: 'cee63_3p',
+    rating_amps: 63,
+    outputs: [{ connector: 'cee32_3p', count: 1 }],
+  });
+  const graphNow = async () => (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  const noSideScroll = async (testId: string) => {
+    const box = await page.getByTestId(testId).first().boundingBox();
+    expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
+  };
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  // lights: the card has the fixture's state and the editors under Details
+  await page.getByTestId('mode-toggle').getByText(/^(lights|ljus)$/i).click();
+  const fixture = page.getByTestId('fixture-card').first();
+  await expect(fixture).toContainText('MAC Aura');
+  await expect(fixture).toContainText('8 ch');
+  await fixture.getByText(/^details$|^detaljer$/i).click();
+  await fixture.getByLabel(/location|placering/i).fill('Truss 2');
+  await fixture.getByLabel(/location|placering/i).press('Tab');
+  await expect
+    .poll(async () => (await graphNow()).devices.find((d: any) => d.kind === 'fixture')?.attributes.location)
+    .toBe('Truss 2');
+  await noSideScroll('fixture-cards');
+
+  // video: the card says what the input is and has source, type, connector and notes under Details
+  await page.getByTestId('mode-toggle').getByText(/^(video)$/i).click();
+  const input = page.getByTestId('video-card').first();
+  await expect(input.locator('input').first()).toHaveValue('Cam 1');
+  await expect(input).toContainText(/sdi/i);
+  await input.getByText(/^details$|^detaljer$/i).click();
+  await input.getByLabel(/notes|anteckningar/i).fill('Wide shot');
+  await input.getByLabel(/notes|anteckningar/i).press('Tab');
+  await expect
+    .poll(async () => (await graphNow()).devices.find((d: any) => d.kind === 'video_input')?.notes)
+    .toBe('Wide shot');
+  await noSideScroll('video-video_input-cards');
+
+  // power: a load is stacked, so its three pickers are as wide as the phone, not squeezed
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  const row = page.getByTestId('load-row').first();
+  await expect(row).toBeVisible();
+  for (const id of ['load-point', 'load-node', 'load-connector']) {
+    const box = await row.getByTestId(id).locator('xpath=ancestor::*[contains(@class,"q-field")][1]').boundingBox();
+    expect(box && box.width > 250 && box.x >= 0 && box.x + box.width <= 390).toBe(true);
+  }
+});
