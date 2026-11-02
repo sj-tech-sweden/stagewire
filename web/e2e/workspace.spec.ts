@@ -1618,3 +1618,32 @@ test('a camera takes its sensor width from a standard size or from the diagonal 
     (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json())[0];
   await expect.poll(async () => (await legacy())?.sensor_width_mm).toBeCloseTo(9.59, 2);
 });
+
+test('bulk-added channels can be patched into a device straight away', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Bulk ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Stagebox A', device_type: 'analog_stagebox' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await page.getByTestId('bulk-channels').click();
+  await page.getByTestId('list-bulk-device').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Stagebox A' }).click();
+  await page.getByTestId('list-bulk-create').click();
+
+  const graph = async () => (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  await expect.poll(async () => (await graph()).devices.filter((d: any) => d.kind === 'channel').length).toBe(8);
+  // every new channel has one chain edge into the stagebox
+  await expect
+    .poll(async () => {
+      const data = await graph();
+      const box = data.devices.find((d: any) => d.name === 'Stagebox A');
+      const channelIds = new Set(data.devices.filter((d: any) => d.kind === 'channel').map((d: any) => d.id));
+      return data.edges.filter((e: any) => channelIds.has(e.attributes?.chain) && (e.dst_device_id === box.id || e.src_device_id === box.id)).length;
+    })
+    .toBe(8);
+});

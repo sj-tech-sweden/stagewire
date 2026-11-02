@@ -218,6 +218,8 @@ export default {
     bulkFixtures: 'Bulk add',
     bulkHint: 'Add several kinds of fixture in one go. They are laid out one after another from the start address, or on the first free addresses.',
     bulkQuantity: 'How many',
+    bulkPatchDevice: 'Patch into device',
+    bulkPatchDeviceHint: 'Every new channel gets this device as its first connection.',
     bulkLabel: 'Label (numbered when more than one)',
     bulkAddKind: 'Add another kind',
     bulkStart: 'Start address',

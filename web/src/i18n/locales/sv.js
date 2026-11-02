@@ -218,6 +218,8 @@ export default {
     bulkFixtures: 'Lägg till flera',
     bulkHint: 'Lägg till flera sorters armaturer på en gång. De läggs efter varandra från startadressen, eller på första lediga adresser.',
     bulkQuantity: 'Antal',
+    bulkPatchDevice: 'Patcha in i enhet',
+    bulkPatchDeviceHint: 'Varje ny kanal får den här enheten som första koppling.',
     bulkLabel: 'Namn (numreras när fler än en)',
     bulkAddKind: 'Lägg till en sort till',
     bulkStart: 'Startadress',

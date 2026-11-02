@@ -66,6 +66,19 @@
             class="col-12"
             label="48V"
           />
+          <q-select
+            v-model="form.patch_device_id"
+            class="col-12"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            :options="deviceOptions"
+            :label="t('workspace.bulkPatchDevice')"
+            :hint="t('workspace.bulkPatchDeviceHint')"
+            data-testid="list-bulk-device"
+          />
         </template>
         <q-select
           v-else
@@ -115,12 +128,15 @@ import { OUTPUT_MODES } from '@/utils/workspace';
 // Adds many channels (inputs) or outputs to a list at once. A prefix names them "Prefix 1",
 // "Prefix 2", ...; channels continue from the start number (the next free one by default).
 // The parent does the creating (`create` event with the item bodies) so the same dialog serves
-// both lists.
+// both lists. A channel can be patched into a device straight away: the parent then gives each new
+// channel that device as the first step of its chain.
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   outputs: { type: Boolean, default: false },
   nextNumber: { type: Number, default: 1 },
   busy: { type: Boolean, default: false },
+  // gear a new channel can be patched into straight away (its first connection)
+  devices: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['update:modelValue', 'create']);
 const { t } = useI18n();
@@ -131,6 +147,7 @@ const form = reactive({
   input_type: 'microphone',
   instrument_group: 'other',
   phantom_power: false,
+  patch_device_id: null,
   mode: 'mono',
   connector: '',
 });
@@ -139,6 +156,7 @@ const inputTypes = ['microphone', 'di', 'wireless', 'fxReturn'].map((v) => ({
   value: v,
   label: t(`channels.type.${v}`),
 }));
+const deviceOptions = computed(() => props.devices.map((d) => ({ value: d.id, label: d.name })));
 const groupOptions = INSTRUMENT_GROUP_KEYS.map((v) => ({ value: v, label: t(`channels.instrumentGroups.${v}`) }));
 const modeOptions = computed(() =>
   OUTPUT_MODES.map((m) => ({ value: m.value, label: t(`workspace.busMode.${m.value.replace(/[._]/g, '')}`) })),
@@ -170,6 +188,6 @@ function create() {
       connector: form.connector || undefined,
     };
   });
-  emit('create', items);
+  emit('create', items, { deviceId: props.outputs ? null : form.patch_device_id });
 }
 </script>

@@ -483,7 +483,8 @@
       v-model="bulkChannels"
       :next-number="nextChannelNumber(channels)"
       :busy="bulkBusy"
-      @create="(items) => bulkCreate('channels', items)"
+      :devices="gear"
+      @create="(items, opts) => bulkCreate('channels', items, opts)"
     />
     <ListBulkDialog
       v-model="bulkOutputs"
@@ -676,11 +677,19 @@ const bulkChannels = ref(false);
 const bulkOutputs = ref(false);
 const bulkBusy = ref(false);
 
-async function bulkCreate(kind, items) {
+async function bulkCreate(kind, items, opts = {}) {
   bulkBusy.value = true;
   try {
-    if (kind === 'channels') await graph.createChannels(props.jobId, list.value.id, items);
-    else await graph.createOutputs(props.jobId, list.value.id, items);
+    if (kind === 'channels') {
+      const created = await graph.createChannels(props.jobId, list.value.id, items);
+      if (opts.deviceId) {
+        await graph.setChannelChains(
+          props.jobId,
+          created.map((c) => c.id),
+          [{ device_id: opts.deviceId }],
+        );
+      }
+    } else await graph.createOutputs(props.jobId, list.value.id, items);
     bulkChannels.value = false;
     bulkOutputs.value = false;
   } catch (err) {

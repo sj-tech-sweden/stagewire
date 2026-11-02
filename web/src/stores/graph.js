@@ -208,6 +208,14 @@ export const useGraphStore = defineStore('graph', {
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
+    // The same chain on many channels at once (bulk add patched into one device): the chains are
+    // written one by one, then the graph is fetched once instead of after every chain.
+    async setChannelChains(jobId, channelIds, steps) {
+      for (const id of channelIds) {
+        await api.put(`${base(jobId)}/channels/${id}/chain`, { steps });
+      }
+      await this.fetchGraph(jobId);
+    },
     async replaceChain(jobId, kind, nodeId, steps) {
       const route =
         {
