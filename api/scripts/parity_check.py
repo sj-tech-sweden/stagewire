@@ -12,7 +12,6 @@ and exits non-zero if there are any.
 import asyncio
 import json
 import sys
-import uuid
 
 from sqlalchemy import select
 
@@ -32,116 +31,6 @@ def normal(value) -> str:
     return json.dumps(value, default=plain, sort_keys=True)
 
 
-async def _dmx_legacy(db, job_id):
-    """The job's universes from the tables; a step is named by the device or fixture it is."""
-    from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
-
-    fixtures = {
-        f.id: f
-        for f in await db.scalars(select(LightingFixture).where(LightingFixture.job_id == job_id))
-    }
-
-    def who(step):
-        if step.fixture_id:
-            fixture = fixtures.get(step.fixture_id)
-            if fixture is None:
-                return None
-            return (
-                ("device", str(fixture.device_id))
-                if fixture.device_id
-                else (
-                    "fixture",
-                    str(fixture.id),
-                )
-            )
-        return ("device", str(step.device_id))
-
-    out = []
-    for u in await db.scalars(
-        select(DmxUniverse).where(DmxUniverse.job_id == job_id).order_by(DmxUniverse.number)
-    ):
-        rows = (
-            await db.scalars(
-                select(DmxStep).where(DmxStep.universe_id == u.id).order_by(DmxStep.position)
-            )
-        ).all()
-        out.append(
-            {
-                "id": str(u.id),
-                "number": u.number,
-                "name": u.name or "",
-                "notes": u.notes or "",
-                "source": [
-                    str(u.source_device_id) if u.source_device_id else None,
-                    u.source_port or "",
-                ],
-                "steps": [
-                    [
-                        str(r.id),
-                        r.position,
-                        who(r),
-                        str(r.parent_id) if r.parent_id else None,
-                        r.in_port or "",
-                        r.out_port or "",
-                        r.connector or "",
-                        r.notes or "",
-                    ]
-                    for r in rows
-                    if who(r) is not None
-                ],
-            }
-        )
-    return out
-
-
-async def _dmx_graph(db, job_id):
-    from app.domains.graph.backfill import backfill_job
-    from app.domains.graph.ids import public_id
-    from app.domains.graph.models import GraphDevice
-
-    await backfill_job(db, job_id)
-    nodes = {
-        n.id: n for n in await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
-    }
-
-    def who(node):
-        ref = node.legacy_ref or ""
-        table, _, raw = ref.partition(":")
-        return ("fixture" if table == "lighting_fixtures" else "device", raw)
-
-    out = []
-    for n in sorted(
-        (n for n in nodes.values() if n.kind == "dmx_universe"),
-        key=lambda n: n.attributes["number"],
-    ):
-        a = n.attributes
-        source = nodes.get(uuid.UUID(a["source_device_id"])) if a.get("source_device_id") else None
-        steps = [
-            [
-                s["step_id"],
-                s["position"],
-                who(nodes[uuid.UUID(s["node_id"])]) if uuid.UUID(s["node_id"]) in nodes else None,
-                s["parent_id"],
-                s["in_port"],
-                s["out_port"],
-                s["connector"],
-                s["notes"],
-            ]
-            for s in sorted(a.get("steps", []), key=lambda s: s["position"])
-        ]
-        out.append(
-            {
-                "id": str(public_id(n)),
-                "number": a["number"],
-                "name": a.get("name", ""),
-                "notes": n.notes or "",
-                "source": [who(source)[1] if source else None, a.get("source_port", "")],
-                "steps": steps,
-            }
-        )
-    return out
-
-
 async def main() -> int:
     checked = mismatched = 0
     async with db_mod.SessionLocal() as db:
@@ -156,14 +45,6 @@ async def main() -> int:
                     registry._patch_sheet_context,
                 ),
             )
-            checked += 1
-            try:
-                if await _dmx_legacy(db, job_id) != await _dmx_graph(db, job_id):
-                    mismatched += 1
-                    print(f"{job_id} dmx_universes: differs")
-            except Exception as exc:  # noqa: BLE001
-                mismatched += 1
-                print(f"{job_id} dmx_universes: error {type(exc).__name__}: {exc}")
             for key, legacy, graph in pairs:
                 checked += 1
                 try:

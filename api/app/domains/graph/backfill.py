@@ -208,15 +208,6 @@ def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False)
     return attrs
 
 
-# DMX universes live on the graph (dmx_native.py); a job's rows still in the legacy tables are
-# brought over once by dmx_native.import_legacy, and their unconverted mirrors are not synced.
-LEGACY_DMX_REFS = ("dmx_universes:", "dmx_steps:")
-
-
-def _is_legacy_dmx(ref: str | None) -> bool:
-    return bool(ref) and ref.startswith(LEGACY_DMX_REFS)
-
-
 class Backfill:
     def __init__(self, db: AsyncSession, job_id: uuid.UUID) -> None:
         self.db = db
@@ -239,7 +230,7 @@ class Backfill:
         for device in (
             await self.db.scalars(select(GraphDevice).where(GraphDevice.job_id == self.job_id))
         ).all():
-            if device.legacy_ref and not _is_legacy_dmx(device.legacy_ref):
+            if device.legacy_ref:
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
@@ -252,7 +243,7 @@ class Backfill:
             )
         ).all():
             ref = (edge.attributes or {}).get("legacy_ref")
-            if ref and not _is_legacy_dmx(ref):
+            if ref:
                 self.edge_refs.add(ref)
                 self.edge_rows[ref] = edge
                 self.loaded_edges.add(ref)
@@ -1009,11 +1000,7 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
-        result = await _backfill_job_locked(db, job_id)
-        from app.domains.graph import dmx_native
-
-        await dmx_native.import_legacy(db, job_id)
-        return result
+        return await _backfill_job_locked(db, job_id)
 
 
 async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
