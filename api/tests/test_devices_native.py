@@ -1,6 +1,8 @@
 """Devices on the graph: a device is a node (its ``device:<id>`` ref is its identity) and
 the legacy device API, the load tree and the lists read and write that node."""
 
+from uuid import UUID
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -194,3 +196,51 @@ async def test_a_catalog_node_becomes_a_device_in_place_and_deleting_a_device_dr
         assert res.status_code == 200
         assert (await client.delete(f"{api}/devices/{catalog['id']}", headers=h)).status_code == 204
         assert catalog["id"] not in await _nodes(client, h, api)
+
+
+@pytest.mark.asyncio
+async def test_a_device_whose_feeder_is_gone_is_not_plugged_in_any_more(auth_headers):
+    from sqlalchemy import select
+
+    from app.core import db as db_mod
+    from app.domains.graph.backfill import backfill_job
+    from app.domains.graph.models import GraphDevice
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api = await _job(client, h)
+        amp = (
+            await client.post(
+                f"{api}/devices",
+                json={"name": "Amp", "device_type": "amp", "power_watts": 400},
+                headers=h,
+            )
+        ).json()
+        mains = (
+            await client.post(
+                f"{api}/graph/power-nodes",
+                json={
+                    "name": "Mains",
+                    "kind": "source",
+                    "feed_connector": "cee32_3p",
+                    "outputs": [{"connector": "schuko", "count": 2}],
+                },
+                headers=h,
+            )
+        ).json()
+        res = await client.patch(
+            f"{api}/rigging/loads/device/{amp['id']}",
+            json={"power_node_id": mains["attributes"]["power_id"], "power_connector": "schuko"},
+            headers=h,
+        )
+        assert res.status_code == 204, res.text
+        # the host node goes without the engine's rules (as a direct write would)
+        async with db_mod.SessionLocal() as db:
+            host = await db.get(GraphDevice, UUID(mains["id"]))
+            host.attributes = {k: v for k, v in host.attributes.items() if k != "power_id"}
+            await db.commit()
+            await backfill_job(db, UUID(job_id))
+            node = (
+                await db.scalars(select(GraphDevice).where(GraphDevice.id == UUID(amp["id"])))
+            ).one()
+            assert "power_node_id" not in node.attributes

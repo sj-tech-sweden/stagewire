@@ -25,7 +25,29 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _refuse_if_rows(*tables: str) -> None:
+    """Fail instead of dropping rows that were never imported onto the graph.
+
+    The import (see docs/PROGRESS.md, M9 part B) moves every row to a node and deletes it, so a row
+    that is still here is data this migration would lose for good.
+    """
+    bind = op.get_bind()
+    for table in tables:
+        if bind.execute(sa.text(f"SELECT EXISTS (SELECT 1 FROM {table})")).scalar():
+            raise RuntimeError(
+                f"{table} still has rows that were not imported onto the graph; "
+                "import them first (docs/PROGRESS.md, M9 part B) - dropping it would lose them"
+            )
+
+
 def upgrade() -> None:
+    _refuse_if_rows(
+        "audio_channel_lists",
+        "audio_channel_patches",
+        "channel_list_outputs",
+        "channel_patch_points",
+        "output_patch_points",
+    )
     op.drop_constraint("fk_audio_devices_sound_list_id", "audio_devices", type_="foreignkey")
     op.drop_table("output_patch_points")
     op.drop_table("channel_patch_points")

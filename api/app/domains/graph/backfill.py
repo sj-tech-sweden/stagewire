@@ -20,6 +20,9 @@ FIXTURE_ATTRS = (
     "gel",
     "purpose",
 )
+# The prefixes of the refs of derived edges (the ref names what the edge was derived from: the
+# point id, the element and role, the plugged device). Some are historical table names; they are
+# stored in edges, so they are kept.
 MIRRORED_EDGE_TABLES = {
     "channel_patch_points",
     "output_patch_points",
@@ -43,7 +46,6 @@ class BackfillResult:
     notes: list[str] = field(default_factory=list)
     changed_devices: list[uuid.UUID] = field(default_factory=list)
     changed_edges: list[uuid.UUID] = field(default_factory=list)
-    removed_devices: list[tuple[uuid.UUID, list[uuid.UUID]]] = field(default_factory=list)
     removed_edges: list[uuid.UUID] = field(default_factory=list)
 
 
@@ -70,12 +72,10 @@ class Backfill:
         self.devices: dict[str, GraphDevice] = {}
         self.edge_refs: set[str] = set()
         self.edge_rows: dict[str, ConnectionEdge] = {}
-        self.loaded_devices: set[str] = set()
         self.loaded_edges: set[str] = set()
         self.loaded_revisions: dict[uuid.UUID, int] = {}
         self.new_edges: list[ConnectionEdge] = []
         self.edge_updates: list[tuple[ConnectionEdge, dict]] = []
-        self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
         self.video_inputs: dict[uuid.UUID, GraphDevice] = {}
         self.rigging_points: dict[uuid.UUID, GraphDevice] = {}
@@ -87,9 +87,7 @@ class Backfill:
             await self.db.scalars(select(GraphDevice).where(GraphDevice.job_id == self.job_id))
         ).all():
             if device.legacy_ref:
-                self.devices[device.legacy_ref] = device
-                if not device.legacy_ref.startswith("device:"):
-                    self.loaded_devices.add(device.legacy_ref)  # a device's ref is its identity
+                self.devices[device.legacy_ref] = device  # a device's ref is its identity
                 self.loaded_revisions[device.id] = device.revision
             power_id = power_id_of(device)
             if power_id is not None:
@@ -229,38 +227,17 @@ class Backfill:
             self.edge_rows[edge.attributes["legacy_ref"]] = edge
 
     async def prune(self) -> None:
-        """Remove graph rows whose legacy source is gone: existence follows the legacy editors."""
-        gone_edges = [self.edge_rows[ref] for ref in self.loaded_edges - self.seen_edges]
-        gone_devices = {
-            self.devices[ref].id: self.devices[ref]
-            for ref in self.loaded_devices - self.seen_devices
-            if ref in self.devices
-        }
-        if not gone_edges and not gone_devices:
-            return
-        doomed = {e.id: e for e in gone_edges}
-        for edge in (
-            await self.db.scalars(
-                select(ConnectionEdge).where(ConnectionEdge.job_id == self.job_id)
-            )
-        ).all():
-            if edge.src_device_id in gone_devices or edge.dst_device_id in gone_devices:
-                doomed[edge.id] = edge
-        for edge in doomed.values():
+        """Remove the derived edges whose source is gone (a deleted point, a cleared link).
+
+        Nodes are never pruned: every node is the data (``audio_native``, ``devices_native``, ...),
+        so only edges, which are derived from nodes, follow what they were derived from.
+        """
+        gone = [self.edge_rows[ref] for ref in self.loaded_edges - self.seen_edges]
+        for edge in gone:
             await self.db.delete(edge)
         await self.db.flush()
-        for device_id, device in gone_devices.items():
-            touching = [
-                e.id for e in doomed.values() if device_id in (e.src_device_id, e.dst_device_id)
-            ]
-            self.result.removed_devices.append((device_id, touching))
-            await self.db.delete(device)
-        self.result.removed_edges = [
-            e.id
-            for e in doomed.values()
-            if e.src_device_id not in gone_devices and e.dst_device_id not in gone_devices
-        ]
-        self.result.removed = len(doomed) + len(gone_devices)
+        self.result.removed_edges = [e.id for e in gone]
+        self.result.removed = len(gone)
 
     async def plot_elements(self) -> None:
         """Plot elements are graph nodes (plot_native.py); the sync draws their link edges."""
@@ -284,8 +261,16 @@ class Backfill:
             if not ref.startswith("device:"):
                 continue
             attributes = node.attributes or {}
-            feeder = hosts.get(attributes.get("power_node_id"))
-            if feeder is None or attributes.get("fixture_id") or feeder.id == node.id:
+            if attributes.get("fixture_id") or not attributes.get("power_node_id"):
+                continue
+            feeder = hosts.get(attributes["power_node_id"])
+            if feeder is None or feeder.id == node.id:
+                # the feeder is gone: the device is not plugged in any more
+                node.attributes = {
+                    k: v
+                    for k, v in attributes.items()
+                    if k not in ("power_node_id", "power_connector")
+                }
                 continue
             connector = attributes.get("power_connector") or ""
             self.edge(
@@ -386,12 +371,7 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
 
 async def publish_changes(db: AsyncSession, job_id: uuid.UUID, result: BackfillResult) -> None:
     """Tell open workspaces what a sync changed (nothing is sent when nothing changed)."""
-    if not (
-        result.changed_devices
-        or result.changed_edges
-        or result.removed_devices
-        or result.removed_edges
-    ):
+    if not (result.changed_devices or result.changed_edges or result.removed_edges):
         return
     from app.domains.audio.ws import publish_job_event
     from app.domains.graph import schemas
@@ -408,9 +388,3 @@ async def publish_changes(db: AsyncSession, job_id: uuid.UUID, result: BackfillR
             await publish_job_event(job_id, "graph.edge.upsert", payload)
     for edge_id in result.removed_edges:
         await publish_job_event(job_id, "graph.edge.delete", {"id": str(edge_id)})
-    for device_id, edge_ids in result.removed_devices:
-        await publish_job_event(
-            job_id,
-            "graph.device.delete",
-            {"id": str(device_id), "edge_ids": [str(e) for e in edge_ids]},
-        )
