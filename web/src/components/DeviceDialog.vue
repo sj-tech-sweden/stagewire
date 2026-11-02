@@ -209,6 +209,72 @@
         </div>
         <div
           v-if="CAMERA_TYPES.includes(form.device_type)"
+          class="q-gutter-sm"
+          data-testid="sensor-calculator"
+        >
+          <q-select
+            v-model="sensorPreset"
+            :options="sensorPresetOptions"
+            :label="t('devices.sensorPreset')"
+            emit-value
+            map-options
+            clearable
+            dense
+            outlined
+            data-testid="sensor-preset"
+            @update:model-value="applySensorPreset"
+          />
+          <div class="row q-col-gutter-sm">
+            <q-input
+              v-model="sensorAspect"
+              :label="t('devices.sensorAspect')"
+              :hint="t('devices.sensorAspectHint')"
+              dense
+              outlined
+              class="col-4"
+              data-testid="sensor-aspect"
+            />
+            <q-input
+              v-model="sensorDiagonal"
+              :label="t('devices.sensorDiagonal')"
+              :hint="t('devices.sensorDiagonalHint')"
+              dense
+              outlined
+              class="col-5"
+              data-testid="sensor-diagonal"
+            />
+            <q-select
+              :model-value="sensorDiagonalUnit"
+              :options="sensorUnitOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              class="col-3"
+              @update:model-value="convertSensorDiagonal"
+            />
+          </div>
+          <div class="row items-center q-gutter-sm">
+            <div
+              class="col text-caption"
+              data-testid="sensor-calc-text"
+            >
+              {{ sensorCalcText }}
+            </div>
+            <q-btn
+              v-if="calculatedSensorWidth"
+              flat
+              dense
+              no-caps
+              color="primary"
+              :label="t('devices.useCalculatedWidth')"
+              data-testid="sensor-use-calculated"
+              @click="useCalculatedSensorWidth"
+            />
+          </div>
+        </div>
+        <div
+          v-if="CAMERA_TYPES.includes(form.device_type)"
           class="row q-col-gutter-sm"
         >
           <q-input
@@ -296,12 +362,22 @@
 
 <script setup>
 import { apiErrorText } from '@/utils/errors';
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
+import {
+  diagonalToMm,
+  findPreset,
+  mmToDiagonal,
+  parseAspect,
+  parseLength,
+  SENSOR_PRESETS,
+  sensorDiagonalMm,
+  sensorWidthFromDiagonal,
+} from '@/utils/sensor';
 import {
   CAMERA_TYPES,
   CONNECTOR_PRESETS,
@@ -337,10 +413,60 @@ async function importProduct(product) {
   }
 }
 
+// The sensor width a camera needs for its field of view can be typed in mm, picked from a standard
+// sensor size, or worked out from the diagonal and aspect ratio printed on the spec sheet (the
+// diagonal may be in inches, also as a fraction such as 1/2.3). Only the width is stored; the
+// preset, aspect and diagonal are scratch inputs that are cleared when the dialog opens.
+const sensorPreset = ref(null);
+const sensorAspect = ref('');
+const sensorDiagonal = ref('');
+const sensorDiagonalUnit = ref('mm');
+const sensorPresetOptions = SENSOR_PRESETS.map((p) => ({ value: p.id, label: `${p.label} · ${p.width} × ${p.height} mm` }));
+const sensorUnitOptions = [
+  { value: 'mm', label: 'mm' },
+  { value: 'in', label: 'in' },
+];
+const calculatedSensorWidth = computed(() => {
+  const diagonal = parseLength(sensorDiagonal.value);
+  const aspect = parseAspect(sensorAspect.value);
+  if (!diagonal || !aspect) return null;
+  return sensorWidthFromDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), aspect);
+});
+const sensorCalcText = computed(() =>
+  calculatedSensorWidth.value
+    ? t('devices.sensorCalculated', { mm: calculatedSensorWidth.value.toFixed(2) })
+    : t('devices.sensorCalcHint'),
+);
+function formatDiagonal(mm, unit) {
+  const digits = unit === 'in' ? 10000 : 100;
+  return String(Math.round(mmToDiagonal(mm, unit) * digits) / digits);
+}
+function applySensorPreset(id) {
+  const preset = findPreset(id);
+  if (!preset) return;
+  form.sensor_width_mm = preset.width;
+  sensorAspect.value = preset.aspect;
+  sensorDiagonal.value = formatDiagonal(sensorDiagonalMm(preset.width, preset.height), sensorDiagonalUnit.value);
+}
+// Switching the unit converts the number already typed instead of reinterpreting it.
+function convertSensorDiagonal(unit) {
+  const diagonal = parseLength(sensorDiagonal.value);
+  if (diagonal) sensorDiagonal.value = formatDiagonal(diagonalToMm(diagonal, sensorDiagonalUnit.value), unit);
+  sensorDiagonalUnit.value = unit;
+}
+function useCalculatedSensorWidth() {
+  if (calculatedSensorWidth.value) form.sensor_width_mm = Math.round(calculatedSensorWidth.value * 100) / 100;
+}
+
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) Object.assign(form, deviceForm(props.node));
+    if (!open) return;
+    Object.assign(form, deviceForm(props.node));
+    sensorPreset.value = null;
+    sensorAspect.value = '';
+    sensorDiagonal.value = '';
+    sensorDiagonalUnit.value = 'mm';
   },
 );
 </script>

@@ -1585,3 +1585,36 @@ test('a channel list gets a mixer size that fills it with the empty inputs and o
   expect(legacy[0].mixer_inputs).toBe(4);
   await expect(page.getByTestId('list-mixer')).toContainText('4');
 });
+
+test('a camera takes its sensor width from a standard size or from the diagonal and aspect ratio', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Sensor ${Date.now()}` })).id as string;
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
+
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-name').fill('Cam A');
+  await page.getByTestId('device-type').click();
+  await page.locator('.q-menu .q-item', { hasText: /^Camera$/ }).click();
+  await expect(page.getByTestId('sensor-calculator')).toBeVisible();
+
+  // a standard size fills the width, the aspect ratio and the diagonal
+  await page.getByTestId('sensor-preset').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Super 35' }).click();
+  await expect(page.getByLabel(/sensor width/i)).toHaveValue('24.9');
+  await expect(page.getByTestId('sensor-aspect')).toHaveValue('4:3');
+
+  // or the width is worked out from the spec sheet: 11 mm at 16:9 is about 9.59 mm wide
+  await page.getByTestId('sensor-aspect').fill('16:9');
+  await page.getByTestId('sensor-diagonal').fill('11');
+  await expect(page.getByTestId('sensor-calc-text')).toContainText('9.59');
+  await page.getByTestId('sensor-use-calculated').click();
+  await expect(page.getByLabel(/sensor width/i)).toHaveValue('9.59');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json())[0];
+  await expect.poll(async () => (await legacy())?.sensor_width_mm).toBeCloseTo(9.59, 2);
+});
