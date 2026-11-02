@@ -1668,6 +1668,12 @@ test('the inspector shows how much of a device\'s ports are in use', async ({ pa
   await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox P');
   await expect(page.getByTestId('port-usage')).toBeVisible();
   await expect(page.getByTestId('port-usage-row').first()).toContainText(/\d+\/\d+/);
+
+  // the same usage is in the device dialog of the Devices tab, and a Stockwire category as a kind
+  // (no translation) is shown as it is
+  await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
+  await page.getByTestId('edit-device').first().click();
+  await expect(page.locator('.q-dialog').getByTestId('port-usage')).toBeVisible();
 });
 
 test('the device dialog says which weight and power value is in use', async ({ page, request }) => {

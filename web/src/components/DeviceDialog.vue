@@ -47,6 +47,11 @@
           :label="t('channels.fieldNotes')"
         />
 
+        <PortUsage
+          v-if="node"
+          :device="node"
+          class="q-mt-md"
+        />
         <div class="text-subtitle2 q-mt-md">
           {{ t('devices.ports') }}
         </div>
@@ -367,6 +372,7 @@
 <script setup>
 import { apiErrorText } from '@/utils/errors';
 import { computed, reactive, ref, watch } from 'vue';
+import PortUsage from '@/components/PortUsage.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';

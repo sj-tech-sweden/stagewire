@@ -1262,6 +1262,7 @@ export default {
     footprint: 'Footprint (channels)',
     defaultGel: 'Default gel / colour',
     full: 'Full',
+    portUsage: 'Ports in use',
     capacity: 'Capacity',
     types: {
       switcher: 'Video switcher',

@@ -1262,6 +1262,7 @@ export default {
     footprint: 'Kanaler (footprint)',
     defaultGel: 'Standardfilter / färg',
     full: 'Full',
+    portUsage: 'Portar i bruk',
     capacity: 'Kapacitet',
     types: {
       switcher: 'Videoswitch',

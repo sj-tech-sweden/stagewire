@@ -173,7 +173,7 @@ import DeviceDialog from '@/components/DeviceDialog.vue';
 import { POWER_INLETS, connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
-const { t } = useI18n();
+const { t, te } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const dialogOpen = ref(false);
@@ -195,7 +195,13 @@ const columns = computed(() => [
 ]);
 
 const effective = (device) => graph.effective[device.id];
-const typeLabel = (device) => (device.kind ? t(`devices.types.${device.kind}`, device.kind) : '');
+// A device's kind is one of our types or, for gear imported from Stockwire, the free-text category
+// it came with ("Microphones"), which has no translation: show it as it is instead of a missing key.
+const typeLabel = (device) => {
+  if (!device.kind) return '';
+  const key = `devices.types.${device.kind}`;
+  return te(key) ? t(key) : device.kind;
+};
 const portsLabel = (device) =>
   portGroups(device.ports)
     .map((g) => `${{ in: '↓', out: '↑', both: '↕' }[g.direction]}${g.count || ''} ${connectorLabel(g.connector)}`.trim())
