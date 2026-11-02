@@ -319,24 +319,31 @@
           </template>
           <template #body-cell-chain="slot">
             <q-td :props="slot">
-              <q-btn
-                flat
-                dense
-                no-caps
-                icon="route"
-                :label="chain(slot.row) || t('workspace.chainEmpty')"
-                data-testid="edit-video-chain"
-                @click="openChain(slot.row, section.kind)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="account_tree"
-                :aria-label="t('workspace.showFlow')"
-                data-testid="show-video-flow"
-                @click="openFlow(slot.row, section.kind)"
-              />
+              <!-- a long chain shortens its label instead of pushing the flow button under the
+                   next column, where it cannot be clicked -->
+              <div class="row no-wrap items-center video-chain-cell">
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  icon="route"
+                  class="video-chain-btn"
+                  :label="chain(slot.row) || t('workspace.chainEmpty')"
+                  :title="chain(slot.row)"
+                  data-testid="edit-video-chain"
+                  @click="openChain(slot.row, section.kind)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="account_tree"
+                  class="col-auto"
+                  :aria-label="t('workspace.showFlow')"
+                  data-testid="show-video-flow"
+                  @click="openFlow(slot.row, section.kind)"
+                />
+              </div>
             </q-td>
           </template>
           <template #body-cell-actions="slot">
@@ -612,3 +619,23 @@ function removeNode(node) {
   );
 }
 </script>
+
+<style scoped>
+.video-chain-cell {
+  min-width: 0;
+  max-width: 100%;
+}
+.video-chain-btn {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.video-chain-btn :deep(.q-btn__content) {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.video-chain-btn :deep(.block) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
