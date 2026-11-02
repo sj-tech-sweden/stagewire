@@ -38,6 +38,49 @@
     </div>
 
     <template v-else>
+      <q-card
+        flat
+        bordered
+        class="q-pa-sm q-mb-sm row items-center q-gutter-sm"
+        data-testid="list-mixer"
+      >
+        <q-icon
+          name="tune"
+          color="primary"
+          size="sm"
+        />
+        <div class="col">
+          <div class="text-caption text-grey-7">
+            {{ t('stockwire.mixerOfList') }}
+          </div>
+          <div v-if="list.attributes.mixer_product_name || list.attributes.mixer_inputs != null || list.attributes.mixer_buses != null">
+            {{ list.attributes.mixer_product_name }}
+            <span
+              v-if="list.attributes.mixer_inputs != null"
+              class="text-grey-7"
+            > · {{ list.attributes.mixer_inputs }} {{ t('stockwire.inputsShort') }}</span>
+            <span
+              v-if="list.attributes.mixer_buses != null"
+              class="text-grey-7"
+            > · {{ list.attributes.mixer_buses }} {{ t('stockwire.busesShort') }}</span>
+          </div>
+          <div
+            v-else
+            class="text-grey-7"
+          >
+            {{ t('stockwire.mixerNotSet') }}
+          </div>
+        </div>
+        <q-btn
+          outline
+          no-caps
+          color="primary"
+          icon="edit"
+          :label="list.attributes.mixer_product_name || list.attributes.mixer_inputs != null ? t('stockwire.changeMixer') : t('stockwire.setMixer')"
+          data-testid="set-mixer"
+          @click="mixerOpen = true"
+        />
+      </q-card>
       <div class="row items-center q-gutter-sm q-mb-sm">
         <q-input
           :model-value="list.name"
@@ -448,6 +491,12 @@
       :busy="bulkBusy"
       @create="(items) => bulkCreate('outputs', items)"
     />
+    <MixerDialog
+      v-model="mixerOpen"
+      :list="list"
+      :channel-count="channels.length"
+      @save="saveMixer"
+    />
     <ChainFlowDialog
       v-model="flowOpen"
       :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
@@ -478,6 +527,7 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import ListBulkDialog from '@/components/ListBulkDialog.vue';
+import MixerDialog from '@/components/MixerDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
@@ -489,6 +539,7 @@ import {
   channelsOf,
   isPlotElement,
   isVirtual,
+  mixerSlotsToAdd,
   nextChannelNumber,
   outputsOf,
   stereoPairPlan,
@@ -588,6 +639,36 @@ async function addChannels(count) {
     );
   } catch (err) {
     failed(err);
+  }
+}
+
+const mixerOpen = ref(false);
+// The mixer is stored on the list, which the server mirrors to the legacy list the Stockwire sync
+// reads. The list is then padded with empty inputs and outputs up to the mixer's size.
+async function saveMixer({ product, inputs, buses }) {
+  const wantInputs = Number(inputs) || 0;
+  const wantBuses = Number(buses) || 0;
+  try {
+    await graph.updateDevice(props.jobId, list.value.id, {
+      attributes: {
+        mixer_product_id: product?.id || null,
+        mixer_product_name: product?.name || null,
+        mixer_inputs: inputs ?? null,
+        mixer_buses: buses ?? null,
+      },
+    });
+    const add = mixerSlotsToAdd(channels.value, outputs.value, wantInputs, wantBuses);
+    if (add.channels.length) await graph.createChannels(props.jobId, list.value.id, add.channels);
+    if (add.outputs.length) await graph.createOutputs(props.jobId, list.value.id, add.outputs);
+    if (add.channels.length || add.outputs.length) {
+      $q.notify({
+        type: 'positive',
+        message: t('stockwire.mixerFilled', { inputs: add.channels.length, buses: add.outputs.length }),
+      });
+    }
+    mixerOpen.value = false;
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 

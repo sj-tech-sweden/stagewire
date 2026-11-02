@@ -1556,3 +1556,32 @@ test('a channel is paired as stereo with its neighbour and a wireless channel ke
   await page.getByTestId('channel-stereo').first().click();
   await expect.poll(async () => (await channels()).every((c) => !c.attributes.stereo)).toBe(true);
 });
+
+test('a channel list gets a mixer size that fills it with the empty inputs and outputs it is missing', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { channel_number: 1, source_label: 'Kick' });
+  const devices = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await expect(page.getByTestId('list-mixer')).toBeVisible();
+  await page.getByTestId('set-mixer').click();
+  await page.getByTestId('mixer-inputs').fill('4');
+  await page.getByTestId('mixer-buses').fill('2');
+  await page.getByTestId('mixer-save').click();
+
+  await expect.poll(async () => (await devices()).filter((d) => d.kind === 'channel').length).toBe(4);
+  await expect.poll(async () => (await devices()).filter((d) => d.kind === 'output').length).toBe(2);
+  const saved = (await devices()).find((d) => d.id === list.id);
+  expect([saved.attributes.mixer_inputs, saved.attributes.mixer_buses]).toEqual([4, 2]);
+  // the legacy list the Stockwire sync reads carries the same size
+  const legacy = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[];
+  expect(legacy[0].mixer_inputs).toBe(4);
+  await expect(page.getByTestId('list-mixer')).toContainText('4');
+});

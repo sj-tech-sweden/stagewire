@@ -19,6 +19,8 @@ import {
   portsFromGroups,
   chainForm,
   stereoPairPlan,
+  mixerSpecsOf,
+  mixerSlotsToAdd,
   stereoView,
   chainSteps,
   videoChainForm,
@@ -586,4 +588,23 @@ test('unpairing clears both legs and stereoView reads the L/R side and neighbour
   expect(stereoView(a, [a, b])).toMatchObject({ linked: true, isL: true, top: true });
   expect(stereoView(b, [a, b])).toMatchObject({ linked: true, isL: false, bottom: true });
   expect(stereoView(chan('c', 5, '', { stereo: true, stereo_channel: 6 }), [a, b]).linked).toBe(false);
+});
+
+test('a mixer fills the list with the empty inputs and output channels it is missing, and never removes', () => {
+  expect(mixerSpecsOf({ specs: { inputs: 32, outputs: 16 } })).toEqual({ inputs: 32, buses: 16 });
+  expect(mixerSpecsOf({ specs: { sb_inputs: 8 } })).toEqual({ inputs: 8, buses: null });
+  expect(mixerSpecsOf(null)).toEqual({ inputs: null, buses: null });
+
+  const channels = [chan('a', 1, 'Kick'), chan('b', 5, 'Snare')];
+  const outputs = [
+    { id: 'o1', attributes: { mode: 'stereo' } },
+    { id: 'o2', attributes: { mode: 'mono' } },
+  ];
+  const add = mixerSlotsToAdd(channels, outputs, 4, 6);
+  // two inputs exist, so two more are added after the highest number
+  expect(add.channels.map((c) => c.channel_number)).toEqual([6, 7]);
+  // a stereo bus is two outputs: 2 + 1 used, so three more mono outputs reach 6
+  expect(add.outputs.map((o) => o.name)).toEqual(['Out 3', 'Out 4', 'Out 5']);
+  const none = mixerSlotsToAdd(channels, outputs, 1, 1);
+  expect([none.channels.length, none.outputs.length]).toEqual([0, 0]);
 });

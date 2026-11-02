@@ -868,3 +868,25 @@ export function stereoView(channel, channels) {
     bottom: !isL && channels[idx - 1]?.id === partner?.id,
   };
 }
+
+// A mixer product's size from its Stockwire specs: the spec keys differ between categories (a
+// console has inputs/outputs, a stagebox sb_inputs/sb_outputs), so both are read. null means the
+// product does not say, and the user types it instead.
+export function mixerSpecsOf(product) {
+  const specs = product?.specs || {};
+  return { inputs: specs.inputs ?? specs.sb_inputs ?? null, buses: specs.outputs ?? specs.sb_outputs ?? null };
+}
+
+// The empty inputs and outputs a list needs to match its mixer. It only ever adds: existing
+// channels keep their numbers and outputs, so nothing a user filled in can be lost. A stereo bus
+// is two mixer outputs (L and R), so buses are counted in output channels, not rows.
+export function mixerSlotsToAdd(channels, outputs, wantInputs, wantBuses) {
+  const top = channels.reduce((m, c) => Math.max(m, Number(c.attributes?.channel_number) || 0), 0);
+  const missingInputs = Math.max(0, wantInputs - channels.length);
+  const used = outputs.reduce((sum, o) => sum + (busChannelsFor(o.attributes?.mode).length || 1), 0);
+  const missingBuses = Math.max(0, wantBuses - used);
+  return {
+    channels: Array.from({ length: missingInputs }, (_, i) => ({ channel_number: top + i + 1 })),
+    outputs: Array.from({ length: missingBuses }, (_, i) => ({ name: `Out ${outputs.length + i + 1}`, mode: 'mono' })),
+  };
+}
