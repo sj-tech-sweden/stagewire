@@ -1,10 +1,10 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domains.audio.models import AudioDevice
+from app.domains.audio.models import AudioDevice, StagePlotElement
 from app.domains.video.models import (
     VideoInput,
     VideoInputList,
@@ -110,6 +110,25 @@ async def apply(db: AsyncSession, obj, data: dict):
 
 
 async def delete(db: AsyncSession, obj) -> None:
+    # video_list_id and linked_video_input_id are plain ids now (no ON DELETE SET NULL): clear
+    # whatever pointed at what is going away
+    if isinstance(obj, VideoInputList):
+        await db.execute(
+            update(AudioDevice)
+            .where(AudioDevice.video_list_id == obj.id)
+            .values(video_list_id=None)
+        )
+        input_ids = [i.id for i in obj.inputs]
+    elif isinstance(obj, VideoInput):
+        input_ids = [obj.id]
+    else:
+        input_ids = []
+    if input_ids:
+        await db.execute(
+            update(StagePlotElement)
+            .where(StagePlotElement.linked_video_input_id.in_(input_ids))
+            .values(linked_video_input_id=None)
+        )
     await db.delete(obj)
     await db.commit()
 

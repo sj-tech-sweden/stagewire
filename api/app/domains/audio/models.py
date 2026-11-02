@@ -155,8 +155,10 @@ class AudioDevice(Base):
     sound_list_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_channel_lists.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # The public id of the device's video list node (see graph/ids.py); not a foreign key, a
+    # list made in the graph has no row in video_input_lists.
     video_list_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("video_input_lists.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     sensor_width_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     focal_min_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -226,8 +228,9 @@ class StagePlotElement(Base):
     linked_output_point_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
     )
+    # The public id of the linked video input node (see graph/ids.py); not a foreign key.
     linked_video_input_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("video_inputs.id", ondelete="SET NULL"), nullable=True
+        Uuid(as_uuid=True), nullable=True
     )
     linked_lens_device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True

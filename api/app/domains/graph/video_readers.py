@@ -20,13 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import backfill_job
-from app.domains.graph.mirror import legacy_target
+from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 
-
-def _legacy_id(row) -> uuid.UUID | None:
-    target = legacy_target(row)
-    return target[1] if target else None
+_legacy_id = public_id
 
 
 def _point(attrs: dict, device_id: uuid.UUID | None, **owner) -> SimpleNamespace:
@@ -61,12 +58,14 @@ async def load_video_lists(
             select(GraphDevice).where(GraphDevice.job_id == job_id, GraphDevice.domain == "video")
         )
     ).all()
+    # every device a chain can pass through, by node id; the point names the device's public id
     gear = {
-        d.id: _legacy_id(d)
+        d.id: public_id(d)
         for d in (
             await db.scalars(
                 select(GraphDevice).where(
-                    GraphDevice.job_id == job_id, GraphDevice.legacy_ref.like("audio_devices:%")
+                    GraphDevice.job_id == job_id,
+                    GraphDevice.kind.notin_(("video_list", "video_input", "video_destination")),
                 )
             )
         ).all()
