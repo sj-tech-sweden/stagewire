@@ -63,6 +63,25 @@
           data-testid="add-video-output"
           @click="addRows('outputs', 1)"
         />
+        <div
+          v-if="listSwitchers.length"
+          class="row q-gutter-xs"
+          data-testid="list-switcher-devices"
+        >
+          <q-chip
+            v-for="device in listSwitchers"
+            :key="device.id"
+            dense
+            clickable
+            square
+            icon="edit"
+            data-testid="chain-device"
+            @click="editDevice(device)"
+          >
+            {{ device.name }}
+            <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+          </q-chip>
+        </div>
         <q-btn
           v-if="list.attributes.switcher_product_id"
           flat
@@ -113,6 +132,11 @@
               <q-item-label caption>
                 {{ chain(row) || t('workspace.chainEmpty') }}
               </q-item-label>
+              <ChainDeviceChips
+                :node="row"
+                video
+                @edit="editDevice"
+              />
             </q-item-section>
             <q-item-section side>
               <q-btn
@@ -251,6 +275,11 @@
                 data-testid="edit-video-chain"
                 @click="openChain(slot.row, section.kind)"
               />
+              <ChainDeviceChips
+                :node="slot.row"
+                video
+                @edit="editDevice"
+              />
               <q-btn
                 flat
                 dense
@@ -282,6 +311,11 @@
       </div>
     </template>
 
+    <DeviceEditDialog
+      v-model="deviceOpen"
+      :device="editedDevice"
+      :job-id="jobId"
+    />
     <ChainFlowDialog
       v-model="flowOpen"
       :title="`${t('workspace.showFlow')}: ${chainNode?.name || ''}`"
@@ -309,10 +343,20 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
+import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
+import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
-import { flowTree, isPlotElement, isVirtual, videoChainForm, videoChainNames, videoRowsOf } from '@/utils/workspace';
+import {
+  flowTree,
+  isPlotElement,
+  isVirtual,
+  videoChainDevices,
+  videoChainForm,
+  videoChainNames,
+  videoRowsOf,
+} from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
 const { t } = useI18n();
@@ -337,6 +381,28 @@ const sourceTypes = ['camera', 'computer', 'other'].map((v) => ({
 
 const list = computed(() => graph.videoLists.find((l) => l.id === listId.value) || null);
 const gear = computed(() => graph.devices.filter((d) => !isVirtual(d) && !isPlotElement(d)));
+
+// The gear in this list's chains can be edited from the list: a chip next to a chain opens that
+// device, and the toolbar lists the switchers and routers the list's inputs and outputs use.
+const deviceOpen = ref(false);
+const editedId = ref(null);
+const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
+function editDevice(device) {
+  editedId.value = device.id;
+  deviceOpen.value = true;
+}
+const listSwitchers = computed(() => {
+  const seen = new Map();
+  const nodes = graph.devices.filter(
+    (d) => ['video_input', 'video_destination'].includes(d.kind) && d.attributes?.list_id === listId.value,
+  );
+  for (const node of nodes) {
+    for (const device of videoChainDevices(node, graph.edges, graph.devices)) {
+      if (['switcher', 'router'].includes(device.kind)) seen.set(device.id, device);
+    }
+  }
+  return [...seen.values()];
+});
 const chainTitle = computed(() => `${t('workspace.editChain')}: ${chainNode.value?.name || ''}`);
 
 const number = { name: 'number', label: '#', field: () => '', align: 'left' };

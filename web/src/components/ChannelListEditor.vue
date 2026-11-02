@@ -71,6 +71,25 @@
             {{ t('stockwire.mixerNotSet') }}
           </div>
         </div>
+        <div
+          v-if="listMixers.length"
+          class="row q-gutter-xs"
+          data-testid="list-mixer-devices"
+        >
+          <q-chip
+            v-for="mixer in listMixers"
+            :key="mixer.id"
+            dense
+            clickable
+            square
+            icon="edit"
+            data-testid="chain-device"
+            @click="editDevice(mixer)"
+          >
+            {{ mixer.name }}
+            <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+          </q-chip>
+        </div>
         <q-btn
           outline
           no-caps
@@ -357,6 +376,10 @@
               data-testid="edit-chain"
               @click="openChain(slot.row, 'channel')"
             />
+            <ChainDeviceChips
+              :node="slot.row"
+              @edit="editDevice"
+            />
             <q-btn
               flat
               dense
@@ -423,6 +446,10 @@
             <q-item-label caption>
               {{ chain(out) || t('workspace.chainEmpty') }}
             </q-item-label>
+            <ChainDeviceChips
+              :node="out"
+              @edit="editDevice"
+            />
           </q-item-section>
           <q-item-section
             side
@@ -492,6 +519,11 @@
       :busy="bulkBusy"
       @create="(items) => bulkCreate('outputs', items)"
     />
+    <DeviceEditDialog
+      v-model="deviceOpen"
+      :device="editedDevice"
+      :job-id="jobId"
+    />
     <MixerDialog
       v-model="mixerOpen"
       :list="list"
@@ -528,12 +560,15 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import ListBulkDialog from '@/components/ListBulkDialog.vue';
+import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
+import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import MixerDialog from '@/components/MixerDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import {
   chainForm,
   busChannelsFor,
+  chainDevices,
   chainSteps,
   flowTree,
   OUTPUT_MODES,
@@ -642,6 +677,25 @@ async function addChannels(count) {
     failed(err);
   }
 }
+
+// The gear in this list's chains can be edited from the list: a chip next to a chain opens that
+// device, and the mixer card lists the mixers (consoles) the list's channels are patched into.
+const deviceOpen = ref(false);
+const editedId = ref(null);
+const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
+function editDevice(device) {
+  editedId.value = device.id;
+  deviceOpen.value = true;
+}
+const listMixers = computed(() => {
+  const seen = new Map();
+  for (const channel of channels.value) {
+    for (const device of chainDevices(channel, graph.edges, graph.devices)) {
+      if (device.kind === 'mixer') seen.set(device.id, device);
+    }
+  }
+  return [...seen.values()];
+});
 
 const mixerOpen = ref(false);
 // The mixer is stored on the list, which the server mirrors to the legacy list the Stockwire sync

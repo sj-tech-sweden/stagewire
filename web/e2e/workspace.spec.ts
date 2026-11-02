@@ -1689,3 +1689,34 @@ test('the device dialog says which weight and power value is in use', async ({ p
   await expect(page.locator('.q-field', { has: page.getByTestId('device-weight') })).toContainText(/value entered here is in use|värde som anges här/i);
   await expect(page.locator('.q-field', { has: page.getByTestId('device-power') })).toContainText(/not set|inte satt|ej satt/i);
 });
+
+test('the gear behind a channel or a video input is edited from its list', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E ListEdit ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Kick' });
+  const desk = await post(request, headers, `${g}/audio-devices`, { name: 'Desk', device_type: 'mixer' });
+  const put = await request.put(`${API_BASE}/api/v1${g}/channels/${channel.id}/chain`, {
+    headers,
+    data: { steps: [{ device_id: desk.id }] },
+  });
+  expect(put.status()).toBe(200);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // the console is on the list's mixer card and on the channel's chain; both open its dialog
+  await expect(page.getByTestId('list-mixer-devices')).toContainText('Desk');
+  await page.getByTestId('channel-table').getByTestId('chain-device').first().click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Desk');
+  await page.getByTestId('device-name').fill('Console FOH');
+  await page.getByTestId('device-save').click();
+  const named = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d) => d.id === desk.id,
+    ).name;
+  await expect.poll(named).toBe('Console FOH');
+  await expect(page.getByTestId('list-mixer-devices')).toContainText('Console FOH');
+});

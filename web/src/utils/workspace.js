@@ -222,6 +222,23 @@ const isUniverseSource = (node, edge) =>
   node.kind === 'dmx_universe' && edge.dst_device_id === node.id;
 
 // Names of the devices a channel or output chain passes through, in order.
+// The device nodes a chain passes through, in order (a step whose device is gone is left out).
+// Used for the clickable device chips next to a chain, so the gear can be edited from the list.
+export function chainDevices(node, edges, devices) {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const steps = [];
+  for (const edge of edges) {
+    const attrs = edge.attributes || {};
+    if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
+    if (attrs.first_point) {
+      steps.push({ position: attrs.first_point.position || 0, device: byId.get(edge.src_device_id) });
+    } else {
+      steps.push({ position: attrs.position || 0, device: byId.get(edge.dst_device_id) });
+    }
+  }
+  return steps.sort((a, b) => a.position - b.position).map((s) => s.device).filter(Boolean);
+}
+
 export function chainSteps(node, edges, devices) {
   const names = new Map(devices.map((d) => [d.id, d.name]));
   const steps = [];
@@ -284,6 +301,12 @@ export const videoChainNames = (node, edges, devices) =>
   videoChainForm(node, edges, devices).map(
     (step) => devices.find((d) => d.id === step.device_id)?.name || '?',
   );
+
+// The device nodes of a video chain, in order (same use as chainDevices).
+export const videoChainDevices = (node, edges, devices) =>
+  videoChainForm(node, edges, devices)
+    .map((step) => devices.find((d) => d.id === step.device_id))
+    .filter(Boolean);
 
 export const nextChannelNumber = (channels) =>
   channels.reduce((max, c) => Math.max(max, c.attributes?.channel_number || 0), 0) + 1;

@@ -21,6 +21,7 @@ import {
   stereoPairPlan,
   mixerSpecsOf,
   portUsage,
+  chainDevices,
   physicalHintKey,
   mixerSlotsToAdd,
   stereoView,
@@ -640,4 +641,16 @@ test('the weight and power hints say whether the value comes from Stockwire or w
   expect(physicalHintKey(eff, 'weight_kg_effective', 'weight_source')).toEqual({ key: 'devices.stockwireInUse', value: 14 });
   expect(physicalHintKey(eff, 'power_watts_effective', 'power_source')).toEqual({ key: 'devices.manualInUse' });
   expect(physicalHintKey(null, 'weight_kg_effective', 'weight_source')).toEqual({ key: 'devices.notSet' });
+});
+
+test('the devices of a chain come back in order and skip steps whose device is gone', () => {
+  const channel = { id: 'ch' };
+  const devices = [{ id: 'a', name: 'Box' }, { id: 'b', name: 'Desk' }];
+  const edges = [
+    { dst_device_id: 'b', attributes: { chain: 'ch', position: 1 } },
+    { src_device_id: 'a', dst_device_id: 'x', attributes: { chain: 'ch', first_point: { position: 0 } } },
+    { dst_device_id: 'gone', attributes: { chain: 'ch', position: 2 } },
+    { dst_device_id: 'a', attributes: { chain: 'other', position: 0 } },
+  ];
+  expect(chainDevices(channel, edges, devices).map((d) => d.name)).toEqual(['Box', 'Desk']);
 });
