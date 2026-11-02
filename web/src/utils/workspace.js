@@ -890,3 +890,26 @@ export function mixerSlotsToAdd(channels, outputs, wantInputs, wantBuses) {
     outputs: Array.from({ length: missingBuses }, (_, i) => ({ name: `Out ${outputs.length + i + 1}`, mode: 'mono' })),
   };
 }
+
+// How much of each port of a device the graph's connections use. A port with a channel count
+// (a stagebox's 32 XLR inputs) is used up channel by channel; any other port takes one connection
+// per edge up to its max_connections (default 1), the same limits topology.py enforces when a
+// connection is made. An "in" port counts the edges that end on it, an "out" port those that
+// start there, and a "both" port either; the port id is what an edge names in src_port/dst_port.
+export function portUsage(device, edges) {
+  return (device?.ports || []).map((port) => {
+    const mine = edges.filter(
+      (e) =>
+        (port.direction !== 'in' && e.src_device_id === device.id && e.src_port === port.id) ||
+        (port.direction !== 'out' && e.dst_device_id === device.id && e.dst_port === port.id),
+    );
+    const byChannel = port.channels != null;
+    return {
+      id: port.id,
+      direction: port.direction,
+      connector: port.connector || '',
+      capacity: byChannel ? Number(port.channels) : Number(port.max_connections || 1),
+      used: byChannel ? mine.reduce((sum, e) => sum + Number(e.channels || 1), 0) : mine.length,
+    };
+  });
+}

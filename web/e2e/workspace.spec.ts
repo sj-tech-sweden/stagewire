@@ -1647,3 +1647,25 @@ test('bulk-added channels can be patched into a device straight away', async ({ 
     })
     .toBe(8);
 });
+
+test('the inspector shows how much of a device\'s ports are in use', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Ports ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Kick' });
+  const box = await post(request, headers, `${g}/audio-devices`, { name: 'Stagebox P', device_type: 'analog_stagebox' });
+  const chain = await request.put(`${API_BASE}/api/v1${g}/channels/${channel.id}/chain`, {
+    headers,
+    data: { steps: [{ device_id: box.id, connector: 'xlr3' }] },
+  });
+  expect(chain.status()).toBe(200);
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await dataRows(page).first().locator('td').nth(1).click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox P');
+  await expect(page.getByTestId('port-usage')).toBeVisible();
+  await expect(page.getByTestId('port-usage-row').first()).toContainText(/\d+\/\d+/);
+});

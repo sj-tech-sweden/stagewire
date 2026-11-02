@@ -246,6 +246,45 @@
       </div>
 
       <div
+        v-if="usage.length"
+        class="q-mb-md"
+        data-testid="port-usage"
+      >
+        <div class="text-subtitle2">
+          {{ t('devices.ports') }}
+        </div>
+        <div
+          v-for="port in usage"
+          :key="port.id"
+          class="row items-center q-gutter-xs q-mt-xs"
+          data-testid="port-usage-row"
+        >
+          <div
+            class="text-caption ellipsis"
+            style="width: 96px"
+          >
+            {{ port.direction === 'out' ? t('devices.directionOut') : t('devices.directionIn') }}
+            · {{ port.connector || port.id }}
+          </div>
+          <q-linear-progress
+            :value="Math.min(1, port.used / (port.capacity || 1))"
+            :color="port.direction === 'out' ? 'secondary' : 'primary'"
+            class="col"
+            style="height: 8px"
+          />
+          <div class="text-caption">
+            {{ port.used }}/{{ port.capacity }}
+          </div>
+          <q-badge
+            v-if="port.used >= port.capacity"
+            color="negative"
+          >
+            {{ t('devices.full') }}
+          </q-badge>
+        </div>
+      </div>
+
+      <div
         v-if="needsBookingRequest(device) || device.stockwire_request_status"
         class="q-mb-md"
       >
@@ -402,7 +441,7 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { legacyId } from '@/utils/graphLegacy';
-import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
+import { isPlotElement, isPowerNode, isVirtual, outputPointOptions, portUsage } from '@/utils/workspace';
 import { isSpeakerType } from '@/utils/plotObjects';
 import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
@@ -505,6 +544,7 @@ const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 }
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });
 
+const usage = computed(() => portUsage(props.device, graph.edges));
 const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
 const otherDevices = computed(() =>
   graph.devices

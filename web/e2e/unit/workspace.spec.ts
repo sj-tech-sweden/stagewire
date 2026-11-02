@@ -20,6 +20,7 @@ import {
   chainForm,
   stereoPairPlan,
   mixerSpecsOf,
+  portUsage,
   mixerSlotsToAdd,
   stereoView,
   chainSteps,
@@ -607,4 +608,28 @@ test('a mixer fills the list with the empty inputs and output channels it is mis
   expect(add.outputs.map((o) => o.name)).toEqual(['Out 3', 'Out 4', 'Out 5']);
   const none = mixerSlotsToAdd(channels, outputs, 1, 1);
   expect([none.channels.length, none.outputs.length]).toEqual([0, 0]);
+});
+
+test('port usage counts channels on a channel port and connections on a plain one', () => {
+  const box = {
+    id: 'box',
+    ports: [
+      { id: 'in1', direction: 'in', connector: 'xlr3', channels: 8 },
+      { id: 'out1', direction: 'out', connector: 'cat6', max_connections: 2 },
+      { id: 'out2', direction: 'out', connector: 'speakon' },
+    ],
+  };
+  const edges = [
+    { src_device_id: 'mic', src_port: 'o', dst_device_id: 'box', dst_port: 'in1', channels: 3 },
+    { src_device_id: 'mic2', src_port: 'o', dst_device_id: 'box', dst_port: 'in1' },
+    { src_device_id: 'box', src_port: 'out1', dst_device_id: 'a', dst_port: 'i' },
+    { src_device_id: 'box', src_port: 'out1', dst_device_id: 'b', dst_port: 'i' },
+    { src_device_id: 'x', src_port: 'out1', dst_device_id: 'y', dst_port: 'i' },
+  ];
+  expect(portUsage(box, edges)).toEqual([
+    { id: 'in1', direction: 'in', connector: 'xlr3', capacity: 8, used: 4 },
+    { id: 'out1', direction: 'out', connector: 'cat6', capacity: 2, used: 2 },
+    { id: 'out2', direction: 'out', connector: 'speakon', capacity: 1, used: 0 },
+  ]);
+  expect(portUsage(null, edges)).toEqual([]);
 });
