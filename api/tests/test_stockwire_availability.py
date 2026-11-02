@@ -22,10 +22,25 @@ from app.main import app
 
 BASE = "/api/v1"
 
-# product_id -> per-day available quantity returned by the mocked upstream.
+# product_id -> availability object returned by the mocked upstream. available_quantity is the
+# minimum available across the requested range; total_quantity / max_reserved_quantity included.
 AVAIL = {
-    "1": {"2026-11-02": 8, "2026-11-03": 5, "2026-11-04": 8},
-    "2": {"2026-11-02": 2, "2026-11-03": 1, "2026-11-04": 3},
+    "1": {
+        "product_id": 1,
+        "start_date": "2026-11-02",
+        "end_date": "2026-11-04",
+        "total_quantity": 8,
+        "max_reserved_quantity": 3,
+        "available_quantity": 5,
+    },
+    "2": {
+        "product_id": 2,
+        "start_date": "2026-11-02",
+        "end_date": "2026-11-04",
+        "total_quantity": 3,
+        "max_reserved_quantity": 2,
+        "available_quantity": 1,
+    },
 }
 
 
@@ -108,11 +123,13 @@ async def test_availability_reports_min_and_flags_short(
 
     by_pid = {i["product_id"]: i for i in body["items"]}
     assert by_pid["1"]["needed"] == 1
-    assert by_pid["1"]["available_min"] == 5  # min over the three days
+    assert by_pid["1"]["available"] == 5  # available_quantity from the response
+    assert by_pid["1"]["total"] == 8
+    assert by_pid["1"]["reserved"] == 3
     assert by_pid["1"]["short"] is False
-    # Two product-2 devices need 2, but only 1 is available on the worst day.
+    # Two product-2 devices need 2, but only 1 is available.
     assert by_pid["2"]["needed"] == 2
-    assert by_pid["2"]["available_min"] == 1
+    assert by_pid["2"]["available"] == 1
     assert by_pid["2"]["short"] is True
     # Sorted by product name.
     assert [i["product_name"] for i in body["items"]] == ["SM58", "e935"]

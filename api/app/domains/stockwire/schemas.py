@@ -18,7 +18,11 @@ class JobProductAvailability(BaseModel):
     product_id: str
     product_name: str | None = None
     needed: int = 0
-    available_min: int = 0
+    # available_quantity from the Stockwire endpoint is already the minimum available across
+    # the requested date range, so this is the quantity the job can draw on.
+    available: int = 0
+    total: int = 0
+    reserved: int = 0
     short: bool = False
 
 

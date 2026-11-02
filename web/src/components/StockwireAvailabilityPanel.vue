@@ -67,8 +67,11 @@
               <q-item-section>
                 <q-item-label>{{ item.product_name || `#${item.product_id}` }}</q-item-label>
                 <q-item-label caption>
-                  {{ t('stockwire.available') }}: {{ item.available_min }}
+                  {{ t('stockwire.available') }}: {{ item.available }}
                   · {{ t('stockwire.needed') }}: {{ item.needed }}
+                  <span v-if="item.total || item.reserved">
+                    · {{ t('stockwire.availabilityDetail', { total: item.total, reserved: item.reserved }) }}
+                  </span>
                 </q-item-label>
               </q-item-section>
               <q-item-section side>
@@ -77,7 +80,7 @@
                   text-color="white"
                   dense
                 >
-                  {{ item.short ? t('stockwire.shortBy', { n: item.needed - item.available_min }) : t('stockwire.inStock') }}
+                  {{ item.short ? t('stockwire.shortBy', { n: item.needed - item.available }) : t('stockwire.inStock') }}
                 </q-chip>
               </q-item-section>
             </q-item>

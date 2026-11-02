@@ -53,11 +53,14 @@
               text-color="white"
               dense
             >
-              {{ availabilityItem.short ? t('stockwire.shortBy', { n: availabilityItem.needed - availabilityItem.available_min }) : t('stockwire.inStock') }}
+              {{ availabilityItem.short ? t('stockwire.shortBy', { n: availabilityItem.needed - availabilityItem.available }) : t('stockwire.inStock') }}
             </q-chip>
             <span class="text-caption">
-              {{ t('stockwire.available') }}: {{ availabilityItem.available_min }}
+              {{ t('stockwire.available') }}: {{ availabilityItem.available }}
               · {{ t('stockwire.needed') }}: {{ availabilityItem.needed }}
+              <span v-if="availabilityItem.total || availabilityItem.reserved">
+                · {{ t('stockwire.availabilityDetail', { total: availabilityItem.total, reserved: availabilityItem.reserved }) }}
+              </span>
             </span>
           </div>
           <div

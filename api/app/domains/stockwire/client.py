@@ -350,11 +350,13 @@ class StockwireClient:
             return response.json()
 
     async def get_availability(self, product_id: int | str, start_date: str, end_date: str) -> dict:
-        """Minimum available device quantity per day for an inclusive date range.
+        """Minimum available device quantity for an inclusive date range.
 
-        The upstream response is a mapping of ``YYYY-MM-DD`` -> available quantity; the caller
-        takes the minimum across the range. We request through the shared ``_client`` so the
-        mock-transport used in tests is honoured.
+        The upstream response is a single object such as
+        ``{"product_id": 888, "start_date": "...", "end_date": "...", "total_quantity": 2,
+        "max_reserved_quantity": 0, "available_quantity": 2}`` where ``available_quantity`` is
+        already the minimum available across the range. We request through the shared
+        ``_client`` so the mock-transport used in tests is honoured.
         """
         async with self._client() as client:
             response = await client.get(

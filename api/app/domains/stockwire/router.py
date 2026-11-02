@@ -52,19 +52,28 @@ async def get_job(job_id: str, db=Depends(get_db)) -> dict:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
 
 
-def _min_availability(resp) -> int:
-    """Reduce a Stockwire availability response to the minimum available quantity.
+def _availability(resp) -> tuple[int, int, int]:
+    """Pull (available, total, reserved) out of a Stockwire availability response.
 
-    The endpoint returns a per-day mapping (``YYYY-MM-DD`` -> quantity); we take the lowest
-    day so the job is flagged short if *any* day in the range is under-supplied. It also
-    tolerates a bare integer response. Anything unrecognised counts as zero available.
+    The endpoint returns a single object whose ``available_quantity`` is already the minimum
+    available across the requested date range. We fall back to ``total_quantity`` minus
+    ``max_reserved_quantity`` when the explicit field is missing, and tolerate a bare integer
+    or a per-day mapping as a last resort. Unrecognised shapes count as zero available.
     """
     if isinstance(resp, dict):
-        nums = [v for v in resp.values() if isinstance(v, (int, float))]
-        return int(min(nums)) if nums else 0
+        if "available_quantity" in resp:
+            available = int(resp["available_quantity"])
+        elif "total_quantity" in resp and "max_reserved_quantity" in resp:
+            available = int(resp["total_quantity"]) - int(resp["max_reserved_quantity"])
+        else:
+            nums = [v for v in resp.values() if isinstance(v, (int, float))]
+            available = int(min(nums)) if nums else 0
+        total = int(resp.get("total_quantity", 0) or 0)
+        reserved = int(resp.get("max_reserved_quantity", 0) or 0)
+        return available, total, reserved
     if isinstance(resp, (int, float)):
-        return int(resp)
-    return 0
+        return int(resp), int(resp), 0
+    return 0, 0, 0
 
 
 @router.get(
@@ -129,15 +138,17 @@ async def job_availability(job_id: str, db=Depends(get_db)) -> dict:
     async def fetch(pid: str) -> schemas.JobProductAvailability:
         try:
             resp = await sw.get_availability(pid, start, end)
-            avail = _min_availability(resp)
+            available, total, reserved = _availability(resp)
         except Exception:  # noqa: BLE001 - treat upstream errors as "cannot confirm stock"
-            avail = 0
+            available, total, reserved = 0, 0, 0
         return schemas.JobProductAvailability(
             product_id=pid,
             product_name=names.get(pid),
             needed=needed[pid],
-            available_min=avail,
-            short=avail < needed[pid],
+            available=available,
+            total=total,
+            reserved=reserved,
+            short=available < needed[pid],
         )
 
     items = await asyncio.gather(*(fetch(pid) for pid in needed))
