@@ -1,10 +1,16 @@
 export default {
   app: {
-    name: "Stagewire",
-    tagline: "Stage plots, patch sheets & input lists",
-    menu: "Menu",
-    navigation: "Navigation",
-    toggleDarkMode: "Toggle dark mode",
+    name: 'Stagewire',
+    tagline: 'Stage plots, patch sheets & input lists',
+    menu: 'Menu',
+    navigation: 'Navigation',
+    toggleDarkMode: 'Toggle dark mode',
+    theme: {
+      label: 'Theme',
+      light: { label: 'Light', short: 'Light' },
+      dark: { label: 'Dark', short: 'Dark' },
+      auto: { label: 'Auto', short: 'Auto' },
+    },
     nav: {
       home: "Home",
       jobs: "Production jobs",
