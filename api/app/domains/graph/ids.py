@@ -22,3 +22,16 @@ def public_id(node: GraphDevice) -> uuid.UUID:
         return uuid.UUID(str(raw)) if raw else node.id
     except ValueError:
         return node.id
+
+
+def power_id_of(node: GraphDevice) -> uuid.UUID | None:
+    """The public id of the power node a graph node hosts (None if it hosts none).
+
+    A power node lives on a host node (see ``power_native``): either a node of its own or the node
+    of the device it stands for; ``attributes.power_id`` is the id loads refer to.
+    """
+    raw = (node.attributes or {}).get("power_id")
+    try:
+        return uuid.UUID(str(raw)) if raw else None
+    except ValueError:
+        return None

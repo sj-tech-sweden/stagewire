@@ -43,8 +43,9 @@ class LightingFixture(Base):
     rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
+    # the public id of the power node it is plugged into (graph/ids.py); not a foreign key
     power_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     power_connector: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(

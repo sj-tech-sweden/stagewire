@@ -6,11 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio import service as audio_service
 from app.domains.audio.device_specs import effective_value, resolve_device_physical
-from app.domains.graph import rigging_native
+from app.domains.graph import power_native, rigging_native
 from app.domains.lighting import service as lighting_service
 from app.domains.rigging import power_tree
 from app.domains.rigging.calc import WeightLoad
-from app.domains.rigging.models import PowerNode, PowerNodeFeed
 from app.domains.venues.models import VenuePowerOutlet
 
 
@@ -130,11 +129,9 @@ def weight_loads(rows: list[LoadRow]) -> list[WeightLoad]:
     return [WeightLoad(r.label, r.weight_kg, r.rigging_point_id) for r in rows]
 
 
-def to_tree_nodes(
-    nodes: list[PowerNode], feeds: list[PowerNodeFeed] | None = None
-) -> list[power_tree.Node]:
+def to_tree_nodes(nodes: list, feeds: list | None = None) -> list[power_tree.Node]:
     feeds = feeds or []
-    feeds_by_node: dict[str, list[PowerNodeFeed]] = {}
+    feeds_by_node: dict[str, list] = {}
     for f in feeds:
         feeds_by_node.setdefault(str(f.node_id), []).append(f)
     tree_nodes = []
@@ -183,29 +180,20 @@ async def list_points(db: AsyncSession, job_id: UUID):
     return await rigging_native.load_points(db, job_id)
 
 
-async def list_nodes(db: AsyncSession, job_id: UUID) -> list[PowerNode]:
-    result = await db.execute(
-        select(PowerNode).where(PowerNode.job_id == job_id).order_by(PowerNode.position)
-    )
-    return list(result.scalars().all())
+async def list_nodes(db: AsyncSession, job_id: UUID):
+    return await power_native.load_nodes(db, job_id)
 
 
 async def get_point(db: AsyncSession, job_id: UUID, point_id: UUID):
     return await rigging_native.get_point(db, job_id, point_id)
 
 
-async def get_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> PowerNode | None:
-    result = await db.execute(
-        select(PowerNode).where(PowerNode.id == node_id, PowerNode.job_id == job_id)
-    )
-    return result.scalars().first()
+async def get_node(db: AsyncSession, job_id: UUID, node_id: UUID):
+    return await power_native.get_node(db, job_id, node_id)
 
 
-async def list_feeds(db: AsyncSession, job_id: UUID) -> list[PowerNodeFeed]:
-    result = await db.execute(
-        select(PowerNodeFeed).where(PowerNodeFeed.job_id == job_id).order_by(PowerNodeFeed.position)
-    )
-    return list(result.scalars().all())
+async def list_feeds(db: AsyncSession, job_id: UUID):
+    return await power_native.load_feeds(db, job_id)
 
 
 async def get_outlet(db: AsyncSession, venue_id: UUID | None, outlet_id: UUID):

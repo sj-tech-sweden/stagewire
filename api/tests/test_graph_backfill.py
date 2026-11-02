@@ -10,7 +10,6 @@ from app.domains.audio.models import (
     ProductionJob,
 )
 from app.domains.lighting.models import LightingFixture
-from app.domains.rigging.models import PowerNode
 from app.main import app
 
 BASE = "/api/v1"
@@ -54,21 +53,12 @@ async def _seed() -> str:
                     ChannelPatchPoint(channel_id=channel.id, position=1, device_id=desk.id),
                 ]
             )
-        source = PowerNode(job_id=job.id, kind="source", name="Mains")
-        db.add(source)
-        await db.flush()
-        distro = PowerNode(
-            job_id=job.id, kind="distro", name="Distro", parent_id=source.id, phase="L1"
-        )
-        db.add(distro)
-        await db.flush()
         fixture = LightingFixture(
             job_id=job.id,
             device_id=node.id,
             universe=1,
             dmx_address=1,
             fixture_type="Spot",
-            power_node_id=distro.id,
         )
         db.add(fixture)
         await db.commit()
@@ -82,10 +72,10 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 3 devices + 1 channel list + 2 channels + 2 power nodes
-        # 4 chain edges + 1 power feed + 1 fixture power
-        assert first.json()["devices"] == 8
-        assert first.json()["edges"] == 6
+        # 3 devices + 1 channel list + 2 channels
+        # 4 chain edges (power nodes are graph-native and not part of the sync)
+        assert first.json()["devices"] == 6
+        assert first.json()["edges"] == 4
 
         second = await client.post(f"{g}/backfill", headers=auth_headers)
         assert second.json()["devices"] == 0 and second.json()["edges"] == 0

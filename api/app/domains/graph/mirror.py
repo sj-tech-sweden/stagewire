@@ -4,7 +4,6 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import db as db_mod
@@ -12,7 +11,7 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
 from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
-from app.domains.graph import dmx_native, video_native
+from app.domains.graph import dmx_native, power_native, video_native
 from app.domains.graph.backfill import (
     CHANNEL_FIELDS,
     DEVICE_SPEC_FIELDS,
@@ -24,7 +23,7 @@ from app.domains.graph.backfill import (
     OWNED_ATTRS,
     backfill_job,
 )
-from app.domains.graph.ids import public_id
+from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import service as lighting_service
 
@@ -199,38 +198,6 @@ async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -
     return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
 
 
-POWER_ATTR_KEYS = ("rating_amps", "active", "outputs")
-
-
-def _power_node_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if data.get("name") is not None:
-        out["name"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if data.get("kind") in ("source", "distro", "breakout", "extension"):
-        out["kind"] = data["kind"]
-    for key in ("rating_amps", "active", "outputs"):
-        if key in attrs and not (attrs[key] is None and key != "rating_amps"):
-            out[key] = attrs[key]
-    return out
-
-
-async def _update_power_node(db: AsyncSession, job_id: UUID, node_id: UUID, changes: dict) -> None:
-    """Edit a power node through the legacy handler, so its rules and errors are the same."""
-    from app.domains.rigging import router as rigging_router
-    from app.domains.rigging import schemas as rigging_schemas
-
-    try:
-        await rigging_router.update_node(
-            job_id, node_id, rigging_schemas.PowerNodeUpdate(**changes), db
-        )
-    except HTTPException:
-        await db.rollback()
-        raise
-
-
 def _audio_device_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -292,11 +259,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
-    elif table == "power_nodes":
-        changes = _power_node_changes(data)
-        if not changes:
-            return False
-        await _update_power_node(db, job_id, legacy_id, changes)
     elif table == "lighting_fixtures":
         row = await lighting_service.get_fixture(db, job_id, legacy_id)
         changes = _fixture_changes(data)
@@ -314,19 +276,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         if row is None:
             return False
         persisted = False
-        power_changes = _power_node_changes({"attributes": data.get("attributes") or {}})
-        power_changes = {k: v for k, v in power_changes.items() if k in POWER_ATTR_KEYS}
-        if power_changes:
-            from app.domains.rigging.models import PowerNode
-
-            power_id = await db.scalar(
-                select(PowerNode.id).where(
-                    PowerNode.device_id == legacy_id, PowerNode.job_id == job_id
-                )
-            )
-            if power_id is not None:
-                await _update_power_node(db, job_id, power_id, power_changes)
-                persisted = True
         if fixture_changes:
             # a device node shows its last fixture, so that is the one edits go to
             fixtures = await _fixtures_on_device(db, job_id, legacy_id)
@@ -381,13 +330,6 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
-    elif table == "power_nodes":
-        from app.domains.rigging import router as rigging_router
-        from app.domains.rigging import service as rigging_service
-
-        if await rigging_service.get_node(db, job_id, legacy_id) is None:
-            return False
-        await rigging_router.delete_node(job_id, legacy_id, db)
     elif table == "lighting_fixtures":
         fixture = await lighting_service.get_fixture(db, job_id, legacy_id)
         if fixture is None:
@@ -420,8 +362,6 @@ def _point_changes(attrs: dict) -> dict:
 
 
 POWER_EDGE_TABLES = {
-    "power_nodes",
-    "power_node_feeds",
     "lighting_fixtures.power",
     "audio_devices.power",
 }
@@ -430,8 +370,6 @@ POWER_EDGE_TABLES = {
 async def _power_edge_to_legacy(
     db: AsyncSession, job_id: UUID, edge: ConnectionEdge, target: tuple[str, UUID], data: dict
 ) -> bool:
-    from app.domains.rigging import router as rigging_router
-    from app.domains.rigging import schemas as rigging_schemas
 
     table, legacy_id = target
     attrs = data.get("attributes") or {}
@@ -444,41 +382,12 @@ async def _power_edge_to_legacy(
     if not changes:
         return False
     try:
-        if table == "power_nodes":
-            await rigging_router.update_node(
-                job_id, legacy_id, rigging_schemas.PowerNodeUpdate(**changes), db
-            )
-        elif table == "power_node_feeds":
-            await _update_feed(db, job_id, legacy_id, changes)
-        else:
-            kind = "device" if table == "audio_devices.power" else "fixture"
-            await _assign_fixture_load(db, job_id, legacy_id, changes, kind)
+        kind = "device" if table == "audio_devices.power" else "fixture"
+        await _assign_fixture_load(db, job_id, legacy_id, changes, kind)
     except HTTPException:
         await db.rollback()
         raise
     return True
-
-
-async def _update_feed(db: AsyncSession, job_id: UUID, feed_id: UUID, changes: dict) -> None:
-    from app.domains.rigging import power_tree
-    from app.domains.rigging import router as rigging_router
-    from app.domains.rigging import service as rigging_service
-    from app.domains.rigging.models import PowerNodeFeed
-
-    feed = await db.get(PowerNodeFeed, feed_id)
-    if feed is None or feed.job_id != job_id:
-        return
-    for key, value in changes.items():
-        setattr(feed, key, value)
-    nodes = await rigging_service.list_nodes(db, job_id)
-    feeds = await rigging_service.list_feeds(db, job_id)
-    rows = await rigging_service.collect_loads(db, job_id)
-    evaluation = power_tree.evaluate(
-        rigging_service.to_tree_nodes(nodes, feeds), rigging_service.to_tree_loads(rows)
-    )
-    names = [n.name for n in nodes if n.id in (feed.node_id, feed.parent_id)]
-    await rigging_router._reject(rigging_router._problems(evaluation, *names))
-    await db.commit()
 
 
 async def _assign_fixture_load(
@@ -499,6 +408,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     if await video_native.point_from_edge(db, edge, data):
         return False
     if await dmx_native.step_from_edge(db, edge, data):
+        return False
+    if await power_native.edge_patch(db, job_id, edge, data):
         return False
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
@@ -540,6 +451,8 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         return False
     if await dmx_native.delete_step_edge(db, edge):
         return False
+    if await power_native.edge_delete(db, job_id, edge):
+        return False
     ref = (edge.attributes or {}).get("legacy_ref") or ""
     if ref.startswith("stage_plot_elements.link:"):
         _, element_id, role = ref.split(":")
@@ -548,20 +461,6 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
     if target is None:
         return False
     table, legacy_id = target
-    if table == "power_node_feeds":
-        from app.domains.rigging.models import PowerNodeFeed
-
-        feed = await db.get(PowerNodeFeed, legacy_id)
-        if feed is None or feed.job_id != job_id:
-            return False
-        await db.delete(feed)
-        await db.commit()
-        return True
-    if table == "power_nodes":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "A node's own feed cannot be cut; move the node to another parent or delete it",
-        )
     if table in ("lighting_fixtures.power", "audio_devices.power"):
         from app.domains.rigging import router as rigging_router
         from app.domains.rigging import schemas as rigging_schemas
@@ -639,6 +538,9 @@ async def link_edge_to_legacy(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"Link role must be one of {sorted(LINK_ROLES)}"
         )
+    if role == "power_node" and power_id_of(dst) is not None:
+        # power nodes are graph nodes; the link holds the power node's public id
+        target = ("power_nodes", power_id_of(dst))
     if role == "video_input" and dst.kind == "video_input":
         # video inputs have no legacy row; the link holds the node's public id
         target = ("video_inputs", public_id(dst))
@@ -729,6 +631,8 @@ def device_needs_protection(device: GraphDevice, data: dict) -> bool:
 
 def edge_needs_protection(edge: ConnectionEdge, data: dict) -> bool:
     ref = (edge.attributes or {}).get("legacy_ref")
+    if "power_feed" in (edge.attributes or {}):
+        return False  # a power feed: the power store owns it
     if "phase" in data and (ref or "").partition(":")[0] not in ("power_nodes", "power_node_feeds"):
         return True
     if not ref or ref.partition(":")[0] in MIRRORED_EDGE_TABLES:

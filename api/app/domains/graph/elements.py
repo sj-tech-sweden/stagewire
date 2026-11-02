@@ -24,13 +24,12 @@ from app.domains.audio.models import (
 )
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import schemas
+from app.domains.graph import power_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import public_id
 from app.domains.graph.lists import _by_ref
 from app.domains.graph.mirror import legacy_target
 from app.domains.graph.models import GraphDevice
-from app.domains.rigging.models import PowerNode
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph",
@@ -73,8 +72,6 @@ def _owned_by_job(column: str, job_id: UUID, value: UUID):
             .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
             .where(OutputPatchPoint.id == value, ChannelList.job_id == job_id)
         )
-    if column == "power_node_id":
-        return select(PowerNode.id).where(PowerNode.id == value, PowerNode.job_id == job_id)
     raise ValueError(column)
 
 
@@ -96,7 +93,10 @@ async def set_element_links(
     for column, value in data.items():
         if value is None:
             continue
-        if column == "rigging_point_id":
+        if column == "power_node_id":
+            # power nodes are graph nodes; the link holds the power node's public id
+            owned = await power_native.get_node(db, job_id, value) is not None
+        elif column == "rigging_point_id":
             # rigging points are graph nodes; the link holds the node's public id
             points = await db.scalars(
                 select(GraphDevice).where(

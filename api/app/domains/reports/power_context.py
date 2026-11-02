@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import AudioDevice
+from app.domains.graph import power_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.models import GraphDevice
 from app.domains.rigging import connectors
 from app.domains.rigging import router as rigging_router
-from app.domains.rigging.models import PowerNode
 from app.domains.venues.models import VenuePowerOutlet
 
 # Standard cord lengths in metres; a needed length is rounded up to one of them.
@@ -122,12 +122,11 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
             select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == job.venue_id)
         )
     }
-    power_rows = {
-        str(n.id): n for n in await db.scalars(select(PowerNode).where(PowerNode.job_id == job_id))
-    }
+    power_hosts = await power_native.host_nodes(db, job_id)
+    power_rows = {str(pid): power_native.node_view(pid, host) for pid, host in power_hosts.items()}
 
     def node_graph(node_id: str | None) -> GraphDevice | None:
-        return graph.get(f"power_nodes:{node_id}") if node_id else None
+        return power_hosts.get(UUID(str(node_id))) if node_id else None
 
     tree_rows: list[dict] = []
     cords: list[dict] = []

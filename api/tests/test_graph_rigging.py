@@ -438,7 +438,7 @@ async def test_extension_cords_breakouts_edits_and_plain_devices_on_the_power_tr
         legacy = next(
             n
             for n in (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
-            if n["id"] == breakout["legacy_ref"].split(":")[1]
+            if n["id"] == breakout["attributes"]["power_id"]
         )
         assert (legacy["name"], legacy["notes"]) == ("Breakout FOH", "behind the riser")
 
@@ -459,8 +459,7 @@ async def test_extension_cords_breakouts_edits_and_plain_devices_on_the_power_tr
             for n in (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json()
         }
         assert (
-            nodes[breakout["legacy_ref"].split(":")[1]]["parent_id"]
-            == cord["legacy_ref"].split(":")[1]
+            nodes[breakout["attributes"]["power_id"]]["parent_id"] == cord["attributes"]["power_id"]
         )
 
         # a plain device is plugged into a node with its power inlet recorded
@@ -626,7 +625,7 @@ async def test_the_power_sheet_gives_each_cable_a_standard_length_from_the_plot(
                 "outputs": [{"connector": "schuko", "count": 4}],
             },
         )
-        legacy_id = breakout["legacy_ref"].split(":")[1]
+        legacy_id = breakout["attributes"]["power_id"]
         res = await client.patch(
             f"{BASE}/jobs/{job_id}/power-nodes/{legacy_id}", json={"x_cm": 0, "y_cm": 0}, headers=h
         )

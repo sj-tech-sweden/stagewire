@@ -76,20 +76,27 @@ async def test_sync_refreshes_untouched_rows_and_is_a_no_op_when_nothing_changed
 
 @pytest.mark.asyncio
 async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_headers):
-    from app.domains.rigging.models import PowerNode
-
     job_id, (kick, _) = await _seed()
-    async with db_mod.SessionLocal() as db:
-        db.add(PowerNode(job_id=job_id, kind="source", name="Mains"))
-        await db.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        made = await client.post(
+            f"{BASE}/jobs/{job_id}/graph/power-nodes",
+            json={
+                "kind": "source",
+                "name": "Mains",
+                "feed_connector": "cee32_3p",
+                "rating_amps": 32,
+            },
+            headers=auth_headers,
+        )
+        assert made.status_code == 201, made.text
         await _sync(client, auth_headers, job_id)
         devices = (await _graph(client, auth_headers, job_id))["devices"]
         node = next(d for d in devices if d["name"] == "Kick")
         power = next(d for d in devices if d["name"] == "Mains")
         for row, changes, protected in (
             (node, {"canvas_x_cm": 120}, False),
-            (power, {"attributes": {"length_m": 8}}, True),
+            # a power node is graph-native now: nothing syncs it, so nothing needs protecting
+            (power, {"attributes": {"length_m": 8}}, False),
         ):
             res = await client.patch(
                 f"{BASE}/jobs/{job_id}/graph/devices/{row['id']}",

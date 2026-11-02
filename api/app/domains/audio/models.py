@@ -177,13 +177,10 @@ class AudioDevice(Base):
     # power node output it is plugged into. Fixtures and plot elements are plugged through their
     # own rows (see rigging.service.collect_loads); a plain device is a load through these.
     power_inlet: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    # the public id of the power node the device is plugged into (graph/ids.py); not a foreign key,
+    # power nodes live on the graph
     power_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey(
-            "power_nodes.id",
-            ondelete="SET NULL",
-            use_alter=True,
-            name="fk_audio_devices_power_node_id",
-        ),
+        Uuid(as_uuid=True),
         nullable=True,
         index=True,
     )
@@ -254,7 +251,7 @@ class StagePlotElement(Base):
         Uuid(as_uuid=True), nullable=True, index=True
     )
     power_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     power_connector: Mapped[str] = mapped_column(String(64), default="")
     graph_device_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -15,17 +15,17 @@ from app.core.db import get_db
 from app.domains.audio import service
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import rigging_native, schemas
+from app.domains.graph import power_native, rigging_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
-from app.domains.graph.ids import public_id
-from app.domains.graph.lists import _by_ref, _device_twin
+from app.domains.graph.ids import power_id_of, public_id
+from app.domains.graph.lists import _device_twin
 from app.domains.graph.mirror import _fixtures_on_device, legacy_target
 from app.domains.graph.models import GraphDevice
 from app.domains.lighting.models import LightingFixture
 from app.domains.rigging import connectors
 from app.domains.rigging import router as rigging_router
 from app.domains.rigging import schemas as rigging_schemas
-from app.domains.rigging.models import PowerNode
+from app.domains.rigging import service as rigging_service
 from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
 
 router = APIRouter(
@@ -91,6 +91,10 @@ async def _legacy(
     node = await db.get(GraphDevice, node_id)
     if node is None or node.job_id != job_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{label} not found")
+    if table == "power_nodes":
+        found = power_id_of(node)  # the node hosts a power node: its public id
+        if found is not None:
+            return found
     if table == "rigging_points" and node.kind == "rigging_point":
         return public_id(
             node
@@ -98,10 +102,6 @@ async def _legacy(
     target = legacy_target(node)
     if target is not None and target[0] == table:
         return target[1]
-    if table == "power_nodes" and target is not None and target[0] == "audio_devices":
-        found = await db.scalar(select(PowerNode.id).where(PowerNode.device_id == target[1]))
-        if found is not None:
-            return found
     raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"That is not a {label.lower()}")
 
 
@@ -151,20 +151,12 @@ async def outlet_source(
             node_id = await _group_source(db, job_id, outlet.group_id)
         else:
             node_id = await _single_outlet_source(db, job_id, outlet)
-    db.expire_all()
-    await backfill_job(db, job_id)
-    row = await db.get(PowerNode, node_id)
-    ref = f"audio_devices:{row.device_id}" if row and row.device_id else f"power_nodes:{node_id}"
-    return OutletSource(
-        node=schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref)),
-        connector=connector,
-    )
+    host = await power_native.host_of(db, job_id, node_id)
+    return OutletSource(node=schemas.GraphDeviceRead.model_validate(host), connector=connector)
 
 
 async def _single_outlet_source(db: AsyncSession, job_id: UUID, outlet: VenuePowerOutlet) -> UUID:
-    existing = await db.scalar(
-        select(PowerNode).where(PowerNode.job_id == job_id, PowerNode.venue_outlet_id == outlet.id)
-    )
+    existing = await power_native.find_by_setting(db, job_id, "venue_outlet_id", outlet.id)
     if existing is not None:
         return existing.id
     created = await rigging_router.create_node(
@@ -203,9 +195,7 @@ async def _group_source(db: AsyncSession, job_id: UUID, group_id: UUID) -> UUID:
         rigging_schemas.PowerOutput(connector=key, count=min(count, 99), phase=phase)
         for key, count in sorted(counts.items())
     ]
-    existing = await db.scalar(
-        select(PowerNode).where(PowerNode.job_id == job_id, PowerNode.venue_group_id == group_id)
-    )
+    existing = await power_native.find_by_setting(db, job_id, "venue_group_id", group_id)
     if existing is not None:
         await rigging_router.update_node(
             job_id,
@@ -235,8 +225,7 @@ async def _group_source(db: AsyncSession, job_id: UUID, group_id: UUID) -> UUID:
         db,
     )
     node_id = UUID(str(created["id"]))
-    row = await db.get(PowerNode, node_id)
-    row.venue_group_id = group_id
+    await power_native.update_node(db, job_id, node_id, {"venue_group_id": group_id})
     await db.commit()
     return node_id
 
@@ -252,19 +241,14 @@ async def create_power_node(
         data["device_id"] = await _device_twin(db, job_id, payload.device_id)
     extra = {k: data.pop(k) for k in ("length_m", "stockwire_product_id", "stockwire_product_name")}
     node = await rigging_router.create_node(job_id, rigging_schemas.PowerNodeCreate(**data), db)
-    await backfill_job(db, job_id)
-    row = await db.scalar(select(PowerNode).where(PowerNode.id == UUID(str(node["id"]))))
-    ref = f"audio_devices:{row.device_id}" if row and row.device_id else f"power_nodes:{node['id']}"
-    return await _decorate(db, job_id, ref, extra)
+    host = await power_native.host_of(db, job_id, UUID(str(node["id"])))
+    return await _decorate(db, host, extra)
 
 
-async def _decorate(
-    db: AsyncSession, job_id: UUID, ref: str, extra: dict
-) -> schemas.GraphDeviceRead:
+async def _decorate(db: AsyncSession, node: GraphDevice, extra: dict) -> schemas.GraphDeviceRead:
     """Put what only the graph knows about a power node on it: the length of an extension cord
     (``length_m``) and the Stockwire product it is rented as. These are not legacy columns, so the
     attribute makes the node ``graph_edited`` and the sync leaves it alone."""
-    node = await _by_ref(db, job_id, ref)
     if extra.get("length_m") is not None:
         node.attributes = {**node.attributes, "length_m": extra["length_m"]}
         node.graph_edited = True
@@ -295,11 +279,10 @@ async def move_power_node(
     if payload.parent_id is None:
         # Cutting the feed leaves the node unpowered; the legacy update would refuse that as an
         # error on the node, so the link is cleared directly.
-        row = await db.get(PowerNode, legacy_id)
-        row.parent_id, row.feed_connector, row.phase = None, "", None
+        await power_native.update_node(
+            db, job_id, legacy_id, {"parent_id": None, "feed_connector": "", "phase": None}
+        )
         await db.commit()
-        db.expire_all()
-        await backfill_job(db, job_id)
         return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))
     parent = await _legacy(db, job_id, payload.parent_id, "power_nodes", "Parent node")
     await rigging_router.update_node(
@@ -310,8 +293,6 @@ async def move_power_node(
         ),
         db,
     )
-    db.expire_all()
-    await backfill_job(db, job_id)
     return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))
 
 
@@ -336,7 +317,7 @@ async def insert_extension(
     """
     await _job(db, job_id)
     legacy_id = await _legacy(db, job_id, node_id, "power_nodes", "Power node")
-    row = await db.get(PowerNode, legacy_id)
+    row = await rigging_service.get_node(db, job_id, legacy_id)
     if row is None or row.parent_id is None or not row.feed_connector:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "Only a node with a feed can get an extension"
@@ -364,12 +345,9 @@ async def insert_extension(
         await db.rollback()
         await rigging_router.delete_node(job_id, cord_id, db)
         raise
-    db.expire_all()
-    await backfill_job(db, job_id)
     return await _decorate(
         db,
-        job_id,
-        f"power_nodes:{cord_id}",
+        await power_native.host_of(db, job_id, cord_id),
         {
             "length_m": payload.length_m,
             "stockwire_product_id": payload.stockwire_product_id,
@@ -395,7 +373,6 @@ async def add_power_feed(
         ),
         db,
     )
-    await backfill_job(db, job_id)
     return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))
 
 
@@ -459,9 +436,8 @@ async def _id_map(db: AsyncSession, job_id: UUID) -> dict[str, str]:
     for row in rows:  # graph-native rows are known by their public id
         if row.kind == "rigging_point":
             out[str(public_id(row))] = str(row.id)
-    for node in (await db.scalars(select(PowerNode).where(PowerNode.job_id == job_id))).all():
-        if node.device_id and f"audio_devices:{node.device_id}" in by_ref:
-            out[str(node.id)] = by_ref[f"audio_devices:{node.device_id}"]
+    for power_id, host in (await power_native.host_nodes(db, job_id)).items():
+        out[str(power_id)] = str(host.id)
     for fx in (
         await db.scalars(select(LightingFixture).where(LightingFixture.job_id == job_id))
     ).all():

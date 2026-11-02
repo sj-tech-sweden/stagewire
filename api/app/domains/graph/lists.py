@@ -20,7 +20,7 @@ from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import dmx_native, schemas, video_native
 from app.domains.graph.backfill import backfill_job, job_lock
-from app.domains.graph.ids import public_id
+from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.mirror import (
     KNOWN_DEVICE_TYPES,
     _audio_device_changes,
@@ -155,7 +155,7 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
         return target[1]
     if target is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
-    if node.kind in NON_DEVICE_KINDS:
+    if node.kind in NON_DEVICE_KINDS or (node.domain == "power" and power_id_of(node) is not None):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
     changes = _audio_device_changes(
         {

@@ -15,10 +15,9 @@ from app.domains.audio.models import (
     OutputPatchPoint,
     StagePlotElement,
 )
-from app.domains.graph.ids import public_id
+from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import LightingFixture
-from app.domains.rigging.models import PowerNode, PowerNodeFeed
 
 FAN_OUT = 64
 
@@ -104,7 +103,6 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
-    "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id"},
     "audio_devices": {
         "power_inlet",
         *DEVICE_SPEC_FIELDS,
@@ -132,8 +130,6 @@ MIRRORED_EDGE_TABLES = {
     "output_patch_points",
     "channel_list_outputs",
     "stage_plot_elements.link",
-    "power_nodes",
-    "power_node_feeds",
     "lighting_fixtures.power",
     "audio_devices.power",
 }
@@ -224,6 +220,7 @@ class Backfill:
         self.seen_edges: set[str] = set()
         self.video_inputs: dict[uuid.UUID, GraphDevice] = {}
         self.rigging_points: dict[uuid.UUID, GraphDevice] = {}
+        self.power_nodes: dict[uuid.UUID, GraphDevice] = {}
         self.result = BackfillResult()
 
     async def load_existing(self) -> None:
@@ -234,6 +231,10 @@ class Backfill:
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
+            power_id = power_id_of(device)
+            if power_id is not None:
+                # power nodes live only in the graph; loads hold the power node's public id
+                self.power_nodes[power_id] = device
             if device.kind == "rigging_point":
                 # rigging points live only in the graph; loads hold the node's public id
                 self.rigging_points[public_id(device)] = device
@@ -801,7 +802,7 @@ class Backfill:
             }
             dmx = {k: v for k, v in dmx.items() if v not in (None, "")}
             rigging = self.rigging_points.get(fx.rigging_point_id)
-            feeder = self.devices.get(f"power_nodes:{fx.power_node_id}")
+            feeder = self.power_nodes.get(fx.power_node_id)
             dmx.update(
                 rigging_point_id=str(rigging.id) if rigging else None,
                 power_node_id=str(feeder.id) if feeder else None,
@@ -832,7 +833,7 @@ class Backfill:
         for fx in fixtures:
             if fx.power_node_id:
                 node = fixture_nodes[fx.id]
-                src = self.devices.get(f"power_nodes:{fx.power_node_id}")
+                src = self.power_nodes.get(fx.power_node_id)
                 if src is not None:
                     self.edge(
                         f"lighting_fixtures.power:{fx.id}",
@@ -845,60 +846,8 @@ class Backfill:
                     )
 
     async def power(self) -> None:
-        nodes = (
-            await self.db.scalars(select(PowerNode).where(PowerNode.job_id == self.job_id))
-        ).all()
-        for node in nodes:
-            attributes = {
-                k: v
-                for k, v in {
-                    "rating_amps": node.rating_amps,
-                    "active": node.active,
-                    "outputs": node.outputs,
-                    "venue_outlet_id": str(node.venue_outlet_id) if node.venue_outlet_id else None,
-                    "venue_group_id": str(node.venue_group_id) if node.venue_group_id else None,
-                }.items()
-                if v not in (None, [])
-            }
-            linked = self.devices.get(f"audio_devices:{node.device_id}") if node.device_id else None
-            if linked is not None:
-                if not linked.graph_edited:
-                    linked.attributes = {**linked.attributes, **attributes}
-                self.devices[f"power_nodes:{node.id}"] = linked
-                continue
-            self.device(
-                f"power_nodes:{node.id}",
-                domain="power",
-                kind=node.kind,
-                name=node.name or node.kind,
-                notes=node.notes or "",
-                position=node.position,
-                attributes=attributes,
-                ports=[],
-                canvas_x_cm=node.x_cm,
-                canvas_y_cm=node.y_cm,
-            )
-        for node in nodes:
-            if node.parent_id:
-                self._power_edge(
-                    f"power_nodes:{node.id}",
-                    node.parent_id,
-                    node.id,
-                    node.feed_connector,
-                    node.phase,
-                )
+        """Power nodes live on the graph (power_native.py); the sync only draws what plugs in."""
         await self._device_power()
-        feeds = (
-            await self.db.scalars(select(PowerNodeFeed).where(PowerNodeFeed.job_id == self.job_id))
-        ).all()
-        for feed in feeds:
-            self._power_edge(
-                f"power_node_feeds:{feed.id}",
-                feed.parent_id,
-                feed.node_id,
-                feed.feed_connector,
-                feed.phase,
-            )
 
     async def _device_power(self) -> None:
         """Devices plugged into a power node: the load attributes and the power edge to the node.
@@ -927,7 +876,7 @@ class Backfill:
         ).all()
         for row in plugged:
             node = self.devices.get(f"audio_devices:{row.id}")
-            feeder = self.devices.get(f"power_nodes:{row.power_node_id}")
+            feeder = self.power_nodes.get(row.power_node_id)
             if node is None or feeder is None:
                 continue
             node.attributes = {
@@ -944,24 +893,6 @@ class Backfill:
                 self.port(node, "in", "power", row.power_connector),
                 attributes={"connector": row.power_connector},
             )
-
-    def _power_edge(
-        self, ref: str, parent_id: uuid.UUID, node_id: uuid.UUID, connector: str, phase: str | None
-    ) -> None:
-        parent = self.devices.get(f"power_nodes:{parent_id}")
-        node = self.devices.get(f"power_nodes:{node_id}")
-        if parent is None or node is None:
-            return
-        self.edge(
-            ref,
-            "power",
-            parent,
-            self.port(parent, "out", "power", connector),
-            node,
-            self.port(node, "in", "power", connector),
-            phase=phase,
-            attributes={"connector": connector},
-        )
 
 
 _JOB_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
@@ -1009,6 +940,10 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
         await builder.plot_links()
         await builder.prune()
     await db.flush()
+    # a sync resets a device node's ports from its connector groups: put the power ports back
+    from app.domains.graph import power_native
+
+    await power_native.rebuild_feeds(db, job_id)
     result = builder.result
     for row in [*builder.devices.values(), *builder.edge_rows.values()]:
         is_new = row.id not in builder.loaded_revisions

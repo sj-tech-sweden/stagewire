@@ -10,8 +10,8 @@ from app.domains.audio import service as audio_service
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
+from app.domains.graph.models import GraphDevice
 from app.domains.rigging import connectors
-from app.domains.rigging.models import PowerNode
 from app.domains.venues import schemas, service
 from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
 
@@ -164,8 +164,13 @@ async def delete_power_group(
         select(VenuePowerOutlet).where(VenuePowerOutlet.group_id == group_id)
     ):
         outlet.group_id = None
-    for node in await db.scalars(select(PowerNode).where(PowerNode.venue_group_id == group_id)):
-        node.venue_group_id = None
+    # power nodes made from the group (on the graph) forget it
+    for node in await db.scalars(
+        select(GraphDevice).where(
+            GraphDevice.attributes["venue_group_id"].as_string() == str(group_id)
+        )
+    ):
+        node.attributes = {k: v for k, v in node.attributes.items() if k != "venue_group_id"}
     await db.delete(group)
     await db.commit()
 

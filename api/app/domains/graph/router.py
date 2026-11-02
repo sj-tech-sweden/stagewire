@@ -16,12 +16,14 @@ from app.domains.graph import (
     backfill,
     dmx_native,
     mirror,
+    power_native,
     readers,
     rigging_native,
     schemas,
     topology,
     video_native,
 )
+from app.domains.graph.ids import power_id_of
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -157,6 +159,7 @@ async def update_device(
             device.graph_edited = True
         await db.flush()  # the version check fails here, before the legacy row is touched
         await dmx_native.after_patch(db, device, data)
+        await power_native.after_patch(db, job_id, device, data)
         mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         await db.commit()
         if mirrored:
@@ -193,6 +196,9 @@ async def delete_device(
     async def remove() -> None:
         for edge in touching:
             await db.delete(edge)
+        if power_id_of(device) is not None:
+            # the engine's rules (nothing fed from it, nothing plugged in); a device keeps living
+            await power_native.check_deletable(db, job_id, power_id_of(device))
         if device.kind == "rigging_point":
             await rigging_native.clear_references(db, device)
         if device.kind in video_native.VIDEO_KINDS:
@@ -202,6 +208,8 @@ async def delete_device(
         await db.delete(device)
         await db.flush()
         await dmx_native.drop_node(db, job_id, device_id)
+        if power_id_of(device) is not None:
+            await power_native.rebuild_feeds(db, job_id)
         try:
             await mirror.delete_device_twin(db, job_id, device)
         except HTTPException:
