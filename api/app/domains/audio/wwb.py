@@ -16,8 +16,10 @@ The historical free-text ``wireless_frequency`` string is parsed on read for
 backwards compatibility and removed by a migration.
 """
 
+import copy
 import re
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from xml.etree.ElementTree import Element
 
 # A number with an optional decimal point or comma (European decimals).
@@ -307,3 +309,84 @@ def apply_stagewire_to_show_file(template_xml: str, channels: list) -> str:
         _set_text(entry, "source_name", _channel_display_name(channel))
 
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+
+
+# A real, minimal Wireless Workbench show file (reduced from a Shure export). WWB show
+# files have a large, version-specific structure that cannot be hand-authored, so for
+# "export without an upload" we clone this validated template and write Stagewire's
+# channels into it — the same mechanism as round-tripping an uploaded file.
+_TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "wwb_template.shw"
+
+
+def _expand_template_to(template_xml: str, count: int) -> str:
+    """Clone a WWB template's single device/channel/coordination entry up to ``count``.
+
+    The bundled template ships with one channel; a from-scratch export needs one per
+    Stagewire wireless channel. Cloning the real (WWB-valid) structure is what keeps the
+    emitted file openable in WWB, since the schema cannot be reproduced from scratch.
+    """
+    if count <= 0:
+        return template_xml
+    root = ET.fromstring(template_xml)
+    device = root.find(".//inventory/device")
+    if device is None:
+        return template_xml
+    device_id = (device.findtext("id") or "").strip()
+
+    channels = device.findall("channel")
+    if channels:
+        proto = channels[0]
+        for _ in range(len(channels), count):
+            device.append(copy.deepcopy(proto))
+        for extra in device.findall("channel")[count:]:
+            device.remove(extra)
+        for i, ch in enumerate(device.findall("channel")):
+            ch.set("number", str(i + 1))
+
+    mc = root.find(".//coordinated_data_root/mic_channels")
+    if mc is not None:
+        fes = mc.findall("freq_entry")
+        if fes:
+            proto_fe = fes[0]
+            for _ in range(len(fes), count):
+                mc.append(copy.deepcopy(proto_fe))
+            for extra in mc.findall("freq_entry")[count:]:
+                mc.remove(extra)
+            fes = mc.findall("freq_entry")
+            for i, fe in enumerate(fes):
+                fe.set("id", f"{device_id}-{i}")
+                sid = fe.find("source_id")
+                if sid is not None:
+                    sid.text = f"{device_id}-{i}"
+            mc.set("count", str(len(fes)))
+
+    cm = root.find(".//coordination_info/channel_management")
+    if cm is not None:
+        chans_el = cm.find("channels")
+        if chans_el is not None:
+            ids = chans_el.findall("id")
+            if ids:
+                proto_id = ids[0]
+                for _ in range(len(ids), count):
+                    chans_el.append(copy.deepcopy(proto_id))
+                for extra in chans_el.findall("id")[count:]:
+                    chans_el.remove(extra)
+                ids = chans_el.findall("id")
+                for i, id_el in enumerate(ids):
+                    id_el.text = f"{device_id}-{i}"
+                    id_el.set("coordination_include", "true")
+                    id_el.set("active_channel", "true")
+
+    return ET.tostring(root, encoding="unicode")
+
+
+def build_show_file_from_scratch(channels: list) -> str:
+    """Generate a WWB ``.shw`` from Stagewire channels when no file was uploaded.
+
+    Clones the bundled template (expanded to the number of wireless channels) and writes
+    Stagewire's frequencies/names into it, so the result opens in Wireless Workbench.
+    """
+    template = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    wireless = [c for c in channels if getattr(c, "input_type", None) == "wireless"]
+    expanded = _expand_template_to(template, len(wireless))
+    return apply_stagewire_to_show_file(expanded, channels)

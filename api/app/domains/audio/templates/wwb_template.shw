@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<show date="Mon Nov 2 2026" time="19:04:01" version="1.0" appl_version="7.9.0.104" source="Stagewire">
+    <show_properties version="1.0">
+        <show_info>
+            <name>Test</name>
+            <customer />
+        </show_info>
+        <point_of_contact_info>
+            <name />
+            <address />
+            <phone />
+            <email />
+            <remember_poc>false</remember_poc>
+        </point_of_contact_info>
+        <venue_info>
+            <name />
+            <address />
+            <phone />
+            <email />
+        </venue_info>
+        <notes />
+    </show_properties>
+    <inventory version="2.1">
+        <device>
+            <id dcid="0450F014-FD5A-11E3-BBD3-0015C5F3F612">AF560EC4-422B-42B1-AA1B-80208E775D36</id>
+            <series>SLXD</series>
+            <model type="10">SLXD4D</model>
+            <manufacturer type="10">Shure</manufacturer>
+            <production_id type="10" />
+            <firmware_version type="12">0000000000000000</firmware_version>
+            <firmware_version_valid type="1">false</firmware_version_valid>
+            <firmware_version_hosted type="12">0000000000000000</firmware_version_hosted>
+            <device_name type="10">SLXD4D</device_name>
+            <mac_address type="12" />
+            <ip_mode type="3">0</ip_mode>
+            <ip_address type="3">0</ip_address>
+            <ip_subnet type="3">0</ip_subnet>
+            <ip_gateway type="3">0</ip_gateway>
+            <scan_freq_step_capability type="10">;aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</scan_freq_step_capability>
+            <scan_rbw_capability type="10">;aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</scan_rbw_capability>
+            <start type="3">0</start>
+            <end type="3">0</end>
+            <band type="10">H56</band>
+            <front_panel_lock type="3">0</front_panel_lock>
+            <zone type="12">Default</zone>
+            <serial_number type="10" />
+            <channel number="1">
+                <channel_name type="10">Channel 1</channel_name>
+                <color type="3">5789784</color>
+                <audio_gain type="2">12</audio_gain>
+                <frequency type="3">558000</frequency>
+                <incl_group type="12">00000000-0000-0000-0000-000000000000</incl_group>
+                <ir_sync_tx_power type="3">255</ir_sync_tx_power>
+                <ir_sync_remote_lock type="3">255</ir_sync_remote_lock>
+                <ir_sync_bat_type type="3">255</ir_sync_bat_type>
+                <rf_scaling_factor type="3">1</rf_scaling_factor>
+                <audio_out_level_switch type="3">0</audio_out_level_switch>
+                <ir_sync_handheld_offset type="2">-128</ir_sync_handheld_offset>
+                <ir_sync_bodypack_offset type="2">-128</ir_sync_bodypack_offset>
+                <ir_sync_high_pass type="3">255</ir_sync_high_pass>
+                <ir_sync_plugon_phantom_power type="3">255</ir_sync_plugon_phantom_power>
+                <ir_sync_plugon_offset type="2">-128</ir_sync_plugon_offset>
+                <ir_sync_plugon_tx_sensitivity type="2">-1</ir_sync_plugon_tx_sensitivity>
+                <tags type="10" />
+                <ir_sync_auto_lock type="3">255</ir_sync_auto_lock>
+                <ir_sync_rf_power_plugon type="3">255</ir_sync_rf_power_plugon>
+                <group_channel type="10">--,--</group_channel>
+            </channel>
+        </device>
+        <zones version="1.1">
+            <zone ordinal="0" color="#7863ed">Default</zone>
+            <zone_matrix>
+                <from zone="Default">
+                    <to zone="Default">
+                        <ch-ch>1</ch-ch>
+                        <ch-imd>1</ch-imd>
+                    </to>
+                </from>
+            </zone_matrix>
+        </zones>
+    </inventory>
+    <coordination_info>
+        <channel_management version="1.0">
+            <channels>
+                <id coordination_include="true" active_channel="true">AF560EC4-422B-42B1-AA1B-80208E775D36-0</id>
+            </channels>
+            <active_channel_list sort_order="0" sort_col="-1" />
+            <backup_channel_list sort_order="0" sort_col="-1" />
+        </channel_management>
+        <scan_data version="1.3">
+            <merged_scans />
+            <threshold>-85</threshold>
+            <higher_threshold>-60</higher_threshold>
+        </scan_data>
+        <channel_exclusions version="1.1">
+            <location_info>
+                <search_type>city based</search_type>
+                <radius units="Kilometers">80</radius>
+                <country>Sweden</country>
+                <found_count>29</found_count>
+                <found_count>29</found_count>
+                <tv_spectrum_format>8 MHz</tv_spectrum_format>
+                <state>Jönköpings län</state>
+                <city>Aneby</city>
+                <zipcode>578 92</zipcode>
+            </location_info>
+            <channel_avoidance_info>
+                <channel>
+                    <number>2</number>
+                    <call_sign />
+                    <tv_station_country />
+                    <tv_station_latitude />
+                    <tv_station_longitude />
+                    <tv_chann_start_freq>47,000 MHz</tv_chann_start_freq>
+                    <tv_chann_end_freq>54,000 MHz</tv_chann_end_freq>
+                    <distance>0</distance>
+                    <type>4</type>
+                    <db_source>0</db_source>
+                    <power>0</power>
+                    <exclude>false</exclude>
+                </channel>
+                <channel>
+                    <number>3</number>
+                    <call_sign />
+                    <tv_station_country />
+                    <tv_station_latitude />
+                    <tv_station_longitude />
+                    <tv_chann_start_freq>54,000 MHz</tv_chann_start_freq>
+                    <tv_chann_end_freq>61,000 MHz</tv_chann_end_freq>
+                    <distance>0</distance>
+                    <type>4</type>
+                    <db_source>0</db_source>
+                    <power>0</power>
+                    <exclude>false</exclude>
+                </channel>
+                <channel>
+                    <number>4</number>
+                    <call_sign />
+                    <tv_station_country />
+                    <tv_station_latitude />
+                    <tv_station_longitude />
+                    <tv_chann_start_freq>61,000 MHz</tv_chann_start_freq>
+                    <tv_chann_end_freq>68,000 MHz</tv_chann_end_freq>
+                    <distance>0</distance>
+                    <type>4</type>
+                    <db_source>0</db_source>
+                    <power>0</power>
+                    <exclude>false</exclude>
+                </channel>
+                <channel>
+                    <number>5</number>
+                    <call_sign />
+                    <tv_station_country />
+                    <tv_station_latitude />
+                    <tv_station_longitude />
+                    <tv_chann_start_freq>174,000 MHz</tv_chann_start_freq>
+                    <tv_chann_end_freq>181,000 MHz</tv_chann_end_freq>
+                    <distance>0</distance>
+                    <type>4</type>
+                    <db_source>0</db_source>
+                    <power>0</power>
+                    <exclude>false</exclude>
+                </channel>
+                <channel>
+                    <number>6</number>
+                    <call_sign />
+                    <tv_station_country />
+                    <tv_station_latitude />
+                    <tv_station_longitude />
+                    <tv_chann_start_freq>181,000 MHz</tv_chann_start_freq>
+                    <tv_chann_end_freq>188,000 MHz</tv_chann_end_freq>
+                    <distance>0</distance>
+                    <type>4</type>
+                    <db_source>0</db_source>
+                    <power>0</power>
+                    <exclude>false</exclude>
+                </channel>
+            </channel_avoidance_info>
+        </channel_exclusions>
+        <band_planning version="1.0">
+            <accounted>false</accounted>
+            <country>Sweden</country>
+            <user_group />
+            <band_plan_accounted>false</band_plan_accounted>
+        </band_planning>
+    </coordination_info>
+    <CFLs version="1.0" />
+    <plot_info>
+        <coordination_plot version="1.2">
+            <plots />
+            <start>30,000 MHz</start>
+            <center>1015,000 MHz</center>
+            <end>2000,000 MHz</end>
+            <span>1970,000 MHz</span>
+        </coordination_plot>
+    </plot_info>
+    <custom_user_group_list>
+        <inclusion_list version="1.0" name="Custom" active="false" uuid="fa92350d-19cb-4df8-82c0-41e20772f5b5" auto-generated-list="0" />
+    </custom_user_group_list>
+    <band_plan_group_list version="1.0" />
+    <coordinated_data_root id="416702ed-c955-43bc-9381-e2f1e368c3c9" version="0.3">
+        <mic_channels count="4" units="khz">
+            <freq_entry id="AF560EC4-422B-42B1-AA1B-80208E775D36-0" tag="" color="#585858">
+                <compat_key>
+                    <zone>Default</zone>
+                    <series>SLXD</series>
+                    <band>H56</band>
+                    <mode />
+                    <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                </compat_key>
+                <compat_prof_id>2503b81f-94de-519d-da2e-fa14fcc079e4</compat_prof_id>
+                <value>559825</value>
+                <gr_ch>G:-- Ch:--</gr_ch>
+                <context_role>7</context_role>
+                <origin>0</origin>
+                <compat_level>0</compat_level>
+                <coord_order>730900</coord_order>
+                <imd_source>1</imd_source>
+                <vip>0</vip>
+                <synth_status>1</synth_status>
+                <chann_num>0</chann_num>
+                <diversity div_partner_id="-1" div_mode="0" />
+                <model>SLXD4D</model>
+                <manufacturer>Shure</manufacturer>
+                <source_id>AF560EC4-422B-42B1-AA1B-80208E775D36-0</source_id>
+                <source_name>Shure</source_name>
+                <dev_category>
+                    <dev_type>Receiver</dev_type>
+                    <dev_type>Microphone</dev_type>
+                    <dev_type>Rack</dev_type>
+                </dev_category>
+            </freq_entry>
+            <freq_entry id="AF560EC4-422B-42B1-AA1B-80208E775D36-1" tag="" color="#585858">
+                <compat_key>
+                    <zone>Default</zone>
+                    <series>SLXD</series>
+                    <band>H56</band>
+                    <mode />
+                    <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                </compat_key>
+                <compat_prof_id>2503b81f-94de-519d-da2e-fa14fcc079e4</compat_prof_id>
+                <value>560600</value>
+                <gr_ch>G:-- Ch:--</gr_ch>
+                <context_role>7</context_role>
+                <origin>0</origin>
+                <compat_level>0</compat_level>
+                <coord_order>730900</coord_order>
+                <imd_source>1</imd_source>
+                <vip>0</vip>
+                <synth_status>1</synth_status>
+                <chann_num>1</chann_num>
+                <diversity div_partner_id="-1" div_mode="0" />
+                <model>SLXD4D</model>
+                <manufacturer>Shure</manufacturer>
+                <source_id>AF560EC4-422B-42B1-AA1B-80208E775D36-1</source_id>
+                <source_name>Shure</source_name>
+                <dev_category>
+                    <dev_type>Receiver</dev_type>
+                    <dev_type>Microphone</dev_type>
+                    <dev_type>Rack</dev_type>
+                </dev_category>
+            </freq_entry>
+            <freq_entry id="98CE3161-24CD-4634-9D32-CE76BE2D8B8B-0" tag="" color="#585858">
+                <compat_key>
+                    <zone>Default</zone>
+                    <series>SLXD</series>
+                    <band>H56</band>
+                    <mode />
+                    <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                </compat_key>
+                <compat_prof_id>2503b81f-94de-519d-da2e-fa14fcc079e4</compat_prof_id>
+                <value>558825</value>
+                <gr_ch>G:-- Ch:--</gr_ch>
+                <context_role>7</context_role>
+                <origin>0</origin>
+                <compat_level>0</compat_level>
+                <coord_order>730900</coord_order>
+                <imd_source>1</imd_source>
+                <vip>0</vip>
+                <synth_status>1</synth_status>
+                <chann_num>0</chann_num>
+                <diversity div_partner_id="-1" div_mode="0" />
+                <model>SLXD4D</model>
+                <manufacturer>Shure</manufacturer>
+                <source_id>98CE3161-24CD-4634-9D32-CE76BE2D8B8B-0</source_id>
+                <source_name>Shure</source_name>
+                <dev_category>
+                    <dev_type>Receiver</dev_type>
+                    <dev_type>Microphone</dev_type>
+                    <dev_type>Rack</dev_type>
+                </dev_category>
+            </freq_entry>
+            <freq_entry id="98CE3161-24CD-4634-9D32-CE76BE2D8B8B-1" tag="" color="#585858">
+                <compat_key>
+                    <zone>Default</zone>
+                    <series>SLXD</series>
+                    <band>H56</band>
+                    <mode />
+                    <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                </compat_key>
+                <compat_prof_id>2503b81f-94de-519d-da2e-fa14fcc079e4</compat_prof_id>
+                <value>558275</value>
+                <gr_ch>G:-- Ch:--</gr_ch>
+                <context_role>7</context_role>
+                <origin>0</origin>
+                <compat_level>0</compat_level>
+                <coord_order>730900</coord_order>
+                <imd_source>1</imd_source>
+                <vip>0</vip>
+                <synth_status>1</synth_status>
+                <chann_num>1</chann_num>
+                <diversity div_partner_id="-1" div_mode="0" />
+                <model>SLXD4D</model>
+                <manufacturer>Shure</manufacturer>
+                <source_id>98CE3161-24CD-4634-9D32-CE76BE2D8B8B-1</source_id>
+                <source_name>Shure</source_name>
+                <dev_category>
+                    <dev_type>Receiver</dev_type>
+                    <dev_type>Microphone</dev_type>
+                    <dev_type>Rack</dev_type>
+                </dev_category>
+            </freq_entry>
+        </mic_channels>
+        <compatibility_profile_settings count="1" version="1.0">
+            <profile>
+                <band>H56</band>
+                <series>SLXD</series>
+                <tx_profile />
+                <zone>Default</zone>
+                <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                <compat_profile id="0844cf6b-8403-9e3e-0d7f-2d2e3d99231e" imd_source="1" version="0.0.0.1" name="Standard" synthesizable="1">
+                    <spacing freq_units="KHz">
+                        <ch_ch>450</ch_ch>
+                        <imd_2t3o>200</imd_2t3o>
+                        <imd_2t5o>0</imd_2t5o>
+                        <imd_2t7o>0</imd_2t7o>
+                        <imd_2t9o>0</imd_2t9o>
+                        <imd_3t3o>0</imd_3t3o>
+                    </spacing>
+                    <filter type="0">
+                        <filter_start>-100000</filter_start>
+                        <filter_end>100000</filter_end>
+                        <filter_center>0</filter_center>
+                    </filter>
+                </compat_profile>
+            </profile>
+        </compatibility_profile_settings>
+        <keys_coord_order version="1.1">
+            <profile>
+                <band>H56</band>
+                <series>SLXD</series>
+                <tx_profile />
+                <zone />
+                <incl_group>00000000-0000-0000-0000-000000000000</incl_group>
+                <coord_order>730900</coord_order>
+            </profile>
+        </keys_coord_order>
+    </coordinated_data_root>
+    <monitoring_info version="2.2">
+        <channel_order />
+        <charger_order />
+        <chooser_widget id="1">
+            <sort_section>2</sort_section>
+            <sort_order>0</sort_order>
+        </chooser_widget>
+        <chooser_widget id="2">
+            <sort_section>4</sort_section>
+            <sort_order>0</sort_order>
+        </chooser_widget>
+        <device_chooser_layout>24,973,24,24,24,24</device_chooser_layout>
+        <device_chooser_selection>0,1,0,0,0,0</device_chooser_selection>
+        <strip_parameters>
+            <enabled_options>CS_GraphicsChannelNameNetworkLockWidget,CS_FrequencyTvChannelWidget,CS_GraphicsRfAudioWidget,CS_TxInfoWidget,CS_GraphicsRfPowerContainer,CS_GraphicsEncryptionContainer,CS_GraphicsBatteryAudioModeWidget,CS_GraphicsCarouselContainer,CS_GraphicsChargerStripView,CS_GraphicsAccessPointStripView</enabled_options>
+        </strip_parameters>
+        <autolog_parameters>
+            <enabled_plots>22,7,1,25,3,27,28,26,8,9,10,11,29,30,13,14,24</enabled_plots>
+            <plot_view_mode>2</plot_view_mode>
+        </autolog_parameters>
+        <monitoring_pager version="1.1">
+            <view id="{6d344311-1a84-45b5-b4fb-5a584acf1ffe}" name="View 1" active="true" />
+        </monitoring_pager>
+        <monitoring_registry version="1.1">
+            <view id="{6d344311-1a84-45b5-b4fb-5a584acf1ffe}">
+                <registry arrange_mode="0" />
+            </view>
+        </monitoring_registry>
+    </monitoring_info>
+</show>

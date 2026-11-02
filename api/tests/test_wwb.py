@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 from xml.etree.ElementTree import ParseError
 
@@ -379,3 +380,41 @@ def test_wireless_frequency_summary() -> None:
     assert wwb.wireless_frequency_summary(518.125, None, None) == "518.125 MHz"
     assert wwb.wireless_frequency_summary(518.125, "G50", "12") == "518.125 MHz · G50/12"
     assert wwb.wireless_frequency_summary(None, "G50", None) == "G50"
+
+
+async def test_export_wwb_from_scratch_uses_template_and_scales(auth_headers) -> None:
+    # No .shw uploaded: from-scratch export must still produce a WWB-openable file. It
+    # clones the bundled real-WWB template (expanded to the channel count) rather than a
+    # hand-built skeleton, which WWB rejects with "no longer supported".
+    client = await _auth_client(auth_headers)
+    job = await client.post(f"{BASE}/jobs", json={"title": "Scratch", "venue_name": "V"})
+    job_id = job.json()["id"]
+    cl = await client.post(
+        f"{BASE}/jobs/{job_id}/channel-lists", json={"name": "FOH", "position": 0}
+    )
+    list_id = cl.json()["id"]
+    for num, mhz in [(1, 606.25), (2, 614.5), (3, 622.75)]:
+        await client.post(
+            f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels",
+            json={
+                "channel_number": num,
+                "source_label": f"Ch{num}",
+                "input_type": "wireless",
+                "wireless_frequency_mhz": mhz,
+                "wireless_group": "50" if num == 1 else None,
+                "wireless_channel": "12" if num == 1 else None,
+            },
+        )
+    resp = await client.get(
+        f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/export",
+        params={"plugin": "wireless_workbench"},
+    )
+    assert resp.status_code == 200, resp.text
+    text = resp.content.decode("utf-8")
+    # Real WWB template structure (not the old hand-built skeleton).
+    assert "coordinated_data_root" in text
+    assert "mic_channels" in text
+    for khz in (606250, 614500, 622750):
+        assert str(khz) in text
+    # Expanded to three device channels.
+    assert len(re.findall(r"<channel number=", text)) == 3

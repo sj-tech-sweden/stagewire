@@ -367,7 +367,7 @@
         dense
         bordered
         virtual-scroll
-        :virtual-scroll-item-size="44"
+        :virtual-scroll-item-size="80"
         :rows="channels"
         :columns="columns"
         row-key="id"
@@ -402,34 +402,40 @@
         </template>
         <template #body-cell-input_type="slot">
           <q-td :props="slot">
-            <q-select
-              :model-value="slot.row.attributes.input_type"
-              dense
-              borderless
-              clearable
-              emit-value
-              map-options
-              :options="inputTypes"
-              @update:model-value="(v) => saveAttr(slot.row, 'input_type', v)"
-            />
-            <div
-              v-if="slot.row.attributes.input_type === 'wireless'"
-              class="row no-wrap q-gutter-xs"
-            >
+            <div class="row items-center q-gutter-x-xs">
+              <q-select
+                :model-value="slot.row.attributes.input_type"
+                dense
+                borderless
+                clearable
+                emit-value
+                map-options
+                :options="inputTypes"
+                style="min-width: 110px; width: 110px"
+                @update:model-value="(v) => saveAttr(slot.row, 'input_type', v)"
+              />
               <q-input
+                v-if="slot.row.attributes.input_type === 'wireless'"
                 :model-value="slot.row.attributes.wireless_pack"
                 dense
                 borderless
+                class="col"
                 :placeholder="t('channels.fieldWirelessPack')"
                 data-testid="wireless-pack"
                 @change="(v) => saveAttr(slot.row, 'wireless_pack', v)"
               />
+            </div>
+            <div
+              v-if="slot.row.attributes.input_type === 'wireless'"
+              class="row items-start q-gutter-x-xs q-mt-xs"
+            >
               <q-input
                 :model-value="slot.row.attributes.wireless_frequency_mhz"
                 dense
                 borderless
                 type="number"
                 step="0.001"
+                class="col"
                 :placeholder="t('channels.fieldWirelessFrequencyMhz')"
                 data-testid="wireless-frequency-mhz"
                 @change="
@@ -445,6 +451,7 @@
                 :model-value="slot.row.attributes.wireless_group"
                 dense
                 borderless
+                style="width: 56px"
                 :placeholder="t('channels.fieldWirelessGroup')"
                 data-testid="wireless-group"
                 @change="(v) => saveAttr(slot.row, 'wireless_group', v || null)"
@@ -453,6 +460,7 @@
                 :model-value="slot.row.attributes.wireless_channel"
                 dense
                 borderless
+                style="width: 56px"
                 :placeholder="t('channels.fieldWirelessChannel')"
                 data-testid="wireless-channel"
                 @change="
@@ -891,6 +899,7 @@ const columns = computed(() => [
     label: t("workspace.colKind"),
     field: () => "",
     align: "left",
+    style: "min-width: 300px; width: 300px",
   },
   {
     name: "device",
