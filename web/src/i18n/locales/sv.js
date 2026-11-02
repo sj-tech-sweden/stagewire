@@ -216,6 +216,7 @@ export default {
     unplugged: 'Inte inkopplad',
     editDevice: 'Redigera enheten',
     editSource: 'Öppna enheten',
+    details: 'Detaljer',
     sourceDeviceRemoved: 'Tog bort den oanvända enheten {name}',
     editDetails: 'Redigera detaljer',
     bulkFixtures: 'Lägg till flera',

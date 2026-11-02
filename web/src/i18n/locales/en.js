@@ -216,6 +216,7 @@ export default {
     unplugged: 'Not plugged in',
     editDevice: 'Edit this device',
     editSource: 'Open device',
+    details: 'Details',
     sourceDeviceRemoved: 'Removed the unused device {name}',
     editDetails: 'Edit details',
     bulkFixtures: 'Bulk add',

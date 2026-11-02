@@ -1819,3 +1819,43 @@ test('replacing or clearing a source removes the device it created, but not one 
   expect(await names()).toEqual(['Mic B']);
   void second;
 });
+
+test('on a phone every channel is a card with its kind, source, stand, connector, wireless fields and notes', async ({ page, request }) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 800 });
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Phone ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, {
+    channel_number: 1,
+    source_label: 'Lead',
+    input_type: 'wireless',
+    connector: 'xlr3',
+    phantom_power: true,
+    stand_type: 'Boom',
+  });
+  const node = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d) => d.id === channel.id,
+    );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // the summary line says what is set without opening anything
+  const card = page.getByTestId('channel-card').first();
+  await expect(card).toContainText('Wireless');
+  await expect(card).toContainText('48V');
+  await expect(card).toContainText('Boom');
+
+  // the same editors as the table are under Details
+  await card.getByTestId('channel-card-details').click();
+  await card.getByLabel(/bodypack|beltpack/i).fill('Shure P10T');
+  await card.getByLabel(/bodypack|beltpack/i).press('Enter');
+  await expect.poll(async () => (await node()).attributes.wireless_pack).toBe('Shure P10T');
+  await card.getByLabel(/notes|anteckningar/i).last().fill('Hand over at soundcheck');
+  await card.getByLabel(/notes|anteckningar/i).last().press('Tab');
+  await expect.poll(async () => (await node()).notes).toBe('Hand over at soundcheck');
+  const box = await page.getByTestId('channel-cards').boundingBox();
+  expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
+});
