@@ -50,6 +50,11 @@
             v-if="draftLine"
             :config="draftLine"
           />
+          <v-circle
+            v-for="(wp, i) in rerouteWaypoints"
+            :key="'wp' + i"
+            :config="{ x: (wp[0] + origin.x) * zoom, y: (wp[1] + origin.y) * zoom, radius: 5, fill: '#ffb300', listening: false }"
+          />
           <v-line
             v-if="audienceDraftLine"
             :config="audienceDraftLine"
@@ -148,6 +153,10 @@ const props = defineProps({
   cableways: { type: Array, default: () => [] },
   drawPoints: { type: Array, default: () => [] },
   drawing: { type: Boolean, default: false },
+  // the cable being rerouted by hand: a click adds a waypoint (stage cm) it must pass through
+  rerouting: { type: Boolean, default: false },
+  rerouteWaypoints: { type: Array, default: () => [] },
+  activeCableKey: { type: String, default: null },
   // the audience area being outlined (venue cm) and whether a click adds a corner of it
   audienceDraft: { type: Array, default: () => [] },
   audienceDrawing: { type: Boolean, default: false },
@@ -160,7 +169,7 @@ const props = defineProps({
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
 });
-const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point', 'audience-point']);
+const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point', 'audience-point', 'reroute-point']);
 
 const $q = useQuasar();
 const host = ref(null);
@@ -273,8 +282,8 @@ const cableLines = computed(() =>
       id: c.key,
       config: {
         points: toPx(c.points),
-        stroke: '#b0bec5',
-        strokeWidth: 2,
+        stroke: c.key === props.activeCableKey ? '#ffb300' : '#b0bec5',
+        strokeWidth: c.key === props.activeCableKey ? 3 : 2,
         dash: c.mode === 'direct' ? [8, 6] : undefined,
         lineCap: 'round',
         lineJoin: 'round',
@@ -290,7 +299,7 @@ const draftLine = computed(() =>
 
 // While a cableway is being drawn a click on the map adds a point (stage-relative cm).
 function onStageClick(event) {
-  const drawingAny = props.drawing || props.audienceDrawing;
+  const drawingAny = props.drawing || props.audienceDrawing || props.rerouting;
   if (!drawingAny || event.target !== stageRef.value?.getStage()) return;
   const pos = stageRef.value.getStage().getRelativePointerPosition();
   if (props.audienceDrawing) {
@@ -298,7 +307,8 @@ function onStageClick(event) {
     emit('audience-point', [Math.round(pos.x / props.zoom), Math.round(pos.y / props.zoom)]);
     return;
   }
-  emit('draw-point', [Math.round(pos.x / props.zoom - origin.value.x), Math.round(pos.y / props.zoom - origin.value.y)]);
+  const cm = [Math.round(pos.x / props.zoom - origin.value.x), Math.round(pos.y / props.zoom - origin.value.y)];
+  emit(props.rerouting ? 'reroute-point' : 'draw-point', cm);
 }
 
 const audienceDraftLine = computed(() =>

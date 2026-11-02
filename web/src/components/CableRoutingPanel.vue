@@ -181,12 +181,15 @@
               <th class="text-right">
                 {{ t('cables.lengthClass') }}
               </th>
+              <th />
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="row in rows"
               :key="row.key"
+              :class="{ 'bg-grey-9': rerouteKey === row.key }"
+              :data-testid="`cable-row-${row.index}`"
             >
               <td>{{ row.fromName }}</td>
               <td>{{ row.toName }}</td>
@@ -213,6 +216,44 @@
               <td class="text-right">
                 {{ row.placed ? (row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m`) : '–' }}
               </td>
+              <td class="text-right no-wrap">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  :icon="row.hidden ? 'visibility_off' : 'visibility'"
+                  :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
+                  data-testid="cable-hide"
+                  @click="emit('toggle-hidden', row)"
+                >
+                  <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="alt_route"
+                  :color="rerouteKey === row.key ? 'primary' : undefined"
+                  :disable="!row.placed"
+                  :aria-label="t('cables.rerouteAction')"
+                  data-testid="cable-reroute"
+                  @click="emit('reroute', row)"
+                >
+                  <q-tooltip>{{ row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}</q-tooltip>
+                </q-btn>
+                <q-btn
+                  v-if="row.requestedMode === 'manual'"
+                  flat
+                  dense
+                  round
+                  icon="auto_fix_high"
+                  :aria-label="t('cables.autoRouteAction')"
+                  data-testid="cable-auto-route"
+                  @click="emit('reset-route', row)"
+                >
+                  <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
+                </q-btn>
+              </td>
             </tr>
           </tbody>
         </q-markup-table>
@@ -236,8 +277,10 @@ const props = defineProps({
   cableways: { type: Array, default: () => [] },
   drawing: { type: Boolean, default: false },
   drawPoints: { type: Array, default: () => [] },
+  // the cable whose manual waypoints are being placed on the map
+  rerouteKey: { type: String, default: null },
 });
-const emit = defineEmits(['settings', 'draw-start', 'draw-finish', 'draw-undo', 'draw-cancel', 'delete-way']);
+const emit = defineEmits(['settings', 'draw-start', 'draw-finish', 'draw-undo', 'draw-cancel', 'delete-way', 'toggle-hidden', 'reroute', 'reset-route']);
 const { t } = useI18n();
 
 const caption = computed(() => `${props.rows.length} · ${props.cableways.length} ${t('cables.waysTitle').toLowerCase()}`);

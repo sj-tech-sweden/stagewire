@@ -478,6 +478,39 @@
               />
             </div>
             <div
+              v-if="rerouteRow"
+              class="row items-center q-gutter-xs q-mb-xs"
+              data-testid="reroute-bar"
+            >
+              <span class="text-caption text-grey-6">{{ t('cables.rerouteHint', { name: 'C' + rerouteRow.index }) }}</span>
+              <q-btn
+                flat
+                dense
+                no-caps
+                icon="undo"
+                :label="t('cables.undoWaypoint')"
+                :disable="!rerouteWaypoints.length"
+                data-testid="reroute-undo"
+                @click="undoWaypoint"
+              />
+              <q-btn
+                flat
+                dense
+                no-caps
+                :label="t('cables.resetRoute')"
+                @click="resetRoute(rerouteRow)"
+              />
+              <q-btn
+                dense
+                no-caps
+                color="primary"
+                icon="check"
+                :label="t('cables.doneReroute')"
+                data-testid="reroute-done"
+                @click="rerouteKey = null"
+              />
+            </div>
+            <div
               v-if="drawingAudience"
               class="row items-center q-gutter-xs q-mb-xs"
               data-testid="audience-bar"
@@ -564,9 +597,13 @@
               :cableways="plotFrame.cablePlan.value.cableways"
               :draw-points="drawPoints"
               :drawing="drawingWay"
+              :rerouting="!!rerouteKey"
+              :reroute-waypoints="rerouteWaypoints"
+              :active-cable-key="rerouteKey"
               :audience-draft="audiencePoints"
               :audience-drawing="drawingAudience"
               :connect-mode="connectMode"
+              @reroute-point="addWaypoint"
               @audience-point="(p) => audiencePoints.push(p)"
               @draw-point="(p) => drawPoints.push(p)"
               @pan="(p) => (pan = p)"
@@ -614,6 +651,10 @@
           :cableways="plotFrame.cablePlan.value.cableways"
           :drawing="drawingWay"
           :draw-points="drawPoints"
+          :reroute-key="rerouteKey"
+          @toggle-hidden="toggleCableHidden"
+          @reroute="startReroute"
+          @reset-route="resetRoute"
           @settings="saveCableSettings"
           @draw-start="startDrawWay"
           @draw-finish="finishDrawWay"
@@ -1105,6 +1146,7 @@ const drawingAudience = ref(false);
 const audiencePoints = ref([]);
 const startAudience = () => {
   cancelDrawWay();
+  rerouteKey.value = null;
   audiencePoints.value = [];
   drawingAudience.value = true;
 };
@@ -1150,6 +1192,7 @@ const cableRows = computed(() => {
 });
 const startDrawWay = () => {
   cancelAudience();
+  rerouteKey.value = null;
   drawPoints.value = [];
   drawingWay.value = true;
 };
@@ -1170,6 +1213,36 @@ const removeCableway = (id) => {
   const plan = plotFrame.cablePlan.value;
   plotFrame.savePlan({ ...plan, cableways: plan.cableways.filter((w) => w.id !== id) });
 };
+// A cable's route is stored per cable key in cable_plan.routes: { mode: 'auto'|'manual', waypoints,
+// hidden }. The key is derived from the chain (utils/cables.js), so it survives a reload. Starting
+// a reroute keeps the existing waypoints of a manual route; hiding is independent of the mode.
+const rerouteKey = ref(null);
+const rerouteRow = computed(() => cableRows.value.find((r) => r.key === rerouteKey.value) || null);
+const rerouteWaypoints = computed(() => plotFrame.cablePlan.value.routes[rerouteKey.value]?.waypoints || []);
+function updateRoute(key, patch) {
+  const plan = plotFrame.cablePlan.value;
+  const current = plan.routes[key] || { mode: 'auto', waypoints: [], hidden: false };
+  plotFrame.savePlan({ ...plan, routes: { ...plan.routes, [key]: { ...current, ...patch } } });
+}
+const toggleCableHidden = (row) => updateRoute(row.key, { hidden: !row.hidden });
+function startReroute(row) {
+  cancelDrawWay();
+  cancelAudience();
+  rerouteKey.value = row.key;
+  updateRoute(row.key, { mode: 'manual', waypoints: row.requestedMode === 'manual' ? row.waypoints : [] });
+}
+function resetRoute(row) {
+  updateRoute(row.key, { mode: 'auto', waypoints: [] });
+  if (rerouteKey.value === row.key) rerouteKey.value = null;
+}
+function addWaypoint(cm) {
+  if (!rerouteKey.value) return;
+  updateRoute(rerouteKey.value, { mode: 'manual', waypoints: [...rerouteWaypoints.value, cm] });
+}
+function undoWaypoint() {
+  if (!rerouteKey.value) return;
+  updateRoute(rerouteKey.value, { mode: 'manual', waypoints: rerouteWaypoints.value.slice(0, -1) });
+}
 const saveCableSettings = (patch) => {
   const plan = plotFrame.cablePlan.value;
   plotFrame.savePlan({ ...plan, settings: { ...plan.settings, ...patch } });

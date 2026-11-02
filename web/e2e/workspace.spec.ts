@@ -1338,6 +1338,29 @@ test('cables are routed on the new map: settings, a drawn cableway and the cable
   await expect.poll(async () => (await plan()).cableways?.length).toBe(1);
   await expect(page.getByTestId('cableway')).toHaveCount(1);
   await expect(page.getByTestId('cable-table')).toContainText(/10 m|15 m|7.5 m|5 m/);
+
+  // a cable is rerouted by hand: waypoints are clicked on the map and kept in cable_plan.routes
+  const routeOf = async () => Object.values(((await plan()).routes || {}) as Record<string, any>)[0];
+  await page.getByTestId('cable-reroute').click();
+  await expect(page.getByTestId('reroute-bar')).toBeVisible();
+  await canvas.scrollIntoViewIfNeeded();
+  const area2 = (await canvas.boundingBox())!;
+  await page.mouse.click(area2.x + 400 * zoom, area2.y + 300 * zoom);
+  await page.mouse.click(area2.x + 600 * zoom, area2.y + 300 * zoom);
+  await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(2);
+  expect((await routeOf()).mode).toBe('manual');
+  await page.getByTestId('reroute-undo').click();
+  await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(1);
+  await page.getByTestId('reroute-done').click();
+  await expect(page.getByTestId('reroute-bar')).toBeHidden();
+
+  // hiding takes it off the plot but keeps it in the list; auto route drops the waypoints
+  await page.getByTestId('cable-hide').click();
+  await expect.poll(async () => (await routeOf())?.hidden).toBe(true);
+  await expect(page.getByTestId('cable-table')).toContainText('Stagebox');
+  await page.getByTestId('cable-auto-route').click();
+  await expect.poll(async () => (await routeOf())?.mode).toBe('auto');
+  expect((await routeOf()).waypoints).toEqual([]);
 });
 
 test('a patch point can search Stockwire for a device and a video input takes a Stockwire source', async ({
