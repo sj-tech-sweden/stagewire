@@ -22,6 +22,7 @@ import {
   mixerSpecsOf,
   portUsage,
   chainDevices,
+  isOrphanedBySource,
   physicalHintKey,
   mixerSlotsToAdd,
   stereoView,
@@ -653,4 +654,18 @@ test('the devices of a chain come back in order and skip steps whose device is g
     { dst_device_id: 'a', attributes: { chain: 'other', position: 0 } },
   ];
   expect(chainDevices(channel, edges, devices).map((d) => d.name)).toEqual(['Box', 'Desk']);
+});
+
+test('a replaced source device is removed only when nothing else uses it', () => {
+  const devices = [
+    { id: 'ch', attributes: { source_device_id: 'mic' } },
+    { id: 'mic', attributes: {} },
+    { id: 'ch2', attributes: { source_device_id: 'shared' } },
+    { id: 'shared', attributes: {} },
+  ];
+  expect(isOrphanedBySource('mic', 'ch', devices, [])).toBe(true);
+  // another channel names it as its source too
+  expect(isOrphanedBySource('shared', 'ch', devices, [])).toBe(false);
+  // patched into a chain or linked on the plot
+  expect(isOrphanedBySource('mic', 'ch', devices, [{ src_device_id: 'x', dst_device_id: 'mic' }])).toBe(false);
 });

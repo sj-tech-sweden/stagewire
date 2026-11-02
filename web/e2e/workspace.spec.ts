@@ -1707,9 +1707,9 @@ test('the gear behind a channel or a video input is edited from its list', async
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
-  // the console is on the list's mixer card and on the channel's chain; both open its dialog
+  // the console is on the list's mixer card; it opens in the inspector, details in its dialog
   await expect(page.getByTestId('list-mixer-devices')).toContainText('Desk');
-  await page.getByTestId('channel-table').getByTestId('chain-device').first().click();
+  await page.getByTestId('list-mixer-devices').getByTestId('chain-device').first().click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Desk');
   await page.getByTestId('inspector-edit-details').click();
   await expect(page.getByTestId('device-name')).toHaveValue('Desk');
@@ -1780,4 +1780,42 @@ test('each device box in the show flow and each step in the edit flow has an edi
   await page.getByTestId('edit-chain').first().click();
   await page.getByTestId('chain-edit-device').first().click();
   await expect(page.getByTestId('device-name')).toHaveValue('Stagebox F');
+});
+
+test('replacing or clearing a source removes the device it created, but not one that is in use', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Orphan ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+  const second = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Gtr' });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Mic A', device_type: 'other' });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Mic B', device_type: 'other' });
+  const names = async () =>
+    (((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[])
+      .filter((d) => d.name.startsWith('Mic '))
+      .map((d) => d.name)
+      .sort();
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  const pick = async (row: number, name: string) => {
+    await page.getByTestId('source-picker').nth(row).click();
+    await page.keyboard.type(name);
+    // not the "use as typed" row: the device already in the job
+    await page.locator('.q-menu .q-item', { hasText: `${name} ·` }).click();
+  };
+  await pick(0, 'Mic A');
+  await expect(page.getByTestId('open-source-device')).toHaveCount(1);
+  // replacing Mic A with Mic B removes Mic A, which nothing else used
+  await pick(0, 'Mic B');
+  await expect.poll(names).toEqual(['Mic B']);
+  // Mic B is also the second channel's source, so clearing the first keeps it
+  await pick(1, 'Mic B');
+  await page.getByRole('button', { name: 'Clear' }).first().click();
+  await expect(page.getByTestId('open-source-device')).toHaveCount(1);
+  expect(await names()).toEqual(['Mic B']);
+  void second;
 });

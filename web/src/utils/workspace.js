@@ -949,3 +949,11 @@ export function physicalHintKey(effective, valueKey, sourceKey) {
   if (source === 'manual') return { key: 'devices.manualInUse' };
   return { key: 'devices.notSet' };
 }
+
+// Whether a device is used by nothing but one channel's source link, so replacing or clearing that
+// source can remove it instead of leaving an orphan. Any connection of the device (a chain step, a
+// plot link, power) or another node that names it as its source keeps it.
+export function isOrphanedBySource(deviceId, channelId, devices, edges) {
+  if (edges.some((e) => e.src_device_id === deviceId || e.dst_device_id === deviceId)) return false;
+  return !devices.some((d) => d.id !== channelId && d.attributes?.source_device_id === deviceId);
+}

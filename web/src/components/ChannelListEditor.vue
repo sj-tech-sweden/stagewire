@@ -387,10 +387,6 @@
               data-testid="edit-chain"
               @click="openChain(slot.row, 'channel')"
             />
-            <ChainDeviceChips
-              :node="slot.row"
-              @edit="editDevice"
-            />
             <q-btn
               flat
               dense
@@ -457,10 +453,6 @@
             <q-item-label caption>
               {{ chain(out) || t('workspace.chainEmpty') }}
             </q-item-label>
-            <ChainDeviceChips
-              :node="out"
-              @edit="editDevice"
-            />
           </q-item-section>
           <q-item-section
             side
@@ -567,7 +559,6 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import ListBulkDialog from '@/components/ListBulkDialog.vue';
-import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
 import MixerDialog from '@/components/MixerDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
@@ -580,6 +571,7 @@ import {
   OUTPUT_MODES,
   channelsOf,
   isPlotElement,
+  isOrphanedBySource,
   isVirtual,
   mixerSlotsToAdd,
   nextChannelNumber,
@@ -684,8 +676,8 @@ async function addChannels(count) {
   }
 }
 
-// The gear in this list's chains is edited from the list: a chip next to a chain selects that
-// device in the inspector (which also opens its full dialog), and the mixer card lists the mixers (consoles) the list's channels are patched into.
+// The gear in a chain is edited from the signal flow or the chain dialog (an edit button on each
+// device); the mixer card lists the mixers (consoles) the list's channels are patched into.
 function editDevice(device) {
   flowOpen.value = false;
   graph.selectedDeviceId = device.id;
@@ -792,6 +784,8 @@ const sourceOf = (node) => {
   return name ? { id: linked ? null : node.stockwire_product_id || null, name, job_device_id: linked?.id || null } : null;
 };
 async function setSource(node, pick) {
+  const previous = sourceDevice(node);
+  let nextId = null;
   try {
     if (!pick) {
       await graph.updateDevice(props.jobId, node.id, {
@@ -799,17 +793,34 @@ async function setSource(node, pick) {
         stockwire_product_id: null,
         stockwire_product_name: null,
       });
-      return;
+    } else {
+      let device = pick.job_device_id ? graph.devices.find((d) => d.id === pick.job_device_id) : null;
+      if (!device && pick.id) device = await graph.createDeviceFromProduct(props.jobId, pick);
+      nextId = device?.id || null;
+      await graph.updateDevice(props.jobId, node.id, {
+        attributes: { device: device?.name || pick.name, source_device_id: device?.id || null },
+        stockwire_product_id: !device && pick.id ? String(pick.id) : null,
+        stockwire_product_name: !device && pick.id ? pick.name : null,
+      });
     }
-    let device = pick.job_device_id ? graph.devices.find((d) => d.id === pick.job_device_id) : null;
-    if (!device && pick.id) device = await graph.createDeviceFromProduct(props.jobId, pick);
-    await graph.updateDevice(props.jobId, node.id, {
-      attributes: { device: device?.name || pick.name, source_device_id: device?.id || null },
-      stockwire_product_id: !device && pick.id ? String(pick.id) : null,
-      stockwire_product_name: !device && pick.id ? pick.name : null,
-    });
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
+    return;
+  }
+  await removeOrphanedSource(node, previous, nextId);
+}
+
+// The channel no longer points at its old source device, so that device goes too unless something
+// else uses it (see isOrphanedBySource). The channel is updated first, so the link never dangles;
+// a delete the server refuses (a patched device is a 409) just leaves the device in place.
+async function removeOrphanedSource(node, previous, nextId) {
+  if (!previous || previous.id === nextId) return;
+  if (!isOrphanedBySource(previous.id, node.id, graph.devices, graph.edges)) return;
+  try {
+    await graph.deleteDevice(props.jobId, previous.id);
+    $q.notify({ type: 'info', message: t('workspace.sourceDeviceRemoved', { name: previous.name }) });
+  } catch (err) {
+    if (err.response?.status !== 409 && !isRevisionConflict(err)) failed(err);
   }
 }
 

@@ -132,11 +132,6 @@
               <q-item-label caption>
                 {{ chain(row) || t('workspace.chainEmpty') }}
               </q-item-label>
-              <ChainDeviceChips
-                :node="row"
-                video
-                @edit="editDevice"
-              />
             </q-item-section>
             <q-item-section side>
               <q-btn
@@ -275,11 +270,6 @@
                 data-testid="edit-video-chain"
                 @click="openChain(slot.row, section.kind)"
               />
-              <ChainDeviceChips
-                :node="slot.row"
-                video
-                @edit="editDevice"
-              />
               <q-btn
                 flat
                 dense
@@ -339,7 +329,6 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import ChainDialog from '@/components/ChainDialog.vue';
-import ChainDeviceChips from '@/components/ChainDeviceChips.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
@@ -377,8 +366,8 @@ const sourceTypes = ['camera', 'computer', 'other'].map((v) => ({
 const list = computed(() => graph.videoLists.find((l) => l.id === listId.value) || null);
 const gear = computed(() => graph.devices.filter((d) => !isVirtual(d) && !isPlotElement(d)));
 
-// The gear in this list's chains is edited from the list: a chip next to a chain selects that
-// device in the inspector (which also opens its full dialog), and the toolbar lists the switchers and routers the list's inputs and outputs use.
+// The gear in a chain is edited from the signal flow or the chain dialog (an edit button on each
+// device); the toolbar lists the switchers and routers the list's inputs and outputs use.
 function editDevice(device) {
   flowOpen.value = false;
   graph.selectedDeviceId = device.id;
