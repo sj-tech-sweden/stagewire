@@ -199,19 +199,6 @@ async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -
     return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
 
 
-def _rigging_point_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if data.get("name") is not None:
-        out["name"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    for key in ("trim_height_cm", "weight_capacity_kg"):
-        if key in attrs:
-            out[key] = attrs[key] or None
-    return out
-
-
 POWER_ATTR_KEYS = ("rating_amps", "active", "outputs")
 
 
@@ -305,16 +292,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
-    elif table == "rigging_points":
-        from app.domains.rigging import service as rigging_service
-
-        point = await rigging_service.get_point(db, job_id, legacy_id)
-        changes = _rigging_point_changes(data)
-        if point is None or not changes:
-            return False
-        for key, value in changes.items():
-            setattr(point, key, value)
-        await db.commit()
     elif table == "power_nodes":
         changes = _power_node_changes(data)
         if not changes:
@@ -404,14 +381,6 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         await _publish_list(db, job_id, list_id)
     elif table == "stage_plot_elements":
         return await service.delete_plot_element(db, job_id, legacy_id)
-    elif table == "rigging_points":
-        from app.domains.rigging import service as rigging_service
-
-        point = await rigging_service.get_point(db, job_id, legacy_id)
-        if point is None:
-            return False
-        await db.delete(point)
-        await db.commit()
     elif table == "power_nodes":
         from app.domains.rigging import router as rigging_router
         from app.domains.rigging import service as rigging_service

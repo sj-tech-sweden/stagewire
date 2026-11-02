@@ -7,22 +7,6 @@ from app.core.db import Base
 from app.domains.venues import models as venue_models  # noqa: F401  (FK target tables)
 
 
-class RiggingPoint(Base):
-    """A truss or hanging point with a weight capacity."""
-
-    __tablename__ = "rigging_points"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
-    )
-    name: Mapped[str] = mapped_column(String(255), default="")
-    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    trim_height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    weight_capacity_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
-    notes: Mapped[str] = mapped_column(Text, default="")
-
-
 class PowerNode(Base):
     """A step in the power tree: a source (mains or a venue outlet), a distro or a breakout.
 

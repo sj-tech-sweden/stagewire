@@ -365,7 +365,7 @@ async def test_every_link_role_validates_and_links(auth_headers, monkeypatch):
                 "linked_video_input_id": video_input,
                 "linked_lens_device_id": box["id"],
                 "power_node_id": source["legacy_ref"].split(":")[1],
-                "rigging_point_id": point["legacy_ref"].split(":")[1],
+                "rigging_point_id": point["id"],
             },
             headers=h,
         )

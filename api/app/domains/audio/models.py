@@ -190,8 +190,10 @@ class AudioDevice(Base):
     power_connector: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     # Where a device that is hung (an LED wall, a screen) hangs; fixtures and plot elements carry
     # their own rigging point.
+    # the public id of the rigging point node (graph/ids.py); not a foreign key, rigging points
+    # live on the graph
     rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
@@ -246,8 +248,10 @@ class StagePlotElement(Base):
     image_url: Mapped[str] = mapped_column(String(1024), default="")
     coverage_angle_h: Mapped[float] = mapped_column(Float, default=0.0)
     coverage_distance_m: Mapped[float] = mapped_column(Float, default=0.0)
+    # the public id of the rigging point node (graph/ids.py); not a foreign key, rigging points
+    # live on the graph
     rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     power_node_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True

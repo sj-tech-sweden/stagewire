@@ -12,7 +12,7 @@ from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting.models import LightingFixture
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
-from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
+from app.domains.rigging.models import PowerNode, PowerNodeFeed
 from app.domains.venues.schemas import VenuePowerOutletRead
 
 router = APIRouter(
@@ -99,43 +99,6 @@ async def list_job_outlets(job_id: UUID, db: AsyncSession = Depends(get_db)):
 async def list_points(job_id: UUID, db: AsyncSession = Depends(get_db)):
     await _job(db, job_id)
     return await service.list_points(db, job_id)
-
-
-@router.post(
-    "/jobs/{job_id}/rigging-points",
-    response_model=schemas.RiggingPointRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_point(
-    job_id: UUID, payload: schemas.RiggingPointCreate, db: AsyncSession = Depends(get_db)
-):
-    await _job(db, job_id)
-    position = await service.next_position(db, RiggingPoint, job_id)
-    return await service.save(
-        db, RiggingPoint(job_id=job_id, position=position, **payload.model_dump())
-    )
-
-
-@router.patch("/jobs/{job_id}/rigging-points/{point_id}", response_model=schemas.RiggingPointRead)
-async def update_point(
-    job_id: UUID,
-    point_id: UUID,
-    payload: schemas.RiggingPointUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    await _job(db, job_id)
-    point = await _found(await service.get_point(db, job_id, point_id), "Rigging point not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(point, key, value)
-    return await service.save(db, point)
-
-
-@router.delete("/jobs/{job_id}/rigging-points/{point_id}", status_code=204)
-async def delete_point(job_id: UUID, point_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    await _job(db, job_id)
-    point = await _found(await service.get_point(db, job_id, point_id), "Rigging point not found")
-    await db.delete(point)
-    await db.commit()
 
 
 @router.get("/jobs/{job_id}/power-nodes")

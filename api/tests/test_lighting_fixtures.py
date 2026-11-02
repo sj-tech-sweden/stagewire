@@ -460,7 +460,7 @@ async def test_manual_weight_and_power_on_a_type_reach_the_truss_load(auth_heade
         ).json()
         point = (
             await client.post(
-                f"{BASE}/jobs/{job_id}/rigging-points",
+                f"{BASE}/jobs/{job_id}/graph/rigging-points",
                 json={"name": "Side truss", "weight_capacity_kg": 20},
                 headers=auth_headers,
             )

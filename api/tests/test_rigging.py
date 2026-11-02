@@ -37,7 +37,7 @@ async def test_the_power_tree_is_built_loads_are_plugged_and_checked(auth_header
             assert res.status_code == status, res.text
             return res.json()
 
-        point = await post("rigging-points", {"name": "FOH truss", "weight_capacity_kg": 10})
+        point = await post("graph/rigging-points", {"name": "FOH truss", "weight_capacity_kg": 10})
         source = await post(
             "power-nodes",
             {

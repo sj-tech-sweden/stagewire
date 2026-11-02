@@ -18,7 +18,7 @@ from app.domains.audio.models import (
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import LightingFixture
-from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
+from app.domains.rigging.models import PowerNode, PowerNodeFeed
 
 FAN_OUT = 64
 
@@ -104,7 +104,6 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
-    "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
     "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id"},
     "audio_devices": {
         "power_inlet",
@@ -224,6 +223,7 @@ class Backfill:
         self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
         self.video_inputs: dict[uuid.UUID, GraphDevice] = {}
+        self.rigging_points: dict[uuid.UUID, GraphDevice] = {}
         self.result = BackfillResult()
 
     async def load_existing(self) -> None:
@@ -234,6 +234,9 @@ class Backfill:
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
+            if device.kind == "rigging_point":
+                # rigging points live only in the graph; loads hold the node's public id
+                self.rigging_points[public_id(device)] = device
             if device.kind == "video_input":
                 # video inputs live only in the graph; plot elements link them by public id
                 self.video_inputs[public_id(device)] = device
@@ -692,7 +695,7 @@ class Backfill:
                     **(
                         {"rigging_point_id": str(point.id)}
                         if el.rigging_point_id
-                        and (point := self.devices.get(f"rigging_points:{el.rigging_point_id}"))
+                        and (point := self.rigging_points.get(el.rigging_point_id))
                         else {}
                     ),
                 },
@@ -797,7 +800,7 @@ class Backfill:
                 "purpose": fx.purpose,
             }
             dmx = {k: v for k, v in dmx.items() if v not in (None, "")}
-            rigging = self.devices.get(f"rigging_points:{fx.rigging_point_id}")
+            rigging = self.rigging_points.get(fx.rigging_point_id)
             feeder = self.devices.get(f"power_nodes:{fx.power_node_id}")
             dmx.update(
                 rigging_point_id=str(rigging.id) if rigging else None,
@@ -842,26 +845,6 @@ class Backfill:
                     )
 
     async def power(self) -> None:
-        for point in (
-            await self.db.scalars(select(RiggingPoint).where(RiggingPoint.job_id == self.job_id))
-        ).all():
-            self.device(
-                f"rigging_points:{point.id}",
-                domain="rigging",
-                kind="rigging_point",
-                name=point.name or "Rigging point",
-                notes=point.notes or "",
-                position=point.position,
-                attributes={
-                    k: v
-                    for k, v in {
-                        "trim_height_cm": point.trim_height_cm,
-                        "weight_capacity_kg": point.weight_capacity_kg,
-                    }.items()
-                    if v is not None
-                },
-                ports=[],
-            )
         nodes = (
             await self.db.scalars(select(PowerNode).where(PowerNode.job_id == self.job_id))
         ).all()
@@ -932,7 +915,7 @@ class Backfill:
         ).all()
         for row in hung:
             node = self.devices.get(f"audio_devices:{row.id}")
-            point = self.devices.get(f"rigging_points:{row.rigging_point_id}")
+            point = self.rigging_points.get(row.rigging_point_id)
             if node is not None and point is not None:
                 node.attributes = {**node.attributes, "rigging_point_id": str(point.id)}
         plugged = (

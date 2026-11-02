@@ -38,8 +38,10 @@ class LightingFixture(Base):
     fixture_mode_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("fixture_modes.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # the public id of the rigging point node (graph/ids.py); not a foreign key, rigging points
+    # live on the graph
     rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("rigging_points.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True), nullable=True, index=True
     )
     power_node_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("power_nodes.id", ondelete="SET NULL"), nullable=True, index=True

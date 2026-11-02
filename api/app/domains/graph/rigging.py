@@ -15,8 +15,9 @@ from app.core.db import get_db
 from app.domains.audio import service
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import schemas
+from app.domains.graph import rigging_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
+from app.domains.graph.ids import public_id
 from app.domains.graph.lists import _by_ref, _device_twin
 from app.domains.graph.mirror import _fixtures_on_device, legacy_target
 from app.domains.graph.models import GraphDevice
@@ -90,6 +91,10 @@ async def _legacy(
     node = await db.get(GraphDevice, node_id)
     if node is None or node.job_id != job_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{label} not found")
+    if table == "rigging_points" and node.kind == "rigging_point":
+        return public_id(
+            node
+        )  # rigging points have no legacy row; the public id is what loads hold
     target = legacy_target(node)
     if target is not None and target[0] == table:
         return target[1]
@@ -105,12 +110,13 @@ async def create_rigging_point(
     job_id: UUID, payload: RiggingPointCreate, db: AsyncSession = Depends(get_db)
 ) -> schemas.GraphDeviceRead:
     await _job(db, job_id)
-    body = rigging_schemas.RiggingPointCreate(**payload.model_dump())
-    point = await rigging_router.create_point(job_id, body, db)
-    await backfill_job(db, job_id)
-    return schemas.GraphDeviceRead.model_validate(
-        await _by_ref(db, job_id, f"rigging_points:{point.id}")
-    )
+    async with job_lock(job_id):
+        position = len(await rigging_native.load_points(db, job_id))
+        node = rigging_native.point_node(job_id, position, payload.model_dump())
+        db.add(node)
+        await db.commit()
+    await db.refresh(node)
+    return schemas.GraphDeviceRead.model_validate(node)
 
 
 class OutletSource(BaseModel):
@@ -450,6 +456,9 @@ async def _id_map(db: AsyncSession, job_id: UUID) -> dict[str, str]:
     rows = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()
     by_ref = {r.legacy_ref: str(r.id) for r in rows if r.legacy_ref}
     out = {ref.partition(":")[2]: gid for ref, gid in by_ref.items()}
+    for row in rows:  # graph-native rows are known by their public id
+        if row.kind == "rigging_point":
+            out[str(public_id(row))] = str(row.id)
     for node in (await db.scalars(select(PowerNode).where(PowerNode.job_id == job_id))).all():
         if node.device_id and f"audio_devices:{node.device_id}" in by_ref:
             out[str(node.id)] = by_ref[f"audio_devices:{node.device_id}"]

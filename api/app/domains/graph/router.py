@@ -17,6 +17,7 @@ from app.domains.graph import (
     dmx_native,
     mirror,
     readers,
+    rigging_native,
     schemas,
     topology,
     video_native,
@@ -192,6 +193,8 @@ async def delete_device(
     async def remove() -> None:
         for edge in touching:
             await db.delete(edge)
+        if device.kind == "rigging_point":
+            await rigging_native.clear_references(db, device)
         if device.kind in video_native.VIDEO_KINDS:
             child_nodes, child_edges = await video_native.clear_references(db, device)
             removed_nodes.extend(child_nodes)

@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio import service as audio_service
 from app.domains.audio.device_specs import effective_value, resolve_device_physical
+from app.domains.graph import rigging_native
 from app.domains.lighting import service as lighting_service
 from app.domains.rigging import power_tree
 from app.domains.rigging.calc import WeightLoad
-from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
+from app.domains.rigging.models import PowerNode, PowerNodeFeed
 from app.domains.venues.models import VenuePowerOutlet
 
 
@@ -178,11 +179,8 @@ def to_tree_loads(rows: list[LoadRow]) -> list[power_tree.Load]:
     ]
 
 
-async def list_points(db: AsyncSession, job_id: UUID) -> list[RiggingPoint]:
-    result = await db.execute(
-        select(RiggingPoint).where(RiggingPoint.job_id == job_id).order_by(RiggingPoint.position)
-    )
-    return list(result.scalars().all())
+async def list_points(db: AsyncSession, job_id: UUID):
+    return await rigging_native.load_points(db, job_id)
 
 
 async def list_nodes(db: AsyncSession, job_id: UUID) -> list[PowerNode]:
@@ -192,11 +190,8 @@ async def list_nodes(db: AsyncSession, job_id: UUID) -> list[PowerNode]:
     return list(result.scalars().all())
 
 
-async def get_point(db: AsyncSession, job_id: UUID, point_id: UUID) -> RiggingPoint | None:
-    result = await db.execute(
-        select(RiggingPoint).where(RiggingPoint.id == point_id, RiggingPoint.job_id == job_id)
-    )
-    return result.scalars().first()
+async def get_point(db: AsyncSession, job_id: UUID, point_id: UUID):
+    return await rigging_native.get_point(db, job_id, point_id)
 
 
 async def get_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> PowerNode | None:

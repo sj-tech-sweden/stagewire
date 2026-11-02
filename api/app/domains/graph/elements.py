@@ -30,7 +30,7 @@ from app.domains.graph.ids import public_id
 from app.domains.graph.lists import _by_ref
 from app.domains.graph.mirror import legacy_target
 from app.domains.graph.models import GraphDevice
-from app.domains.rigging.models import PowerNode, RiggingPoint
+from app.domains.rigging.models import PowerNode
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph",
@@ -75,7 +75,7 @@ def _owned_by_job(column: str, job_id: UUID, value: UUID):
         )
     if column == "power_node_id":
         return select(PowerNode.id).where(PowerNode.id == value, PowerNode.job_id == job_id)
-    return select(RiggingPoint.id).where(RiggingPoint.id == value, RiggingPoint.job_id == job_id)
+    raise ValueError(column)
 
 
 @router.put("/plot-elements/{node_id}/links", response_model=schemas.GraphDeviceRead)
@@ -96,7 +96,15 @@ async def set_element_links(
     for column, value in data.items():
         if value is None:
             continue
-        if column == "linked_video_input_id":
+        if column == "rigging_point_id":
+            # rigging points are graph nodes; the link holds the node's public id
+            points = await db.scalars(
+                select(GraphDevice).where(
+                    GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                )
+            )
+            owned = any(public_id(n) == value for n in points.all())
+        elif column == "linked_video_input_id":
             # video inputs are graph nodes; the link holds the node's public id
             inputs = await db.scalars(
                 select(GraphDevice).where(

@@ -39,6 +39,7 @@ router = APIRouter(
 
 MAX_BATCH = 200
 NON_DEVICE_KINDS = (
+    "rigging_point",
     "channel",
     "output",
     "channel_list",
