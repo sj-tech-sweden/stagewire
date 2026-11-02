@@ -45,9 +45,17 @@ def _point(attrs: dict, device_id: uuid.UUID | None, **owner) -> SimpleNamespace
     )
 
 
-async def load_video_lists(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
-    """Every video list of a job with its inputs, outputs and their patch points, ordered."""
-    await backfill_job(db, job_id)
+async def load_video_lists(
+    db: AsyncSession, job_id: uuid.UUID, *, sync: bool = False
+) -> list[SimpleNamespace]:
+    """Every video list of a job with its inputs, outputs and their patch points, ordered.
+
+    It reads the graph as it is: every write (legacy route or graph route) syncs the graph right
+    after, and a sync of its own here would collide with a concurrent graph write (a stale-row
+    error), so ``sync`` is only for a caller that has just changed legacy rows itself.
+    """
+    if sync:
+        await backfill_job(db, job_id)
     nodes = (
         await db.scalars(
             select(GraphDevice).where(GraphDevice.job_id == job_id, GraphDevice.domain == "video")

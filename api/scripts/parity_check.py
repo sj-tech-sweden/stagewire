@@ -52,7 +52,7 @@ async def main() -> int:
             try:
                 old_video = describe(await video_service.list_input_lists(db, job_id))
                 db.expire_all()
-                new_video = describe(await load_video_lists(db, job_id))
+                new_video = describe(await load_video_lists(db, job_id, sync=True))
                 if old_video != new_video:
                     mismatched += 1
                     print(f"{job_id} video_lists: differs")
