@@ -12,6 +12,7 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
 from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
+from app.domains.graph import video_native
 from app.domains.graph.backfill import (
     CHANNEL_FIELDS,
     DEVICE_SPEC_FIELDS,
@@ -23,16 +24,10 @@ from app.domains.graph.backfill import (
     OWNED_ATTRS,
     backfill_job,
 )
+from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import service as lighting_service
 from app.domains.lighting.models import DmxStep, DmxUniverse
-from app.domains.video import service as video_service
-from app.domains.video.models import (
-    VideoInput,
-    VideoInputList,
-    VideoOutput,
-    VideoOutputPatchPoint,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +99,6 @@ def legacy_target(row: GraphDevice | ConnectionEdge) -> tuple[str, UUID] | None:
 
 
 async def _video_input_points(db, job_id: UUID, device_id: UUID) -> bool:
-    # imported here: video_readers imports this module for legacy_target
     from app.domains.graph.video_readers import device_has_video_input_points
 
     return await device_has_video_input_points(db, job_id, device_id)
@@ -156,69 +150,6 @@ def _output_changes(data: dict) -> dict:
         if key in attrs and not (key == "mode" and attrs[key] is None):
             out[key] = attrs[key]
     return out
-
-
-VIDEO_POINT_KEYS = ("connector", "patch_label", "notes", "source_port", "input_port")
-
-
-def _video_list_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if data.get("name") is not None:
-        out["name"] = data["name"]
-    if data.get("position") is not None:
-        out["position"] = data["position"]
-    for key in (
-        "switcher_product_id",
-        "switcher_product_name",
-        "switcher_inputs",
-        "switcher_outputs",
-    ):
-        if key in attrs:
-            out[key] = attrs[key]
-    return out
-
-
-def _video_input_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if data.get("name") is not None and "source_label" not in attrs:
-        out["source_label"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if data.get("position") is not None and "input_number" not in attrs:
-        out["input_number"] = max(1, data["position"])
-    for key in ("input_number", "source_type", "source_label", "connector"):
-        if attrs.get(key) is not None:
-            out[key] = attrs[key]
-    for key in ("stockwire_product_id", "stockwire_product_name"):
-        if key in attrs:
-            out[key] = attrs[key]
-    return out
-
-
-def _video_output_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if data.get("name") is not None and "destination_label" not in attrs:
-        out["destination_label"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if data.get("position") is not None and "output_number" not in attrs:
-        out["output_number"] = max(1, data["position"])
-    for key in ("output_number", "name", "destination_label", "connector"):
-        if attrs.get(key) is not None:
-            out[key] = attrs[key]
-    return out
-
-
-async def _video_row(db: AsyncSession, job_id: UUID, model, legacy_id: UUID):
-    row = await db.get(model, legacy_id)
-    if row is None:
-        return None
-    list_id = row.id if model is VideoInputList else row.list_id
-    lst = row if model is VideoInputList else await db.get(VideoInputList, list_id)
-    return row if lst is not None and lst.job_id == job_id else None
 
 
 ELEMENT_NOT_NULL = {
@@ -362,13 +293,6 @@ def _audio_device_changes(data: dict) -> dict:
     return out
 
 
-VIDEO_TABLES = {
-    "video_input_lists": (VideoInputList, _video_list_changes),
-    "video_inputs": (VideoInput, _video_input_changes),
-    "video_outputs": (VideoOutput, _video_output_changes),
-}
-
-
 async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, data: dict) -> bool:
     """Write a graph device PATCH through to its legacy row. True when a legacy row changed."""
     target = legacy_target(device)
@@ -396,14 +320,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
             return False
         await service.update_output(db, row, changes)
         await _publish_list(db, job_id, row.channel_list_id)
-    elif table in VIDEO_TABLES:
-        model, make = VIDEO_TABLES[table]
-        row, changes = await _video_row(db, job_id, model, legacy_id), make(data)
-        if row is None or not changes:
-            return False
-        for key, value in changes.items():
-            setattr(row, key, value)
-        await db.commit()
     elif table == "rigging_points":
         from app.domains.rigging import service as rigging_service
 
@@ -538,11 +454,6 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         if await rigging_service.get_node(db, job_id, legacy_id) is None:
             return False
         await rigging_router.delete_node(job_id, legacy_id, db)
-    elif table in VIDEO_TABLES:
-        row = await _video_row(db, job_id, VIDEO_TABLES[table][0], legacy_id)
-        if row is None:
-            return False
-        await video_service.delete(db, row)
     elif table == "dmx_universes":
         universe = await db.get(DmxUniverse, legacy_id)
         if universe is None:
@@ -655,14 +566,10 @@ async def _assign_fixture_load(
         )
 
 
-async def _video_point(db: AsyncSession, job_id: UUID, table: str, point_id: UUID):
-    if table == "video_patch_points":
-        return await video_service.get_point(db, job_id, point_id)
-    return await video_service.get_output_point(db, job_id, point_id)
-
-
 async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, data: dict) -> bool:
     """Write patch-point fields of an edge PATCH (connector, label, notes) to the legacy point."""
+    if await video_native.point_from_edge(db, edge, data):
+        return False
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
     if target is not None and target[0] in POWER_EDGE_TABLES:
@@ -686,15 +593,6 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
         if universe is None or "source_port" not in attrs:
             return False
         universe.source_port = attrs["source_port"] or ""
-        await db.commit()
-        return True
-    if table in ("video_patch_points", "video_output_patch_points"):
-        point = await _video_point(db, job_id, table, legacy_id)
-        changes = {k: attrs[k] or "" for k in VIDEO_POINT_KEYS if k in attrs}
-        if point is None or not changes:
-            return False
-        for key, value in changes.items():
-            setattr(point, key, value)
         await db.commit()
         return True
     if table == "channel_patch_points":
@@ -726,6 +624,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
 
 
 async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge) -> bool:
+    if await video_native.delete_edge_point(db, edge):
+        return False
     ref = (edge.attributes or {}).get("legacy_ref") or ""
     if ref.startswith("stage_plot_elements.link:"):
         _, element_id, role = ref.split(":")
@@ -778,28 +678,6 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
             rigging_schemas.LoadAssign(power_node_id=None),
             db,
         )
-        return True
-    if table == "video_patch_points":
-        point = await _video_point(db, job_id, table, legacy_id)
-        if point is None:
-            return False
-        await db.delete(point)
-        await db.commit()
-        return True
-    if table == "video_output_patch_points":
-        point = await _video_point(db, job_id, table, legacy_id)
-        if point is None:
-            return False
-        children = (
-            await db.scalars(
-                select(VideoOutputPatchPoint).where(VideoOutputPatchPoint.parent_id == point.id)
-            )
-        ).all()
-        for child in children:
-            child.parent_id = point.parent_id
-        await db.flush()
-        await db.delete(point)
-        await db.commit()
         return True
     if table == "channel_patch_points":
         point = await service.get_patch_point(db, legacy_id)
@@ -866,6 +744,9 @@ async def link_edge_to_legacy(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, f"Link role must be one of {sorted(LINK_ROLES)}"
         )
+    if role == "video_input" and dst.kind == "video_input":
+        # video inputs have no legacy row; the link holds the node's public id
+        target = ("video_inputs", public_id(dst))
     if target is None or target[0] != LINK_ROLES[role]:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

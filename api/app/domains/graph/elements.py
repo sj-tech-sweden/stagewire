@@ -26,11 +26,11 @@ from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import schemas
 from app.domains.graph.backfill import backfill_job, job_lock
+from app.domains.graph.ids import public_id
 from app.domains.graph.lists import _by_ref
 from app.domains.graph.mirror import legacy_target
 from app.domains.graph.models import GraphDevice
 from app.domains.rigging.models import PowerNode, RiggingPoint
-from app.domains.video.models import VideoInput, VideoInputList
 
 router = APIRouter(
     prefix="/jobs/{job_id}/graph",
@@ -73,12 +73,6 @@ def _owned_by_job(column: str, job_id: UUID, value: UUID):
             .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
             .where(OutputPatchPoint.id == value, ChannelList.job_id == job_id)
         )
-    if column == "linked_video_input_id":
-        return (
-            select(VideoInput.id)
-            .join(VideoInputList, VideoInput.list_id == VideoInputList.id)
-            .where(VideoInput.id == value, VideoInputList.job_id == job_id)
-        )
     if column == "power_node_id":
         return select(PowerNode.id).where(PowerNode.id == value, PowerNode.job_id == job_id)
     return select(RiggingPoint.id).where(RiggingPoint.id == value, RiggingPoint.job_id == job_id)
@@ -100,7 +94,19 @@ async def set_element_links(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
     data = payload.model_dump(exclude_unset=True)
     for column, value in data.items():
-        if value is not None and await db.scalar(_owned_by_job(column, job_id, value)) is None:
+        if value is None:
+            continue
+        if column == "linked_video_input_id":
+            # video inputs are graph nodes; the link holds the node's public id
+            inputs = await db.scalars(
+                select(GraphDevice).where(
+                    GraphDevice.job_id == job_id, GraphDevice.kind == "video_input"
+                )
+            )
+            owned = any(public_id(n) == value for n in inputs.all())
+        else:
+            owned = await db.scalar(_owned_by_job(column, job_id, value)) is not None
+        if not owned:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, f"{column} does not belong to this job"
             )

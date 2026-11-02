@@ -458,9 +458,15 @@ LEGACY_KEY_TABLES = {
 
 def _cable_key(edge: Any) -> str:
     """Keep the legacy patch point id as the key so saved cable routes keep matching."""
-    ref = (edge.attributes or {}).get("legacy_ref") or ""
-    table, _, legacy_id = ref.partition(":")
-    return legacy_id if table in LEGACY_KEY_TABLES and legacy_id else str(edge.id)
+    attrs = edge.attributes or {}
+    table, _, legacy_id = (attrs.get("legacy_ref") or "").partition(":")
+    if table in LEGACY_KEY_TABLES and legacy_id:
+        return legacy_id
+    # video connections live only on the graph: their point id is the key (the legacy point id for
+    # connections that came from the tables)
+    if edge.signal == "video" and attrs.get("point_id"):
+        return str(attrs["point_id"])
+    return str(edge.id)
 
 
 class _ElementView:

@@ -123,15 +123,8 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_backfill_maps_output_chains_and_video(auth_headers):
+async def test_backfill_maps_output_chains(auth_headers):
     from app.domains.audio.models import ChannelListOutput, OutputPatchPoint
-    from app.domains.video.models import (
-        VideoInput,
-        VideoInputList,
-        VideoOutput,
-        VideoOutputPatchPoint,
-        VideoPatchPoint,
-    )
 
     async with db_mod.SessionLocal() as db:
         job = ProductionJob(title="Outputs")
@@ -146,13 +139,7 @@ async def test_backfill_maps_output_chains_and_video(auth_headers):
             mk("Spk A", "speaker"),
             mk("Spk B", "speaker"),
         )
-        camera_rig, matrix, scaler, led = (
-            mk("Cam rig", "other"),
-            mk("Matrix", "switcher"),
-            mk("Scaler", "other"),
-            mk("LED proc", "other"),
-        )
-        db.add_all([console, amp, spk_a, spk_b, camera_rig, matrix, scaler, led])
+        db.add_all([console, amp, spk_a, spk_b])
         lst = ChannelList(job_id=job.id, name="FOH")
         db.add(lst)
         await db.flush()
@@ -169,31 +156,6 @@ async def test_backfill_maps_output_chains_and_video(auth_headers):
                 OutputPatchPoint(output_id=out.id, position=3, device_id=spk_b.id, parent_id=p0.id),
             ]
         )
-        vlist = VideoInputList(job_id=job.id, name="Video")
-        db.add(vlist)
-        await db.flush()
-        vin = VideoInput(list_id=vlist.id, input_number=1, source_label="Cam 1")
-        db.add(vin)
-        await db.flush()
-        db.add(VideoPatchPoint(input_id=vin.id, position=0, device_id=matrix.id, input_port="In 3"))
-        vout = VideoOutput(list_id=vlist.id, output_number=1, destination_label="LED wall")
-        db.add(vout)
-        await db.flush()
-        root = VideoOutputPatchPoint(output_id=vout.id, position=0, device_id=matrix.id)
-        db.add(root)
-        await db.flush()
-        mid = VideoOutputPatchPoint(
-            output_id=vout.id,
-            position=1,
-            device_id=scaler.id,
-            parent_id=root.id,
-            source_port="Out 1",
-        )
-        db.add(mid)
-        await db.flush()
-        db.add(
-            VideoOutputPatchPoint(output_id=vout.id, position=2, device_id=led.id, parent_id=mid.id)
-        )
         await db.commit()
         job_id = str(job.id)
 
@@ -201,11 +163,10 @@ async def test_backfill_maps_output_chains_and_video(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 8 devices + channel list + bus + video list + video input + video destination
-        assert first.json()["devices"] == 13
-        # console->bus, bus->amp, amp->spkA, bus->spkB, cam->matrix,
-        # matrix->scaler, scaler->led, led->dest
-        assert first.json()["edges"] == 8
+        # 4 devices + channel list + bus
+        assert first.json()["devices"] == 6
+        # console->bus, bus->amp, amp->spkA, bus->spkB
+        assert first.json()["edges"] == 4
         assert (await client.post(f"{g}/backfill", headers=auth_headers)).json()["edges"] == 0
 
         graph = (await client.get(g, headers=auth_headers)).json()
@@ -220,13 +181,3 @@ async def test_backfill_maps_output_chains_and_video(auth_headers):
         assert reached[by_name["Amp"]["id"]] == 2
         assert reached[by_name["Spk A"]["id"]] == 3
         assert reached[by_name["Spk B"]["id"]] == 2
-
-        cam = await client.get(
-            f"{g}/devices/{by_name['Cam 1']['id']}/trace",
-            params={"direction": "downstream"},
-            headers=auth_headers,
-        )
-        assert by_name["LED wall"]["id"] in {h["device_id"] for h in cam.json()["hops"]}
-        assert any(p["id"] == "In 3" for p in by_name["Matrix"]["ports"])
-        assert any(p["id"] == "Out 1" for p in by_name["Matrix"]["ports"])
-        assert any(p["id"] == "Out 1" for p in by_name["Scaler"]["ports"]) is False

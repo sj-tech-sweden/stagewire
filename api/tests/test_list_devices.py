@@ -76,29 +76,33 @@ async def test_each_video_list_gets_its_own_switcher_named_after_it(auth_headers
         job_id = (
             await client.post(f"{BASE}/jobs", json={"title": "Video lists"}, headers=auth_headers)
         ).json()["id"]
+        g = f"{BASE}/jobs/{job_id}/graph"
         made = {}
         for name, product in (("Cameras", "11"), ("Graphics", "22")):
             lst = (
-                await client.post(
-                    f"{BASE}/jobs/{job_id}/video-lists", json={"name": name}, headers=auth_headers
-                )
+                await client.post(f"{g}/video-lists", json={"name": name}, headers=auth_headers)
             ).json()
             await client.patch(
-                f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}",
-                json={"switcher_product_id": product, "switcher_product_name": f"ATEM {product}"},
+                f"{g}/devices/{lst['id']}",
+                json={
+                    "attributes": {
+                        "switcher_product_id": product,
+                        "switcher_product_name": f"ATEM {product}",
+                    },
+                    "expected_revision": lst["revision"],
+                },
                 headers=auth_headers,
             )
             cam = (
                 await client.post(
-                    f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/inputs",
+                    f"{g}/video-lists/{lst['id']}/inputs",
                     json={"source_label": f"{name} 1"},
                     headers=auth_headers,
                 )
             ).json()
             fill = (
                 await client.post(
-                    f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/fill-from-switcher",
-                    headers=auth_headers,
+                    f"{g}/video-lists/{lst['id']}/fill-from-switcher", headers=auth_headers
                 )
             ).json()
             made[name] = fill["device_id"]

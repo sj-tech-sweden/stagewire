@@ -930,7 +930,10 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
 
 
 async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> None:
-    from app.domains.video.models import VideoInputList
+    from sqlalchemy import select as sa_select
+
+    from app.domains.graph.ids import public_id
+    from app.domains.graph.models import GraphDevice
 
     if data.get("sound_list_id") is not None:
         found = await service.get_channel_list(db, data["sound_list_id"])
@@ -939,8 +942,13 @@ async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> Non
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "Channel list not found for this job"
             )
     if data.get("video_list_id") is not None:
-        found = await db.get(VideoInputList, data["video_list_id"])
-        if found is None or found.job_id != job_id:
+        # video lists are graph nodes; the device holds the list's public id
+        lists = await db.scalars(
+            sa_select(GraphDevice).where(
+                GraphDevice.job_id == job_id, GraphDevice.kind == "video_list"
+            )
+        )
+        if not any(public_id(n) == data["video_list_id"] for n in lists.all()):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "Video list not found for this job"
             )

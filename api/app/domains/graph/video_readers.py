@@ -7,10 +7,8 @@ dropped. The ids are still the legacy ids (carried by ``legacy_ref``): saved cab
 element links and report layouts are keyed by them, and they stay valid until the final migration
 rewrites those keys.
 
-How a chain is stored (see ``backfill.Builder.video``): an input's patch points are the edges
-whose ``attributes.chain`` is the input node, in ``position`` order, each ending on the device the
-point names; an output's *root* points have no edge of their own (they are listed in the
-destination's ``attributes.roots``) and its other points are edges with a ``parent_id``.
+A chain is stored as the node's ``attributes.points`` (see ``video_native``); the edges are
+derived from it.
 """
 
 import uuid
@@ -21,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import GraphDevice
 
 _legacy_id = public_id
 
@@ -70,29 +68,16 @@ async def load_video_lists(
             )
         ).all()
     }
-    edges = (
-        await db.scalars(
-            select(ConnectionEdge).where(
-                ConnectionEdge.job_id == job_id, ConnectionEdge.signal == "video"
-            )
-        )
-    ).all()
-    chains: dict[str, list[ConnectionEdge]] = {}
-    for edge in edges:
-        chain = (edge.attributes or {}).get("chain")
-        if chain and (edge.attributes or {}).get("point_id"):
-            chains.setdefault(chain, []).append(edge)
 
     def points_of(node: GraphDevice, owner_key: str) -> list[SimpleNamespace]:
         owner = {owner_key: _legacy_id(node)}
-        out = [
-            _point(e.attributes, gear.get(e.dst_device_id), **owner)
-            for e in chains.get(str(node.id), [])
-        ]
-        for root in (node.attributes or {}).get("roots") or []:
-            if root.get("point_id"):
-                out.append(_point(root, gear.get(uuid.UUID(root["device_id"])), **owner))
-        return sorted(out, key=lambda p: p.position)
+        return sorted(
+            (
+                _point(p, gear.get(uuid.UUID(p["device_id"])), **owner)
+                for p in (node.attributes or {}).get("points", [])
+            ),
+            key=lambda p: p.position,
+        )
 
     lists: dict[str, SimpleNamespace] = {}
     for node in sorted(

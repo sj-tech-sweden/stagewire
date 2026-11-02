@@ -170,6 +170,8 @@ async def test_video_node_and_edge_edits_and_deletes_write_through(auth_headers)
             headers=h,
         )
 
+        fresh = {d["id"]: d for d in (await _graph(client, h, job_id))["devices"]}
+        cam, out = fresh[cam["id"]], fresh[out["id"]]
         res = await client.patch(
             f"{g}/devices/{cam['id']}",
             json={
@@ -209,7 +211,11 @@ async def test_video_node_and_edge_edits_and_deletes_write_through(auth_headers)
             for e in (await _graph(client, h, job_id))["edges"]
             if (e["attributes"] or {}).get("point_id")
         ]
-        first = next(e for e in edges if e["attributes"]["position"] == 0)
+        first = next(
+            e
+            for e in edges
+            if e["attributes"]["position"] == 0 and e["attributes"].get("input_number")
+        )
         res = await client.patch(
             f"{g}/edges/{first['id']}",
             json={"attributes": {"connector": "BNC"}, "expected_revision": first["revision"]},
@@ -363,72 +369,3 @@ async def test_a_video_source_can_be_a_stockwire_product_and_counts_for_the_job(
         ]
         desired, freetext = _desired_stockwire_items(job, inputs)
         assert desired[77]["quantity"] == 2 and freetext == []
-
-
-@pytest.mark.asyncio
-async def test_graph_video_readers_match_the_tables(auth_headers):
-    """load_video_lists (graph) must equal the table-backed service for chains, branches, labels."""
-    from app.core import db as db_mod
-    from app.domains.graph.video_readers import (
-        describe,
-        load_video_lists,
-        video_counts_per_device,
-    )
-    from app.domains.video import service as video_service
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        h = auth_headers
-        job_id, g, lst = await _setup(client, h)
-        cam = (
-            await client.post(
-                f"{g}/video-lists/{lst['id']}/inputs",
-                json={"source_label": "Cam 1", "connector": "sdi", "notes": "wide"},
-                headers=h,
-            )
-        ).json()
-        await client.post(
-            f"{g}/video-lists/{lst['id']}/inputs", json={"source_label": "Cam 2"}, headers=h
-        )
-        out = (
-            await client.post(
-                f"{g}/video-lists/{lst['id']}/outputs",
-                json={"name": "PGM", "destination_label": "Screens"},
-                headers=h,
-            )
-        ).json()
-        sw = await _device(client, g, h, "Switcher", "switcher")
-        split = await _device(client, g, h, "Splitter", "split")
-        left = await _device(client, g, h, "Left", "screen")
-        right = await _device(client, g, h, "Right", "screen")
-        res = await client.put(
-            f"{g}/video-inputs/{cam['id']}/chain",
-            json={"steps": [{"device_id": sw["id"], "connector": "sdi", "patch_label": "In 4"}]},
-            headers=h,
-        )
-        assert res.status_code == 200, res.text
-        res = await client.put(
-            f"{g}/video-outputs/{out['id']}/chain",
-            json={
-                "steps": [
-                    {"device_id": sw["id"], "connector": "SDI"},
-                    {"device_id": split["id"], "parent_index": 0, "input_port": "A"},
-                    {"device_id": left["id"], "parent_index": 1},
-                    {"device_id": right["id"], "parent_index": 1, "notes": "far side"},
-                ]
-            },
-            headers=h,
-        )
-        assert res.status_code == 200, res.text
-
-        from uuid import UUID
-
-        async with db_mod.SessionLocal() as db:
-            old = describe(await video_service.list_input_lists(db, UUID(job_id)))
-            db.expire_all()
-            new = describe(await load_video_lists(db, UUID(job_id)))
-            inputs, outputs = await video_counts_per_device(db, UUID(job_id))
-        assert old == new
-        assert len(new[0]["outputs"][0]["points"]) == 4
-        # Cam 1 goes through one device; the output goes through four
-        assert list(inputs.values()) == [1]
-        assert sorted(outputs.values()) == [1, 1, 1, 1]

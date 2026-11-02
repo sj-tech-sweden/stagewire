@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { legacyId } from '../../src/utils/graphLegacy';
 import { applyGraphEvent, isRevisionConflict, threeWayMerge, upsertVersioned } from '../../src/utils/graph';
 
 test('an older revision never overwrites a newer row', () => {
@@ -59,4 +60,10 @@ test('edits to different attribute keys merge, the same key changed twice still 
   expect(clean.merged).toEqual({ attributes: { wireless_frequency: '606.250' } });
   const clash = threeWayMerge(base, { attributes: { wireless_pack: 'P9R' } }, theirs);
   expect(clash.conflicts.map((c) => c.field)).toEqual(['attributes']);
+});
+
+test('a node is known by its legacy id, then the legacy id kept as an attribute, then its own id', () => {
+  expect(legacyId({ id: 'n1', legacy_ref: 'audio_devices:abc' })).toBe('abc');
+  expect(legacyId({ id: 'n2', legacy_ref: null, attributes: { legacy_id: 'old-input' } })).toBe('old-input');
+  expect(legacyId({ id: 'n3', legacy_ref: null, attributes: {} })).toBe('n3');
 });

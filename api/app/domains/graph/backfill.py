@@ -15,10 +15,10 @@ from app.domains.audio.models import (
     OutputPatchPoint,
     StagePlotElement,
 )
+from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
 from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
-from app.domains.video.models import VideoInputList
 
 FAN_OUT = 64
 
@@ -107,29 +107,6 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "dmx_universes": {"number", "source_port", "name"},
     "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
     "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id"},
-    "video_input_lists": {
-        "switcher_product_id",
-        "switcher_product_name",
-        "switcher_inputs",
-        "switcher_outputs",
-    },
-    "video_inputs": {
-        "input_number",
-        "source_type",
-        "source_label",
-        "connector",
-        "list_id",
-        "stockwire_product_id",
-        "stockwire_product_name",
-    },
-    "video_outputs": {
-        "output_number",
-        "name",
-        "destination_label",
-        "connector",
-        "list_id",
-        "roots",
-    },
     "audio_devices": {
         "power_inlet",
         *DEVICE_SPEC_FIELDS,
@@ -163,8 +140,6 @@ MIRRORED_EDGE_TABLES = {
     "power_node_feeds",
     "lighting_fixtures.power",
     "audio_devices.power",
-    "video_patch_points",
-    "video_output_patch_points",
 }
 CANVAS_OWNED_TABLES = {"stage_plot_elements"}
 
@@ -220,20 +195,6 @@ def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
     return ports
 
 
-def _video_point_attrs(point, chain_root: GraphDevice | None) -> dict:
-    return {
-        **({"chain": str(chain_root.id)} if chain_root is not None else {}),
-        "point_id": str(point.id),
-        "position": point.position,
-        "connector": point.connector or "",
-        "patch_label": point.patch_label or "",
-        "notes": point.notes or "",
-        "source_port": point.source_port or "",
-        "input_port": point.input_port or "",
-        "parent_id": str(point.parent_id) if getattr(point, "parent_id", None) else None,
-    }
-
-
 def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False) -> dict:
     attrs = {
         "chain": str(chain_root.id),
@@ -248,6 +209,22 @@ def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False)
     if bus_connector:
         attrs["bus_connector"] = getattr(point, "bus_connector", None) or ""
     return attrs
+
+
+# Legacy video mirrors are not synced any more: video lives on the graph (video_native.py) and a
+# job's remaining table rows are brought over once by video_native.import_legacy.
+LEGACY_VIDEO_REFS = (
+    "video_input_lists:",
+    "video_inputs:",
+    "video_outputs:",
+    "video_patch_points:",
+    "video_output_patch_points:",
+    "video_outputs.dest:",
+)
+
+
+def _is_video(ref: str | None) -> bool:
+    return bool(ref) and ref.startswith(LEGACY_VIDEO_REFS)
 
 
 class Backfill:
@@ -265,23 +242,27 @@ class Backfill:
         self.edge_updates: list[tuple[ConnectionEdge, dict]] = []
         self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
+        self.video_inputs: dict[uuid.UUID, GraphDevice] = {}
         self.result = BackfillResult()
 
     async def load_existing(self) -> None:
         for device in (
             await self.db.scalars(select(GraphDevice).where(GraphDevice.job_id == self.job_id))
         ).all():
-            if device.legacy_ref:
+            if device.legacy_ref and not _is_video(device.legacy_ref):
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
+            if device.kind == "video_input":
+                # video inputs live only in the graph; plot elements link them by public id
+                self.video_inputs[public_id(device)] = device
         for edge in (
             await self.db.scalars(
                 select(ConnectionEdge).where(ConnectionEdge.job_id == self.job_id)
             )
         ).all():
             ref = (edge.attributes or {}).get("legacy_ref")
-            if ref:
+            if ref and not _is_video(ref):
                 self.edge_refs.add(ref)
                 self.edge_rows[ref] = edge
                 self.loaded_edges.add(ref)
@@ -640,143 +621,6 @@ class Backfill:
                     },
                 )
 
-    async def video(self) -> None:
-        lists = (
-            await self.db.scalars(
-                select(VideoInputList).where(VideoInputList.job_id == self.job_id)
-            )
-        ).all()
-        for vlist in lists:
-            list_node = self.device(
-                f"video_input_lists:{vlist.id}",
-                domain="video",
-                kind="video_list",
-                name=vlist.name,
-                position=vlist.position,
-                stockwire_product_id=vlist.switcher_product_id,
-                stockwire_product_name=vlist.switcher_product_name,
-                attributes={
-                    "switcher_product_id": vlist.switcher_product_id,
-                    "switcher_product_name": vlist.switcher_product_name,
-                    "switcher_inputs": vlist.switcher_inputs,
-                    "switcher_outputs": vlist.switcher_outputs,
-                },
-            )
-            for vin in vlist.inputs:
-                source = self.device(
-                    f"video_inputs:{vin.id}",
-                    domain="video",
-                    kind="video_input",
-                    name=vin.source_label or f"Input {vin.input_number}",
-                    notes=vin.notes or "",
-                    position=vin.input_number,
-                    attributes={
-                        "input_number": vin.input_number,
-                        "source_type": vin.source_type,
-                        "source_label": vin.source_label or "",
-                        "stockwire_product_id": vin.stockwire_product_id,
-                        "stockwire_product_name": vin.stockwire_product_name,
-                        "connector": vin.connector or "",
-                        "list_id": str(list_node.id),
-                    },
-                    ports=[
-                        {
-                            "id": "out",
-                            "direction": "out",
-                            "signal": "video",
-                            "connector": (vin.connector or "").lower() or None,
-                        }
-                    ],
-                )
-                prev = source
-                for point in vin.patch_points:
-                    target = self.devices.get(f"audio_devices:{point.device_id}")
-                    if target is None or target is prev:
-                        continue
-                    self.edge(
-                        f"video_patch_points:{point.id}",
-                        "video",
-                        prev,
-                        "out"
-                        if prev is source
-                        else self.named_port(
-                            prev, "out", "video", point.source_port, point.connector
-                        ),
-                        target,
-                        self.named_port(target, "in", "video", point.input_port, point.connector),
-                        attributes={
-                            "input_number": vin.input_number,
-                            **_video_point_attrs(point, source),
-                        },
-                    )
-                    prev = target
-            for vout in vlist.outputs:
-                self._video_output(vlist, list_node, vout)
-
-    def _video_output(self, vlist: VideoInputList, list_node: GraphDevice, vout) -> None:
-        dest_ref = f"video_outputs:{vout.id}"
-        points = [p for p in vout.patch_points if p.device_id]
-        leaves = {p.id for p in points} - {p.parent_id for p in points if p.parent_id}
-        dest = self.device(
-            dest_ref,
-            domain="video",
-            kind="video_destination",
-            name=vout.destination_label or vout.name or f"Output {vout.output_number}",
-            notes=vout.notes or "",
-            position=vout.output_number,
-            attributes={
-                "output_number": vout.output_number,
-                "name": vout.name or "",
-                "destination_label": vout.destination_label or "",
-                "connector": vout.connector or "",
-                "list_id": str(list_node.id),
-                "roots": [
-                    {"device_id": str(node.id), **_video_point_attrs(p, None)}
-                    for p in points
-                    if p.parent_id is None
-                    and (node := self.devices.get(f"audio_devices:{p.device_id}")) is not None
-                ],
-            },
-            ports=[
-                {
-                    "id": "in",
-                    "direction": "in",
-                    "signal": "video",
-                    "connector": (vout.connector or "").lower() or None,
-                    "channels": max(1, len(leaves)),
-                }
-            ],
-        )
-        by_id = {p.id: p for p in points}
-        for point in points:
-            target = self.devices.get(f"audio_devices:{point.device_id}")
-            parent = by_id.get(point.parent_id) if point.parent_id else None
-            if parent is not None and target is not None and parent.device_id != point.device_id:
-                src = self.devices.get(f"audio_devices:{parent.device_id}")
-                if src is not None:
-                    self.edge(
-                        f"video_output_patch_points:{point.id}",
-                        "video",
-                        src,
-                        self.named_port(src, "out", "video", point.source_port, point.connector),
-                        target,
-                        self.named_port(target, "in", "video", point.input_port, point.connector),
-                        attributes={
-                            "output_id": str(vout.id),
-                            **_video_point_attrs(point, dest),
-                        },
-                    )
-            if point.id in leaves and target is not None:
-                self.edge(
-                    f"video_outputs.dest:{point.id}",
-                    "video",
-                    target,
-                    self.port(target, "out", "video", point.connector),
-                    dest,
-                    "in",
-                    attributes={"output_id": str(vout.id)},
-                )
-
     async def write_edges(self) -> None:
         """Insert devices first; nothing in the ORM orders edge inserts after them."""
         await self.db.flush()
@@ -892,6 +736,8 @@ class Backfill:
                     }.get(role, "audio_devices")
                     target_ref = f"{table}:{legacy_id}"
                 target = self.devices.get(target_ref) if target_ref in self.seen_devices else None
+                if role == "video_input":
+                    target = self.video_inputs.get(legacy_id)
                 if target is None and role == "power_node":
                     target = self.devices.get(target_ref)
                 if target is None:
@@ -932,9 +778,7 @@ class Backfill:
                 ("channel", f"audio_channel_patches:{el.linked_channel_id}")
                 if el.linked_channel_id
                 else None,
-                ("video_input", f"video_inputs:{el.linked_video_input_id}")
-                if el.linked_video_input_id
-                else None,
+                ("video_input", None) if el.linked_video_input_id in self.video_inputs else None,
                 ("output_point", f"audio_devices:{out_device.get(el.linked_output_point_id)}")
                 if el.linked_output_point_id in out_device
                 else None,
@@ -944,7 +788,11 @@ class Backfill:
             ]
             el.graph_source_id, el.graph_source_role = None, None
             for role, ref in (c for c in candidates if c):
-                source = node(ref)
+                source = (
+                    self.video_inputs[el.linked_video_input_id]
+                    if role == "video_input"
+                    else node(ref)
+                )
                 if source is not None:
                     el.graph_source_id, el.graph_source_role = source.id, role
                     break
@@ -1262,7 +1110,14 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
-        return await _backfill_job_locked(db, job_id)
+        result = await _backfill_job_locked(db, job_id)
+        # video still in the legacy tables is imported once; the plot links to its inputs are only
+        # visible to a sync that runs after it
+        from app.domains.graph import video_native
+
+        if await video_native.import_legacy(db, job_id):
+            result = await _backfill_job_locked(db, job_id)
+        return result
 
 
 async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
@@ -1281,7 +1136,6 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
         await builder.channel_lists()
         await builder.channels()
         await builder.audio_outputs()
-        await builder.video()
         await builder.lighting()
         await builder.plot_elements()
     with db.no_autoflush:

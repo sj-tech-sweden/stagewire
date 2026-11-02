@@ -114,22 +114,25 @@ async def test_switcher_io_comes_from_video_inputs_then_stockwire_then_override(
                 headers=auth_headers,
             )
         ).json()
+        g = f"{BASE}/jobs/{job_id}/graph"
         lst = (
-            await client.post(
-                f"{BASE}/jobs/{job_id}/video-lists", json={"name": "Cameras"}, headers=auth_headers
-            )
+            await client.post(f"{g}/video-lists", json={"name": "Cameras"}, headers=auth_headers)
         ).json()
+        graph = (await client.get(g, headers=auth_headers)).json()
+        switcher_node = next(
+            d for d in graph["devices"] if d["legacy_ref"] == f"audio_devices:{switcher['id']}"
+        )
         for n in range(2):
             cam = (
                 await client.post(
-                    f"{BASE}/jobs/{job_id}/video-lists/{lst['id']}/inputs",
+                    f"{g}/video-lists/{lst['id']}/inputs",
                     json={"source_label": f"Cam {n + 1}"},
                     headers=auth_headers,
                 )
             ).json()
-            await client.post(
-                f"{BASE}/jobs/{job_id}/video-inputs/{cam['id']}/patch-points",
-                json={"device_id": switcher["id"]},
+            await client.put(
+                f"{g}/video-inputs/{cam['id']}/chain",
+                json={"steps": [{"device_id": switcher_node["id"]}]},
                 headers=auth_headers,
             )
 

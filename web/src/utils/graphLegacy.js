@@ -5,7 +5,11 @@ import { buildCableRows } from './cables';
 // the legacy ids, so cable keys, saved routes and highlights keep working while the data
 // itself comes from the graph.
 
+// The id other things (cable keys, plot element links, saved routes) use for a node: the legacy id
+// of a row that came from the old tables, else the node's own id. Video nodes are graph-native and
+// keep their old id as `attributes.legacy_id` (the same rule as api/app/domains/graph/ids.py).
 export const legacyId = (node) => {
+  if (node?.attributes?.legacy_id) return node.attributes.legacy_id;
   const ref = node?.legacy_ref || '';
   const [table, id] = ref.split(':');
   return table && id ? id : node?.id;

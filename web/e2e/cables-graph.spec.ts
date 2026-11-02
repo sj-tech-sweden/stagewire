@@ -71,14 +71,17 @@ test('the cable list built from the graph equals the one built from the legacy d
     parent_id: console_.id,
   });
 
-  const vlist = await post(`${job}/video-lists`, { name: 'Video' });
-  const vin = await post(`${job}/video-lists/${vlist.id}/inputs`, { source_label: 'Cam 1' });
-  await send(request, h, 'put', `${job}/video-inputs/${vin.id}/patch-chain`, {
-    steps: [{ device_id: cam.id }, { device_id: matrix.id, input_port: 'In 3' }],
+  // video lives only on the graph: lists and chains are written there, with graph node ids
+  const nodes = ((await (await request.get(`${API_BASE}/api/v1${job}/graph`, { headers: h })).json()) as any).devices as any[];
+  const nodeOf = (legacy: { id: string }) => nodes.find((d) => d.legacy_ref === `audio_devices:${legacy.id}`).id;
+  const vlist = await post(`${job}/graph/video-lists`, { name: 'Video' });
+  const vin = await post(`${job}/graph/video-lists/${vlist.id}/inputs`, { source_label: 'Cam 1' });
+  await send(request, h, 'put', `${job}/graph/video-inputs/${vin.id}/chain`, {
+    steps: [{ device_id: nodeOf(cam) }, { device_id: nodeOf(matrix), input_port: 'In 3' }],
   });
-  const vout = await post(`${job}/video-lists/${vlist.id}/outputs`, { destination_label: 'LED wall' });
-  await send(request, h, 'put', `${job}/video-outputs/${vout.id}/patch-chain`, {
-    steps: [{ device_id: matrix.id }, { device_id: led.id, parent_index: 0, source_port: 'Out 1' }],
+  const vout = await post(`${job}/graph/video-lists/${vlist.id}/outputs`, { destination_label: 'LED wall' });
+  await send(request, h, 'put', `${job}/graph/video-outputs/${vout.id}/chain`, {
+    steps: [{ device_id: nodeOf(matrix) }, { device_id: nodeOf(led), parent_index: 0, source_port: 'Out 1' }],
   });
 
   const el = (data: object) => post(`${job}/plot-elements`, { width_cm: 40, height_cm: 40, ...data });

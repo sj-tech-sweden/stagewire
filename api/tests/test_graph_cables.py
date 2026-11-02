@@ -14,18 +14,12 @@ from app.domains.audio.models import (
     StagePlotElement,
 )
 from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.video_readers import load_video_lists
 from app.domains.reports.cable_routing import (
     derive_cables,
     derive_cables_from_graph,
     routed_cable_paths,
     routed_cable_paths_from_graph,
-)
-from app.domains.video.models import (
-    VideoInput,
-    VideoInputList,
-    VideoOutput,
-    VideoOutputPatchPoint,
-    VideoPatchPoint,
 )
 from app.main import app
 
@@ -90,25 +84,7 @@ async def _seed():
             output_id=out.id, position=2, device_id=devices["Stagebox"].id, parent_id=p0.id
         )
         db.add_all([p1, p2])
-        vlist = VideoInputList(job_id=job.id, name="Video")
-        db.add(vlist)
         await db.flush()
-        vin = VideoInput(list_id=vlist.id, input_number=1, source_label="Cam")
-        db.add(vin)
-        await db.flush()
-        for position, name in enumerate(("Camrig", "Matrix", "Scaler")):
-            db.add(VideoPatchPoint(input_id=vin.id, position=position, device_id=devices[name].id))
-        vout = VideoOutput(list_id=vlist.id, output_number=1, destination_label="LED")
-        db.add(vout)
-        await db.flush()
-        root = VideoOutputPatchPoint(output_id=vout.id, position=0, device_id=devices["Matrix"].id)
-        db.add(root)
-        await db.flush()
-        db.add(
-            VideoOutputPatchPoint(
-                output_id=vout.id, position=1, device_id=devices["Scaler"].id, parent_id=root.id
-            )
-        )
         j = job.id
         db.add_all(
             [
@@ -131,10 +107,9 @@ async def _seed():
                     "camera",
                     50,
                     400,
-                    linked_video_input_id=vin.id,
                     linked_device_id=devices["Camrig"].id,
                 ),
-                _element(j, "projector", 60, 420, linked_video_input_id=vin.id),
+                _element(j, "projector", 60, 420),
                 _element(j, "switcher", 400, 50, linked_device_id=devices["Matrix"].id),
                 _element(j, "other", 450, 80, linked_device_id=devices["Scaler"].id),
             ]
@@ -149,12 +124,11 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post(f"{BASE}/jobs/{job_id}/graph/backfill", headers=auth_headers)
         assert res.status_code == 200, res.text
+        await _native_video(client, auth_headers, job_id)
 
     async with db_mod.SessionLocal() as db:
         lists = (await db.scalars(select(ChannelList).where(ChannelList.job_id == job_id))).all()
-        vlists = (
-            await db.scalars(select(VideoInputList).where(VideoInputList.job_id == job_id))
-        ).all()
+        vlists = await load_video_lists(db, job_id)
         elements = (
             await db.scalars(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
         ).all()
@@ -207,6 +181,49 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
         graph_paths, key=lambda p: p["key"]
     )
     assert str(hidden_point_id) not in {p["key"] for p in graph_paths}
+
+
+async def _native_video(client, h, job_id):
+    """Video lives only on the graph: a camera chain and an output tree, linked to plot elements."""
+    g = f"{BASE}/jobs/{job_id}/graph"
+    graph = (await client.get(g, headers=h)).json()
+    node = {d["name"]: d for d in graph["devices"] if d["domain"] != "video"}
+    lst = (await client.post(f"{g}/video-lists", json={"name": "Video"}, headers=h)).json()
+    vin = (
+        await client.post(
+            f"{g}/video-lists/{lst['id']}/inputs", json={"source_label": "Cam"}, headers=h
+        )
+    ).json()
+    vout = (
+        await client.post(
+            f"{g}/video-lists/{lst['id']}/outputs", json={"destination_label": "LED"}, headers=h
+        )
+    ).json()
+    steps = [{"device_id": node[n]["id"]} for n in ("Camrig", "Matrix", "Scaler")]
+    await client.put(f"{g}/video-inputs/{vin['id']}/chain", json={"steps": steps}, headers=h)
+    await client.put(
+        f"{g}/video-outputs/{vout['id']}/chain",
+        json={
+            "steps": [
+                {"device_id": node["Matrix"]["id"]},
+                {"device_id": node["Scaler"]["id"], "parent_index": 0},
+            ]
+        },
+        headers=h,
+    )
+    for element_type in ("camera", "projector"):
+        el = next(
+            d
+            for d in graph["devices"]
+            if d["kind"] == "plot_element"
+            and (d["attributes"] or {}).get("element_type") == element_type
+        )
+        res = await client.put(
+            f"{g}/plot-elements/{el['id']}/links",
+            json={"linked_video_input_id": vin["id"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
 
 
 async def _legacy_devices(job_id):

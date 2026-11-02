@@ -347,7 +347,7 @@ async def test_every_link_role_validates_and_links(auth_headers, monkeypatch):
         vin = (
             await client.post(f"{g}/video-lists/{vlist['id']}/inputs", json={}, headers=h)
         ).json()
-        video_input = vin["legacy_ref"].split(":")[1]
+        video_input = vin["id"]  # video nodes have no legacy row: the public id is the node id
         source = (
             await client.post(
                 f"{g}/power-nodes",

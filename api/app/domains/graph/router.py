@@ -12,7 +12,7 @@ from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import backfill, mirror, readers, schemas, topology
+from app.domains.graph import backfill, mirror, readers, schemas, topology, video_native
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -133,7 +133,9 @@ async def update_device(
     db: AsyncSession = Depends(get_db),
 ) -> GraphDevice:
     device = await _device(db, job_id, device_id)
-    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    data = video_native.translate_patch(
+        device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    )
 
     async def apply() -> GraphDevice:
         protect = mirror.device_needs_protection(device, data)
@@ -173,10 +175,15 @@ async def delete_device(
         e for e in await _all_edges(db, job_id) if device_id in (e.src_device_id, e.dst_device_id)
     ]
     removed_edges = [str(e.id) for e in touching]
+    removed_nodes: list[str] = []
 
     async def remove() -> None:
         for edge in touching:
             await db.delete(edge)
+        if device.kind in video_native.VIDEO_KINDS:
+            child_nodes, child_edges = await video_native.clear_references(db, device)
+            removed_nodes.extend(child_nodes)
+            removed_edges.extend(child_edges)
         await db.delete(device)
         await db.flush()
         try:
@@ -194,6 +201,8 @@ async def delete_device(
         remove,
         lambda: db.get(GraphDevice, device_id),
     )
+    for child_id in removed_nodes:
+        await publish_job_event(job_id, "graph.device.delete", {"id": child_id, "edge_ids": []})
     await publish_job_event(
         job_id, "graph.device.delete", {"id": str(device_id), "edge_ids": removed_edges}
     )
