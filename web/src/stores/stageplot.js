@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
 import { useGraphStore } from '@/stores/graph';
+import { legacyId } from '@/utils/graphLegacy';
 import {
   elementFromNode,
   elementLinks,
@@ -24,7 +25,8 @@ export const useStagePlotStore = defineStore('stageplot', {
   actions: {
     nodeOf(id) {
       const graph = useGraphStore();
-      return graph.devices.find((d) => d.legacy_ref === `stage_plot_elements:${id}`) || null;
+      // an element's id is its node's public id (legacy id for an imported one, else the node id)
+      return graph.devices.find((d) => d.kind === 'plot_element' && legacyId(d) === id) || null;
     },
     elementOf(jobId, node) {
       const graph = useGraphStore();

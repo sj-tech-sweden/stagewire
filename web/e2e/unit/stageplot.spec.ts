@@ -33,6 +33,13 @@ test('a plot element node is shown with its legacy id, geometry and linked legac
   });
 });
 
+test('a native element keeps an imported legacy id and otherwise uses its node id', () => {
+  const imported = node({ legacy_ref: null, attributes: { legacy_id: 'e9', element_type: 'stage' } });
+  expect(elementFromNode(imported).id).toBe('e9');
+  const fresh = node({ legacy_ref: null, attributes: { element_type: 'stage' } });
+  expect(elementFromNode(fresh).id).toBe('n1');
+});
+
 test('elements come from plot_element nodes only, with links read from the link edges', () => {
   const devices = [node(), { id: 'd', kind: 'mixer', legacy_ref: 'audio_devices:d1', attributes: {} }];
   const edges = [

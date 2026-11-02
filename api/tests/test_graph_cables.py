@@ -11,8 +11,9 @@ from app.domains.audio.models import (
     ChannelPatchPoint,
     OutputPatchPoint,
     ProductionJob,
-    StagePlotElement,
 )
+from app.domains.graph import plot_native
+from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.video_readers import load_video_lists
 from app.domains.reports.cable_routing import (
@@ -27,8 +28,8 @@ BASE = "/api/v1"
 
 
 def _element(job_id, kind, x, y, **links):
-    return StagePlotElement(
-        job_id=job_id,
+    """The fields of a plot element (made natively by the seed, as the plot makes them)."""
+    return dict(
         element_type=kind,
         position_x=x,
         position_y=y,
@@ -86,34 +87,33 @@ async def _seed():
         db.add_all([p1, p2])
         await db.flush()
         j = job.id
-        db.add_all(
-            [
-                _element(j, "microphone", 100, 100, linked_channel_id=channels[0].id),
-                _element(j, "performer", 200, 100, linked_channel_id=channels[1].id),
-                _element(j, "stagebox", 300, 300, linked_device_id=devices["Stagebox"].id),
-                _element(j, "mixer", 600, 300, linked_device_id=devices["Desk"].id),
-                _element(j, "amp", 500, 500, linked_device_id=devices["Amp"].id),
-                _element(
-                    j,
-                    "speaker",
-                    700,
-                    500,
-                    linked_output_point_id=p1.id,
-                    linked_device_id=devices["Wedge"].id,
-                ),
-                _element(j, "speaker", 800, 500, linked_device_id=devices["Amp"].id),
-                _element(
-                    j,
-                    "camera",
-                    50,
-                    400,
-                    linked_device_id=devices["Camrig"].id,
-                ),
-                _element(j, "projector", 60, 420),
-                _element(j, "switcher", 400, 50, linked_device_id=devices["Matrix"].id),
-                _element(j, "other", 450, 80, linked_device_id=devices["Scaler"].id),
-            ]
-        )
+        for spec in [
+            _element(j, "microphone", 100, 100, linked_channel_id=channels[0].id),
+            _element(j, "performer", 200, 100, linked_channel_id=channels[1].id),
+            _element(j, "stagebox", 300, 300, linked_device_id=devices["Stagebox"].id),
+            _element(j, "mixer", 600, 300, linked_device_id=devices["Desk"].id),
+            _element(j, "amp", 500, 500, linked_device_id=devices["Amp"].id),
+            _element(
+                j,
+                "speaker",
+                700,
+                500,
+                linked_output_point_id=p1.id,
+                linked_device_id=devices["Wedge"].id,
+            ),
+            _element(j, "speaker", 800, 500, linked_device_id=devices["Amp"].id),
+            _element(
+                j,
+                "camera",
+                50,
+                400,
+                linked_device_id=devices["Camrig"].id,
+            ),
+            _element(j, "projector", 60, 420),
+            _element(j, "switcher", 400, 50, linked_device_id=devices["Matrix"].id),
+            _element(j, "other", 450, 80, linked_device_id=devices["Scaler"].id),
+        ]:
+            await plot_native.create_element(db, j, spec)
         await db.commit()
         return job.id, p2.id
 
@@ -129,9 +129,7 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
     async with db_mod.SessionLocal() as db:
         lists = (await db.scalars(select(ChannelList).where(ChannelList.job_id == job_id))).all()
         vlists = await load_video_lists(db, job_id)
-        elements = (
-            await db.scalars(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
-        ).all()
+        elements = await plot_native.load_elements(db, job_id)
         devices = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()
         edges = (
             await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
@@ -165,9 +163,7 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
     legacy_names = {str(d.id): d.name for d in (await _legacy_devices(job_id))}
     graph_names = {str(d.id): d.name for d in devices}
     legacy_elements = {str(e.id): str(e.id) for e in elements}
-    graph_elements = {
-        str(d.id): d.legacy_ref.split(":")[1] for d in devices if d.kind == "plot_element"
-    }
+    graph_elements = {str(d.id): str(public_id(d)) for d in devices if d.kind == "plot_element"}
     assert shape(legacy, legacy_names, legacy_elements) == shape(graph, graph_names, graph_elements)
 
     plan = {"routes": {str(hidden_point_id): {"hidden": True}}}

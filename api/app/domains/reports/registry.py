@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
+from app.domains.graph import plot_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
@@ -72,7 +73,6 @@ async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
         .options(
             selectinload(ProductionJob.channel_lists).selectinload(ChannelList.channels),
             selectinload(ProductionJob.channel_lists).selectinload(ChannelList.outputs),
-            selectinload(ProductionJob.plot_elements),
             selectinload(ProductionJob.devices),
         )
     )
@@ -91,7 +91,7 @@ async def _channel_list_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     performer_names = {
         str(element.linked_channel_id): element.label
-        for element in job.plot_elements
+        for element in await plot_native.load_elements(db, job_id)
         if element.element_type == "performer" and element.linked_channel_id and element.label
     }
     rows = [
@@ -131,7 +131,7 @@ async def _channel_list_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job, "channels": rows}
 
 
-async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]:
+async def _camera_specs(db: AsyncSession, job: ProductionJob, plot_elements) -> dict[str, dict]:
     from app.domains.audio.camera_specs import resolve_camera_specs
     from app.domains.audio.router import stockwire_product_fetcher
 
@@ -156,7 +156,7 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]
             else None,
             "focal_mm": element.focal_mm,
         }
-        for element in job.plot_elements
+        for element in plot_elements
     ]
     fetch = await stockwire_product_fetcher(db)
     return await resolve_camera_specs(elements, devices, fetch)
@@ -165,7 +165,7 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]
 async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
     await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    graph_devices, graph_edges, _ = await graph_context.load_graph(db, job_id)
+    graph_devices, graph_edges, plot_elements = await graph_context.load_graph(db, job_id)
     audience = [(float(x), float(y)) for x, y in (job.audience_polygon or [])]
     cables = routed_cable_paths_from_graph(
         cable_plan=job.cable_plan,
@@ -183,15 +183,15 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
             "width_cm": round(element.width_cm, 1),
             "height_cm": round(element.height_cm, 1),
         }
-        for element in job.plot_elements
+        for element in plot_elements
     ]
     return {
         "job": job,
-        "elements": job.plot_elements,
+        "elements": plot_elements,
         "stage_plot_elements": rows,
         "cables": cables,
         "audience": audience,
-        "cameras": await _camera_specs(db, job),
+        "cameras": await _camera_specs(db, job, plot_elements),
         "devices_by_id": {str(device.id): device for device in job.devices},
     }
 
@@ -241,7 +241,7 @@ async def _patch_sheet_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
     sheets: dict[str, dict] = {}
     performer_names = {
         str(element.linked_channel_id): element.label
-        for element in job.plot_elements
+        for element in await plot_native.load_elements(db, job_id)
         if element.element_type == "performer" and element.linked_channel_id and element.label
     }
     device_names = {str(device.id): device.name for device in job.devices}

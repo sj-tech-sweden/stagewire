@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import StagePlotElement
+from app.domains.graph import plot_native
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.readers import channel_view
 
@@ -207,10 +207,7 @@ def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
 
 async def load_graph(
     db: AsyncSession, job_id: UUID
-) -> tuple[list[GraphDevice], list[ConnectionEdge], list[StagePlotElement]]:
+) -> tuple[list[GraphDevice], list[ConnectionEdge], list]:
     devices = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()
     edges = (await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))).all()
-    elements = (
-        await db.scalars(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
-    ).all()
-    return list(devices), list(edges), list(elements)
+    return list(devices), list(edges), await plot_native.load_elements(db, job_id)

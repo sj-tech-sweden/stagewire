@@ -17,6 +17,7 @@ from app.domains.graph import (
     dmx_native,
     fixtures_native,
     mirror,
+    plot_native,
     power_native,
     readers,
     rigging_native,
@@ -103,10 +104,9 @@ async def create_device(
 ) -> GraphDevice:
     await _require_job(db, job_id)
     fields = payload.model_dump()
+    if fields["kind"] == "plot_element":
+        fields = plot_native.normalize_new(fields)
     device = GraphDevice(job_id=job_id, **fields)
-    if device.kind == "plot_element":
-        element_id = await mirror.create_element_twin(db, job_id, fields)
-        device.legacy_ref = f"stage_plot_elements:{element_id}"
     db.add(device)
     await db.commit()
     await db.refresh(device)
@@ -124,11 +124,9 @@ async def create_devices_batch(
     devices = []
     for item in payload:
         fields = item.model_dump()
-        device = GraphDevice(job_id=job_id, **fields)
-        if device.kind == "plot_element":
-            element_id = await mirror.create_element_twin(db, job_id, fields)
-            device.legacy_ref = f"stage_plot_elements:{element_id}"
-        devices.append(device)
+        if fields["kind"] == "plot_element":
+            fields = plot_native.normalize_new(fields)
+        devices.append(GraphDevice(job_id=job_id, **fields))
     db.add_all(devices)
     await db.commit()
     for device in devices:
@@ -162,6 +160,7 @@ async def update_device(
         await dmx_native.after_patch(db, device, data)
         await power_native.after_patch(db, job_id, device, data)
         await fixtures_native.after_patch(db, job_id, device, data)
+        await plot_native.after_patch(db, job_id, device, data)
         mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         await db.commit()
         if mirrored:

@@ -12,8 +12,8 @@ from app.domains.audio.models import (
     ChannelPatchPoint,
     OutputPatchPoint,
     ProductionJob,
-    StagePlotElement,
 )
+from app.domains.graph import plot_native
 
 _POINT_STRING_FIELDS = {"connector", "patch_label", "notes", "point_type"}
 
@@ -160,14 +160,10 @@ async def update_channel(
         if value is not None or key in CLEARABLE_KEYS:
             setattr(channel, key, value)
     if "performer_name" in data and channel.performer_name is not None:
-        result = await db.execute(
-            select(StagePlotElement).where(
-                StagePlotElement.linked_channel_id == channel.id,
-                StagePlotElement.element_type == "performer",
-            )
+        job_id = await db.scalar(
+            select(ChannelList.job_id).where(ChannelList.id == channel.channel_list_id)
         )
-        for element in result.scalars():
-            element.label = channel.performer_name
+        await plot_native.performer_from_channel(db, job_id, channel.id, channel.performer_name)
     await db.commit()
     await db.refresh(channel)
     return channel
@@ -329,72 +325,30 @@ async def delete_channel_list(db: AsyncSession, channel_list: ChannelList) -> No
     await db.commit()
 
 
-async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict) -> StagePlotElement:
-    element = StagePlotElement(job_id=job_id, **data)
-    db.add(element)
-    channel_id = data.get("linked_channel_id")
-    if data.get("element_type") == "performer" and channel_id:
-        channel_result = await db.execute(
-            select(AudioChannelPatch)
-            .join(ChannelList)
-            .where(AudioChannelPatch.id == channel_id, ChannelList.job_id == job_id)
-        )
-        channel = channel_result.scalar_one_or_none()
-        if channel:
-            channel.performer_name = element.label
+async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict):
+    """Plot elements are graph nodes (``graph/plot_native.py``); these return the old row shape."""
+    element = await plot_native.create_element(db, job_id, data)
     await db.commit()
-    await db.refresh(element)
     return element
 
 
-async def list_plot_elements(db: AsyncSession, job_id: UUID) -> list[StagePlotElement]:
-    result = await db.execute(select(StagePlotElement).where(StagePlotElement.job_id == job_id))
-    return list(result.scalars().all())
+async def list_plot_elements(db: AsyncSession, job_id: UUID) -> list:
+    return await plot_native.load_elements(db, job_id)
 
 
-async def update_plot_element(
-    db: AsyncSession, job_id: UUID, element_id: UUID, data: dict
-) -> StagePlotElement | None:
-    result = await db.execute(
-        select(StagePlotElement).where(
-            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
-        )
-    )
-    element = result.scalar_one_or_none()
-    if element is None:
-        return None
-    for key, value in data.items():
-        if value is not None or key in PLOT_CLEARABLE_KEYS:
-            setattr(element, key, value)
-    if element.element_type == "performer" and element.linked_channel_id:
-        channel_result = await db.execute(
-            select(AudioChannelPatch)
-            .join(ChannelList)
-            .where(
-                AudioChannelPatch.id == element.linked_channel_id,
-                ChannelList.job_id == job_id,
-            )
-        )
-        channel = channel_result.scalar_one_or_none()
-        if channel:
-            channel.performer_name = element.label
+async def update_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID, data: dict):
+    # a null clears only the link and focal fields; elsewhere it means "not sent" (as before)
+    data = {k: v for k, v in data.items() if v is not None or k in PLOT_CLEARABLE_KEYS}
+    element = await plot_native.update_element(db, job_id, element_id, data)
     await db.commit()
-    await db.refresh(element)
     return element
 
 
-async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID) -> bool:
-    result = await db.execute(
-        select(StagePlotElement).where(
-            StagePlotElement.id == element_id, StagePlotElement.job_id == job_id
-        )
-    )
-    element = result.scalar_one_or_none()
-    if element is None:
-        return False
-    await db.delete(element)
+async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID):
+    """The deleted element's node id and edge ids, or None when there is no such element."""
+    deleted = await plot_native.delete_element(db, job_id, element_id)
     await db.commit()
-    return True
+    return deleted
 
 
 async def create_device(db: AsyncSession, job_id: UUID, data: dict) -> AudioDevice:

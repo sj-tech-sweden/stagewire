@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice, StagePlotElement
+from app.domains.audio.models import AudioDevice
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import GraphDevice
 
@@ -73,11 +73,10 @@ async def get_point(
 
 async def clear_references(db: AsyncSession, node: GraphDevice) -> None:
     ref = public_id(node)
-    for model in (AudioDevice, StagePlotElement):
-        await db.execute(
-            update(model).where(model.rigging_point_id == ref).values(rigging_point_id=None)
-        )
-    # fixtures live on the graph: their link holds the point's graph node id
+    await db.execute(
+        update(AudioDevice).where(AudioDevice.rigging_point_id == ref).values(rigging_point_id=None)
+    )
+    # fixtures and plot elements live on the graph: their link holds the point's graph node id
     for host in (
         await db.scalars(select(GraphDevice).where(GraphDevice.job_id == node.job_id))
     ).all():

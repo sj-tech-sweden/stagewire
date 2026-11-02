@@ -487,9 +487,13 @@ class _ElementView:
 
 
 def _legacy_id(node: Any) -> str:
-    ref = getattr(node, "legacy_ref", None) or ""
-    table, _, raw = ref.partition(":")
-    return raw if table == "stage_plot_elements" and raw else str(node.id)
+    """The element's public id (``graph/ids.py``): ``attributes.legacy_id`` or the legacy ref's id
+    for an element imported from the old table, else its node id."""
+    raw = (getattr(node, "attributes", None) or {}).get("legacy_id")
+    if not raw:
+        table, _, raw = (getattr(node, "legacy_ref", None) or "").partition(":")
+        raw = raw if table == "stage_plot_elements" else None
+    return str(raw or node.id)
 
 
 def _element_views(devices: list[Any], edges: list[Any]) -> list[_ElementView]:

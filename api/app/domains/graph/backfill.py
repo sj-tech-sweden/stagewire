@@ -13,7 +13,6 @@ from app.domains.audio.models import (
     ChannelListOutput,
     ChannelPatchPoint,
     OutputPatchPoint,
-    StagePlotElement,
 )
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -69,26 +68,6 @@ FIXTURE_ONLY_ATTRS = (
     "purpose",
     *LOAD_ATTRS,
 )
-ELEMENT_FIELDS = (
-    "element_type",
-    "width_cm",
-    "height_cm",
-    "image_url",
-    "coverage_angle_h",
-    "coverage_distance_m",
-    "focal_mm",
-    "power_connector",
-)
-# legacy link column -> role of the ``link`` edge from the element node to its target
-ELEMENT_LINKS = {
-    "linked_channel_id": "channel",
-    "linked_device_id": "device",
-    "linked_patch_point_id": "patch_point",
-    "linked_output_point_id": "output_point",
-    "linked_video_input_id": "video_input",
-    "linked_lens_device_id": "lens",
-    "power_node_id": "power_node",
-}
 # Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
 # the graph even when the twin was edited there, because graph edits are mirrored back at once.
 OWNED_ATTRS: dict[str, set[str]] = {
@@ -100,7 +79,6 @@ OWNED_ATTRS: dict[str, set[str]] = {
         "mixer_buses",
     },
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
-    "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "audio_devices": {
         "power_inlet",
         *DEVICE_SPEC_FIELDS,
@@ -127,7 +105,6 @@ MIRRORED_EDGE_TABLES = {
     "stage_plot_elements.link",
     "audio_devices.power",
 }
-CANVAS_OWNED_TABLES = {"stage_plot_elements"}
 
 
 def _table(ref: str) -> str:
@@ -269,10 +246,6 @@ class Backfill:
                 owned_new = fields.get("attributes") or {}
                 attrs.update({k: v for k, v in owned_new.items() if k in OWNED_ATTRS[table]})
                 existing.attributes = attrs
-                if table in CANVAS_OWNED_TABLES:
-                    for key in ("canvas_x_cm", "canvas_y_cm", "canvas_rotation"):
-                        if key in fields:
-                            setattr(existing, key, fields[key])
                 if table == "audio_devices":
                     existing.kind = fields["kind"]
                     # a device that carries a fixture belongs to lighting (fixtures_native)
@@ -672,115 +645,10 @@ class Backfill:
         return self._point_devices
 
     async def plot_elements(self) -> None:
-        """Stage plot elements become ``plot_element`` nodes; their links become ``link`` edges."""
-        elements = (
-            await self.db.scalars(
-                select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
-            )
-        ).all()
-        point_device, out_device = await self.point_devices()
-        for el in elements:
-            node = self.device(
-                f"stage_plot_elements:{el.id}",
-                domain="other",
-                kind="plot_element",
-                name=el.label or el.element_type,
-                position=0,
-                attributes={
-                    **{
-                        key: getattr(el, key)
-                        for key in ELEMENT_FIELDS
-                        if getattr(el, key) is not None
-                    },
-                    "label": el.label or "",
-                    **(
-                        {"rigging_point_id": str(point.id)}
-                        if el.rigging_point_id
-                        and (point := self.rigging_points.get(el.rigging_point_id))
-                        else {}
-                    ),
-                },
-                ports=[],
-                canvas_x_cm=el.position_x,
-                canvas_y_cm=el.position_y,
-                canvas_rotation=el.rotation,
-            )
-            for column, role in ELEMENT_LINKS.items():
-                legacy_id = getattr(el, column)
-                if not legacy_id:
-                    continue
-                if role == "patch_point":
-                    target_ref = f"audio_devices:{point_device.get(legacy_id)}"
-                elif role == "output_point":
-                    target_ref = f"audio_devices:{out_device.get(legacy_id)}"
-                else:
-                    table = {
-                        "channel": "audio_channel_patches",
-                        "video_input": "video_inputs",
-                        "power_node": "power_nodes",
-                    }.get(role, "audio_devices")
-                    target_ref = f"{table}:{legacy_id}"
-                target = self.devices.get(target_ref) if target_ref in self.seen_devices else None
-                if role == "video_input":
-                    target = self.video_inputs.get(legacy_id)
-                if target is None and role == "power_node":
-                    target = self.devices.get(target_ref)
-                if target is None:
-                    continue
-                self.edge(
-                    f"stage_plot_elements.link:{el.id}:{role}",
-                    "link",
-                    node,
-                    "link",
-                    target,
-                    role,
-                    attributes={"role": role, "legacy_target": str(legacy_id)},
-                )
+        """Plot elements are graph nodes (plot_native.py); the sync draws their link edges."""
+        from app.domains.graph import plot_native
 
-    async def plot_links(self) -> None:
-        """Point each stage plot element at its graph nodes.
-
-        Recomputed on every sync while the plot editor still writes the legacy links. An element
-        has up to two graph links: ``graph_device_id`` (its device, which places it on the plot)
-        and a source link (``graph_source_id`` + role) for its cable, chosen by priority:
-        channel, video input, output point, patch point.
-        """
-        elements = (
-            await self.db.scalars(
-                select(StagePlotElement).where(StagePlotElement.job_id == self.job_id)
-            )
-        ).all()
-        point_device, out_device = await self.point_devices()
-
-        def node(ref: str):
-            return self.devices.get(ref) if ref in self.seen_devices else None
-
-        for el in elements:
-            device = node(f"audio_devices:{el.linked_device_id}") if el.linked_device_id else None
-            el.graph_device_id = device.id if device else None
-            el.graph_link_role = None
-            candidates = [
-                ("channel", f"audio_channel_patches:{el.linked_channel_id}")
-                if el.linked_channel_id
-                else None,
-                ("video_input", None) if el.linked_video_input_id in self.video_inputs else None,
-                ("output_point", f"audio_devices:{out_device.get(el.linked_output_point_id)}")
-                if el.linked_output_point_id in out_device
-                else None,
-                ("patch_point", f"audio_devices:{point_device.get(el.linked_patch_point_id)}")
-                if el.linked_patch_point_id in point_device
-                else None,
-            ]
-            el.graph_source_id, el.graph_source_role = None, None
-            for role, ref in (c for c in candidates if c):
-                source = (
-                    self.video_inputs[el.linked_video_input_id]
-                    if role == "video_input"
-                    else node(ref)
-                )
-                if source is not None:
-                    el.graph_source_id, el.graph_source_role = source.id, role
-                    break
+        await plot_native.sync_links(self)
 
     async def power(self) -> None:
         """Power nodes live on the graph (power_native.py); the sync only draws what plugs in."""
@@ -896,7 +764,6 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
         await builder.plot_elements()
     with db.no_autoflush:
         await builder.write_edges()
-        await builder.plot_links()
         await builder.prune()
     await db.flush()
     # a sync resets a device node's ports from its connector groups: put the power ports back

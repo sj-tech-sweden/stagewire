@@ -15,7 +15,7 @@ from app.core.db import get_db
 from app.domains.audio import service
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import fixtures_native, power_native, rigging_native, schemas
+from app.domains.graph import fixtures_native, plot_native, power_native, rigging_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.lists import _device_twin
@@ -379,12 +379,12 @@ async def _load_target(db: AsyncSession, job_id: UUID, node: GraphDevice) -> tup
     fixture_id = fixtures_native.fixture_id_of(node)
     if fixture_id is not None:  # a fixture's host: the fixture is the load (even on a device)
         return "fixture", fixture_id
+    if plot_native.is_element(node):
+        return "element", public_id(node)
     target = legacy_target(node)
     if target is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node cannot carry a load")
     table, legacy_id = target
-    if table == "stage_plot_elements":
-        return "element", legacy_id
     if table == "audio_devices":
         fixtures = await _fixtures_on_device(db, job_id, legacy_id)
         return ("fixture", fixtures[-1].id) if fixtures else ("device", legacy_id)

@@ -19,7 +19,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice, StagePlotElement
+from app.domains.audio.models import AudioDevice
+from app.domains.graph import plot_native
 from app.domains.graph.backfill import Backfill
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -233,11 +234,7 @@ async def clear_references(db: AsyncSession, node: GraphDevice) -> tuple[list[st
     removed_nodes: list[str] = []
     removed_edges: list[str] = []
     if node.kind == "video_input":
-        await db.execute(
-            update(StagePlotElement)
-            .where(StagePlotElement.linked_video_input_id == ref)
-            .values(linked_video_input_id=None)
-        )
+        await plot_native.clear_links(db, node.job_id, "linked_video_input_id", ref)
     elif node.kind == "video_list":
         await db.execute(
             update(AudioDevice).where(AudioDevice.video_list_id == ref).values(video_list_id=None)

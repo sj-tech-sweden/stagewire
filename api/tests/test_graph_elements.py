@@ -212,9 +212,7 @@ async def test_element_links_are_set_and_cleared_with_legacy_ids_and_labels_can_
         job_id, ch, box, mic, _stage = await _setup(client, h)
         g = f"{BASE}/jobs/{job_id}/graph"
         graph = (await client.get(g, headers=h)).json()
-        node = next(
-            d for d in graph["devices"] if d["legacy_ref"] == f"stage_plot_elements:{mic['id']}"
-        )
+        node = next(d for d in graph["devices"] if d["id"] == mic["id"])
 
         res = await client.put(
             f"{g}/plot-elements/{node['id']}/links",
@@ -324,7 +322,7 @@ async def test_every_link_role_validates_and_links(auth_headers, monkeypatch):
         g = f"{BASE}/jobs/{job_id}/graph"
         graph = await _graph(client, h, job_id)
         by_ref = {d["legacy_ref"]: d for d in graph["devices"]}
-        element = by_ref[f"stage_plot_elements:{mic['id']}"]
+        element = next(d for d in graph["devices"] if d["id"] == mic["id"])
         list_node = next(d for d in graph["devices"] if d["kind"] == "channel_list")
         ch_node = by_ref[f"audio_channel_patches:{ch['id']}"]
         box_node = by_ref[f"audio_devices:{box['id']}"]

@@ -1,8 +1,8 @@
 """Plot element links (channel, device, patch point, video input, power node, ...).
 
-An element's link edges are derived from its legacy link columns, so a link is set by writing the
-column. The ids are the legacy ids the plot already holds (a link edge carries them as
-``legacy_target``); the graph is synced straight after so the link edges follow.
+An element's link edges are derived from its link attributes (``plot_native``), so a link is set
+by writing the attribute. The ids are the public ids the plot already holds (a link edge carries
+them as ``legacy_target``); the graph is synced straight after so the link edges follow.
 """
 
 from uuid import UUID
@@ -20,15 +20,12 @@ from app.domains.audio.models import (
     ChannelListOutput,
     ChannelPatchPoint,
     OutputPatchPoint,
-    StagePlotElement,
 )
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import power_native, schemas
+from app.domains.graph import plot_native, power_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import public_id
-from app.domains.graph.lists import _by_ref
-from app.domains.graph.mirror import legacy_target
 from app.domains.graph.models import GraphDevice
 
 router = APIRouter(
@@ -81,13 +78,7 @@ async def set_element_links(
 ) -> schemas.GraphDeviceRead:
     """Set or clear the links of a plot element; only the keys sent change."""
     node = await db.get(GraphDevice, node_id)
-    target = legacy_target(node) if node is not None else None
-    if (
-        node is None
-        or node.job_id != job_id
-        or target is None
-        or target[0] != "stage_plot_elements"
-    ):
+    if node is None or node.job_id != job_id or not plot_native.is_element(node):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
     data = payload.model_dump(exclude_unset=True)
     for column, value in data.items():
@@ -119,14 +110,8 @@ async def set_element_links(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, f"{column} does not belong to this job"
             )
     async with job_lock(job_id):
-        element = await db.get(StagePlotElement, target[1])
-        if element is None or element.job_id != job_id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
-        for column, value in data.items():
-            setattr(element, column, value)
+        await plot_native.update_element(db, job_id, public_id(node), data)
         await db.commit()
     db.expire_all()
     await backfill_job(db, job_id)
-    return schemas.GraphDeviceRead.model_validate(
-        await _by_ref(db, job_id, f"stage_plot_elements:{target[1]}")
-    )
+    return schemas.GraphDeviceRead.model_validate(await db.get(GraphDevice, node_id))

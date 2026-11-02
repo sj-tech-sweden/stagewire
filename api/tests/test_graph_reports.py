@@ -9,8 +9,8 @@ from app.domains.audio.models import (
     ChannelPatchPoint,
     OutputPatchPoint,
     ProductionJob,
-    StagePlotElement,
 )
+from app.domains.graph import plot_native
 from app.domains.reports import registry
 
 BASE = "/api/v1"
@@ -114,13 +114,14 @@ async def _seed():
                 ),
             ]
         )
-        db.add(
-            StagePlotElement(
-                job_id=job.id,
-                element_type="performer",
-                label="Alex on stage",
-                linked_channel_id=chans[1].id,
-            )
+        await plot_native.create_element(
+            db,
+            job.id,
+            {
+                "element_type": "performer",
+                "label": "Alex on stage",
+                "linked_channel_id": chans[1].id,
+            },
         )
         await db.commit()
         return job.id

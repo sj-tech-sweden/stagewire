@@ -29,6 +29,7 @@ from app.domains.audio.models import (
 from app.domains.audio.speaker_specs import resolve_speaker_specs
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
+from app.domains.graph import plot_native
 from app.domains.graph import readers as graph_readers
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.mirror import MirrorToGraphRoute
@@ -726,6 +727,7 @@ async def create_plot_element(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     element = await service.create_plot_element(db, job_id, payload.model_dump(exclude_unset=True))
+    await plot_native.publish_upsert(db, job_id, element.node_id)
     return schemas.StagePlotElementRead.model_validate(element)
 
 
@@ -865,6 +867,7 @@ async def update_plot_element(
     )
     if element is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+    await plot_native.publish_upsert(db, job_id, element.node_id)
     return schemas.StagePlotElementRead.model_validate(element)
 
 
@@ -880,8 +883,9 @@ async def delete_plot_element(
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
     deleted = await service.delete_plot_element(db, job_id, element_id)
-    if not deleted:
+    if deleted is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plot element not found")
+    await plot_native.publish_delete(job_id, *deleted)
 
 
 IO_DEVICE_TYPES = {"mixer", "switcher", "router", "multiviewer"}

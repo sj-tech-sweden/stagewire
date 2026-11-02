@@ -48,9 +48,6 @@ class ProductionJob(Base):
         cascade="all, delete-orphan",
         order_by="ChannelList.position",
     )
-    plot_elements: Mapped[list["StagePlotElement"]] = relationship(
-        back_populates="job", cascade="all, delete-orphan"
-    )
     devices: Mapped[list["AudioDevice"]] = relationship(
         back_populates="job", cascade="all, delete-orphan", order_by="AudioDevice.position"
     )
@@ -206,64 +203,6 @@ class AudioDevice(Base):
         back_populates="device",
         lazy="selectin",
     )
-
-
-class StagePlotElement(Base):
-    __tablename__ = "stage_plot_elements"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
-    )
-    linked_channel_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("audio_channel_patches.id", ondelete="SET NULL"), nullable=True
-    )
-    linked_patch_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("channel_patch_points.id", ondelete="SET NULL"), nullable=True
-    )
-    linked_device_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
-    )
-    linked_output_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("output_patch_points.id", ondelete="SET NULL"), nullable=True
-    )
-    # The public id of the linked video input node (see graph/ids.py); not a foreign key.
-    linked_video_input_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), nullable=True
-    )
-    linked_lens_device_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("audio_devices.id", ondelete="SET NULL"), nullable=True
-    )
-    focal_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    element_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    position_x: Mapped[float] = mapped_column(Float, default=0.0)
-    position_y: Mapped[float] = mapped_column(Float, default=0.0)
-    rotation: Mapped[float] = mapped_column(Float, default=0.0)
-    width_cm: Mapped[float] = mapped_column(Float, default=60.0)
-    height_cm: Mapped[float] = mapped_column(Float, default=60.0)
-    label: Mapped[str] = mapped_column(String(255), default="")
-    image_url: Mapped[str] = mapped_column(String(1024), default="")
-    coverage_angle_h: Mapped[float] = mapped_column(Float, default=0.0)
-    coverage_distance_m: Mapped[float] = mapped_column(Float, default=0.0)
-    # the public id of the rigging point node (graph/ids.py); not a foreign key, rigging points
-    # live on the graph
-    rigging_point_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), nullable=True, index=True
-    )
-    power_node_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), nullable=True, index=True
-    )
-    power_connector: Mapped[str] = mapped_column(String(64), default="")
-    graph_device_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("graph_devices.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    graph_link_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    graph_source_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("graph_devices.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    graph_source_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
-
-    job: Mapped[ProductionJob] = relationship(back_populates="plot_elements")
 
 
 class ChannelPatchPoint(Base):
