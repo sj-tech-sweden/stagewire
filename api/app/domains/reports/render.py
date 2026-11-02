@@ -170,9 +170,12 @@ def _stage_plot_drawing(
     options: dict[str, Any] | None = None,
 ) -> Drawing:
     job = context["job"]
+    channel_lists = context.get("channel_lists")
+    if channel_lists is None:  # a context built by hand (tests) carries them on the job
+        channel_lists = getattr(job, "channel_lists", [])
     channels_by_id = {
         str(channel.id): channel
-        for channel_list in getattr(job, "channel_lists", [])
+        for channel_list in channel_lists
         for channel in channel_list.channels
     }
     selected_options = {**DEFAULT_STAGE_PLOT_OPTIONS, **(options or {})}

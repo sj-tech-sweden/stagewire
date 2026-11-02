@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -83,6 +83,106 @@ async def search_products(
     except Exception as exc:  # noqa: BLE001
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/own-products")
+async def own_products(
+    search: str | None = None,
+    category_id: list[int] | None = Query(default=None),
+    skip: int = 0,
+    limit: int = 20,
+    db=Depends(get_db),
+) -> dict:
+    """Own equipment: products that have devices, the device count being the quantity."""
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": [], "total": 0}
+    try:
+        return await sw.search_own_products(
+            q=search, category_ids=category_id, skip=skip, limit=limit
+        )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/catalog/search")
+async def search_catalog(
+    q: str | None = None,
+    category: list[str] | None = Query(default=None),
+    manufacturer: list[str] | None = Query(default=None),
+    attr: list[str] | None = Query(default=None, description="key:value spec filters"),
+    job_id: str | None = Query(default=None, description="Stockwire rental job id"),
+    skip: int = 0,
+    limit: int = 50,
+    db=Depends(get_db),
+) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {
+            "items": [],
+            "total": 0,
+            "facets": {},
+            "availability": {"date_range_supported": False},
+        }
+    attributes = dict(pair.split(":", 1) for pair in attr or [] if ":" in pair)
+    try:
+        return await sw.search_catalog(
+            q=q,
+            categories=category,
+            manufacturers=manufacturer,
+            attributes=attributes,
+            job_id=job_id,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/catalog/cases")
+async def list_cases(db=Depends(get_db)) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": []}
+    try:
+        return {"items": await sw.list_cases()}
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/catalog/cases/{case_device_id}/children")
+async def case_children(case_device_id: str, db=Depends(get_db)) -> dict:
+    sw = await _catalog_client(db)
+    if sw is None:
+        return {"items": []}
+    try:
+        return {"items": await sw.list_child_devices(case_device_id)}
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+@router.get("/products/{product_id}/device-specs")
+async def get_device_specs(product_id: int | str, db=Depends(get_db)) -> dict:
+    """What an import needs from a product: its connector groups, power inlet, I/O counts, weight
+    and power, read with the tolerant rules in ``audio/device_specs.py``."""
+    from app.domains.audio.device_specs import product_io_specs, product_physical_specs
+
+    try:
+        sw = await _stockwire_client(db)
+        product = await sw.get_product(product_id)
+    except Exception as exc:  # noqa: BLE001
+        detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+    return {
+        "id": product.get("id"),
+        "name": product.get("name"),
+        **product_io_specs(product),
+        **product_physical_specs(product),
+    }
 
 
 @router.get("/products/{product_id}")

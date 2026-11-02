@@ -4,14 +4,16 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
+from app.domains.audio.models import ProductionJob
+from app.domains.graph import audio_native, devices_native
+from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
-from app.domains.reports.cable_routing import routed_cable_paths
+from app.domains.reports import graph_context
+from app.domains.reports.cable_routing import routed_cable_paths_from_graph
 from app.domains.reports.models import ReportTemplate
+from app.domains.reports.power_context import power_sheet_context
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
-from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
 
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
@@ -64,16 +66,7 @@ class ReportDefinition:
 
 
 async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
-    result = await db.execute(
-        select(ProductionJob)
-        .where(ProductionJob.id == job_id)
-        .options(
-            selectinload(ProductionJob.channel_lists).selectinload(ChannelList.channels),
-            selectinload(ProductionJob.channel_lists).selectinload(ChannelList.outputs),
-            selectinload(ProductionJob.plot_elements),
-            selectinload(ProductionJob.devices),
-        )
-    )
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_id))
     job = result.scalars().first()
     if job is None:
         raise LookupError("Production job not found")
@@ -85,64 +78,7 @@ async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job}
 
 
-async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
-    job = await _load_job(db, job_id)
-    performer_names = {
-        str(element.linked_channel_id): element.label
-        for element in job.plot_elements
-        if element.element_type == "performer" and element.linked_channel_id and element.label
-    }
-    rows = [
-        {
-            "channel_number": channel.channel_number,
-            "source_label": channel.source_label,
-            "device": channel.device or "",
-            "input_details": " · ".join(
-                value
-                for value in (
-                    channel.input_type or "",
-                    channel.instrument_group or "",
-                    channel.stand_type or "",
-                )
-                if value
-            ),
-            "performer_name": performer_names.get(str(channel.id)) or channel.performer_name or "",
-            "wireless_pack": channel.wireless_pack or "",
-            "wireless_frequency": channel.wireless_frequency or "",
-            "wireless_details": " · ".join(
-                value
-                for value in (
-                    performer_names.get(str(channel.id)) or channel.performer_name or "",
-                    channel.wireless_pack or "",
-                    channel.wireless_frequency or "",
-                )
-                if value
-            ),
-            "connector": channel.connector or "",
-            "phantom_power": channel.phantom_power,
-            "notes": channel.notes,
-            "list_name": channel_list.name,
-        }
-        for channel_list in job.channel_lists
-        for channel in channel_list.channels
-    ]
-    return {"job": job, "channels": rows}
-
-
-async def _load_video_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputList]:
-    result = await db.execute(
-        select(VideoInputList)
-        .where(VideoInputList.job_id == job_id)
-        .options(
-            selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points),
-            selectinload(VideoInputList.outputs).selectinload(VideoOutput.patch_points),
-        )
-        .order_by(VideoInputList.position)
-    )
-    return list(result.scalars().all())
-
-
-async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]:
+async def _camera_specs(db: AsyncSession, devices: list, plot_elements) -> dict[str, dict]:
     from app.domains.audio.camera_specs import resolve_camera_specs
     from app.domains.audio.router import stockwire_product_fetcher
 
@@ -156,7 +92,7 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]
             "focal_max_mm": device.focal_max_mm,
             "max_distance_m": device.max_distance_m,
         }
-        for device in job.devices
+        for device in devices
     }
     elements = [
         {
@@ -167,21 +103,21 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]
             else None,
             "focal_mm": element.focal_mm,
         }
-        for element in job.plot_elements
+        for element in plot_elements
     ]
     fetch = await stockwire_product_fetcher(db)
     return await resolve_camera_specs(elements, devices, fetch)
 
 
 async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    video_lists = await _load_video_lists(db, job_id)
+    graph_devices, graph_edges, plot_elements = await graph_context.load_graph(db, job_id)
     audience = [(float(x), float(y)) for x, y in (job.audience_polygon or [])]
-    cables = routed_cable_paths(
+    cables = routed_cable_paths_from_graph(
         cable_plan=job.cable_plan,
-        channel_lists=job.channel_lists,
-        elements=job.plot_elements,
-        video_lists=video_lists,
+        devices=graph_devices,
+        edges=graph_edges,
         audience=audience,
         stage_offset=(float(job.stage_x_cm or 0), float(job.stage_y_cm or 0)),
     )
@@ -194,16 +130,18 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
             "width_cm": round(element.width_cm, 1),
             "height_cm": round(element.height_cm, 1),
         }
-        for element in job.plot_elements
+        for element in plot_elements
     ]
+    devices = await devices_native.load_devices(db, job_id)
     return {
         "job": job,
-        "elements": job.plot_elements,
+        "channel_lists": await audio_native.load_lists(db, job_id),
+        "elements": plot_elements,
         "stage_plot_elements": rows,
         "cables": cables,
         "audience": audience,
-        "cameras": await _camera_specs(db, job),
-        "devices_by_id": {str(device.id): device for device in job.devices},
+        "cameras": await _camera_specs(db, devices, plot_elements),
+        "devices_by_id": {str(device.id): device for device in devices},
     }
 
 
@@ -211,7 +149,9 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     fixtures = await lighting_service.list_fixtures(db, job_id)
     flags = lighting_service.dmx_flags(fixtures)
-    names = {str(device.id): device.name for device in job.devices}
+    names = {
+        str(device.id): device.name for device in await devices_native.load_devices(db, job_id)
+    }
     rows = []
     for fixture in fixtures:
         overlap, overflow = flags[fixture.id]
@@ -233,116 +173,18 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job, "fixture_patch": rows}
 
 
-async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
+async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    sheets: dict[str, dict] = {}
-    performer_names = {
-        str(element.linked_channel_id): element.label
-        for element in job.plot_elements
-        if element.element_type == "performer" and element.linked_channel_id and element.label
-    }
-    device_names = {str(device.id): device.name for device in job.devices}
-    devices_by_id = {str(device.id): device for device in job.devices}
+    devices, edges, _ = await graph_context.load_graph(db, job_id)
+    return {"job": job, "channels": graph_context.channel_rows(devices, edges)}
 
-    def console_patch(points: list[ChannelPatchPoint] | list[OutputPatchPoint]) -> str:
-        return next(
-            (
-                point.patch_label
-                for point in points
-                if (device := devices_by_id.get(str(point.device_id)))
-                and device.device_type == "mixer"
-            ),
-            "",
-        )
 
-    def add_row(device_id, point_type, row):
-        if not device_id:
-            return
-        key = str(device_id)
-        sheet = sheets.setdefault(
-            key,
-            {
-                "id": key,
-                "name": device_names.get(key) or key,
-                "type": point_type or "mixer",
-                "rows": [],
-            },
-        )
-        sheet["rows"].append(row)
-
-    for channel_list in job.channel_lists:
-        for channel in channel_list.channels:
-            for point in channel.patch_points:
-                add_row(
-                    point.device_id,
-                    point.point_type,
-                    {
-                        "direction": "In",
-                        "channel_number": channel.channel_number,
-                        "source_label": channel.source_label,
-                        "instrument_group": channel.instrument_group,
-                        "device": channel.device or "",
-                        "stand_type": channel.stand_type,
-                        "performer_name": performer_names.get(str(channel.id))
-                        or channel.performer_name
-                        or "",
-                        "wireless_pack": channel.wireless_pack or "",
-                        "wireless_frequency": channel.wireless_frequency or "",
-                        "phantom_power": channel.phantom_power,
-                        "patch_assignment": " / ".join(
-                            value
-                            for value in (
-                                device_names.get(str(point.device_id), ""),
-                                console_patch(channel.patch_points),
-                            )
-                            if value
-                        ),
-                        "patch_label": point.patch_label,
-                        "connector": point.connector,
-                        "notes": " · ".join(
-                            value for value in (channel.notes, point.notes) if value
-                        ),
-                    },
-                )
-        for output in channel_list.outputs:
-            for point in output.points:
-                add_row(
-                    point.device_id,
-                    point.point_type,
-                    {
-                        "direction": "Out",
-                        "channel_number": "OUT",
-                        "source_label": output.name,
-                        "instrument_group": "",
-                        "device": "",
-                        "stand_type": "",
-                        "performer_name": "",
-                        "wireless_pack": "",
-                        "wireless_frequency": "",
-                        "phantom_power": False,
-                        "bus_connector": point.bus_connector or "",
-                        "patch_assignment": " / ".join(
-                            value
-                            for value in (
-                                device_names.get(str(point.device_id), ""),
-                                console_patch(output.points),
-                            )
-                            if value
-                        ),
-                        "patch_label": point.patch_label,
-                        "connector": point.connector,
-                        "notes": " · ".join(
-                            value for value in (output.notes, point.notes) if value
-                        ),
-                    },
-                )
-    return {
-        "job": job,
-        "patchpoint_sheets": [
-            {**sheet, "rows": sorted(sheet["rows"], key=lambda row: row["direction"] != "In")}
-            for sheet in sorted(sheets.values(), key=lambda value: value["name"].lower())
-        ],
-    }
+async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
+    await backfill_job(db, job_id)
+    job = await _load_job(db, job_id)
+    devices, edges, _ = await graph_context.load_graph(db, job_id)
+    return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges)}
 
 
 _CHANNEL_COLUMNS = (
@@ -455,6 +297,73 @@ _PATCH_WIRELESS_COLUMNS_SV = (
     ReportField(key="performer_name", label="Artist / presentatör"),
     ReportField(key="wireless_pack", label="Fick- / bältespaket"),
     ReportField(key="wireless_frequency", label="Frekvens"),
+)
+
+_POWER_TREE_COLUMNS = (
+    ReportField(key="name", label="Node"),
+    ReportField(key="kind", label="Kind"),
+    ReportField(key="fed_from", label="Fed from"),
+    ReportField(key="connector", label="Feed connector"),
+    ReportField(key="rating_amps", label="Rating (A)"),
+    ReportField(key="load_w", label="Load (W)"),
+    ReportField(key="peak_amps", label="Peak (A/phase)"),
+    ReportField(key="length_m", label="Cable (m)"),
+    ReportField(key="status", label="Status"),
+)
+_POWER_LOAD_COLUMNS = (
+    ReportField(key="device", label="Device"),
+    ReportField(key="type", label="Type"),
+    ReportField(key="inlet", label="Power inlet"),
+    ReportField(key="plugged_into", label="Plugged into"),
+    ReportField(key="connector", label="Outlet"),
+    ReportField(key="power_w", label="Power (W)"),
+    ReportField(key="cable", label="Cable"),
+    ReportField(key="length_m", label="Length (m)"),
+)
+_POWER_CORD_COLUMNS = (
+    ReportField(key="name", label="Extension cord"),
+    ReportField(key="from", label="From"),
+    ReportField(key="to", label="To"),
+    ReportField(key="connector", label="Connector"),
+    ReportField(key="length_m", label="Length (m)"),
+    ReportField(key="product", label="Stockwire product"),
+)
+_POWER_CABLE_COLUMNS = (
+    ReportField(key="cable", label="Cable"),
+    ReportField(key="count", label="Count"),
+)
+_POWER_TREE_COLUMNS_SV = (
+    ReportField(key="name", label="Nod"),
+    ReportField(key="kind", label="Typ"),
+    ReportField(key="fed_from", label="Matas från"),
+    ReportField(key="connector", label="Matningskontakt"),
+    ReportField(key="rating_amps", label="Märkström (A)"),
+    ReportField(key="load_w", label="Last (W)"),
+    ReportField(key="peak_amps", label="Topp (A/fas)"),
+    ReportField(key="length_m", label="Kabel (m)"),
+    ReportField(key="status", label="Status"),
+)
+_POWER_LOAD_COLUMNS_SV = (
+    ReportField(key="device", label="Enhet"),
+    ReportField(key="type", label="Typ"),
+    ReportField(key="inlet", label="Strömintag"),
+    ReportField(key="plugged_into", label="Inkopplad i"),
+    ReportField(key="connector", label="Uttag"),
+    ReportField(key="power_w", label="Effekt (W)"),
+    ReportField(key="cable", label="Kabel"),
+    ReportField(key="length_m", label="Längd (m)"),
+)
+_POWER_CORD_COLUMNS_SV = (
+    ReportField(key="name", label="Skarvsladd"),
+    ReportField(key="from", label="Från"),
+    ReportField(key="to", label="Till"),
+    ReportField(key="connector", label="Kontakt"),
+    ReportField(key="length_m", label="Längd (m)"),
+    ReportField(key="product", label="Stockwire-produkt"),
+)
+_POWER_CABLE_COLUMNS_SV = (
+    ReportField(key="cable", label="Kabel"),
+    ReportField(key="count", label="Antal"),
 )
 
 REPORT_DEFINITIONS = (
@@ -678,6 +587,65 @@ REPORT_DEFINITIONS = (
             ),
         ),
     ),
+    ReportDefinition(
+        domain="power",
+        report_type="power-sheet",
+        name="Power & cables",
+        description=(
+            "The power tree with its load, every device with its power inlet and the cable it "
+            "needs, the extension cords and a count of the power cables to pack."
+        ),
+        default_html=(
+            "<h1>{{job.title}} — Power</h1>"
+            "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+            "<h2>Power tree</h2>{{table:power_tree}}"
+            "<h2>Devices</h2>{{table:power_loads}}"
+            "<h2>Extension cords</h2>{{table:power_cords}}"
+            "<h2>Cables to pack</h2>{{table:power_cables}}"
+        ),
+        fields=(
+            ReportField(key="job.title", label="Job title"),
+            ReportField(key="job.venue_name", label="Venue"),
+        ),
+        tables=(
+            ReportTable(key="power_tree", label="Power tree", columns=list(_POWER_TREE_COLUMNS)),
+            ReportTable(key="power_loads", label="Devices", columns=list(_POWER_LOAD_COLUMNS)),
+            ReportTable(
+                key="power_cords", label="Extension cords", columns=list(_POWER_CORD_COLUMNS)
+            ),
+            ReportTable(
+                key="power_cables", label="Cables to pack", columns=list(_POWER_CABLE_COLUMNS)
+            ),
+        ),
+        context_builder=power_sheet_context,
+        name_sv="Ström och kablar",
+        description_sv=(
+            "Strömträdet med last, varje enhet med strömintag och kabeln den behöver, "
+            "skarvsladdarna och en sammanställning av strömkablar att packa."
+        ),
+        default_html_sv=(
+            "<h1>{{job.title}} — Ström</h1>"
+            "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+            "<h2>Strömträd</h2>{{table:power_tree}}"
+            "<h2>Enheter</h2>{{table:power_loads}}"
+            "<h2>Skarvsladdar</h2>{{table:power_cords}}"
+            "<h2>Kablar att packa</h2>{{table:power_cables}}"
+        ),
+        fields_sv=(
+            ReportField(key="job.title", label="Jobbtitel"),
+            ReportField(key="job.venue_name", label="Spelplats"),
+        ),
+        tables_sv=(
+            ReportTable(key="power_tree", label="Strömträd", columns=list(_POWER_TREE_COLUMNS_SV)),
+            ReportTable(key="power_loads", label="Enheter", columns=list(_POWER_LOAD_COLUMNS_SV)),
+            ReportTable(
+                key="power_cords", label="Skarvsladdar", columns=list(_POWER_CORD_COLUMNS_SV)
+            ),
+            ReportTable(
+                key="power_cables", label="Kablar att packa", columns=list(_POWER_CABLE_COLUMNS_SV)
+            ),
+        ),
+    ),
 )
 
 REPORT_DEFINITIONS_BY_KEY = {definition.key: definition for definition in REPORT_DEFINITIONS}
@@ -855,7 +823,13 @@ async def ensure_default_templates(db: AsyncSession) -> None:
                 if builtin.stage_plot_options is None:
                     builtin.stage_plot_options = DEFAULT_STAGE_PLOT_OPTIONS.copy()
                     changed = True
-                if builtin.page_count == 1 and builtin.layout_json:
+                if not builtin.layout_json:
+                    # a built-in made before layouts existed has only its HTML body: give it the
+                    # default layout (header and plot on page 1, the element table on page 2)
+                    builtin.layout_json = _default_layout(definition, locale, builtin.body_html)
+                    builtin.page_count = 2
+                    changed = True
+                elif builtin.page_count == 1:
                     object_ids = {
                         item.get("id") for item in builtin.layout_json if isinstance(item, dict)
                     }

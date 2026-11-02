@@ -56,7 +56,7 @@
         v-for="n in layout.nodes"
         :key="n.node.id"
         class="dmx-flow-node"
-        :class="n.node.kind === 'fixture' ? 'is-fixture' : 'is-device'"
+        :class="n.node.kind === 'fixture' || n.node.kind === 'source' ? 'is-fixture' : 'is-device'"
         :style="nodeStyle(n)"
         @click="$emit('edit', n.node)"
       >
@@ -67,6 +67,19 @@
           {{ subLabel(n.node) }}
         </div>
         <q-btn
+          v-if="inspectable && n.node.device_id"
+          class="dmx-flow-edit"
+          round
+          dense
+          size="sm"
+          icon="edit"
+          color="primary"
+          :aria-label="t('workspace.editDevice')"
+          data-testid="flow-edit-device"
+          @click.stop="$emit('edit-device', n.node.device_id)"
+        />
+        <q-btn
+          v-if="!readonly"
           class="dmx-flow-add"
           round
           dense
@@ -77,6 +90,7 @@
           @click.stop="$emit('add-child', n.node.id)"
         />
         <q-btn
+          v-if="!readonly"
           class="dmx-flow-del"
           round
           dense
@@ -98,9 +112,13 @@ import { useI18n } from 'vue-i18n';
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   universeNumber: { type: Number, default: 0 },
+  // a read-only diagram has no add/delete buttons (used for chains edited elsewhere)
+  readonly: { type: Boolean, default: false },
+  // boxes that stand for a device get an edit button (`edit-device` with the device id)
+  inspectable: { type: Boolean, default: false },
 });
 
-defineEmits(['edit', 'add-child', 'delete']);
+defineEmits(['edit', 'add-child', 'delete', 'edit-device']);
 
 const { t } = useI18n();
 
@@ -129,6 +147,7 @@ function truncate(value, max = 18) {
 function subLabel(node) {
   const bits = [];
   if (node.kind === 'fixture') bits.push(t('dmxChain.kindFixture'));
+  else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
   else bits.push(t('dmxChain.kindDevice'));
   if (node.in_port) bits.push(`in ${node.in_port}`);
   if (node.out_port) bits.push(`out ${node.out_port}`);
@@ -251,6 +270,11 @@ function nodeStyle(n) {
   right: -10px;
   top: 50%;
   transform: translateY(-50%);
+}
+.dmx-flow-edit {
+  position: absolute;
+  left: -10px;
+  top: -10px;
 }
 .dmx-flow-del {
   position: absolute;

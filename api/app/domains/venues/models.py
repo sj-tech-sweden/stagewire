@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -36,6 +36,27 @@ class Venue(Base):
     )
 
 
+class VenuePowerGroup(Base):
+    """A circuit of the venue's power: one fuse/breaker feeding several outlets.
+
+    The group's rating is shared by every load on its outlets, so the power tree treats a used
+    group as one source with the group's rating and one output per outlet connector.
+    """
+
+    __tablename__ = "venue_power_groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    venue_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), default="")
+    rating_amps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    phases: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Which phase a one-phase group is on (L1 when not set); a three-phase group spreads its load.
+    phase: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
 class VenuePowerOutlet(Base):
     """A mains outlet that belongs to a venue, and where it sits on the stage plot (cm)."""
 
@@ -48,6 +69,9 @@ class VenuePowerOutlet(Base):
     name: Mapped[str] = mapped_column(String(255), default="")
     connector: Mapped[str] = mapped_column(String(64), default="")
     rating_amps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venue_power_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     x_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     y_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")

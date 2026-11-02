@@ -1,4 +1,5 @@
 from dataclasses import replace as dc_replace
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,14 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
-from app.domains.audio.models import StagePlotElement
 from app.domains.auth.deps import get_current_user
-from app.domains.lighting.models import LightingFixture
+from app.domains.connectors.service import refresh_power_connectors
+from app.domains.graph import devices_native, fixtures_native, plot_native, power_native
+from app.domains.graph.mirror import MirrorToGraphRoute
+from app.domains.lighting import service as lighting_service
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
-from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
 from app.domains.venues.schemas import VenuePowerOutletRead
 
-router = APIRouter(tags=["rigging"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["rigging"],
+    dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
+    route_class=MirrorToGraphRoute,
+)
 
 
 async def _job(db: AsyncSession, job_id: UUID):
@@ -69,7 +75,7 @@ async def _reject(problems: list[str]) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "; ".join(problems))
 
 
-async def _read_node(db: AsyncSession, node: PowerNode) -> dict:
+async def _read_node(db: AsyncSession, node) -> dict:
     # Validate the node before any further await expires its attributes in the async session.
     read = schemas.PowerNodeRead.model_validate(node)
     feeds = await service.list_feeds(db, node.job_id)
@@ -93,43 +99,6 @@ async def list_job_outlets(job_id: UUID, db: AsyncSession = Depends(get_db)):
 async def list_points(job_id: UUID, db: AsyncSession = Depends(get_db)):
     await _job(db, job_id)
     return await service.list_points(db, job_id)
-
-
-@router.post(
-    "/jobs/{job_id}/rigging-points",
-    response_model=schemas.RiggingPointRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_point(
-    job_id: UUID, payload: schemas.RiggingPointCreate, db: AsyncSession = Depends(get_db)
-):
-    await _job(db, job_id)
-    position = await service.next_position(db, RiggingPoint, job_id)
-    return await service.save(
-        db, RiggingPoint(job_id=job_id, position=position, **payload.model_dump())
-    )
-
-
-@router.patch("/jobs/{job_id}/rigging-points/{point_id}", response_model=schemas.RiggingPointRead)
-async def update_point(
-    job_id: UUID,
-    point_id: UUID,
-    payload: schemas.RiggingPointUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    await _job(db, job_id)
-    point = await _found(await service.get_point(db, job_id, point_id), "Rigging point not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(point, key, value)
-    return await service.save(db, point)
-
-
-@router.delete("/jobs/{job_id}/rigging-points/{point_id}", status_code=204)
-async def delete_point(job_id: UUID, point_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    await _job(db, job_id)
-    point = await _found(await service.get_point(db, job_id, point_id), "Rigging point not found")
-    await db.delete(point)
-    await db.commit()
 
 
 @router.get("/jobs/{job_id}/power-nodes")
@@ -170,7 +139,7 @@ async def create_node(
     nodes = await service.list_nodes(db, job_id)
     feeds = await service.list_feeds(db, job_id)
     rows = await service.collect_loads(db, job_id)
-    candidate = PowerNode(
+    candidate = SimpleNamespace(
         id=UUID(int=0),
         job_id=job_id,
         parent_id=payload.parent_id,
@@ -185,12 +154,8 @@ async def create_node(
     tree = service.to_tree_nodes(nodes + [candidate], feeds)
     evaluation = power_tree.evaluate(tree, service.to_tree_loads(rows))
     await _reject(_problems(evaluation, candidate.name))
-    position = await service.next_position(db, PowerNode, job_id)
-    node = PowerNode(
-        job_id=job_id, position=position, **{k: v for k, v in data.items() if k != "outputs"}
-    )
-    node.outputs = outputs
-    node = await service.save(db, node)
+    node = await power_native.create_node(db, job_id, {**data, "outputs": outputs})
+    await db.commit()
     return await _read_node(db, node)
 
 
@@ -277,14 +242,12 @@ async def update_node(
         names = (node.name,)
     evaluation = power_tree.evaluate(tree, service.to_tree_loads(rows))
     await _reject(_problems(evaluation, *names))
-    for key, value in data.items():
-        setattr(node, key, value)
+    node = await power_native.update_node(db, job_id, node.id, data)
     await db.commit()
-    await db.refresh(node)
-    return await _read_node(db, node)
+    return await _read_node(db, await service.get_node(db, job_id, node.id))
 
 
-def _descendant_ids(nodes: list[PowerNode], feeds: list[PowerNodeFeed], node_id: str) -> set[str]:
+def _descendant_ids(nodes: list, feeds: list, node_id: str) -> set[str]:
     children: dict[str, list[str]] = {}
     for n in nodes:
         if n.parent_id:
@@ -314,7 +277,7 @@ async def delete_node(job_id: UUID, node_id: UUID, db: AsyncSession = Depends(ge
     rows = await service.collect_loads(db, job_id)
     if any(r.power_node_id == str(node.id) for r in rows):
         raise HTTPException(status.HTTP_409_CONFLICT, "Unplug the loads on this node first")
-    await db.delete(node)
+    await power_native.delete_node(db, job_id, node.id)
     await db.commit()
 
 
@@ -354,21 +317,28 @@ async def add_feed(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"{payload.feed_connector} is not an output of {parent.name}",
         )
-    position = await service.next_position(db, PowerNodeFeed, job_id)
-    feed = PowerNodeFeed(
+    feed = SimpleNamespace(
+        id=UUID(int=0),
         job_id=job_id,
         node_id=node.id,
         parent_id=parent.id,
         feed_connector=payload.feed_connector,
         phase=payload.phase,
-        position=position,
     )
     rows = await service.collect_loads(db, job_id)
     evaluation = power_tree.evaluate(
         service.to_tree_nodes(nodes, feeds + [feed]), service.to_tree_loads(rows)
     )
     await _reject(_problems(evaluation, node.name, parent.name))
-    return await service.save(db, feed)
+    saved = await power_native.add_feed(
+        db,
+        job_id,
+        node.id,
+        parent.id,
+        {"feed_connector": payload.feed_connector, "phase": payload.phase},
+    )
+    await db.commit()
+    return schemas.PowerNodeFeedRead.model_validate(saved)
 
 
 @router.delete("/jobs/{job_id}/power-nodes/{node_id}/feeds/{feed_id}", status_code=204)
@@ -377,10 +347,10 @@ async def remove_feed(
 ) -> None:
     await _job(db, job_id)
     await _found(await service.get_node(db, job_id, node_id), "Power node not found")
-    feed = await db.get(PowerNodeFeed, feed_id)
-    if feed is None or str(feed.node_id) != str(node_id) or feed.job_id != job_id:
+    feeds = await service.list_feeds(db, job_id)
+    if not any(f.id == feed_id and f.node_id == node_id for f in feeds):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Feed not found")
-    await db.delete(feed)
+    await power_native.remove_feed(db, job_id, feed_id)
     await db.commit()
 
 
@@ -417,9 +387,12 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
         ),
         service.to_tree_loads(rows),
     )
+    weights = calc.summarize_weights(points, service.weight_loads(rows))
+    point_over = {str(p["id"]): bool(p["over"]) for p in weights}
     loads = []
     for r in rows:
         power = evaluation.loads.get(r.id, {})
+        node = evaluation.nodes.get(r.power_node_id) if r.power_node_id else None
         loads.append(
             {
                 "id": r.id,
@@ -431,13 +404,25 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
                 "power_node_id": r.power_node_id,
                 "power_connector": r.power_connector,
                 "device_id": r.device_id,
-                "power_status": power.get(
-                    "status", "ok" if r.power_node_id is None else "unpowered"
+                # hung on a point that carries more than its capacity is "over" for everything on it
+                "rigging_status": (
+                    "none"
+                    if not r.rigging_point_id
+                    else "over"
+                    if point_over.get(r.rigging_point_id)
+                    else "ok"
+                ),
+                # a load sits on its node: when the node is over its rating or close to it, so is
+                # the load (it is part of what overloads it), not "ok"
+                "power_status": (
+                    node["status"]
+                    if node and node["status"] in ("over", "warn")
+                    else power.get("status", "ok" if r.power_node_id is None else "unpowered")
                 ),
             }
         )
     return {
-        "points": calc.summarize_weights(points, service.weight_loads(rows)),
+        "points": weights,
         "nodes": list(evaluation.nodes.values()),
         "loads": loads,
         "errors": evaluation.errors,
@@ -455,7 +440,7 @@ async def assign_load(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _job(db, job_id)
-    if kind not in ("fixture", "element"):
+    if kind not in ("fixture", "element", "device"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown load kind")
     rows = await service.collect_loads(db, job_id)
     row = next((r for r in rows if r.id == str(load_id) and r.kind == kind), None)
@@ -497,23 +482,30 @@ async def assign_load(
     await _reject(_problems(evaluation, row.label, target_name))
 
     if kind == "fixture":
-        fixture = await db.get(LightingFixture, load_id)
-        if fixture is None or fixture.job_id != job_id:
+        if await lighting_service.get_fixture(db, job_id, load_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
-        target = fixture
+        # fixtures live on the graph: their load links are set by the fixture store
+        changes = {k: v for k, v in data.items() if k in ("power_node_id", "rigging_point_id")}
+        if "power_connector" in data:
+            changes["power_connector"] = data["power_connector"] or ""
+        await fixtures_native.update_fixture(db, job_id, load_id, changes)
+        await db.commit()
+        return
+    elif kind == "element":
+        # plot elements live on the graph: their load links are set by the element store
+        changes = {k: v for k, v in data.items() if k in ("power_node_id", "rigging_point_id")}
+        if "power_connector" in data:
+            changes["power_connector"] = data["power_connector"] or ""
+        await plot_native.update_element(db, job_id, load_id, changes)
+        await db.commit()
+        return
     else:
-        element = await db.get(StagePlotElement, load_id)
-        if element is None or element.job_id != job_id:
+        device = await audio_service.get_device(db, load_id)
+        if device is None or device.job_id != job_id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
-        target = element
-    for key, value in data.items():
-        if key == "power_node_id":
-            target.power_node_id = value
-        elif key == "rigging_point_id":
-            target.rigging_point_id = value
-        elif key == "power_connector":
-            target.power_connector = value or ""
-    if target.power_node_id is None:
-        target.power_connector = ""
-    await db.commit()
-    await db.commit()
+        # devices live on the graph: their load links are set by the device store
+        changes = {k: v for k, v in data.items() if k in ("power_node_id", "rigging_point_id")}
+        if "power_connector" in data:
+            changes["power_connector"] = data["power_connector"] or ""
+        await devices_native.update_device(db, load_id, changes, job_id)
+        await db.commit()

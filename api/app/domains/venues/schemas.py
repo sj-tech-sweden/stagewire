@@ -68,10 +68,38 @@ class VenuePropagateResult(BaseModel):
     updated: int
 
 
+class VenuePowerGroupBase(BaseModel):
+    name: str = ""
+    rating_amps: float | None = Field(None, gt=0)
+    phases: int = Field(1, ge=1, le=3)
+    phase: Literal["L1", "L2", "L3"] | None = None
+    notes: str = ""
+
+
+class VenuePowerGroupCreate(VenuePowerGroupBase):
+    pass
+
+
+class VenuePowerGroupUpdate(BaseModel):
+    name: str | None = None
+    rating_amps: float | None = Field(None, gt=0)
+    phases: int | None = Field(None, ge=1, le=3)
+    phase: Literal["L1", "L2", "L3"] | None = None
+    notes: str | None = None
+
+
+class VenuePowerGroupRead(VenuePowerGroupBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    venue_id: UUID
+
+
 class VenuePowerOutletBase(BaseModel):
     name: str = ""
     connector: str = ""
     rating_amps: float | None = None
+    group_id: UUID | None = None
     x_cm: float | None = None
     y_cm: float | None = None
     notes: str = ""
@@ -84,6 +112,8 @@ class VenuePowerOutletCreate(VenuePowerOutletBase):
 class VenuePowerOutletUpdate(BaseModel):
     name: str | None = None
     connector: str | None = None
+    rating_amps: float | None = None
+    group_id: UUID | None = None
     x_cm: float | None = None
     y_cm: float | None = None
     notes: str | None = None

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { firstFreeAddress, occupiedChannels } from '../../src/utils/dmx';
+import { dmxFlags, firstFreeAddress, occupiedChannels } from '../../src/utils/dmx';
 
 const fixtures = [
   { id: 'a', universe: 1, dmx_address: 1, footprint: 16 },
@@ -34,4 +34,19 @@ test('a run that shares channels with other fixtures, or runs past 512, is repor
   expect(clashesFor(fixtures, 1, 1, 16, 'a').clashes).toEqual([]);
   expect(clashesFor(fixtures, 1, 510, 4, null).overflow).toBe(true);
   expect(clashesFor(fixtures, 1, 510, 2, null).overflow).toBe(false);
+});
+
+test('flags mark overlapping fixtures in a universe and runs past channel 512', () => {
+  const flags = dmxFlags([
+    { id: 'a', universe: 1, dmx_address: 1, footprint: 16 },
+    { id: 'b', universe: 1, dmx_address: 10, footprint: 4 },
+    { id: 'c', universe: 2, dmx_address: 1, footprint: 16 },
+    { id: 'd', universe: 1, dmx_address: 510, footprint: 8 },
+    { id: 'e', universe: null, dmx_address: null, footprint: 4 },
+  ]);
+  expect(flags.get('a')).toEqual({ conflict: true, overflow: false });
+  expect(flags.get('b')).toEqual({ conflict: true, overflow: false });
+  expect(flags.get('c')).toEqual({ conflict: false, overflow: false });
+  expect(flags.get('d')).toEqual({ conflict: false, overflow: true });
+  expect(flags.get('e')).toEqual({ conflict: false, overflow: false });
 });

@@ -42,6 +42,22 @@ CONNECTORS: dict[str, Connector] = {
 }
 
 
+# Keys added from the shared connector kinds (see domains/connectors); replaced as a whole on each
+# refresh so a deleted kind disappears. They live in CONNECTORS so the power tree sees them too.
+_custom_keys: set[str] = set()
+
+
+def register_custom(connectors: list[Connector]) -> None:
+    for key in _custom_keys:
+        CONNECTORS.pop(key, None)
+    _custom_keys.clear()
+    for item in connectors:
+        if item.key in CONNECTORS:
+            continue
+        CONNECTORS[item.key] = item
+        _custom_keys.add(item.key)
+
+
 def known(key: str | None) -> bool:
     return key in CONNECTORS
 
@@ -63,6 +79,11 @@ def catalog() -> list[dict]:
             "phases": c.phases,
             "amps": c.amps,
             "circuits": c.circuits,
+            "custom": c.key in _custom_keys,
         }
         for c in CONNECTORS.values()
     ]
+
+
+def catalog_is_custom(key: str) -> bool:
+    return key in _custom_keys

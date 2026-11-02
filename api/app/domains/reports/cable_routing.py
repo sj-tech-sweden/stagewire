@@ -378,16 +378,15 @@ def _centres(elements: list[Any]) -> tuple[dict[str, Point], dict[str, Point]]:
     return centre_of_element, centre_of_device
 
 
-def routed_cable_paths(
+def _route_cables(
+    cables: list[Cable],
     *,
     cable_plan: dict[str, Any] | None,
-    channel_lists: list[Any],
-    elements: list[Any],
-    video_lists: list[Any],
+    centre_of_element: dict[str, Point],
+    centre_of_device: dict[str, Point],
     audience: list[Any],
     stage_offset: Point,
 ) -> list[dict[str, Any]]:
-    """Routed cables in stage coordinates, skipping hidden and unplaced cables."""
     plan = cable_plan or {}
     cableways = [
         [(float(x), float(y)) for x, y in way.get("points", [])]
@@ -399,9 +398,8 @@ def routed_cable_paths(
     audience_local = [
         (float(x) - stage_offset[0], float(y) - stage_offset[1]) for x, y in audience or []
     ]
-    centre_of_element, centre_of_device = _centres(elements)
     paths = []
-    for cable in derive_cables(channel_lists, elements, video_lists):
+    for cable in cables:
         route = routes.get(cable.key) or {}
         if route.get("hidden"):
             continue
@@ -418,3 +416,190 @@ def routed_cable_paths(
         points, mode = route_cable(start, end, cableways, route, audience_local, tray_factor)
         paths.append({"key": cable.key, "points": points, "mode": mode})
     return paths
+
+
+def routed_cable_paths(
+    *,
+    cable_plan: dict[str, Any] | None,
+    channel_lists: list[Any],
+    elements: list[Any],
+    video_lists: list[Any],
+    audience: list[Any],
+    stage_offset: Point,
+) -> list[dict[str, Any]]:
+    """Routed cables in stage coordinates, skipping hidden and unplaced cables."""
+    centre_of_element, centre_of_device = _centres(elements)
+    return _route_cables(
+        derive_cables(channel_lists, elements, video_lists),
+        cable_plan=cable_plan,
+        centre_of_element=centre_of_element,
+        centre_of_device=centre_of_device,
+        audience=audience,
+        stage_offset=stage_offset,
+    )
+
+
+VIRTUAL_KINDS = {
+    "channel",
+    "output",
+    "video_input",
+    "video_destination",
+    "video_list",
+    "rigging_point",
+    "channel_list",
+}
+LEGACY_KEY_TABLES = {
+    "channel_patch_points",
+    "output_patch_points",
+    "video_patch_points",
+    "video_output_patch_points",
+}
+
+
+def _cable_key(edge: Any) -> str:
+    """Keep the legacy patch point id as the key so saved cable routes keep matching."""
+    attrs = edge.attributes or {}
+    table, _, legacy_id = (attrs.get("legacy_ref") or "").partition(":")
+    if table in LEGACY_KEY_TABLES and legacy_id:
+        return legacy_id
+    # video connections live only on the graph: their point id is the key (the legacy point id for
+    # connections that came from the tables)
+    if edge.signal == "video" and attrs.get("point_id"):
+        return str(attrs["point_id"])
+    return str(edge.id)
+
+
+class _ElementView:
+    """A plot element node seen the way the legacy element row is: type, size, centre."""
+
+    def __init__(self, node: Any, links: dict[str, Any]) -> None:
+        attrs = node.attributes or {}
+        self.node_id = str(node.id)
+        self.legacy_id = _legacy_id(node)
+        self.element_type = attrs.get("element_type") or ""
+        self.label = attrs.get("label") or ""
+        self.position_x = node.canvas_x_cm or 0
+        self.position_y = node.canvas_y_cm or 0
+        self.rotation = node.canvas_rotation or 0
+        self.width_cm = attrs.get("width_cm") or 0
+        self.height_cm = attrs.get("height_cm") or 0
+        self.links = links
+
+
+def _legacy_id(node: Any) -> str:
+    """The element's public id (``graph/ids.py``): ``attributes.legacy_id`` or the legacy ref's id
+    for an element imported from the old table, else its node id."""
+    raw = (getattr(node, "attributes", None) or {}).get("legacy_id")
+    if not raw:
+        table, _, raw = (getattr(node, "legacy_ref", None) or "").partition(":")
+        raw = raw if table == "stage_plot_elements" else None
+    return str(raw or node.id)
+
+
+def _element_views(devices: list[Any], edges: list[Any]) -> list[_ElementView]:
+    links: dict[str, dict[str, Any]] = {}
+    for edge in edges:
+        if edge.signal == "link":
+            links.setdefault(str(edge.src_device_id), {})[(edge.attributes or {}).get("role")] = (
+                str(edge.dst_device_id)
+            )
+    nodes = sorted(
+        (d for d in devices if d.kind == "plot_element"),
+        key=lambda d: (str(d.created_at), str(d.id)),
+    )
+    return [_ElementView(n, links.get(str(n.id), {})) for n in nodes]
+
+
+def derive_cables_from_graph(devices: list[Any], edges: list[Any]) -> list[Cable]:
+    """Same cables as ``derive_cables``, read from the graph.
+
+    Audio and video edges between real devices become cables. Channel and video-input nodes
+    are replaced by the plot element nodes linked to them, and an output bus is looked through
+    so the cable runs from the console to the next device.
+    """
+    by_id = {str(d.id): d for d in devices}
+    elements = _element_views(devices, edges)
+    into: dict[str, list[Any]] = {}
+    for edge in edges:
+        into.setdefault(str(edge.dst_device_id), []).append(edge)
+    cables: list[Cable] = []
+    for edge in sorted(edges, key=lambda e: str(e.id)):
+        if edge.signal not in ("audio", "video"):
+            continue
+        src, dst = by_id.get(str(edge.src_device_id)), by_id.get(str(edge.dst_device_id))
+        if src is None or dst is None or dst.kind in VIRTUAL_KINDS:
+            continue
+        if src.kind in ("channel", "video_input"):
+            linked = [e for e in elements if e.links.get(src.kind) == str(src.id)]
+            if src.kind == "channel":
+                mics = [e for e in linked if e.element_type in MIC_TYPES]
+                linked = mics or [e for e in linked if e.element_type == "performer"]
+            else:
+                linked = [e for e in linked if e.element_type != "projector"]
+            cables.extend(
+                Cable(key=f"src:{e.legacy_id}", from_element_id=e.node_id, to_device_id=str(dst.id))
+                for e in linked
+            )
+        elif src.kind == "output":
+            for feeder in into.get(str(src.id), []):
+                origin = by_id.get(str(feeder.src_device_id))
+                if origin is not None and origin.kind not in VIRTUAL_KINDS and origin.id != dst.id:
+                    cables.append(
+                        Cable(
+                            key=_cable_key(edge),
+                            from_device_id=str(origin.id),
+                            to_device_id=str(dst.id),
+                        )
+                    )
+        elif src.kind not in VIRTUAL_KINDS and src.id != dst.id:
+            cables.append(
+                Cable(key=_cable_key(edge), from_device_id=str(src.id), to_device_id=str(dst.id))
+            )
+    for element in elements:
+        point_device = element.links.get("output_point")
+        if element.element_type in SPEAKER_TYPES and point_device:
+            cables.append(
+                Cable(
+                    key=f"spk:{element.legacy_id}",
+                    from_device_id=point_device,
+                    to_element_id=element.node_id,
+                )
+            )
+    return cables
+
+
+def _graph_centres(
+    devices: list[Any], edges: list[Any]
+) -> tuple[dict[str, Point], dict[str, Point]]:
+    centre_of_element: dict[str, Point] = {}
+    centre_of_device: dict[str, Point] = {}
+    for element in _element_views(devices, edges):
+        centre = element_centre(element)
+        centre_of_element[element.node_id] = centre
+        device_id = element.links.get("device")
+        if (
+            device_id
+            and element.element_type not in SPEAKER_TYPES
+            and device_id not in centre_of_device
+        ):
+            centre_of_device[device_id] = centre
+    return centre_of_element, centre_of_device
+
+
+def routed_cable_paths_from_graph(
+    *,
+    cable_plan: dict[str, Any] | None,
+    devices: list[Any],
+    edges: list[Any],
+    audience: list[Any],
+    stage_offset: Point,
+) -> list[dict[str, Any]]:
+    centre_of_element, centre_of_device = _graph_centres(devices, edges)
+    return _route_cables(
+        derive_cables_from_graph(devices, edges),
+        cable_plan=cable_plan,
+        centre_of_element=centre_of_element,
+        centre_of_device=centre_of_device,
+        audience=audience,
+        stage_offset=stage_offset,
+    )

@@ -52,3 +52,28 @@ export function clashesFor(fixtures, universe, start, footprint, excludeId = nul
   }
   return { clashes, overflow: last > DMX_CHANNELS };
 }
+
+// Per fixture id: does it share channels with another fixture in its universe, and does it
+// run past channel 512. Same rule as the backend `dmx_flags`.
+export function dmxFlags(fixtures) {
+  const flags = new Map((fixtures || []).map((f) => [f.id, { conflict: false, overflow: false }]));
+  const byUniverse = new Map();
+  for (const f of fixtures || []) {
+    if (f.universe == null || !f.dmx_address) continue;
+    const end = f.dmx_address + footprintOf(f) - 1;
+    if (end > DMX_CHANNELS) flags.get(f.id).overflow = true;
+    if (!byUniverse.has(f.universe)) byUniverse.set(f.universe, []);
+    byUniverse.get(f.universe).push({ id: f.id, start: f.dmx_address, end });
+  }
+  for (const spans of byUniverse.values()) {
+    spans.forEach((a, i) => {
+      for (const b of spans.slice(i + 1)) {
+        if (a.start <= b.end && b.start <= a.end) {
+          flags.get(a.id).conflict = true;
+          flags.get(b.id).conflict = true;
+        }
+      }
+    });
+  }
+  return flags;
+}

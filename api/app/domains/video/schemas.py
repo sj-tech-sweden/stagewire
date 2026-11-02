@@ -34,6 +34,8 @@ class VideoInputBase(BaseModel):
     source_type: str = "camera"
     connector: str = "sdi"
     notes: str = ""
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
 
 
 class VideoInputCreate(VideoInputBase):
@@ -57,6 +59,8 @@ class VideoInputRead(BaseModel):
     source_type: str
     connector: str
     notes: str
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
     patch_points: list[VideoPatchPointRead] = []
 
 
