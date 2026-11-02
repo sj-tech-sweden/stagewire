@@ -17,7 +17,41 @@ async def _graph(client, h, job_id):
 
 
 async def _legacy_universes(client, h, job_id):
-    return (await client.get(f"{BASE}/jobs/{job_id}/dmx-universes", headers=h)).json()
+    """The universes as plain trees (what the old endpoint returned), read from the graph nodes."""
+    graph = await _graph(client, h, job_id)
+    names = {d["id"]: d for d in graph["devices"]}
+    out = []
+    for node in sorted(
+        (d for d in graph["devices"] if d["kind"] == "dmx_universe"),
+        key=lambda d: d["attributes"]["number"],
+    ):
+        steps = node["attributes"]["steps"]
+
+        def tree(parent, steps=steps):
+            return [
+                {
+                    "id": step["step_id"],
+                    "kind": "fixture" if names[step["node_id"]]["kind"] == "fixture" else "device",
+                    "label": names[step["node_id"]]["name"],
+                    **{k: step[k] for k in ("in_port", "out_port", "connector", "notes")},
+                    "children": tree(step["step_id"]),
+                }
+                for step in sorted(steps, key=lambda s: s["position"])
+                if step["parent_id"] == parent
+            ]
+
+        source = node["attributes"].get("source_device_id")
+        out.append(
+            {
+                "number": node["attributes"]["number"],
+                "name": node["attributes"].get("name", ""),
+                "source_port": node["attributes"].get("source_port", ""),
+                "source_device_id": source,
+                "source_label": names[source]["name"] if source else "",
+                "steps": tree(None),
+            }
+        )
+    return out
 
 
 async def _setup(client, h):
@@ -258,3 +292,28 @@ async def test_an_edit_on_a_device_without_fixtures_is_not_reported_as_saved(aut
             if d["name"] == "Splitter"
         )
         assert "location" not in legacy
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_fixture_removes_its_step_and_moves_the_rest_up(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, a, b, desk, split = await _setup(client, h)
+        uni = (
+            await client.post(f"{g}/universes", json={"source_device_id": desk["id"]}, headers=h)
+        ).json()
+        await client.put(
+            f"{g}/universes/{uni['id']}/chain",
+            json={"steps": [{"device_id": a["id"]}, {"device_id": b["id"], "parent_index": 0}]},
+            headers=h,
+        )
+        node = {d["id"]: d for d in (await _graph(client, h, job_id))["devices"]}[a["id"]]
+        res = await client.delete(
+            f"{g}/devices/{a['id']}", params={"expected_revision": node["revision"]}, headers=h
+        )
+        assert res.status_code == 204, res.text
+        tree = (await _legacy_universes(client, h, job_id))[0]["steps"]
+        assert [(s["label"], s["children"]) for s in tree] == [("B", [])]
+        # the universe still has its source edge and one chain edge
+        edges = [e for e in (await _graph(client, h, job_id))["edges"] if e["signal"] == "dmx"]
+        assert len(edges) == 2

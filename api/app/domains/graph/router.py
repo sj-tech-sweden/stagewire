@@ -12,7 +12,15 @@ from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import backfill, mirror, readers, schemas, topology, video_native
+from app.domains.graph import (
+    backfill,
+    dmx_native,
+    mirror,
+    readers,
+    schemas,
+    topology,
+    video_native,
+)
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
@@ -133,8 +141,11 @@ async def update_device(
     db: AsyncSession = Depends(get_db),
 ) -> GraphDevice:
     device = await _device(db, job_id, device_id)
-    data = video_native.translate_patch(
-        device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    data = dmx_native.translate_patch(
+        device,
+        video_native.translate_patch(
+            device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+        ),
     )
 
     async def apply() -> GraphDevice:
@@ -144,6 +155,7 @@ async def update_device(
         if protect:
             device.graph_edited = True
         await db.flush()  # the version check fails here, before the legacy row is touched
+        await dmx_native.after_patch(db, device, data)
         mirrored = await mirror.device_to_legacy(db, job_id, device, data)
         await db.commit()
         if mirrored:
@@ -186,6 +198,7 @@ async def delete_device(
             removed_edges.extend(child_edges)
         await db.delete(device)
         await db.flush()
+        await dmx_native.drop_node(db, job_id, device_id)
         try:
             await mirror.delete_device_twin(db, job_id, device)
         except HTTPException:

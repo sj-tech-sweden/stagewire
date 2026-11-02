@@ -17,7 +17,7 @@ from app.domains.audio.models import (
 )
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
-from app.domains.lighting.models import DmxStep, DmxUniverse, LightingFixture
+from app.domains.lighting.models import LightingFixture
 from app.domains.rigging.models import PowerNode, PowerNodeFeed, RiggingPoint
 
 FAN_OUT = 64
@@ -104,7 +104,6 @@ OWNED_ATTRS: dict[str, set[str]] = {
     "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "stage_plot_elements": {*ELEMENT_FIELDS, "rigging_point_id", "label"},
     "lighting_fixtures": {*FIXTURE_ATTRS, *LOAD_ATTRS},
-    "dmx_universes": {"number", "source_port", "name"},
     "rigging_points": {"trim_height_cm", "weight_capacity_kg"},
     "power_nodes": {"rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id"},
     "audio_devices": {
@@ -134,8 +133,6 @@ MIRRORED_EDGE_TABLES = {
     "output_patch_points",
     "channel_list_outputs",
     "stage_plot_elements.link",
-    "dmx_steps",
-    "dmx_universes",
     "power_nodes",
     "power_node_feeds",
     "lighting_fixtures.power",
@@ -211,6 +208,15 @@ def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False)
     return attrs
 
 
+# DMX universes live on the graph (dmx_native.py); a job's rows still in the legacy tables are
+# brought over once by dmx_native.import_legacy, and their unconverted mirrors are not synced.
+LEGACY_DMX_REFS = ("dmx_universes:", "dmx_steps:")
+
+
+def _is_legacy_dmx(ref: str | None) -> bool:
+    return bool(ref) and ref.startswith(LEGACY_DMX_REFS)
+
+
 class Backfill:
     def __init__(self, db: AsyncSession, job_id: uuid.UUID) -> None:
         self.db = db
@@ -233,7 +239,7 @@ class Backfill:
         for device in (
             await self.db.scalars(select(GraphDevice).where(GraphDevice.job_id == self.job_id))
         ).all():
-            if device.legacy_ref:
+            if device.legacy_ref and not _is_legacy_dmx(device.legacy_ref):
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
@@ -246,7 +252,7 @@ class Backfill:
             )
         ).all():
             ref = (edge.attributes or {}).get("legacy_ref")
-            if ref:
+            if ref and not _is_legacy_dmx(ref):
                 self.edge_refs.add(ref)
                 self.edge_rows[ref] = edge
                 self.loaded_edges.add(ref)
@@ -829,97 +835,6 @@ class Backfill:
                 attributes=dmx,
                 ports=[],
             )
-        universes = (
-            await self.db.scalars(select(DmxUniverse).where(DmxUniverse.job_id == self.job_id))
-        ).all()
-        universe_nodes: dict[uuid.UUID, GraphDevice] = {}
-        for universe in universes:
-            node = self.device(
-                f"dmx_universes:{universe.id}",
-                domain="lighting",
-                kind="dmx_universe",
-                name=universe.name or f"Universe {universe.number}",
-                notes=universe.notes or "",
-                position=universe.number,
-                attributes={
-                    "number": universe.number,
-                    "name": universe.name or "",
-                    "source_port": universe.source_port or "",
-                },
-                ports=[
-                    {"id": "in", "direction": "in", "signal": "dmx"},
-                    {"id": "out", "direction": "out", "signal": "dmx", "max_connections": FAN_OUT},
-                ],
-            )
-            universe_nodes[universe.id] = node
-            source = (
-                self.devices.get(f"audio_devices:{universe.source_device_id}")
-                if universe.source_device_id
-                else None
-            )
-            if source is not None:
-                self.edge(
-                    f"dmx_universes:{universe.id}",
-                    "dmx",
-                    source,
-                    self.named_port(source, "out", "dmx", universe.source_port or ""),
-                    node,
-                    "in",
-                    attributes={
-                        "chain": str(node.id),
-                        "universe": universe.number,
-                        "source_port": universe.source_port or "",
-                    },
-                )
-        steps = (
-            await self.db.scalars(
-                select(DmxStep)
-                .join(DmxUniverse, DmxStep.universe_id == DmxUniverse.id)
-                .where(DmxUniverse.job_id == self.job_id)
-                .order_by(DmxStep.position)
-            )
-        ).all()
-        step_by_id = {step.id: step for step in steps}
-        node_of: dict[uuid.UUID, GraphDevice] = {}
-        for step in steps:
-            if step.fixture_id and step.fixture_id in fixture_nodes:
-                node_of[step.id] = fixture_nodes[step.fixture_id]
-            elif step.device_id:
-                node_of[step.id] = self.devices.get(f"audio_devices:{step.device_id}")
-        for step in steps:
-            node = node_of.get(step.id)
-            universe_node = universe_nodes.get(step.universe_id)
-            if node is None or universe_node is None:
-                continue
-            parent_step = step_by_id.get(step.parent_id) if step.parent_id else None
-            parent = node_of.get(parent_step.id) if parent_step else universe_node
-            if parent is None:
-                continue
-            number = universe_node.attributes.get("number")
-            src_port = (
-                self.named_port(parent, "out", "dmx", parent_step.out_port or "", step.connector)
-                if parent_step
-                else "out"
-            )
-            self.edge(
-                f"dmx_steps:{step.id}",
-                "dmx",
-                parent,
-                src_port,
-                node,
-                self.named_port(node, "in", "dmx", step.in_port or "", step.connector),
-                attributes={
-                    "chain": str(universe_node.id),
-                    "universe": number,
-                    "step_id": str(step.id),
-                    "position": step.position,
-                    "parent_id": str(step.parent_id) if step.parent_id else None,
-                    "in_port": step.in_port or "",
-                    "out_port": step.out_port or "",
-                    "connector": step.connector or "",
-                    "notes": step.notes or "",
-                },
-            )
         for fx in fixtures:
             if fx.power_node_id:
                 node = fixture_nodes[fx.id]
@@ -1094,7 +1009,11 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
-        return await _backfill_job_locked(db, job_id)
+        result = await _backfill_job_locked(db, job_id)
+        from app.domains.graph import dmx_native
+
+        await dmx_native.import_legacy(db, job_id)
+        return result
 
 
 async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:

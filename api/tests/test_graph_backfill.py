@@ -86,10 +86,11 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         g = f"{BASE}/jobs/{job_id}/graph"
         first = await client.post(f"{g}/backfill", headers=auth_headers)
         assert first.status_code == 200, first.text
-        # 3 devices + 1 channel list + 2 channels + 2 power nodes + 1 DMX universe
-        # 4 chain edges + 1 power feed + 2 dmx (source -> universe -> fixture) + 1 fixture power
-        assert first.json()["devices"] == 9
-        assert first.json()["edges"] == 8
+        # 3 devices + 1 channel list + 2 channels + 2 power nodes
+        # 4 chain edges + 1 power feed + 1 fixture power; the DMX universe is imported after
+        # the sync (below), not counted here
+        assert first.json()["devices"] == 8
+        assert first.json()["edges"] == 6
 
         second = await client.post(f"{g}/backfill", headers=auth_headers)
         assert second.json()["devices"] == 0 and second.json()["edges"] == 0
@@ -108,6 +109,15 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         assert stagebox["attributes"]["power_w"] == 120
         fixture = next(d for d in graph["devices"] if d["name"] == "Moving head")
         assert fixture["domain"] == "lighting" and fixture["attributes"]["dmx_address"] == 1
+
+        # the legacy universe became a native node with its source and its fixture step
+        universe = next(d for d in graph["devices"] if d["kind"] == "dmx_universe")
+        assert universe["legacy_ref"] is None and universe["attributes"]["legacy_id"]
+        assert [s["node_id"] for s in universe["attributes"]["steps"]] == [fixture["id"]]
+        desk = next(d for d in graph["devices"] if d["name"] == "Desk")
+        assert universe["attributes"]["source_device_id"] == desk["id"]
+        dmx_edges = [e for e in graph["edges"] if e["signal"] == "dmx"]
+        assert len(dmx_edges) == 2
 
         mic = next(d for d in graph["devices"] if d["name"] == "Mic 1")
         trace = await client.get(

@@ -554,10 +554,12 @@ test('a DMX universe is built in the lights editor with a source, a chain and an
   await page.locator('.q-menu .q-item', { hasText: 'Wash B' }).click();
   await page.getByTestId('chain-save').click();
 
-  const universe = async () =>
-    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/dmx-universes`, { headers })).json())[0];
-  await expect.poll(async () => (await universe())?.steps?.length).toBe(2);
-  expect((await universe()).source_label).toBe('Lighting desk');
+  // the universe is a graph node holding its chain and its source
+  const graph = async () => (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as any;
+  const universe = async () => (await graph()).devices.find((d: any) => d.kind === 'dmx_universe');
+  await expect.poll(async () => (await universe())?.attributes?.steps?.length).toBe(2);
+  const desk = (await graph()).devices.find((d: any) => d.name === 'Lighting desk');
+  expect((await universe()).attributes.source_device_id).toBe(desk.id);
   await page.getByText(/flow diagram|flödesdiagram/i).click();
   await expect(page.getByText('Wash B').first()).toBeVisible();
 });

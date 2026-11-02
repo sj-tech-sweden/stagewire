@@ -12,7 +12,7 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
 from app.domains.audio.models import ProductionJob, StagePlotElement
 from app.domains.audio.ws import publish_job_event
-from app.domains.graph import video_native
+from app.domains.graph import dmx_native, video_native
 from app.domains.graph.backfill import (
     CHANNEL_FIELDS,
     DEVICE_SPEC_FIELDS,
@@ -27,7 +27,6 @@ from app.domains.graph.backfill import (
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.lighting import service as lighting_service
-from app.domains.lighting.models import DmxStep, DmxUniverse
 
 logger = logging.getLogger(__name__)
 
@@ -245,20 +244,6 @@ async def _update_power_node(db: AsyncSession, job_id: UUID, node_id: UUID, chan
         raise
 
 
-def _universe_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if "name" in data and data["name"] is not None:
-        out["name"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if attrs.get("number"):
-        out["number"] = attrs["number"]
-    if "source_port" in attrs:
-        out["source_port"] = attrs["source_port"] or ""
-    return out
-
-
 def _audio_device_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -335,26 +320,6 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
         if not changes:
             return False
         await _update_power_node(db, job_id, legacy_id, changes)
-    elif table == "dmx_universes":
-        universe = await db.get(DmxUniverse, legacy_id)
-        changes = _universe_changes(data)
-        if universe is None or not changes:
-            return False
-        number = changes.get("number")
-        if number is not None and number != universe.number:
-            taken = await db.scalar(
-                select(DmxUniverse.id).where(
-                    DmxUniverse.job_id == job_id,
-                    DmxUniverse.number == number,
-                    DmxUniverse.id != universe.id,
-                )
-            )
-            if taken is not None:
-                await db.rollback()
-                raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
-        for key, value in changes.items():
-            setattr(universe, key, value)
-        await db.commit()
     elif table == "lighting_fixtures":
         row = await lighting_service.get_fixture(db, job_id, legacy_id)
         changes = _fixture_changes(data)
@@ -454,12 +419,6 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         if await rigging_service.get_node(db, job_id, legacy_id) is None:
             return False
         await rigging_router.delete_node(job_id, legacy_id, db)
-    elif table == "dmx_universes":
-        universe = await db.get(DmxUniverse, legacy_id)
-        if universe is None:
-            return False
-        await db.delete(universe)
-        await db.commit()
     elif table == "lighting_fixtures":
         fixture = await lighting_service.get_fixture(db, job_id, legacy_id)
         if fixture is None:
@@ -570,6 +529,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     """Write patch-point fields of an edge PATCH (connector, label, notes) to the legacy point."""
     if await video_native.point_from_edge(db, edge, data):
         return False
+    if await dmx_native.step_from_edge(db, edge, data):
+        return False
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
     if target is not None and target[0] in POWER_EDGE_TABLES:
@@ -577,24 +538,6 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     if target is None or not attrs:
         return False
     table, legacy_id = target
-    if table == "dmx_steps":
-        step = await db.get(DmxStep, legacy_id)
-        changes = {
-            k: attrs[k] or "" for k in ("connector", "in_port", "out_port", "notes") if k in attrs
-        }
-        if step is None or not changes:
-            return False
-        for key, value in changes.items():
-            setattr(step, key, value)
-        await db.commit()
-        return True
-    if table == "dmx_universes":
-        universe = await db.get(DmxUniverse, legacy_id)
-        if universe is None or "source_port" not in attrs:
-            return False
-        universe.source_port = attrs["source_port"] or ""
-        await db.commit()
-        return True
     if table == "channel_patch_points":
         point, changes = await service.get_patch_point(db, legacy_id), _point_changes(attrs)
         if point is None or not changes:
@@ -626,6 +569,8 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
 async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge) -> bool:
     if await video_native.delete_edge_point(db, edge):
         return False
+    if await dmx_native.delete_step_edge(db, edge):
+        return False
     ref = (edge.attributes or {}).get("legacy_ref") or ""
     if ref.startswith("stage_plot_elements.link:"):
         _, element_id, role = ref.split(":")
@@ -634,25 +579,6 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
     if target is None:
         return False
     table, legacy_id = target
-    if table == "dmx_steps":
-        step = await db.get(DmxStep, legacy_id)
-        if step is None:
-            return False
-        children = (await db.scalars(select(DmxStep).where(DmxStep.parent_id == step.id))).all()
-        for child in children:
-            child.parent_id = step.parent_id
-        await db.flush()
-        await db.delete(step)
-        await db.commit()
-        return True
-    if table == "dmx_universes":
-        universe = await db.get(DmxUniverse, legacy_id)
-        if universe is None:
-            return False
-        universe.source_device_id = None
-        universe.source_port = ""
-        await db.commit()
-        return True
     if table == "power_node_feeds":
         from app.domains.rigging.models import PowerNodeFeed
 

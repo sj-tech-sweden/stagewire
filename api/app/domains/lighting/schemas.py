@@ -116,39 +116,3 @@ class FixtureImportResult(BaseModel):
     devices_created: int = 0
     cleared: int = 0
     errors: list[str] = []
-
-
-class DmxUniverseCreate(BaseModel):
-    number: int = Field(1, ge=1)
-    name: str = ""
-    source_device_id: UUID | None = None
-    source_port: str = ""
-    notes: str = ""
-
-
-class DmxUniverseUpdate(BaseModel):
-    number: int | None = Field(None, ge=1)
-    name: str | None = None
-    source_device_id: UUID | None = None
-    source_port: str | None = None
-    notes: str | None = None
-
-
-class DmxStepCreate(BaseModel):
-    """A device or a fixture on a universe. Exactly one of device_id and fixture_id is set."""
-
-    parent_id: UUID | None = None
-    device_id: UUID | None = None
-    fixture_id: UUID | None = None
-    in_port: str = ""
-    out_port: str = ""
-    connector: str = ""
-    notes: str = ""
-
-
-class DmxStepUpdate(BaseModel):
-    parent_id: UUID | None = None
-    in_port: str | None = None
-    out_port: str | None = None
-    connector: str | None = None
-    notes: str | None = None
