@@ -257,8 +257,11 @@ async def fill_from_switcher(db: AsyncSession, lst: VideoInputList) -> dict:
     }
 
 
-async def build_video_sheets(db: AsyncSession, job_id: UUID) -> list[dict]:
-    """One sheet per device: every video input and output that is patched through it."""
+async def build_video_sheets(db: AsyncSession, job_id: UUID, lists: list) -> list[dict]:
+    """One sheet per device: every video input and output that is patched through it.
+
+    ``lists`` are video lists as the graph readers return them (same shape as the tables').
+    """
     names = {
         d.id: (d.name or "Device", d.device_type or "other")
         for d in (await db.execute(select(AudioDevice).where(AudioDevice.job_id == job_id)))
@@ -266,7 +269,7 @@ async def build_video_sheets(db: AsyncSession, job_id: UUID) -> list[dict]:
         .all()
     }
     sheets: dict[UUID, list[dict]] = {}
-    for lst in await list_input_lists(db, job_id):
+    for lst in lists:
         for inp in lst.inputs:
             steps = len(inp.patch_points)
             for point in inp.patch_points:

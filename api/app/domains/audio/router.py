@@ -33,9 +33,13 @@ from app.domains.graph import readers as graph_readers
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.graph.models import GraphDevice
+from app.domains.graph.video_readers import (
+    device_has_video_input_points,
+    load_video_lists,
+    video_counts_per_device,
+)
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
-from app.domains.video import service as video_service
 
 router = APIRouter(
     prefix="/jobs",
@@ -902,7 +906,7 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
             lists[str(device.sound_list_id)] = await service.list_io_totals(
                 db, device.sound_list_id
             )
-    video_inputs = await video_service.video_inputs_per_device(db, job_id)
+    video_inputs, video_outputs = await video_counts_per_device(db, job_id)
     device_product = {
         str(d.id): d.stockwire_product_id
         for d in devices
@@ -920,7 +924,7 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
         "outputs": outputs,
         "lists": lists,
         "video_inputs": video_inputs,
-        "video_outputs": await video_service.video_outputs_per_device(db, job_id),
+        "video_outputs": video_outputs,
         "specs": specs,
     }
 
@@ -1051,7 +1055,7 @@ async def delete_device(
     if (
         device.patch_points
         or device.output_points
-        or await video_service.device_has_patch_points(db, device_id)
+        or await device_has_video_input_points(db, job_id, device_id)
     ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -1174,9 +1178,7 @@ async def sync_job_to_stockwire(
         )
 
     target = job.stockwire_job_id
-    video_inputs = [
-        vin for vlist in await video_service.list_input_lists(db, job.id) for vin in vlist.inputs
-    ]
+    video_inputs = [vin for vlist in await load_video_lists(db, job.id) for vin in vlist.inputs]
     desired, freetext = _desired_stockwire_items(job, video_inputs)
     sw = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
 

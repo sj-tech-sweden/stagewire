@@ -8,6 +8,7 @@ from app.domains.audio import service as audio_service
 from app.domains.audio.models import AudioDevice
 from app.domains.auth.deps import get_current_user
 from app.domains.graph.mirror import MirrorToGraphRoute
+from app.domains.graph.video_readers import load_video_lists
 from app.domains.video import schemas, service
 from app.domains.video.models import (
     VideoInput,
@@ -55,7 +56,7 @@ async def _check_device(db: AsyncSession, job_id: UUID, device_id: UUID | None) 
 @router.get("/jobs/{job_id}/video-patch-sheets", response_model=list[schemas.VideoSheet])
 async def list_video_patch_sheets(job_id: UUID, db: AsyncSession = Depends(get_db)) -> list[dict]:
     await _job_or_404(db, job_id)
-    return await service.build_video_sheets(db, job_id)
+    return await service.build_video_sheets(db, job_id, await load_video_lists(db, job_id))
 
 
 @router.get("/jobs/{job_id}/video-lists", response_model=list[schemas.VideoInputListRead])
@@ -63,7 +64,7 @@ async def list_video_lists(
     job_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> list[schemas.VideoInputListRead]:
     await _job_or_404(db, job_id)
-    lists = await service.list_input_lists(db, job_id)
+    lists = await load_video_lists(db, job_id)
     return [schemas.VideoInputListRead.model_validate(lst) for lst in lists]
 
 

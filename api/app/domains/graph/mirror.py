@@ -103,6 +103,13 @@ def legacy_target(row: GraphDevice | ConnectionEdge) -> tuple[str, UUID] | None:
         return None
 
 
+async def _video_input_points(db, job_id: UUID, device_id: UUID) -> bool:
+    # imported here: video_readers imports this module for legacy_target
+    from app.domains.graph.video_readers import device_has_video_input_points
+
+    return await device_has_video_input_points(db, job_id, device_id)
+
+
 def _channel_changes(data: dict) -> dict:
     out: dict = {}
     attrs = data.get("attributes") or {}
@@ -554,7 +561,7 @@ async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice
         if (
             row.patch_points
             or row.output_points
-            or await video_service.device_has_patch_points(db, legacy_id)
+            or await _video_input_points(db, job_id, legacy_id)
         ):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
