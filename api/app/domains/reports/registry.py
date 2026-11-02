@@ -823,7 +823,13 @@ async def ensure_default_templates(db: AsyncSession) -> None:
                 if builtin.stage_plot_options is None:
                     builtin.stage_plot_options = DEFAULT_STAGE_PLOT_OPTIONS.copy()
                     changed = True
-                if builtin.page_count == 1 and builtin.layout_json:
+                if not builtin.layout_json:
+                    # a built-in made before layouts existed has only its HTML body: give it the
+                    # default layout (header and plot on page 1, the element table on page 2)
+                    builtin.layout_json = _default_layout(definition, locale, builtin.body_html)
+                    builtin.page_count = 2
+                    changed = True
+                elif builtin.page_count == 1:
                     object_ids = {
                         item.get("id") for item in builtin.layout_json if isinstance(item, dict)
                     }
