@@ -32,12 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import (
-    AudioChannelPatch,
     AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
 )
 from app.domains.graph import power_native
 from app.domains.graph.ids import public_id
@@ -350,13 +345,11 @@ async def performer_to_channel(db: AsyncSession, job_id: uuid.UUID, node: GraphD
     channel_id = _uuid(a.get("linked_channel_id"))
     if a.get("element_type") != "performer" or channel_id is None:
         return
-    channel = await db.scalar(
-        select(AudioChannelPatch)
-        .join(ChannelList)
-        .where(AudioChannelPatch.id == channel_id, ChannelList.job_id == job_id)
-    )
+    from app.domains.graph import audio_native
+
+    channel = await audio_native.find_node(db, audio_native.CHANNEL, channel_id, job_id)
     if channel is not None:
-        channel.performer_name = a.get("label") or ""
+        channel.attributes = {**channel.attributes, "performer_name": a.get("label") or ""}
 
 
 async def performer_from_channel(
@@ -401,31 +394,10 @@ async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, da
 # --- the sync -------------------------------------------------------------------------------
 
 
-async def _existing_targets(db: AsyncSession, job_id: uuid.UUID) -> dict[str, set[str]]:
-    """The ids of the job's channels, devices and patch points, to tell a dangling link."""
-    devices = await db.scalars(select(AudioDevice.id).where(AudioDevice.job_id == job_id))
-    channels = await db.scalars(
-        select(AudioChannelPatch.id)
-        .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-        .where(ChannelList.job_id == job_id)
-    )
-    inputs = await db.scalars(
-        select(ChannelPatchPoint.id)
-        .join(AudioChannelPatch, ChannelPatchPoint.channel_id == AudioChannelPatch.id)
-        .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-        .where(ChannelList.job_id == job_id)
-    )
-    outputs = await db.scalars(
-        select(OutputPatchPoint.id)
-        .join(ChannelListOutput, OutputPatchPoint.output_id == ChannelListOutput.id)
-        .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
-        .where(ChannelList.job_id == job_id)
-    )
+async def _existing_devices(db: AsyncSession, job_id: uuid.UUID) -> set[str]:
+    """The ids of the job's devices, to tell a dangling device link."""
     return {
-        "device": {str(i) for i in devices},
-        "channel": {str(i) for i in channels},
-        "patch_point": {str(i) for i in inputs},
-        "output_point": {str(i) for i in outputs},
+        str(i) for i in await db.scalars(select(AudioDevice.id).where(AudioDevice.job_id == job_id))
     }
 
 
@@ -438,8 +410,10 @@ async def sync_links(builder) -> None:
     nodes = await element_nodes(builder.db, builder.job_id)
     if not nodes:
         return
-    existing = await _existing_targets(builder.db, builder.job_id)
-    point_device, out_device = await builder.point_devices()
+    from app.domains.graph import audio_native
+
+    devices = await _existing_devices(builder.db, builder.job_id)
+    targets = await audio_native.plot_targets(builder.db, builder.job_id)
     power_hosts = {str(h.id): (pid, h) for pid, h in builder.power_nodes.items()}
     point_nodes = {str(n.id) for n in builder.rigging_points.values()}
 
@@ -454,14 +428,16 @@ async def sync_links(builder) -> None:
             if role == "video_input":
                 target = builder.video_inputs.get(value)
                 gone = target is None
-            else:
-                gone = str(value) not in existing["device" if role in ("device", "lens") else role]
-                ref = {
-                    "channel": f"audio_channel_patches:{value}",
-                    "patch_point": f"audio_devices:{point_device.get(value)}",
-                    "output_point": f"audio_devices:{out_device.get(value)}",
-                }.get(role, f"audio_devices:{value}")
-                target = builder.devices.get(ref) if ref in builder.seen_devices else None
+            elif role == "channel":
+                target = targets["channels"].get(value)
+                gone = target is None
+            elif role in ("patch_point", "output_point"):
+                owners = targets[f"{role}_device"]
+                gone = value not in owners
+                target = None if gone else builder.devices.get(f"audio_devices:{owners[value]}")
+            else:  # device, lens
+                gone = str(value) not in devices
+                target = None if gone else builder.devices.get(f"audio_devices:{value}")
             if gone:  # what it pointed at was deleted: the link goes with it
                 attributes.pop(column)
                 continue

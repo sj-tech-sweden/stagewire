@@ -20,16 +20,13 @@ from app.domains.audio.device_specs import (
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.exports.base import ConsoleExporter
 from app.domains.audio.models import (
-    AudioChannelPatch,
-    ChannelList,
-    ChannelListOutput,
     ProductionJob,
     StockwireRequirementLink,
 )
 from app.domains.audio.speaker_specs import resolve_speaker_specs
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
-from app.domains.graph import plot_native
+from app.domains.graph import audio_native, plot_native
 from app.domains.graph import readers as graph_readers
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.mirror import MirrorToGraphRoute
@@ -125,16 +122,8 @@ async def create_channel_list(
     channel_list = await service.create_channel_list(
         db, job_id, payload.model_dump(exclude_unset=True)
     )
-    result = await db.execute(
-        select(ChannelList)
-        .where(ChannelList.id == channel_list.id)
-        .options(
-            selectinload(ChannelList.channels).selectinload(AudioChannelPatch.patch_points),
-            selectinload(ChannelList.outputs).selectinload(ChannelListOutput.points),
-        )
-    )
-    channel_list = result.scalars().first()
     read = schemas.ChannelListRead.model_validate(channel_list)
+    await audio_native.publish_nodes(db, job_id, [await _node_id(db, audio_native.LIST, read.id)])
     await publish_job_event(job_id, "list.upsert", read)
     return read
 
@@ -168,6 +157,7 @@ async def update_channel_list(
         db, channel_list, payload.model_dump(exclude_unset=True)
     )
     read = schemas.ChannelListRead.model_validate(channel_list)
+    await audio_native.publish_nodes(db, job_id, [await _node_id(db, audio_native.LIST, list_id)])
     await publish_job_event(job_id, "list.upsert", read)
     return read
 
@@ -183,7 +173,8 @@ async def delete_channel_list(
     channel_list = await service.get_channel_list(db, list_id)
     if channel_list is None or channel_list.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
-    await service.delete_channel_list(db, channel_list)
+    removed = await service.delete_channel_list(db, channel_list)
+    await audio_native.publish_removed(job_id, removed)
     await publish_job_event(job_id, "list.delete", {"id": str(list_id)})
 
 
@@ -227,14 +218,7 @@ async def export_channel_list(
     if exporter is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown export plugin")
     await backfill_job(db, job_id)
-    container = (
-        await db.scalars(
-            select(GraphDevice).where(
-                GraphDevice.job_id == job_id,
-                GraphDevice.legacy_ref == f"audio_channel_lists:{list_id}",
-            )
-        )
-    ).first()
+    container = await audio_native.find_node(db, audio_native.LIST, list_id, job_id)
     view = container and await graph_readers.load_channel_list(db, job_id, container.id)
     if view is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
@@ -263,8 +247,10 @@ async def create_channel(
     if channel_list is None or channel_list.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
     channel = await service.create_channel(db, list_id, payload.model_dump(exclude_unset=True))
-    channel = await service.get_channel(db, channel.id)
     read = schemas.AudioChannelPatchRead.model_validate(channel)
+    await audio_native.publish_nodes(
+        db, job_id, [await _node_id(db, audio_native.CHANNEL, channel.id)]
+    )
     await publish_job_event(job_id, "channel.upsert", read)
     return read
 
@@ -313,8 +299,10 @@ async def update_channel(
     )
     channel = await service.get_channel(db, channel.id)
     read = schemas.AudioChannelPatchRead.model_validate(channel)
-    list_obj = await service.get_channel_list(db, channel.channel_list_id)
-    await publish_job_event(list_obj.job_id, "channel.upsert", read)
+    await audio_native.publish_nodes(
+        db, channel.job_id, [await _node_id(db, audio_native.CHANNEL, channel.id)]
+    )
+    await publish_job_event(channel.job_id, "channel.upsert", read)
     return read
 
 
@@ -328,22 +316,34 @@ async def delete_channel(
     channel = await service.get_channel(db, channel_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
-    list_obj = await service.get_channel_list(db, channel.channel_list_id)
+    removed: list = []
+
+    async def remove() -> None:
+        removed.append(await service.delete_channel(db, channel))
+
     await run_versioned_delete(
         db,
         channel,
         expected_revision,
         schemas.AudioChannelPatchRead,
-        lambda: service.delete_channel(db, channel),
+        remove,
         lambda: service.get_channel(db, channel_id),
     )
-    await publish_job_event(list_obj.job_id, "channel.delete", {"id": str(channel_id)})
+    await audio_native.publish_removed(channel.job_id, removed[0])
+    await publish_job_event(channel.job_id, "channel.delete", {"id": str(channel_id)})
 
 
-async def _publish_channel(db: AsyncSession, channel: AudioChannelPatch) -> None:
-    channel_list = await service.get_channel_list(db, channel.channel_list_id)
+async def _node_id(db: AsyncSession, kind: str, ident: UUID) -> UUID:
+    """The graph node behind a list, channel or output (its id is the node id when it is new)."""
+    return await audio_native.node_id_of(db, kind, ident)
+
+
+async def _publish_channel(db: AsyncSession, channel) -> None:
     read = schemas.AudioChannelPatchRead.model_validate(channel)
-    await publish_job_event(channel_list.job_id, "channel.upsert", read)
+    await audio_native.publish_nodes(
+        db, channel.job_id, [await _node_id(db, audio_native.CHANNEL, channel.id)]
+    )
+    await publish_job_event(channel.job_id, "channel.upsert", read)
 
 
 async def _linked_device_type(db: AsyncSession, job_id: UUID, device_id: UUID) -> str:
@@ -393,8 +393,8 @@ async def update_patch_point(
 ) -> schemas.ChannelPatchPointRead:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
-    point = await service.get_patch_point(db, point_id)
-    if point is None or point.channel_id != channel_id:
+    point = await service.get_patch_point(db, channel_id, point_id)
+    if point is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
     if "device_id" in data:
@@ -409,7 +409,7 @@ async def update_patch_point(
         payload.expected_revision,
         schemas.ChannelPatchPointRead,
         lambda: service.update_patch_point(db, point, data),
-        lambda: service.get_patch_point(db, point_id),
+        lambda: service.get_patch_point(db, channel_id, point_id),
     )
     channel = await service.get_channel(db, channel_id)
     await _publish_channel(db, channel)
@@ -426,18 +426,18 @@ async def delete_patch_point(
 ) -> None:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
-    point = await service.get_patch_point(db, point_id)
-    if point is None or point.channel_id != channel_id:
+    point = await service.get_patch_point(db, channel_id, point_id)
+    if point is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Patch point not found")
-    channel = await service.get_channel(db, channel_id)
     await run_versioned_delete(
         db,
         point,
         expected_revision,
         schemas.ChannelPatchPointRead,
         lambda: service.delete_patch_point(db, point),
-        lambda: service.get_patch_point(db, point_id),
+        lambda: service.get_patch_point(db, channel_id, point_id),
     )
+    channel = await service.get_channel(db, channel_id)
     await _publish_channel(db, channel)
 
 
@@ -451,6 +451,14 @@ async def _publish_list(db: AsyncSession, job_id: UUID, list_id: UUID) -> None:
     lst = await service.get_channel_list(db, list_id)
     if lst:
         read = schemas.ChannelListRead.model_validate(lst)
+        await audio_native.publish_nodes(
+            db,
+            job_id,
+            [
+                await _node_id(db, audio_native.LIST, list_id),
+                *[await _node_id(db, audio_native.OUTPUT, o.id) for o in lst.outputs],
+            ],
+        )
         await publish_job_event(job_id, "list.upsert", read)
 
 
@@ -517,14 +525,20 @@ async def delete_output(
     output = await service.get_output(db, output_id)
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
+    removed: list = []
+
+    async def remove() -> None:
+        removed.append(await service.delete_output(db, output))
+
     await run_versioned_delete(
         db,
         output,
         expected_revision,
         schemas.ChannelListOutputRead,
-        lambda: service.delete_output(db, output),
+        remove,
         lambda: service.get_output(db, output_id),
     )
+    await audio_native.publish_removed(job_id, removed[0])
     await _publish_list(db, job_id, list_id)
 
 
@@ -570,8 +584,8 @@ async def update_output_point(
 ) -> schemas.OutputPatchPointRead:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
-    point = await service.get_output_point(db, point_id)
-    if point is None or point.output_id != output_id:
+    point = await service.get_output_point(db, output_id, point_id)
+    if point is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
     if "device_id" in data:
@@ -587,7 +601,7 @@ async def update_output_point(
         payload.expected_revision,
         schemas.OutputPatchPointRead,
         lambda: service.update_output_point(db, point, data),
-        lambda: service.get_output_point(db, point_id),
+        lambda: service.get_output_point(db, output_id, point_id),
     )
     await _publish_list(db, job_id, list_id)
     return schemas.OutputPatchPointRead.model_validate(point)
@@ -607,8 +621,8 @@ async def delete_output_point(
 ) -> None:
     if await service.get_job(db, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
-    point = await service.get_output_point(db, point_id)
-    if point is None or point.output_id != output_id:
+    point = await service.get_output_point(db, output_id, point_id)
+    if point is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output point not found")
     await run_versioned_delete(
         db,
@@ -616,7 +630,7 @@ async def delete_output_point(
         expected_revision,
         schemas.OutputPatchPointRead,
         lambda: service.delete_output_point(db, point),
-        lambda: service.get_output_point(db, point_id),
+        lambda: service.get_output_point(db, output_id, point_id),
     )
     await _publish_list(db, job_id, list_id)
 
@@ -904,6 +918,7 @@ def _effective_count(override, stockwire, default) -> tuple[int | None, str | No
 
 async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
     channels, outputs = await service.job_io_totals(db, job_id)
+    point_counts = await audio_native.device_point_counts(db, job_id)
     lists = {}
     for device in devices:
         if device.sound_list_id is not None and str(device.sound_list_id) not in lists:
@@ -923,6 +938,7 @@ async def _device_io_context(db: AsyncSession, job_id: UUID, devices) -> dict:
     specs = await resolve_device_io(device_product, fetch)
     physical = await resolve_device_physical(physical_product, fetch)
     return {
+        "point_counts": point_counts,
         "physical": physical,
         "channels": channels,
         "outputs": outputs,
@@ -937,7 +953,6 @@ async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> Non
     from sqlalchemy import select as sa_select
 
     from app.domains.graph.ids import public_id
-    from app.domains.graph.models import GraphDevice
 
     if data.get("sound_list_id") is not None:
         found = await service.get_channel_list(db, data["sound_list_id"])
@@ -960,7 +975,7 @@ async def _check_device_lists(db: AsyncSession, job_id: UUID, data: dict) -> Non
 
 def _to_device_read(device, ctx: dict) -> schemas.AudioDeviceRead:
     read = schemas.AudioDeviceRead.model_validate(device)
-    read.patch_point_count = len(device.patch_points)
+    read.patch_point_count = ctx.get("point_counts", {}).get(device.id, 0)
     key = str(device.id)
     phys = ctx["physical"].get(key, {})
     read.weight_kg_effective, read.weight_source = effective_value(
@@ -1064,10 +1079,8 @@ async def delete_device(
     device = await service.get_device(db, device_id)
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
-    if (
-        device.patch_points
-        or device.output_points
-        or await device_has_video_input_points(db, job_id, device_id)
+    if await audio_native.device_has_points(db, job_id, device_id) or (
+        await device_has_video_input_points(db, job_id, device_id)
     ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -1090,7 +1103,7 @@ class StockwireSyncResult(BaseModel):
 
 
 def _desired_stockwire_items(
-    job: ProductionJob, video_inputs: list | None = None
+    job: ProductionJob, video_inputs: list | None = None, channel_lists: list | None = None
 ) -> tuple[dict[int, dict], list[str]]:
     """Catalog products used in the job, one entry per product with its total quantity.
 
@@ -1112,7 +1125,7 @@ def _desired_stockwire_items(
             entry["label"] = name
         entry["slots"].append(slot)
 
-    for clist in job.channel_lists:
+    for clist in job.channel_lists if channel_lists is None else channel_lists:
         put(
             clist.mixer_product_id,
             clist.mixer_product_name,
@@ -1171,12 +1184,6 @@ async def sync_job_to_stockwire(
         select(ProductionJob)
         .options(
             selectinload(ProductionJob.devices),
-            selectinload(ProductionJob.channel_lists)
-            .selectinload(ChannelList.channels)
-            .selectinload(AudioChannelPatch.patch_points),
-            selectinload(ProductionJob.channel_lists)
-            .selectinload(ChannelList.outputs)
-            .selectinload(ChannelListOutput.points),
         )
         .where(ProductionJob.id == job_id)
     )
@@ -1191,7 +1198,9 @@ async def sync_job_to_stockwire(
 
     target = job.stockwire_job_id
     video_inputs = [vin for vlist in await load_video_lists(db, job.id) for vin in vlist.inputs]
-    desired, freetext = _desired_stockwire_items(job, video_inputs)
+    desired, freetext = _desired_stockwire_items(
+        job, video_inputs, await service.list_channel_lists(db, job.id)
+    )
     sw = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
 
     links = (

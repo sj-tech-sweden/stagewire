@@ -13,17 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.domains.audio.models import (
-    AudioChannelPatch,
-    AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
-)
+from app.domains.audio.models import AudioDevice
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import plot_native, power_native, schemas
+from app.domains.graph import audio_native, plot_native, power_native, schemas
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import GraphDevice
@@ -46,29 +39,22 @@ class ElementLinks(BaseModel):
     rigging_point_id: UUID | None = None
 
 
-def _owned_by_job(column: str, job_id: UUID, value: UUID):
+async def _owned_by_job(db: AsyncSession, column: str, job_id: UUID, value: UUID) -> bool:
+    """Whether the id in a link column belongs to the job (the tables and nodes it lives on)."""
     if column in ("linked_device_id", "linked_lens_device_id"):
-        return select(AudioDevice.id).where(AudioDevice.id == value, AudioDevice.job_id == job_id)
+        return (
+            await db.scalar(
+                select(AudioDevice.id).where(AudioDevice.id == value, AudioDevice.job_id == job_id)
+            )
+            is not None
+        )
+    targets = await audio_native.plot_targets(db, job_id)
     if column == "linked_channel_id":
-        return (
-            select(AudioChannelPatch.id)
-            .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-            .where(AudioChannelPatch.id == value, ChannelList.job_id == job_id)
-        )
+        return value in targets["channels"]
     if column == "linked_patch_point_id":
-        return (
-            select(ChannelPatchPoint.id)
-            .join(AudioChannelPatch, ChannelPatchPoint.channel_id == AudioChannelPatch.id)
-            .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-            .where(ChannelPatchPoint.id == value, ChannelList.job_id == job_id)
-        )
+        return value in targets["patch_point_device"]
     if column == "linked_output_point_id":
-        return (
-            select(OutputPatchPoint.id)
-            .join(ChannelListOutput, OutputPatchPoint.output_id == ChannelListOutput.id)
-            .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
-            .where(OutputPatchPoint.id == value, ChannelList.job_id == job_id)
-        )
+        return value in targets["output_point_device"]
     raise ValueError(column)
 
 
@@ -104,7 +90,7 @@ async def set_element_links(
             )
             owned = any(public_id(n) == value for n in inputs.all())
         else:
-            owned = await db.scalar(_owned_by_job(column, job_id, value)) is not None
+            owned = await _owned_by_job(db, column, job_id, value)
         if not owned:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, f"{column} does not belong to this job"

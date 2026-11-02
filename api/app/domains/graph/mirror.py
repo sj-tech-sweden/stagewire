@@ -11,13 +11,18 @@ from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
-from app.domains.graph import dmx_native, fixtures_native, plot_native, power_native, video_native
+from app.domains.graph import (
+    audio_native,
+    dmx_native,
+    fixtures_native,
+    plot_native,
+    power_native,
+    video_native,
+)
 from app.domains.graph.backfill import (
-    CHANNEL_FIELDS,
     DEVICE_SPEC_FIELDS,
     FIXTURE_ATTRS,
     MIRRORED_EDGE_TABLES,
-    OUTPUT_FIELDS,
     OWNED_ATTRS,
     backfill_job,
 )
@@ -67,7 +72,6 @@ class MirrorToGraphRoute(APIRoute):
 # editors and every unmoved reader stay consistent. Graph-only fields (canvas position, cable
 # label, phase) are never mirrored.
 
-CHANNEL_NOT_NULL = {"channel_number", "stand_type", "instrument_group", "phantom_power", "stereo"}
 DEVICE_ATTRS = {
     "power_w": "power_watts",
     "weight_kg": "weight_kg",
@@ -98,54 +102,6 @@ async def _video_input_points(db, job_id: UUID, device_id: UUID) -> bool:
     from app.domains.graph.video_readers import device_has_video_input_points
 
     return await device_has_video_input_points(db, job_id, device_id)
-
-
-def _channel_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if "name" in data:
-        out["source_label"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if "position" in data and "channel_number" not in attrs:
-        out["channel_number"] = data["position"]
-    for key in CHANNEL_FIELDS:
-        if key in attrs and not (attrs[key] is None and key in CHANNEL_NOT_NULL):
-            out[key] = attrs[key]
-    for key in ("stockwire_product_id", "stockwire_product_name"):
-        if key in data:
-            out[key] = data[key]
-    return out
-
-
-def _list_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    for key in ("name", "position"):
-        if key in data and data[key] is not None:
-            out[key] = data[key]
-    for key in ("mixer_product_id", "mixer_product_name", "mixer_inputs", "mixer_buses"):
-        if key in attrs:
-            out[key] = attrs[key]
-    if "stockwire_product_id" in data and "mixer_product_id" not in attrs:
-        out["mixer_product_id"] = data["stockwire_product_id"]
-    if "stockwire_product_name" in data and "mixer_product_name" not in attrs:
-        out["mixer_product_name"] = data["stockwire_product_name"]
-    return out
-
-
-def _output_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    for key in ("name", "position"):
-        if key in data and data[key] is not None:
-            out[key] = data[key]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    for key in OUTPUT_FIELDS:
-        if key in attrs and not (key == "mode" and attrs[key] is None):
-            out[key] = attrs[key]
-    return out
 
 
 FIXTURE_NOT_NULL = {"fixture_type", "channel_mode", "location", "gel", "purpose"}
@@ -204,28 +160,7 @@ async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, 
     if target is None:
         return False
     table, legacy_id = target
-    if table == "audio_channel_patches":
-        row, changes = await service.get_channel(db, legacy_id), _channel_changes(data)
-        if row is None or not changes:
-            return False
-        row = await service.update_channel(db, row, changes)
-        read = audio_schemas.AudioChannelPatchRead.model_validate(
-            await service.get_channel(db, legacy_id)
-        )
-        await publish_job_event(job_id, "channel.upsert", read)
-    elif table == "audio_channel_lists":
-        row, changes = await service.get_channel_list(db, legacy_id), _list_changes(data)
-        if row is None or not changes:
-            return False
-        await service.update_channel_list(db, row, changes)
-        await _publish_list(db, job_id, legacy_id)
-    elif table == "channel_list_outputs":
-        row, changes = await service.get_output(db, legacy_id), _output_changes(data)
-        if row is None or not changes:
-            return False
-        await service.update_output(db, row, changes)
-        await _publish_list(db, job_id, row.channel_list_id)
-    elif table == "audio_devices":
+    if table == "audio_devices":
         row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
         if row is None:
             return False
@@ -251,39 +186,32 @@ async def _publish_list(db: AsyncSession, job_id: UUID, list_id: UUID) -> None:
         )
 
 
+async def _publish_owner(db: AsyncSession, job_id: UUID, owner: GraphDevice) -> None:
+    """After a patch point changed: the legacy events for its channel or its output's list."""
+    if owner.kind == audio_native.CHANNEL:
+        channel = await service.get_channel(db, public_id(owner), job_id)
+        if channel is not None:
+            await publish_job_event(
+                job_id,
+                "channel.upsert",
+                audio_schemas.AudioChannelPatchRead.model_validate(channel),
+            )
+    else:
+        await _publish_list(db, job_id, UUID(owner.attributes["channel_list_id"]))
+
+
 async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice) -> bool:
     """Delete the legacy row behind a graph device (checked first, so the caller can abort)."""
     target = legacy_target(device)
     if target is None:
         return False
     table, legacy_id = target
-    if table == "audio_channel_patches":
-        row = await service.get_channel(db, legacy_id)
-        if row is None:
-            return False
-        await service.delete_channel(db, row)
-        await publish_job_event(job_id, "channel.delete", {"id": str(legacy_id)})
-    elif table == "audio_channel_lists":
-        row = await service.get_channel_list(db, legacy_id)
-        if row is None:
-            return False
-        await service.delete_channel_list(db, row)
-        await publish_job_event(job_id, "list.delete", {"id": str(legacy_id)})
-    elif table == "channel_list_outputs":
-        row = await service.get_output(db, legacy_id)
-        if row is None:
-            return False
-        list_id = row.channel_list_id
-        await service.delete_output(db, row)
-        await _publish_list(db, job_id, list_id)
-    elif table == "audio_devices":
+    if table == "audio_devices":
         row = await service.get_device(db, legacy_id)
         if row is None:
             return False
-        if (
-            row.patch_points
-            or row.output_points
-            or await _video_input_points(db, job_id, legacy_id)
+        if await audio_native.node_has_points(db, job_id, device.id) or (
+            await _video_input_points(db, job_id, legacy_id)
         ):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -353,6 +281,10 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
         return False
     if await fixtures_native.edge_patch(db, job_id, edge, data):
         return False
+    owner = await audio_native.edge_patch(db, edge, data)
+    if owner is not None:  # a patch point of a channel or output: the sync redraws its edges
+        await _publish_owner(db, job_id, owner)
+        return True
     target = legacy_target(edge)
     attrs = data.get("attributes") or {}
     if target is not None and target[0] in POWER_EDGE_TABLES:
@@ -360,32 +292,7 @@ async def edge_to_legacy(db: AsyncSession, job_id: UUID, edge: ConnectionEdge, d
     if target is None or not attrs:
         return False
     table, legacy_id = target
-    if table == "channel_patch_points":
-        point, changes = await service.get_patch_point(db, legacy_id), _point_changes(attrs)
-        if point is None or not changes:
-            return False
-        await service.update_patch_point(db, point, changes)
-        channel = await service.get_channel(db, point.channel_id)
-        await publish_job_event(
-            job_id, "channel.upsert", audio_schemas.AudioChannelPatchRead.model_validate(channel)
-        )
-    elif table in ("output_patch_points", "channel_list_outputs"):
-        if table == "channel_list_outputs":
-            first = attrs.get("first_point") or (edge.attributes or {}).get("first_point") or {}
-            changes = _point_changes(attrs.get("first_point") or {})
-            point_id = first.get("point_id")
-            point = await service.get_output_point(db, UUID(point_id)) if point_id else None
-        else:
-            changes = _point_changes(attrs)
-            point = await service.get_output_point(db, legacy_id)
-        if point is None or not changes:
-            return False
-        await service.update_output_point(db, point, changes)
-        output = await service.get_output(db, point.output_id)
-        await _publish_list(db, job_id, output.channel_list_id)
-    else:
-        return False
-    return True
+    return False
 
 
 async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge) -> bool:
@@ -397,6 +304,10 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         return False
     if await fixtures_native.edge_delete(db, job_id, edge):
         return False
+    owner = await audio_native.edge_delete(db, edge)
+    if owner is not None:
+        await _publish_owner(db, job_id, owner)
+        return True
     ref = (edge.attributes or {}).get("legacy_ref") or ""
     if ref.startswith("stage_plot_elements.link:"):
         _, element_id, role = ref.split(":")
@@ -416,30 +327,6 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
             rigging_schemas.LoadAssign(power_node_id=None),
             db,
         )
-        return True
-    if table == "channel_patch_points":
-        point = await service.get_patch_point(db, legacy_id)
-        if point is None:
-            return False
-        channel_id = point.channel_id
-        await service.delete_patch_point(db, point)
-        channel = await service.get_channel(db, channel_id)
-        await publish_job_event(
-            job_id, "channel.upsert", audio_schemas.AudioChannelPatchRead.model_validate(channel)
-        )
-        return True
-    if table in ("output_patch_points", "channel_list_outputs"):
-        point_id = (
-            legacy_id
-            if table == "output_patch_points"
-            else (edge.attributes or {}).get("first_point", {}).get("point_id")
-        )
-        point = await service.get_output_point(db, UUID(str(point_id))) if point_id else None
-        if point is None:
-            return False
-        output = await service.get_output(db, point.output_id)
-        await service.delete_output_point(db, point)
-        await _publish_list(db, job_id, output.channel_list_id)
         return True
     return False
 

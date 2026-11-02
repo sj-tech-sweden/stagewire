@@ -2,18 +2,12 @@ from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import (
-    AudioChannelPatch,
     AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
     ProductionJob,
 )
-from app.domains.graph import plot_native
+from app.domains.graph import audio_native, plot_native
 
 _POINT_STRING_FIELDS = {"connector", "patch_label", "notes", "point_type"}
 
@@ -126,203 +120,135 @@ async def delete_job(db: AsyncSession, job: ProductionJob) -> None:
     await db.commit()
 
 
-async def create_channel(db: AsyncSession, channel_list_id: UUID, data: dict) -> AudioChannelPatch:
-    channel = AudioChannelPatch(channel_list_id=channel_list_id, **data)
-    db.add(channel)
+# Channel lists, channels, outputs and patch points are graph nodes (graph/audio_native.py). These
+# keep the service API the routers and exporters have always used and return objects shaped like
+# the old rows (``patch_points`` / ``points`` / ``channels`` / ``outputs`` nested).
+
+
+async def create_channel(db: AsyncSession, channel_list_id: UUID, data: dict):
+    channel = await audio_native.create_channel(db, channel_list_id, data)
     await db.commit()
-    await db.refresh(channel)
     return channel
 
 
-async def list_channels(db: AsyncSession, channel_list_id: UUID) -> list[AudioChannelPatch]:
-    result = await db.execute(
-        select(AudioChannelPatch)
-        .where(AudioChannelPatch.channel_list_id == channel_list_id)
-        .options(selectinload(AudioChannelPatch.patch_points))
-        .order_by(AudioChannelPatch.channel_number)
-    )
-    return list(result.scalars().all())
+async def list_channels(db: AsyncSession, channel_list_id: UUID) -> list:
+    return await audio_native.list_channels(db, channel_list_id)
 
 
-async def get_channel(db: AsyncSession, channel_id: UUID) -> AudioChannelPatch | None:
-    result = await db.execute(
-        select(AudioChannelPatch)
-        .options(selectinload(AudioChannelPatch.patch_points))
-        .where(AudioChannelPatch.id == channel_id)
-    )
-    return result.scalars().first()
+async def get_channel(db: AsyncSession, channel_id: UUID, job_id: UUID | None = None):
+    return await audio_native.get_channel(db, channel_id, job_id)
 
 
-async def update_channel(
-    db: AsyncSession, channel: AudioChannelPatch, data: dict
-) -> AudioChannelPatch:
-    for key, value in data.items():
-        if value is not None or key in CLEARABLE_KEYS:
-            setattr(channel, key, value)
-    if "performer_name" in data and channel.performer_name is not None:
-        job_id = await db.scalar(
-            select(ChannelList.job_id).where(ChannelList.id == channel.channel_list_id)
-        )
-        await plot_native.performer_from_channel(db, job_id, channel.id, channel.performer_name)
+async def update_channel(db: AsyncSession, channel, data: dict):
+    # the audio nodes know their job; a channel is looked up by its public id
+    updated = await audio_native.update_channel(db, channel.id, data, channel.job_id)
     await db.commit()
-    await db.refresh(channel)
-    return channel
+    return updated
 
 
-async def delete_channel(db: AsyncSession, channel: AudioChannelPatch) -> None:
-    await db.delete(channel)
+async def delete_channel(db: AsyncSession, channel):
+    """The ids of the nodes and edges removed (for the caller to publish)."""
+    removed = await audio_native.delete_channel(db, channel.id, channel.job_id)
     await db.commit()
+    return removed
 
 
-async def create_patch_point(db: AsyncSession, channel_id: UUID, data: dict) -> ChannelPatchPoint:
-    data = _clean_point_data(data)
-    point = ChannelPatchPoint(channel_id=channel_id, **data)
-    db.add(point)
+async def create_patch_point(db: AsyncSession, channel_id: UUID, data: dict):
+    point = await audio_native.create_point(db, audio_native.CHANNEL, channel_id, data)
     await db.commit()
-    await db.refresh(point)
     return point
 
 
-async def get_patch_point(db: AsyncSession, point_id: UUID) -> ChannelPatchPoint | None:
-    return await db.get(ChannelPatchPoint, point_id)
+async def get_patch_point(db: AsyncSession, channel_id: UUID, point_id: UUID):
+    return await audio_native.get_point(db, audio_native.CHANNEL, channel_id, point_id)
 
 
-async def update_patch_point(
-    db: AsyncSession, point: ChannelPatchPoint, data: dict
-) -> ChannelPatchPoint:
-    for key, value in data.items():
-        if value is not None or key in CLEARABLE_KEYS:
-            setattr(point, key, value)
+async def update_patch_point(db: AsyncSession, point, data: dict):
+    updated = await audio_native.update_point(
+        db, audio_native.CHANNEL, point.channel_id, point.id, data
+    )
     await db.commit()
-    await db.refresh(point)
-    return point
+    return updated
 
 
-async def delete_patch_point(db: AsyncSession, point: ChannelPatchPoint) -> None:
-    await db.delete(point)
+async def delete_patch_point(db: AsyncSession, point) -> None:
+    await audio_native.delete_point(db, audio_native.CHANNEL, point.channel_id, point.id)
     await db.commit()
 
 
-async def create_output(db: AsyncSession, channel_list_id: UUID, data: dict) -> ChannelListOutput:
-    output = ChannelListOutput(channel_list_id=channel_list_id, **data)
-    db.add(output)
+async def create_output(db: AsyncSession, channel_list_id: UUID, data: dict):
+    output = await audio_native.create_output(db, channel_list_id, data)
     await db.commit()
-    await db.refresh(output, ["points"])
     return output
 
 
-async def get_output(db: AsyncSession, output_id: UUID) -> ChannelListOutput | None:
-    result = await db.execute(
-        select(ChannelListOutput)
-        .options(selectinload(ChannelListOutput.points))
-        .where(ChannelListOutput.id == output_id)
-    )
-    return result.scalars().first()
+async def get_output(db: AsyncSession, output_id: UUID, job_id: UUID | None = None):
+    return await audio_native.get_output(db, output_id, job_id)
 
 
-async def update_output(
-    db: AsyncSession, output: ChannelListOutput, data: dict
-) -> ChannelListOutput:
-    for key, value in data.items():
-        if value is not None or key in CLEARABLE_KEYS:
-            setattr(output, key, value)
+async def update_output(db: AsyncSession, output, data: dict):
+    updated = await audio_native.update_output(db, output.id, data, output.job_id)
     await db.commit()
-    await db.refresh(output, ["points"])
-    return output
+    return updated
 
 
-async def delete_output(db: AsyncSession, output: ChannelListOutput) -> None:
-    await db.delete(output)
+async def delete_output(db: AsyncSession, output):
+    removed = await audio_native.delete_output(db, output.id, output.job_id)
     await db.commit()
+    return removed
 
 
-async def create_output_point(db: AsyncSession, output_id: UUID, data: dict) -> OutputPatchPoint:
-    data = _clean_point_data(data)
-    point = OutputPatchPoint(output_id=output_id, **data)
-    db.add(point)
+async def create_output_point(db: AsyncSession, output_id: UUID, data: dict):
+    point = await audio_native.create_point(db, audio_native.OUTPUT, output_id, data)
     await db.commit()
-    await db.refresh(point)
     return point
 
 
-async def get_output_point(db: AsyncSession, point_id: UUID) -> OutputPatchPoint | None:
-    return await db.get(OutputPatchPoint, point_id)
+async def get_output_point(db: AsyncSession, output_id: UUID, point_id: UUID):
+    return await audio_native.get_point(db, audio_native.OUTPUT, output_id, point_id)
 
 
-async def update_output_point(
-    db: AsyncSession, point: OutputPatchPoint, data: dict
-) -> OutputPatchPoint:
-    for key, value in data.items():
-        if value is not None or key in CLEARABLE_KEYS:
-            setattr(point, key, value)
-    await db.commit()
-    await db.refresh(point)
-    return point
-
-
-async def delete_output_point(db: AsyncSession, point: OutputPatchPoint) -> None:
-    await db.delete(point)
-    await db.commit()
-
-
-async def list_job_channels_with_points(db: AsyncSession, job_id: UUID) -> list[AudioChannelPatch]:
-    result = await db.execute(
-        select(AudioChannelPatch)
-        .join(AudioChannelPatch.channel_list)
-        .options(selectinload(AudioChannelPatch.patch_points))
-        .where(ChannelList.job_id == job_id)
-        .order_by(AudioChannelPatch.channel_number)
+async def update_output_point(db: AsyncSession, point, data: dict):
+    updated = await audio_native.update_point(
+        db, audio_native.OUTPUT, point.output_id, point.id, data
     )
-    return list(result.scalars().all())
-
-
-async def create_channel_list(db: AsyncSession, job_id: UUID, data: dict) -> ChannelList:
-    channel_list = ChannelList(job_id=job_id, **data)
-    db.add(channel_list)
     await db.commit()
-    await db.refresh(channel_list, ["channels"])
+    return updated
+
+
+async def delete_output_point(db: AsyncSession, point) -> None:
+    await audio_native.delete_point(db, audio_native.OUTPUT, point.output_id, point.id)
+    await db.commit()
+
+
+async def list_job_channels_with_points(db: AsyncSession, job_id: UUID) -> list:
+    return await audio_native.job_channels(db, job_id)
+
+
+async def create_channel_list(db: AsyncSession, job_id: UUID, data: dict):
+    channel_list = await audio_native.create_list(db, job_id, data)
+    await db.commit()
     return channel_list
 
 
-async def list_channel_lists(db: AsyncSession, job_id: UUID) -> list[ChannelList]:
-    result = await db.execute(
-        select(ChannelList)
-        .options(
-            selectinload(ChannelList.channels).selectinload(AudioChannelPatch.patch_points),
-            selectinload(ChannelList.outputs).selectinload(ChannelListOutput.points),
-        )
-        .where(ChannelList.job_id == job_id)
-        .order_by(ChannelList.position)
-    )
-    return list(result.scalars().all())
+async def list_channel_lists(db: AsyncSession, job_id: UUID) -> list:
+    return await audio_native.load_lists(db, job_id)
 
 
-async def get_channel_list(db: AsyncSession, list_id: UUID) -> ChannelList | None:
-    result = await db.execute(
-        select(ChannelList)
-        .options(
-            selectinload(ChannelList.channels).selectinload(AudioChannelPatch.patch_points),
-            selectinload(ChannelList.outputs).selectinload(ChannelListOutput.points),
-        )
-        .where(ChannelList.id == list_id)
-    )
-    return result.scalars().first()
+async def get_channel_list(db: AsyncSession, list_id: UUID, job_id: UUID | None = None):
+    return await audio_native.get_list(db, list_id, job_id)
 
 
-async def update_channel_list(
-    db: AsyncSession, channel_list: ChannelList, data: dict
-) -> ChannelList:
-    for key, value in data.items():
-        if value is not None or key in CLEARABLE_KEYS:
-            setattr(channel_list, key, value)
+async def update_channel_list(db: AsyncSession, channel_list, data: dict):
+    updated = await audio_native.update_list(db, channel_list.id, data, channel_list.job_id)
     await db.commit()
-    await db.refresh(channel_list, ["channels"])
-    return channel_list
+    return updated
 
 
-async def delete_channel_list(db: AsyncSession, channel_list: ChannelList) -> None:
-    await db.delete(channel_list)
+async def delete_channel_list(db: AsyncSession, channel_list):
+    removed = await audio_native.delete_list(db, channel_list.id, channel_list.job_id)
     await db.commit()
+    return removed
 
 
 async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict):
@@ -381,27 +307,11 @@ async def update_device(db: AsyncSession, device: AudioDevice, data: dict) -> Au
 
 
 async def job_io_totals(db: AsyncSession, job_id: UUID) -> tuple[int, int]:
-    channels = await db.scalar(
-        select(func.count(AudioChannelPatch.id))
-        .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-        .where(ChannelList.job_id == job_id)
-    )
-    outputs = await db.scalar(
-        select(func.count(ChannelListOutput.id))
-        .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
-        .where(ChannelList.job_id == job_id)
-    )
-    return int(channels or 0), int(outputs or 0)
+    return await audio_native.totals(db, job_id)
 
 
 async def list_io_totals(db: AsyncSession, list_id: UUID) -> tuple[int, int]:
-    channels = await db.scalar(
-        select(func.count(AudioChannelPatch.id)).where(AudioChannelPatch.channel_list_id == list_id)
-    )
-    outputs = await db.scalar(
-        select(func.count(ChannelListOutput.id)).where(ChannelListOutput.channel_list_id == list_id)
-    )
-    return int(channels or 0), int(outputs or 0)
+    return await audio_native.list_totals(db, list_id)
 
 
 async def delete_device(db: AsyncSession, device: AudioDevice) -> None:

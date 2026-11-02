@@ -1,18 +1,12 @@
 import pytest
+from audio_seed import seed_channel, seed_list, seed_output, seed_point
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.core import db as db_mod
-from app.domains.audio.models import (
-    AudioChannelPatch,
-    AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
-    ProductionJob,
-)
-from app.domains.graph import plot_native
+from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.graph import audio_native, plot_native
+from app.domains.graph.backfill import backfill_job
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.video_readers import load_video_lists
@@ -57,35 +51,21 @@ async def _seed():
             )
         }
         db.add_all(devices.values())
-        lst = ChannelList(job_id=job.id, name="FOH")
-        db.add(lst)
-        await db.flush()
+        await db.commit()
+        await backfill_job(db, job.id)  # the points refer to the devices' graph nodes
+        lst = await seed_list(db, job.id, name="FOH")
         channels = []
         for number in (1, 2):
-            ch = AudioChannelPatch(
-                channel_list_id=lst.id, channel_number=number, source_label=f"C{number}"
-            )
-            db.add(ch)
-            await db.flush()
+            ch = await seed_channel(db, lst, channel_number=number, source_label=f"C{number}")
             for position, name in enumerate(("Stagebox", "Desk")):
-                db.add(
-                    ChannelPatchPoint(
-                        channel_id=ch.id, position=position, device_id=devices[name].id
-                    )
-                )
+                await seed_point(db, ch, position=position, device_id=devices[name].id)
             channels.append(ch)
-        out = ChannelListOutput(channel_list_id=lst.id, name="Mon 1")
-        db.add(out)
-        await db.flush()
-        p0 = OutputPatchPoint(output_id=out.id, position=0, device_id=devices["Desk"].id)
-        db.add(p0)
-        await db.flush()
-        p1 = OutputPatchPoint(output_id=out.id, position=1, device_id=devices["Amp"].id)
-        p2 = OutputPatchPoint(
-            output_id=out.id, position=2, device_id=devices["Stagebox"].id, parent_id=p0.id
+        out = await seed_output(db, lst, name="Mon 1")
+        p0 = await seed_point(db, out, position=0, device_id=devices["Desk"].id)
+        p1 = await seed_point(db, out, position=1, device_id=devices["Amp"].id)
+        p2 = await seed_point(
+            db, out, position=2, device_id=devices["Stagebox"].id, parent_id=p0.id
         )
-        db.add_all([p1, p2])
-        await db.flush()
         j = job.id
         for spec in [
             _element(j, "microphone", 100, 100, linked_channel_id=channels[0].id),
@@ -127,7 +107,7 @@ async def test_graph_cables_match_legacy_cables_and_saved_routes(auth_headers):
         await _native_video(client, auth_headers, job_id)
 
     async with db_mod.SessionLocal() as db:
-        lists = (await db.scalars(select(ChannelList).where(ChannelList.job_id == job_id))).all()
+        lists = await audio_native.load_lists(db, job_id)
         vlists = await load_video_lists(db, job_id)
         elements = await plot_native.load_elements(db, job_id)
         devices = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()

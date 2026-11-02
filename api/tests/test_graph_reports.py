@@ -1,16 +1,10 @@
 import pytest
+from audio_seed import seed_channel, seed_list, seed_output, seed_point
 
 from app.core import db as db_mod
-from app.domains.audio.models import (
-    AudioChannelPatch,
-    AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
-    ProductionJob,
-)
+from app.domains.audio.models import AudioDevice, ProductionJob
 from app.domains.graph import plot_native
+from app.domains.graph.backfill import backfill_job
 from app.domains.reports import registry
 
 BASE = "/api/v1"
@@ -31,10 +25,10 @@ async def _seed():
             mk("Wedge", "monitor"),
         )
         db.add_all([stagebox, desk, amp, spk])
-        first = ChannelList(job_id=job.id, name="FOH", position=0)
-        second = ChannelList(job_id=job.id, name="Monitors", position=1)
-        db.add_all([first, second])
-        await db.flush()
+        await db.commit()
+        await backfill_job(db, job.id)  # the points refer to the devices' graph nodes
+        first = await seed_list(db, job.id, name="FOH", position=0)
+        second = await seed_list(db, job.id, name="Monitors", position=1)
         chans = []
         for lst, number, label, extra in (
             (first, 2, "Snare", {"input_type": "microphone", "stand_type": "Clip", "notes": "top"}),
@@ -54,11 +48,7 @@ async def _seed():
             ),
             (second, 1, "Keys", {"input_type": "di", "instrument_group": "keys"}),
         ):
-            ch = AudioChannelPatch(
-                channel_list_id=lst.id, channel_number=number, source_label=label, **extra
-            )
-            db.add(ch)
-            await db.flush()
+            ch = await seed_channel(db, lst, channel_number=number, source_label=label, **extra)
             chans.append(ch)
             hops = [
                 (stagebox, "analog_stagebox", "In 3", "XLR", "box note"),
@@ -66,24 +56,20 @@ async def _seed():
                 (desk, "mixer", f"Ch {number}", "Dante", ""),
             ]
             for position, (dev, kind, label_, conn, note) in enumerate(hops):
-                db.add(
-                    ChannelPatchPoint(
-                        channel_id=ch.id,
-                        position=position,
-                        point_type=kind,
-                        device_id=dev.id,
-                        patch_label=label_,
-                        connector=conn,
-                        notes=note,
-                    )
+                await seed_point(
+                    db,
+                    ch,
+                    position=position,
+                    point_type=kind,
+                    device_id=dev.id,
+                    patch_label=label_,
+                    connector=conn,
+                    notes=note,
                 )
-        out = ChannelListOutput(
-            channel_list_id=first.id, name="Mon 1", position=0, notes="wedge mix"
-        )
-        db.add(out)
-        await db.flush()
-        p0 = OutputPatchPoint(
-            output_id=out.id,
+        out = await seed_output(db, first, name="Mon 1", position=0, notes="wedge mix")
+        await seed_point(
+            db,
+            out,
             position=0,
             point_type="mixer",
             device_id=desk.id,
@@ -91,28 +77,24 @@ async def _seed():
             connector="Dante",
             bus_connector="aux",
         )
-        db.add(p0)
-        await db.flush()
-        db.add_all(
-            [
-                OutputPatchPoint(
-                    output_id=out.id,
-                    position=1,
-                    point_type="amp",
-                    device_id=amp.id,
-                    patch_label="In A",
-                    connector="XLR",
-                    notes="amp note",
-                ),
-                OutputPatchPoint(
-                    output_id=out.id,
-                    position=2,
-                    point_type="monitor",
-                    device_id=spk.id,
-                    patch_label="",
-                    connector="speakon",
-                ),
-            ]
+        await seed_point(
+            db,
+            out,
+            position=1,
+            point_type="amp",
+            device_id=amp.id,
+            patch_label="In A",
+            connector="XLR",
+            notes="amp note",
+        )
+        await seed_point(
+            db,
+            out,
+            position=2,
+            point_type="monitor",
+            device_id=spk.id,
+            patch_label="",
+            connector="speakon",
         )
         await plot_native.create_element(
             db,
@@ -128,21 +110,16 @@ async def _seed():
 
 
 @pytest.mark.asyncio
-async def test_graph_report_contexts_match_the_legacy_contexts(auth_headers):
+async def test_report_contexts_read_the_channel_lists_from_the_graph(auth_headers):
     job_id = await _seed()
     async with db_mod.SessionLocal() as db:
-        legacy_channels = await registry._channel_list_context_legacy(db, job_id)
-        graph_channels = await registry._channel_list_context(db, job_id)
-        legacy_sheets = await registry._patch_sheet_context_legacy(db, job_id)
-        graph_sheets = await registry._patch_sheet_context(db, job_id)
+        channels = await registry._channel_list_context(db, job_id)
+        sheets = await registry._patch_sheet_context(db, job_id)
 
-    assert [r["source_label"] for r in legacy_channels["channels"]] == ["Vox", "Snare", "Keys"]
-    assert graph_channels["channels"] == legacy_channels["channels"]
-    assert any(r["performer_name"] == "Alex on stage" for r in graph_channels["channels"])
+    assert [r["source_label"] for r in channels["channels"]] == ["Vox", "Snare", "Keys"]
+    assert any(r["performer_name"] == "Alex on stage" for r in channels["channels"])
 
-    legacy_view = legacy_sheets["patchpoint_sheets"]
-    graph_view = graph_sheets["patchpoint_sheets"]
-    assert [s["name"] for s in legacy_view] == ["Amp", "Desk", "Stagebox", "Wedge"]
-    assert graph_view == legacy_view
-    desk_rows = next(s for s in graph_view if s["name"] == "Desk")["rows"]
+    view = sheets["patchpoint_sheets"]
+    assert [s["name"] for s in view] == ["Amp", "Desk", "Stagebox", "Wedge"]
+    desk_rows = next(s for s in view if s["name"] == "Desk")["rows"]
     assert {r["direction"] for r in desk_rows} == {"In", "Out"}

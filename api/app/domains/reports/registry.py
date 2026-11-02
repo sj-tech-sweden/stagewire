@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domains.audio.models import ChannelList, ChannelPatchPoint, OutputPatchPoint, ProductionJob
-from app.domains.graph import plot_native
+from app.domains.audio.models import ProductionJob
+from app.domains.graph import audio_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
@@ -71,8 +71,6 @@ async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
         select(ProductionJob)
         .where(ProductionJob.id == job_id)
         .options(
-            selectinload(ProductionJob.channel_lists).selectinload(ChannelList.channels),
-            selectinload(ProductionJob.channel_lists).selectinload(ChannelList.outputs),
             selectinload(ProductionJob.devices),
         )
     )
@@ -85,50 +83,6 @@ async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
 async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     return {"job": job}
-
-
-async def _channel_list_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
-    job = await _load_job(db, job_id)
-    performer_names = {
-        str(element.linked_channel_id): element.label
-        for element in await plot_native.load_elements(db, job_id)
-        if element.element_type == "performer" and element.linked_channel_id and element.label
-    }
-    rows = [
-        {
-            "channel_number": channel.channel_number,
-            "source_label": channel.source_label,
-            "device": channel.device or "",
-            "input_details": " · ".join(
-                value
-                for value in (
-                    channel.input_type or "",
-                    channel.instrument_group or "",
-                    channel.stand_type or "",
-                )
-                if value
-            ),
-            "performer_name": performer_names.get(str(channel.id)) or channel.performer_name or "",
-            "wireless_pack": channel.wireless_pack or "",
-            "wireless_frequency": channel.wireless_frequency or "",
-            "wireless_details": " · ".join(
-                value
-                for value in (
-                    performer_names.get(str(channel.id)) or channel.performer_name or "",
-                    channel.wireless_pack or "",
-                    channel.wireless_frequency or "",
-                )
-                if value
-            ),
-            "connector": channel.connector or "",
-            "phantom_power": channel.phantom_power,
-            "notes": channel.notes,
-            "list_name": channel_list.name,
-        }
-        for channel_list in job.channel_lists
-        for channel in channel_list.channels
-    ]
-    return {"job": job, "channels": rows}
 
 
 async def _camera_specs(db: AsyncSession, job: ProductionJob, plot_elements) -> dict[str, dict]:
@@ -187,6 +141,7 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
     ]
     return {
         "job": job,
+        "channel_lists": await audio_native.load_lists(db, job_id),
         "elements": plot_elements,
         "stage_plot_elements": rows,
         "cables": cables,
@@ -234,118 +189,6 @@ async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     devices, edges, _ = await graph_context.load_graph(db, job_id)
     return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges)}
-
-
-async def _patch_sheet_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
-    job = await _load_job(db, job_id)
-    sheets: dict[str, dict] = {}
-    performer_names = {
-        str(element.linked_channel_id): element.label
-        for element in await plot_native.load_elements(db, job_id)
-        if element.element_type == "performer" and element.linked_channel_id and element.label
-    }
-    device_names = {str(device.id): device.name for device in job.devices}
-    devices_by_id = {str(device.id): device for device in job.devices}
-
-    def console_patch(points: list[ChannelPatchPoint] | list[OutputPatchPoint]) -> str:
-        return next(
-            (
-                point.patch_label
-                for point in points
-                if (device := devices_by_id.get(str(point.device_id)))
-                and device.device_type == "mixer"
-            ),
-            "",
-        )
-
-    def add_row(device_id, point_type, row):
-        if not device_id:
-            return
-        key = str(device_id)
-        sheet = sheets.setdefault(
-            key,
-            {
-                "id": key,
-                "name": device_names.get(key) or key,
-                "type": point_type or "mixer",
-                "rows": [],
-            },
-        )
-        sheet["rows"].append(row)
-
-    for channel_list in job.channel_lists:
-        for channel in channel_list.channels:
-            for point in channel.patch_points:
-                add_row(
-                    point.device_id,
-                    point.point_type,
-                    {
-                        "direction": "In",
-                        "channel_number": channel.channel_number,
-                        "source_label": channel.source_label,
-                        "instrument_group": channel.instrument_group,
-                        "device": channel.device or "",
-                        "stand_type": channel.stand_type,
-                        "performer_name": performer_names.get(str(channel.id))
-                        or channel.performer_name
-                        or "",
-                        "wireless_pack": channel.wireless_pack or "",
-                        "wireless_frequency": channel.wireless_frequency or "",
-                        "phantom_power": channel.phantom_power,
-                        "patch_assignment": " / ".join(
-                            value
-                            for value in (
-                                device_names.get(str(point.device_id), ""),
-                                console_patch(channel.patch_points),
-                            )
-                            if value
-                        ),
-                        "patch_label": point.patch_label,
-                        "connector": point.connector,
-                        "notes": " · ".join(
-                            value for value in (channel.notes, point.notes) if value
-                        ),
-                    },
-                )
-        for output in channel_list.outputs:
-            for point in output.points:
-                add_row(
-                    point.device_id,
-                    point.point_type,
-                    {
-                        "direction": "Out",
-                        "channel_number": "OUT",
-                        "source_label": output.name,
-                        "instrument_group": "",
-                        "device": "",
-                        "stand_type": "",
-                        "performer_name": "",
-                        "wireless_pack": "",
-                        "wireless_frequency": "",
-                        "phantom_power": False,
-                        "bus_connector": point.bus_connector or "",
-                        "patch_assignment": " / ".join(
-                            value
-                            for value in (
-                                device_names.get(str(point.device_id), ""),
-                                console_patch(output.points),
-                            )
-                            if value
-                        ),
-                        "patch_label": point.patch_label,
-                        "connector": point.connector,
-                        "notes": " · ".join(
-                            value for value in (output.notes, point.notes) if value
-                        ),
-                    },
-                )
-    return {
-        "job": job,
-        "patchpoint_sheets": [
-            {**sheet, "rows": sorted(sheet["rows"], key=lambda row: row["direction"] != "In")}
-            for sheet in sorted(sheets.values(), key=lambda value: value["name"].lower())
-        ],
-    }
 
 
 _CHANNEL_COLUMNS = (

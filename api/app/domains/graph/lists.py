@@ -8,17 +8,17 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
-from app.domains.audio.models import AudioDevice, ChannelPatchPoint, OutputPatchPoint
+from app.domains.audio.models import AudioDevice
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import dmx_native, fixtures_native, schemas, video_native
+from app.domains.graph import audio_native, dmx_native, fixtures_native, schemas, video_native
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.mirror import (
@@ -115,13 +115,6 @@ async def _node(db: AsyncSession, job_id: UUID, node_id: UUID, kind: str) -> Gra
     return node
 
 
-def _legacy_id(node: GraphDevice, table: str) -> UUID:
-    target = legacy_target(node)
-    if target is None or target[0] != table:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This node has no legacy twin to write")
-    return target[1]
-
-
 async def _by_ref(db: AsyncSession, job_id: UUID, ref: str) -> GraphDevice:
     node = (
         await db.scalars(
@@ -136,13 +129,6 @@ async def _by_ref(db: AsyncSession, job_id: UUID, ref: str) -> GraphDevice:
 async def _read(db: AsyncSession, job_id: UUID, ref: str) -> schemas.GraphDeviceRead:
     await backfill_job(db, job_id)
     return schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref))
-
-
-async def _list_row(db: AsyncSession, job_id: UUID, list_node: GraphDevice):
-    row = await service.get_channel_list(db, _legacy_id(list_node, "audio_channel_lists"))
-    if row is None or row.job_id != job_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
-    return row
 
 
 async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
@@ -176,6 +162,10 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
     return device.id
 
 
+async def _publish_graph(db: AsyncSession, job_id: UUID, nodes: list[GraphDevice]) -> None:
+    await audio_native.publish_nodes(db, job_id, [n.id for n in nodes])
+
+
 @router.post("/lists", response_model=schemas.GraphDeviceRead, status_code=201)
 async def create_list(
     job_id: UUID, payload: ListCreate, db: AsyncSession = Depends(get_db)
@@ -186,34 +176,54 @@ async def create_list(
     row = await service.create_channel_list(
         db, job_id, {**payload.model_dump(exclude_unset=True), "position": position}
     )
+    node = await audio_native.find_node(db, audio_native.LIST, row.id, job_id)
+    await _publish_graph(db, job_id, [node])
     await _publish_list(db, job_id, row.id)
-    return await _read(db, job_id, f"audio_channel_lists:{row.id}")
+    return schemas.GraphDeviceRead.model_validate(node)
+
+
+async def _list_members(db: AsyncSession, list_node: GraphDevice, kind: str) -> list[GraphDevice]:
+    rows = (
+        await db.scalars(
+            select(GraphDevice).where(
+                GraphDevice.job_id == list_node.job_id, GraphDevice.kind == kind
+            )
+        )
+    ).all()
+    return sorted(
+        (r for r in rows if (r.attributes or {}).get("list_id") == str(list_node.id)),
+        key=lambda r: (r.position, r.created_at),
+    )
 
 
 async def _create_channels(
     db: AsyncSession, job_id: UUID, list_node_id: UUID, items: list[ChannelCreate]
 ) -> list[schemas.GraphDeviceRead]:
     list_node = await _node(db, job_id, list_node_id, "channel_list")
-    row = await _list_row(db, job_id, list_node)
-    existing = await service.list_channels(db, row.id)
-    next_number = max((c.channel_number for c in existing), default=0) + 1
-    created = []
-    for item in items:
-        data = item.model_dump(exclude_unset=True)
-        if data.get("channel_number") is None:
-            data["channel_number"] = next_number
-        next_number = max(next_number, data["channel_number"]) + 1
-        created.append(await service.create_channel(db, row.id, data))
-    await backfill_job(db, job_id)
-    out = []
-    for channel in created:
-        full = await service.get_channel(db, channel.id)
+    async with job_lock(job_id):
+        existing = await _list_members(db, list_node, "channel")
+        next_number = max((c.position for c in existing), default=0) + 1
+        created = []
+        for item in items:
+            data = item.model_dump(exclude_unset=True)
+            if data.get("channel_number") is None:
+                data["channel_number"] = next_number
+            next_number = max(next_number, data["channel_number"]) + 1
+            node = audio_native.channel_node(job_id, list_node, data)
+            db.add(node)
+            created.append(node)
+        await db.flush()
+        for node in created:
+            await audio_native.plot_native_performer(db, node)
+        await db.commit()
+    await _publish_graph(db, job_id, created)
+    devices = {}
+    for node in created:
+        row = audio_native.channel_row(node, devices)
         await publish_job_event(
-            job_id, "channel.upsert", audio_schemas.AudioChannelPatchRead.model_validate(full)
+            job_id, "channel.upsert", audio_schemas.AudioChannelPatchRead.model_validate(row)
         )
-        node = await _by_ref(db, job_id, f"audio_channel_patches:{channel.id}")
-        out.append(schemas.GraphDeviceRead.model_validate(node))
-    return out
+    return [schemas.GraphDeviceRead.model_validate(node) for node in created]
 
 
 @router.post("/lists/{list_id}/channels", response_model=schemas.GraphDeviceRead, status_code=201)
@@ -236,18 +246,30 @@ async def create_channels(
     return await _create_channels(db, job_id, list_id, payload)
 
 
+async def _create_outputs(
+    db: AsyncSession, job_id: UUID, list_node_id: UUID, items: list[OutputCreate]
+) -> list[schemas.GraphDeviceRead]:
+    list_node = await _node(db, job_id, list_node_id, "channel_list")
+    async with job_lock(job_id):
+        position = len(await _list_members(db, list_node, "output"))
+        created = [
+            audio_native.output_node(
+                job_id, list_node, item.model_dump(exclude_unset=True), position + offset
+            )
+            for offset, item in enumerate(items)
+        ]
+        db.add_all(created)
+        await db.commit()
+    await _publish_graph(db, job_id, created)
+    await _publish_list(db, job_id, public_id(list_node))
+    return [schemas.GraphDeviceRead.model_validate(node) for node in created]
+
+
 @router.post("/lists/{list_id}/outputs", response_model=schemas.GraphDeviceRead, status_code=201)
 async def create_output(
     job_id: UUID, list_id: UUID, payload: OutputCreate, db: AsyncSession = Depends(get_db)
 ) -> schemas.GraphDeviceRead:
-    list_node = await _node(db, job_id, list_id, "channel_list")
-    row = await _list_row(db, job_id, list_node)
-    position = len(row.outputs)
-    output = await service.create_output(
-        db, row.id, {**payload.model_dump(exclude_unset=True), "position": position}
-    )
-    await _publish_list(db, job_id, row.id)
-    return await _read(db, job_id, f"channel_list_outputs:{output.id}")
+    return (await _create_outputs(db, job_id, list_id, [payload]))[0]
 
 
 @router.post(
@@ -264,24 +286,7 @@ async def create_outputs(
     """Add several outputs at once (the way ``/channels/batch`` adds inputs)."""
     if len(payload) > MAX_BATCH:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} outputs")
-    list_node = await _node(db, job_id, list_id, "channel_list")
-    row = await _list_row(db, job_id, list_node)
-    position = len(row.outputs)
-    created = []
-    for offset, item in enumerate(payload):
-        created.append(
-            await service.create_output(
-                db, row.id, {**item.model_dump(exclude_unset=True), "position": position + offset}
-            )
-        )
-    await _publish_list(db, job_id, row.id)
-    await backfill_job(db, job_id)
-    return [
-        schemas.GraphDeviceRead.model_validate(
-            await _by_ref(db, job_id, f"channel_list_outputs:{output.id}")
-        )
-        for output in created
-    ]
+    return await _create_outputs(db, job_id, list_id, payload)
 
 
 async def _chain_edges(db: AsyncSession, job_id: UUID, node: GraphDevice) -> ChainRead:
@@ -291,33 +296,43 @@ async def _chain_edges(db: AsyncSession, job_id: UUID, node: GraphDevice) -> Cha
     return ChainRead(edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in mine])
 
 
+async def _chain_points(
+    db: AsyncSession, job_id: UUID, steps: list[ChainStep], *, output: bool
+) -> list[dict]:
+    """The points a chain replace stores: each step's device is made a real device first."""
+    points: list[dict] = []
+    for position, step in enumerate(steps):
+        twin = await _device_twin(db, job_id, step.device_id)
+        device = await service.get_device(db, twin)
+        parent = (
+            points[step.parent_index]["point_id"]
+            if output and step.parent_index is not None
+            else None
+        )
+        points.append(
+            audio_native.new_point(
+                position,
+                step.device_id,
+                step.point_type or (device.device_type if device else "other"),
+                step,
+                parent,
+                output=output,
+            )
+        )
+    return points
+
+
 @router.put("/channels/{channel_id}/chain", response_model=ChainRead)
 async def replace_channel_chain(
     job_id: UUID, channel_id: UUID, payload: Chain, db: AsyncSession = Depends(get_db)
 ) -> ChainRead:
     node = await _node(db, job_id, channel_id, "channel")
-    legacy_id = _legacy_id(node, "audio_channel_patches")
-    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
-    types = {}
-    for twin in set(twins):
-        device = await service.get_device(db, twin)
-        types[twin] = device.device_type if device else "other"
-    await db.execute(delete(ChannelPatchPoint).where(ChannelPatchPoint.channel_id == legacy_id))
-    for position, (step, twin) in enumerate(zip(payload.steps, twins, strict=True)):
-        db.add(
-            ChannelPatchPoint(
-                channel_id=legacy_id,
-                position=position,
-                point_type=step.point_type or types[twin],
-                device_id=twin,
-                connector=step.connector,
-                patch_label=step.patch_label,
-                notes=step.notes,
-            )
-        )
+    points = await _chain_points(db, job_id, payload.steps, output=False)
+    await audio_native.replace_points(db, node, points)
     await db.commit()
     await backfill_job(db, job_id)
-    channel = await service.get_channel(db, legacy_id)
+    channel = await service.get_channel(db, public_id(node), job_id)
+    await _publish_graph(db, job_id, [node])
     await publish_job_event(
         job_id, "channel.upsert", audio_schemas.AudioChannelPatchRead.model_validate(channel)
     )
@@ -329,40 +344,18 @@ async def replace_output_chain(
     job_id: UUID, output_id: UUID, payload: Chain, db: AsyncSession = Depends(get_db)
 ) -> ChainRead:
     node = await _node(db, job_id, output_id, "output")
-    legacy_id = _legacy_id(node, "channel_list_outputs")
     for position, step in enumerate(payload.steps):
         if step.parent_index is not None and not 0 <= step.parent_index < position:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "A step can only take its signal from an earlier step",
             )
-    twins = [await _device_twin(db, job_id, step.device_id) for step in payload.steps]
-    types = {}
-    for twin in set(twins):
-        device = await service.get_device(db, twin)
-        types[twin] = device.device_type if device else "other"
-    await db.execute(delete(OutputPatchPoint).where(OutputPatchPoint.output_id == legacy_id))
-    created: list[OutputPatchPoint] = []
-    for position, (step, twin) in enumerate(zip(payload.steps, twins, strict=True)):
-        point = OutputPatchPoint(
-            output_id=legacy_id,
-            position=position,
-            point_type=step.point_type or types[twin],
-            device_id=twin,
-            connector=step.connector,
-            patch_label=step.patch_label,
-            notes=step.notes,
-            bus_connector=step.bus_connector,
-            parallel=step.parallel,
-            parent_id=created[step.parent_index].id if step.parent_index is not None else None,
-        )
-        db.add(point)
-        await db.flush()
-        created.append(point)
+    points = await _chain_points(db, job_id, payload.steps, output=True)
+    await audio_native.replace_points(db, node, points)
     await db.commit()
     await backfill_job(db, job_id)
-    output = await service.get_output(db, legacy_id)
-    await _publish_list(db, job_id, output.channel_list_id)
+    await _publish_graph(db, job_id, [node])
+    await _publish_list(db, job_id, UUID(node.attributes["channel_list_id"]))
     return await _chain_edges(db, job_id, node)
 
 
@@ -408,20 +401,6 @@ class VideoChain(BaseModel):
 
 async def _video_list_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> GraphDevice:
     return await _node(db, job_id, node_id, "video_list")
-
-
-async def _list_members(db: AsyncSession, list_node: GraphDevice, kind: str) -> list[GraphDevice]:
-    rows = (
-        await db.scalars(
-            select(GraphDevice).where(
-                GraphDevice.job_id == list_node.job_id, GraphDevice.kind == kind
-            )
-        )
-    ).all()
-    return sorted(
-        (r for r in rows if (r.attributes or {}).get("list_id") == str(list_node.id)),
-        key=lambda r: (r.position, r.created_at),
-    )
 
 
 @router.post("/video-lists", response_model=schemas.GraphDeviceRead, status_code=201)

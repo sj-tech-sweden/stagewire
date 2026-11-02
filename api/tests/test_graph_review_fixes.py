@@ -5,7 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioChannelPatch, ChannelList, ProductionJob
+from app.domains.audio.models import AudioDevice, ProductionJob
 from app.domains.graph.mirror import sync_job_to_graph
 from app.main import app
 
@@ -154,7 +154,8 @@ async def test_patching_some_attributes_keeps_the_ones_that_tie_a_row_to_its_leg
         again = await _graph(client, h, job_id)
         assert len(again["edges"]) == 1
 
-        kick = next(d for d in graph["devices"] if d["name"] == "Kick")
+        # the channel node owns its points, so the edge edit above moved its revision
+        kick = next(d for d in again["devices"] if d["name"] == "Kick")
         res = await client.patch(
             f"{g}/devices/{kick['id']}",
             json={
@@ -173,10 +174,8 @@ async def test_overlapping_syncs_do_not_create_duplicate_nodes(auth_headers):
         job = ProductionJob(title="Race")
         db.add(job)
         await db.flush()
-        lst = ChannelList(job_id=job.id, name="FOH")
-        db.add(lst)
-        await db.flush()
-        db.add(AudioChannelPatch(channel_list_id=lst.id, channel_number=1, source_label="Kick"))
+        db.add(AudioDevice(job_id=job.id, name="Kick", device_type="other"))
+        db.add(AudioDevice(job_id=job.id, name="FOH", device_type="mixer"))
         await db.commit()
         job_id = job.id
     await asyncio.gather(*[sync_job_to_graph(UUID(str(job_id))) for _ in range(6)])

@@ -145,9 +145,9 @@ async def test_graph_edits_write_through_to_the_legacy_rows(auth_headers):
         assert legacy["source_label"] == "Kick In"
         assert legacy["notes"] == "inside the drum"
         assert legacy["stand_type"] == "Short boom" and legacy["phantom_power"] is True
-        assert legacy["revision"] == ch["revision"] + 1
+        assert legacy["revision"] > ch["revision"]
 
-        # a canvas-only edit is graph-only: the legacy row is untouched
+        # the channel is one node now, so a canvas edit is a revision of the channel too
         node = {d["name"]: d for d in (await _graph(client, h, job_id))["devices"]}["Kick In"]
         await client.patch(
             f"{g}/devices/{node['id']}",
@@ -155,7 +155,7 @@ async def test_graph_edits_write_through_to_the_legacy_rows(auth_headers):
             headers=h,
         )
         again = await _legacy_channel(client, h, job_id, lst["id"], ch["id"])
-        assert again["revision"] == legacy["revision"]
+        assert again["revision"] > legacy["revision"]
 
         # and a later legacy edit of the same row flows back into the graph twin
         await client.patch(

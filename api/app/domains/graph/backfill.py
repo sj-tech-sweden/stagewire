@@ -7,12 +7,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import (
-    AudioChannelPatch,
     AudioDevice,
-    ChannelList,
-    ChannelListOutput,
-    ChannelPatchPoint,
-    OutputPatchPoint,
 )
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -71,14 +66,6 @@ FIXTURE_ONLY_ATTRS = (
 # Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
 # the graph even when the twin was edited there, because graph edits are mirrored back at once.
 OWNED_ATTRS: dict[str, set[str]] = {
-    "audio_channel_patches": {*CHANNEL_FIELDS, "list_id", "channel_list_id", "source_label"},
-    "audio_channel_lists": {
-        "mixer_product_id",
-        "mixer_product_name",
-        "mixer_inputs",
-        "mixer_buses",
-    },
-    "channel_list_outputs": {*OUTPUT_FIELDS, "list_id", "channel_list_id"},
     "audio_devices": {
         "power_inlet",
         *DEVICE_SPEC_FIELDS,
@@ -185,7 +172,6 @@ class Backfill:
         self.loaded_edges: set[str] = set()
         self.loaded_revisions: dict[uuid.UUID, int] = {}
         self.new_edges: list[ConnectionEdge] = []
-        self._point_devices: tuple[dict, dict] | None = None
         self.edge_updates: list[tuple[ConnectionEdge, dict]] = []
         self.seen_devices: set[str] = set()
         self.seen_edges: set[str] = set()
@@ -395,189 +381,12 @@ class Backfill:
                 stockwire_product_name=row.stockwire_product_name,
             )
 
-    async def channel_lists(self) -> None:
-        lists = (
-            await self.db.scalars(select(ChannelList).where(ChannelList.job_id == self.job_id))
-        ).all()
-        for row in lists:
-            self.device(
-                f"audio_channel_lists:{row.id}",
-                domain="audio",
-                kind="channel_list",
-                name=row.name,
-                position=row.position,
-                attributes={
-                    k: v
-                    for k, v in {
-                        "mixer_product_id": row.mixer_product_id,
-                        "mixer_product_name": row.mixer_product_name,
-                        "mixer_inputs": row.mixer_inputs,
-                        "mixer_buses": row.mixer_buses,
-                    }.items()
-                    if v is not None
-                },
-                ports=[],
-                stockwire_product_id=row.mixer_product_id,
-                stockwire_product_name=row.mixer_product_name,
-            )
+    async def audio_lists(self) -> None:
+        """Channel lists, channels and outputs are graph nodes (audio_native.py); the sync draws
+        the patch edges from their points."""
+        from app.domains.graph import audio_native
 
-    def _list_id(self, legacy_list_id: uuid.UUID) -> str:
-        container = self.devices.get(f"audio_channel_lists:{legacy_list_id}")
-        return str(container.id) if container is not None else str(legacy_list_id)
-
-    async def channels(self) -> None:
-        channels = (
-            await self.db.scalars(
-                select(AudioChannelPatch)
-                .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-                .where(ChannelList.job_id == self.job_id)
-            )
-        ).all()
-        points = (
-            await self.db.scalars(
-                select(ChannelPatchPoint)
-                .where(ChannelPatchPoint.channel_id.in_([c.id for c in channels]))
-                .order_by(ChannelPatchPoint.position)
-            )
-        ).all()
-        by_channel: dict[uuid.UUID, list[ChannelPatchPoint]] = {}
-        for point in points:
-            by_channel.setdefault(point.channel_id, []).append(point)
-        for channel in channels:
-            node = self.device(
-                f"audio_channel_patches:{channel.id}",
-                domain="audio",
-                kind="channel",
-                name=channel.source_label or f"Ch {channel.channel_number}",
-                position=channel.channel_number,
-                notes=channel.notes or "",
-                attributes={
-                    "list_id": self._list_id(channel.channel_list_id),
-                    "channel_list_id": str(channel.channel_list_id),
-                    # the node name falls back to "Ch N" when there is no label; the label itself
-                    # is kept so exports show what was typed (an empty label stays empty)
-                    "source_label": channel.source_label or "",
-                    **{
-                        field: getattr(channel, field)
-                        for field in CHANNEL_FIELDS
-                        if getattr(channel, field) is not None
-                    },
-                },
-                ports=[{"id": "out", "direction": "out", "signal": "audio"}],
-                stockwire_product_id=channel.stockwire_product_id,
-                stockwire_product_name=channel.stockwire_product_name,
-            )
-            prev, prev_port = node, "out"
-            for point in by_channel.get(channel.id, []):
-                target = self.devices.get(f"audio_devices:{point.device_id}")
-                if target is None:
-                    self.result.notes.append(f"patch point {point.id}: device missing")
-                    continue
-                self.edge(
-                    f"channel_patch_points:{point.id}",
-                    "audio",
-                    prev,
-                    prev_port,
-                    target,
-                    self.port(target, "in", "audio", point.connector),
-                    attributes={
-                        "channel_number": channel.channel_number,
-                        **_point_attrs(point, node),
-                    },
-                )
-                prev, prev_port = target, self.port(target, "out", "audio", point.connector)
-
-    async def audio_outputs(self) -> None:
-        outputs = (
-            await self.db.scalars(
-                select(ChannelListOutput)
-                .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
-                .where(ChannelList.job_id == self.job_id)
-            )
-        ).all()
-        points = (
-            await self.db.scalars(
-                select(OutputPatchPoint)
-                .where(OutputPatchPoint.output_id.in_([o.id for o in outputs]))
-                .order_by(OutputPatchPoint.position)
-            )
-        ).all()
-        by_output: dict[uuid.UUID, list[OutputPatchPoint]] = {}
-        for point in points:
-            if point.device_id:
-                by_output.setdefault(point.output_id, []).append(point)
-        for output in outputs:
-            bus = self.device(
-                f"channel_list_outputs:{output.id}",
-                domain="audio",
-                kind="output",
-                name=output.name,
-                notes=output.notes or "",
-                position=output.position,
-                attributes={
-                    "list_id": self._list_id(output.channel_list_id),
-                    "channel_list_id": str(output.channel_list_id),
-                    **{
-                        field: getattr(output, field)
-                        for field in OUTPUT_FIELDS
-                        if getattr(output, field) is not None
-                    },
-                },
-                ports=[
-                    {"id": "in", "direction": "in", "signal": "audio"},
-                    {
-                        "id": "out",
-                        "direction": "out",
-                        "signal": "audio",
-                        "max_connections": FAN_OUT,
-                    },
-                ],
-            )
-            chain = by_output.get(output.id, [])
-            by_id = {p.id: p for p in chain}
-            console = self.devices.get(f"audio_devices:{chain[0].device_id}") if chain else None
-            if console is not None:
-                self.edge(
-                    f"channel_list_outputs:{output.id}",
-                    "audio",
-                    console,
-                    self.port(console, "out", "audio", output.connector or ""),
-                    bus,
-                    "in",
-                    attributes={
-                        "connector": output.connector,
-                        "first_point": _point_attrs(chain[0], bus, bus_connector=True),
-                        "chain": str(bus.id),
-                        "position": chain[0].position,
-                    },
-                )
-            for index, point in enumerate(chain):
-                if index == 0:
-                    continue
-                parent = by_id.get(point.parent_id) if point.parent_id else chain[index - 1]
-                target = self.devices.get(f"audio_devices:{point.device_id}")
-                if parent is None or target is None:
-                    continue
-                src = (
-                    bus
-                    if parent is chain[0]
-                    else self.devices.get(f"audio_devices:{parent.device_id}")
-                )
-                if src is None:
-                    continue
-                self.edge(
-                    f"output_patch_points:{point.id}",
-                    "audio",
-                    src,
-                    "out" if src is bus else self.port(src, "out", "audio", point.connector),
-                    target,
-                    self.port(target, "in", "audio", point.connector),
-                    attributes={
-                        "output_id": str(output.id),
-                        "parallel": point.parallel,
-                        **_point_attrs(point, bus, bus_connector=True),
-                    },
-                )
+        await audio_native.sync_edges(self)
 
     async def write_edges(self) -> None:
         """Insert devices first; nothing in the ORM orders edge inserts after them."""
@@ -625,24 +434,6 @@ class Backfill:
             if e.src_device_id not in gone_devices and e.dst_device_id not in gone_devices
         ]
         self.result.removed = len(doomed) + len(gone_devices)
-
-    async def point_devices(self) -> tuple[dict, dict]:
-        """Patch point id -> device id for this job's input and output chains (cached)."""
-        if self._point_devices is None:
-            inputs = await self.db.execute(
-                select(ChannelPatchPoint.id, ChannelPatchPoint.device_id)
-                .join(AudioChannelPatch, ChannelPatchPoint.channel_id == AudioChannelPatch.id)
-                .join(ChannelList, AudioChannelPatch.channel_list_id == ChannelList.id)
-                .where(ChannelList.job_id == self.job_id, ChannelPatchPoint.device_id.is_not(None))
-            )
-            outputs = await self.db.execute(
-                select(OutputPatchPoint.id, OutputPatchPoint.device_id)
-                .join(ChannelListOutput, OutputPatchPoint.output_id == ChannelListOutput.id)
-                .join(ChannelList, ChannelListOutput.channel_list_id == ChannelList.id)
-                .where(ChannelList.job_id == self.job_id, OutputPatchPoint.device_id.is_not(None))
-            )
-            self._point_devices = (dict(inputs.all()), dict(outputs.all()))
-        return self._point_devices
 
     async def plot_elements(self) -> None:
         """Plot elements are graph nodes (plot_native.py); the sync draws their link edges."""
@@ -758,9 +549,7 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
     with db.no_autoflush:
         await builder.audio_devices()
         await builder.power()
-        await builder.channel_lists()
-        await builder.channels()
-        await builder.audio_outputs()
+        await builder.audio_lists()
         await builder.plot_elements()
     with db.no_autoflush:
         await builder.write_edges()

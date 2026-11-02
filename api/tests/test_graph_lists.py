@@ -197,8 +197,7 @@ async def test_a_channel_without_a_label_exports_an_empty_label_not_its_fallback
         assert res.json()["name"].startswith("Ch ")
     async with db_mod.SessionLocal() as db:
         rows = (await registry._channel_list_context(db, uuid.UUID(job_id)))["channels"]
-        old = (await registry._channel_list_context_legacy(db, uuid.UUID(job_id)))["channels"]
-    assert [r["source_label"] for r in rows] == [""] == [r["source_label"] for r in old]
+    assert [r["source_label"] for r in rows] == [""]
 
 
 @pytest.mark.asyncio

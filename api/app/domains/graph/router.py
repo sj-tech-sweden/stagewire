@@ -13,6 +13,7 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
+    audio_native,
     backfill,
     dmx_native,
     fixtures_native,
@@ -161,7 +162,11 @@ async def update_device(
         await power_native.after_patch(db, job_id, device, data)
         await fixtures_native.after_patch(db, job_id, device, data)
         await plot_native.after_patch(db, job_id, device, data)
-        mirrored = await mirror.device_to_legacy(db, job_id, device, data)
+        await audio_native.after_patch(db, device, data)
+        mirrored = await mirror.device_to_legacy(db, job_id, device, data) or (
+            # a channel's number and an output's order are on its edges: redraw them
+            device.kind in audio_native.KINDS and not device.legacy_ref
+        )
         await db.commit()
         if mirrored:
             await backfill.backfill_job(db, job_id)
@@ -200,6 +205,11 @@ async def delete_device(
         if power_id_of(device) is not None:
             # the engine's rules (nothing fed from it, nothing plugged in); a device keeps living
             await power_native.check_deletable(db, job_id, power_id_of(device))
+        if audio_native.is_native(device) and device.kind == audio_native.LIST:
+            # a list takes its channels and outputs with it
+            child_nodes, child_edges = await audio_native.delete_children(db, device)
+            removed_nodes.extend(child_nodes)
+            removed_edges.extend(child_edges)
         if device.kind == "rigging_point":
             await rigging_native.clear_references(db, device)
         if device.kind in video_native.VIDEO_KINDS:

@@ -3,14 +3,12 @@ import re
 import zipfile
 
 import pytest
+from audio_seed import seed_channel, seed_list, seed_output
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
 from app.domains.audio.exports import list_exporters
 from app.domains.audio.models import (
-    AudioChannelPatch,
-    ChannelList,
-    ChannelListOutput,
     ProductionJob,
 )
 from app.main import app
@@ -23,45 +21,36 @@ async def _seed() -> tuple[str, str]:
         job = ProductionJob(title="Export parity")
         db.add(job)
         await db.flush()
-        lst = ChannelList(
-            job_id=job.id, name="FOH / Main", mixer_product_name="Qu-32", mixer_inputs=32
+        lst = await seed_list(
+            db, job.id, name="FOH / Main", mixer_product_name="Qu-32", mixer_inputs=32
         )
-        db.add(lst)
-        await db.flush()
-        db.add_all(
-            [
-                AudioChannelPatch(
-                    channel_list_id=lst.id,
-                    channel_number=1,
-                    source_label="Kick",
-                    input_type="microphone",
-                    connector="XLR",
-                    device="Beta 91",
-                    stand_type="Short boom",
-                    phantom_power=True,
-                    notes="inside the drum",
-                ),
-                AudioChannelPatch(
-                    channel_list_id=lst.id,
-                    channel_number=3,
-                    source_label="Keys",
-                    input_type="di",
-                    stereo=True,
-                    stereo_channel=1,
-                    color_code="blue",
-                ),
-                AudioChannelPatch(channel_list_id=lst.id, channel_number=2, source_label="Snare"),
-                ChannelListOutput(
-                    channel_list_id=lst.id,
-                    name="Mon 1",
-                    position=0,
-                    mode="stereo",
-                    connector="XLR",
-                    notes="wedge",
-                ),
-                ChannelListOutput(channel_list_id=lst.id, name="Mon 2", position=1),
-            ]
+        await seed_channel(
+            db,
+            lst,
+            channel_number=1,
+            source_label="Kick",
+            input_type="microphone",
+            connector="XLR",
+            device="Beta 91",
+            stand_type="Short boom",
+            phantom_power=True,
+            notes="inside the drum",
         )
+        await seed_channel(
+            db,
+            lst,
+            channel_number=3,
+            source_label="Keys",
+            input_type="di",
+            stereo=True,
+            stereo_channel=1,
+            color_code="blue",
+        )
+        await seed_channel(db, lst, channel_number=2, source_label="Snare")
+        await seed_output(
+            db, lst, name="Mon 1", position=0, mode="stereo", connector="XLR", notes="wedge"
+        )
+        await seed_output(db, lst, name="Mon 2", position=1)
         await db.commit()
         return str(job.id), str(lst.id)
 

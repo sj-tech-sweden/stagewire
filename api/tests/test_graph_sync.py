@@ -1,15 +1,10 @@
 import pytest
+from audio_seed import seed_channel, seed_list, seed_point
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
 
 from app.core import db as db_mod
-from app.domains.audio.models import (
-    AudioChannelPatch,
-    AudioDevice,
-    ChannelList,
-    ChannelPatchPoint,
-    ProductionJob,
-)
+from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.graph.backfill import backfill_job
 from app.main import app
 
 BASE = "/api/v1"
@@ -22,19 +17,16 @@ async def _seed():
         await db.flush()
         box = AudioDevice(job_id=job.id, name="Stagebox", device_type="analog_stagebox")
         db.add(box)
-        lst = ChannelList(job_id=job.id, name="FOH")
-        db.add(lst)
-        await db.flush()
+        await db.commit()
+        await backfill_job(db, job.id)  # the points refer to the device's graph node
+        lst = await seed_list(db, job.id, name="FOH")
         ids = []
         for number, label in ((1, "Kick"), (2, "Snare")):
-            ch = AudioChannelPatch(
-                channel_list_id=lst.id, channel_number=number, source_label=label
-            )
-            db.add(ch)
-            await db.flush()
-            db.add(ChannelPatchPoint(channel_id=ch.id, position=0, device_id=box.id))
+            ch = await seed_channel(db, lst, channel_number=number, source_label=label)
+            await seed_point(db, ch, position=0, device_id=box.id)
             ids.append(ch.id)
         await db.commit()
+        await backfill_job(db, job.id)
         return job.id, ids
 
 
@@ -49,7 +41,7 @@ async def _graph(client, headers, job_id):
 
 
 @pytest.mark.asyncio
-async def test_sync_refreshes_untouched_rows_and_is_a_no_op_when_nothing_changed(auth_headers):
+async def test_a_second_sync_changes_nothing_and_channels_edit_through_the_api(auth_headers):
     job_id, (kick, _) = await _seed()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await _sync(client, auth_headers, job_id)
@@ -61,82 +53,66 @@ async def test_sync_refreshes_untouched_rows_and_is_a_no_op_when_nothing_changed
             0,
         )
 
-        async with db_mod.SessionLocal() as db:
-            row = await db.get(AudioChannelPatch, kick)
-            row.source_label = "Kick In"
-            row.notes = "moved"
-            await db.commit()
-        changed = await _sync(client, auth_headers, job_id)
-        assert changed["updated"] == 1
-        devices = (await _graph(client, auth_headers, job_id))["devices"]
-        node = next(d for d in devices if d["name"] == "Kick In")
-        assert node["notes"] == "moved"
-        assert node["revision"] == 2 and node["graph_edited"] is False
-
-
-@pytest.mark.asyncio
-async def test_sync_keeps_graph_only_fields_and_unmirrored_graph_edits(auth_headers):
-    job_id, (kick, _) = await _seed()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        made = await client.post(
-            f"{BASE}/jobs/{job_id}/graph/power-nodes",
+        # the imported channel keeps its row id; an edit is one write to its node
+        channel = (
+            await client.get(f"{BASE}/jobs/{job_id}/channel-lists", headers=auth_headers)
+        ).json()[0]["channels"][0]
+        assert channel["id"] == str(kick)
+        res = await client.patch(
+            f"{BASE}/jobs/{job_id}/channels/{kick}",
             json={
-                "kind": "source",
-                "name": "Mains",
-                "feed_connector": "cee32_3p",
-                "rating_amps": 32,
+                "source_label": "Kick In",
+                "notes": "moved",
+                "expected_revision": channel["revision"],
             },
             headers=auth_headers,
         )
-        assert made.status_code == 201, made.text
-        await _sync(client, auth_headers, job_id)
+        assert res.status_code == 200, res.text
         devices = (await _graph(client, auth_headers, job_id))["devices"]
-        node = next(d for d in devices if d["name"] == "Kick")
-        power = next(d for d in devices if d["name"] == "Mains")
-        for row, changes, protected in (
-            (node, {"canvas_x_cm": 120}, False),
-            # a power node is graph-native now: nothing syncs it, so nothing needs protecting
-            (power, {"attributes": {"length_m": 8}}, False),
-        ):
-            res = await client.patch(
-                f"{BASE}/jobs/{job_id}/graph/devices/{row['id']}",
-                json={**changes, "expected_revision": row["revision"]},
-                headers=auth_headers,
-            )
-            assert res.json()["graph_edited"] is protected
-
-        async with db_mod.SessionLocal() as db:
-            row = await db.get(AudioChannelPatch, kick)
-            row.source_label = "Kick (legacy)"
-            await db.commit()
-        await _sync(client, auth_headers, job_id)
-        devices = (await _graph(client, auth_headers, job_id))["devices"]
-        by_name = {d["name"]: d for d in devices}
-        # channels are mirrored both ways: legacy-owned fields flow in, graph-only ones stay
-        assert by_name["Kick (legacy)"]["canvas_x_cm"] == 120
-        # a power node's own fields are mirrored; an attribute only the graph has (cable length)
-        # is protected and survives the sync
-        assert by_name["Mains"]["attributes"]["length_m"] == 8
+        node = next(d for d in devices if d["name"] == "Kick In")
+        assert node["notes"] == "moved" and node["graph_edited"] is False
 
 
 @pytest.mark.asyncio
-async def test_sync_removes_rows_deleted_from_the_legacy_tables(auth_headers):
+async def test_a_sync_keeps_what_only_the_graph_knows(auth_headers):
+    job_id, (kick, _) = await _seed()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await _sync(client, auth_headers, job_id)
+        node = next(
+            d
+            for d in (await _graph(client, auth_headers, job_id))["devices"]
+            if d["name"] == "Kick"
+        )
+        res = await client.patch(
+            f"{BASE}/jobs/{job_id}/graph/devices/{node['id']}",
+            json={"canvas_x_cm": 120, "expected_revision": node["revision"]},
+            headers=auth_headers,
+        )
+        assert res.status_code == 200, res.text
+        await _sync(client, auth_headers, job_id)
+        node = next(
+            d
+            for d in (await _graph(client, auth_headers, job_id))["devices"]
+            if d["name"] == "Kick"
+        )
+        assert node["canvas_x_cm"] == 120
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_channel_removes_its_node_and_its_edges(auth_headers):
     job_id, (_, snare) = await _seed()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await _sync(client, auth_headers, job_id)
-        before = await _graph(client, auth_headers, job_id)
-        assert len(before["edges"]) == 2
-
-        async with db_mod.SessionLocal() as db:
-            await db.execute(delete(ChannelPatchPoint).where(ChannelPatchPoint.channel_id == snare))
-            await db.execute(delete(AudioChannelPatch).where(AudioChannelPatch.id == snare))
-            await db.commit()
-        result = await _sync(client, auth_headers, job_id)
-        assert result["removed"] == 2
+        assert len((await _graph(client, auth_headers, job_id))["edges"]) == 2
+        channel = (
+            await client.get(f"{BASE}/jobs/{job_id}/channel-lists", headers=auth_headers)
+        ).json()[0]["channels"][1]
+        res = await client.delete(
+            f"{BASE}/jobs/{job_id}/channels/{snare}",
+            params={"expected_revision": channel["revision"]},
+            headers=auth_headers,
+        )
+        assert res.status_code == 204, res.text
         after = await _graph(client, auth_headers, job_id)
         assert "Snare" not in {d["name"] for d in after["devices"]}
         assert len(after["edges"]) == 1
-
-        async with db_mod.SessionLocal() as db:
-            left = await db.scalars(select(ChannelPatchPoint))
-            assert len(left.all()) >= 1
