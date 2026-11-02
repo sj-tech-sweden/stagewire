@@ -1669,3 +1669,17 @@ test('the inspector shows how much of a device\'s ports are in use', async ({ pa
   await expect(page.getByTestId('port-usage')).toBeVisible();
   await expect(page.getByTestId('port-usage-row').first()).toContainText(/\d+\/\d+/);
 });
+
+test('the device dialog says which weight and power value is in use', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Hints ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, { name: 'Amp H', device_type: 'other', weight_kg: 12 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
+  await page.getByTestId('edit-device').first().click();
+  // typed in here for the weight, nothing set for the power
+  await expect(page.locator('.q-field', { has: page.getByTestId('device-weight') })).toContainText(/value entered here is in use|värde som anges här/i);
+  await expect(page.locator('.q-field', { has: page.getByTestId('device-power') })).toContainText(/not set|inte satt|ej satt/i);
+});

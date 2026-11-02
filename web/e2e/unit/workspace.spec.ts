@@ -21,6 +21,7 @@ import {
   stereoPairPlan,
   mixerSpecsOf,
   portUsage,
+  physicalHintKey,
   mixerSlotsToAdd,
   stereoView,
   chainSteps,
@@ -632,4 +633,11 @@ test('port usage counts channels on a channel port and connections on a plain on
     { id: 'out2', direction: 'out', connector: 'speakon', capacity: 1, used: 0 },
   ]);
   expect(portUsage(null, edges)).toEqual([]);
+});
+
+test('the weight and power hints say whether the value comes from Stockwire or was typed in', () => {
+  const eff = { weight_kg_effective: 14, weight_source: 'stockwire', power_watts_effective: 60, power_source: 'manual' };
+  expect(physicalHintKey(eff, 'weight_kg_effective', 'weight_source')).toEqual({ key: 'devices.stockwireInUse', value: 14 });
+  expect(physicalHintKey(eff, 'power_watts_effective', 'power_source')).toEqual({ key: 'devices.manualInUse' });
+  expect(physicalHintKey(null, 'weight_kg_effective', 'weight_source')).toEqual({ key: 'devices.notSet' });
 });

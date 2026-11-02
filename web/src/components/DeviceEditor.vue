@@ -156,6 +156,7 @@
     <DeviceDialog
       v-model="dialogOpen"
       :node="editing"
+      :effective="editing ? graph.effective[editing.id] : null"
       @save="save"
     />
   </div>

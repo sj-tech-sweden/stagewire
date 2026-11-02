@@ -913,3 +913,14 @@ export function portUsage(device, edges) {
     };
   });
 }
+
+// Which value a device's weight or power really uses, for the hint under the field: the number
+// from the linked Stockwire product, the one typed in here, or none. `source` is what the server's
+// effective values report (stockwire | manual | null), so a value typed in the dialog is still
+// shown as the Stockwire one until it is saved.
+export function physicalHintKey(effective, valueKey, sourceKey) {
+  const source = effective?.[sourceKey];
+  if (source === 'stockwire') return { key: 'devices.stockwireInUse', value: effective[valueKey] };
+  if (source === 'manual') return { key: 'devices.manualInUse' };
+  return { key: 'devices.notSet' };
+}

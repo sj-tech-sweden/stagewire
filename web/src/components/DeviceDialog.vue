@@ -128,6 +128,8 @@
             outlined
             type="number"
             :label="t('devices.weight')"
+            :hint="hintFor('weight_kg_effective', 'weight_source')"
+            data-testid="device-weight"
           />
           <q-input
             v-model="form.power_w"
@@ -136,6 +138,8 @@
             outlined
             type="number"
             :label="t('devices.power')"
+            :hint="hintFor('power_watts_effective', 'power_source')"
+            data-testid="device-power"
           />
           <q-select
             v-model="form.power_inlet"
@@ -387,16 +391,23 @@ import {
   addConnector,
   deviceForm,
   fillFormFromSpecs,
+  physicalHintKey,
 } from '@/utils/workspace';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   node: { type: Object, default: null },
+  // the server's computed values for this device (weight/power and where they come from)
+  effective: { type: Object, default: null },
 });
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const $q = useQuasar();
 const form = reactive(deviceForm(null));
+function hintFor(valueKey, sourceKey) {
+  const { key, value } = physicalHintKey(props.effective, valueKey, sourceKey);
+  return t(key, { value });
+}
 const typeOptions = computed(() => DEVICE_TYPES.map((v) => ({ value: v, label: t(`devices.types.${v}`) })));
 
 // Picking a Stockwire product brings in its connectors, power inlet, weight and power (see
