@@ -5,6 +5,12 @@ export default {
     menu: 'Meny',
     navigation: 'Navigation',
     toggleDarkMode: 'Växla mörkt läge',
+    theme: {
+      label: 'Tema',
+      light: { label: 'Ljust', short: 'Ljust' },
+      dark: { label: 'Mörkt', short: 'Mörkt' },
+      auto: { label: 'Auto', short: 'Auto' },
+    },
     nav: {
       home: 'Hem',
       jobs: 'Produktionsjobb',

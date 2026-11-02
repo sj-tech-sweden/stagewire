@@ -30,6 +30,43 @@
           <q-btn-dropdown
             flat
             dense
+            no-caps
+            :icon="themeIcon"
+            :label="t(`app.theme.${mode}.short`)"
+            content-class="theme-menu"
+          >
+            <q-list dense>
+              <q-item
+                v-for="m in modes"
+                :key="m"
+                v-close-popup
+                clickable
+                :active="mode === m"
+                active-class="text-primary"
+                @click="setMode(m)"
+              >
+                <q-item-section
+                  avatar
+                  style="min-width: 32px"
+                >
+                  <q-icon :name="m === 'light' ? 'light_mode' : m === 'dark' ? 'dark_mode' : 'brightness_auto'" />
+                </q-item-section>
+                <q-item-section>{{ t(`app.theme.${m}.label`) }}</q-item-section>
+                <q-item-section
+                  v-if="mode === m"
+                  side
+                >
+                  <q-icon
+                    name="check"
+                    color="primary"
+                  />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-btn-dropdown>
+          <q-btn-dropdown
+            flat
+            dense
             icon="language"
             :label="t(`app.language.${locale}`)"
           >
@@ -97,6 +134,32 @@
                   <q-icon name="settings" />
                 </q-item-section>
                 <q-item-section>{{ t('settings.title') }}</q-item-section>
+              </q-item>
+              <q-item-label header>
+                {{ t('app.theme.label') }}
+              </q-item-label>
+              <q-item
+                v-for="m in modes"
+                :key="m"
+                v-close-popup
+                clickable
+                :active="mode === m"
+                active-class="text-primary"
+                @click="setMode(m)"
+              >
+                <q-item-section avatar>
+                  <q-icon :name="m === 'light' ? 'light_mode' : m === 'dark' ? 'dark_mode' : 'brightness_auto'" />
+                </q-item-section>
+                <q-item-section>{{ t(`app.theme.${m}.label`) }}</q-item-section>
+                <q-item-section
+                  v-if="mode === m"
+                  side
+                >
+                  <q-icon
+                    name="check"
+                    color="primary"
+                  />
+                </q-item-section>
               </q-item>
               <q-item
                 v-for="l in locales"
@@ -201,15 +264,26 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { SUPPORTED_LOCALES, setLocale } from '../i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useThemeStore } from '@/stores/theme'
+import { modeIcon } from '@/utils/theme'
 
 const { t, locale } = useI18n({ useScope: 'global' })
 const router = useRouter()
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 
 const locales = SUPPORTED_LOCALES
 const leftDrawerOpen = ref(false)
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 const userLabel = computed(() => authStore.user?.email || t('app.actions.login'))
+
+const modes = computed(() => themeStore.modes)
+const mode = computed(() => themeStore.mode)
+const themeIcon = computed(() => modeIcon(themeStore.mode))
+
+function setMode(m) {
+  themeStore.setMode(m)
+}
 
 function goSettings() {
   router.push('/settings')
