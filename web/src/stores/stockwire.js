@@ -7,6 +7,9 @@ export const useStockwireStore = defineStore('stockwire', {
     gearTypes: [],
     categories: [],
     integration: { enabled: false, base_url: '', has_api_key: false },
+    // Availability per job, keyed by jobId. Populated on demand by the availability panel
+    // and reused inline by the device dialog so the Stockwire call happens once per job.
+    jobAvailability: {},
   }),
   actions: {
     async loadCategoryMap() {
@@ -51,6 +54,18 @@ export const useStockwireStore = defineStore('stockwire', {
     async getProduct(productId) {
       const { data } = await api.get(`/stockwire/products/${productId}`);
       return data;
+    },
+    // Minimum Stockwire stock per product across the job's date range vs what the job needs.
+    async getJobAvailability(jobId) {
+      const { data } = await api.get(`/stockwire/jobs/${jobId}/availability`);
+      this.jobAvailability = { ...this.jobAvailability, [jobId]: data };
+      return data;
+    },
+    // Fetch availability for a job only if we don't already have it, so inline and panel
+    // views share one request.
+    async ensureJobAvailability(jobId) {
+      if (this.jobAvailability[jobId]) return this.jobAvailability[jobId];
+      return this.getJobAvailability(jobId);
     },
   },
 });

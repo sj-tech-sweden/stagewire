@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +10,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio.models import ProductionJob
 from app.domains.auth.deps import get_current_user
+from app.domains.graph.models import GraphDevice
 from app.domains.stockwire import client, schemas
 from app.domains.stockwire.config import (
     STAGEWIRE_RENTAL_INSTANCE_ID,
@@ -48,6 +50,105 @@ async def get_job(job_id: str, db=Depends(get_db)) -> dict:
     except Exception as exc:  # noqa: BLE001 - surface upstream errors to caller
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+def _min_availability(resp) -> int:
+    """Reduce a Stockwire availability response to the minimum available quantity.
+
+    The endpoint returns a per-day mapping (``YYYY-MM-DD`` -> quantity); we take the lowest
+    day so the job is flagged short if *any* day in the range is under-supplied. It also
+    tolerates a bare integer response. Anything unrecognised counts as zero available.
+    """
+    if isinstance(resp, dict):
+        nums = [v for v in resp.values() if isinstance(v, (int, float))]
+        return int(min(nums)) if nums else 0
+    if isinstance(resp, (int, float)):
+        return int(resp)
+    return 0
+
+
+@router.get(
+    "/jobs/{job_id}/availability",
+    response_model=schemas.JobAvailabilityResponse,
+)
+async def job_availability(job_id: str, db=Depends(get_db)) -> dict:
+    """Minimum available quantity per Stockwire product over the job's date range.
+
+    Every device in the job that is linked to a Stockwire product is counted as "needed";
+    for each product we ask Stockwire for the minimum available quantity across the job's
+    start/end dates and flag ``short`` when the job needs more than is available. Degrades
+    gracefully: ``configured`` is false when the integration is off, ``missing_dates`` when
+    the job has no date range to query against.
+    """
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found") from None
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_uuid))
+    job = result.scalars().first()
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+
+    cfg = await load_integration_config(db)
+    if not cfg.get("api_key"):
+        return {"configured": False, "items": []}
+
+    start = job.start_date.isoformat() if job.start_date else None
+    end = job.end_date.isoformat() if job.end_date else None
+    if not start or not end:
+        return {
+            "configured": True,
+            "missing_dates": True,
+            "start_date": start,
+            "end_date": end,
+            "items": [],
+        }
+
+    devices = (
+        (
+            await db.execute(
+                select(GraphDevice).where(
+                    GraphDevice.job_id == job.id,
+                    GraphDevice.stockwire_product_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    needed: dict[str, int] = {}
+    names: dict[str, str | None] = {}
+    for d in devices:
+        pid = str(d.stockwire_product_id)
+        needed[pid] = needed.get(pid, 0) + 1
+        names.setdefault(pid, d.stockwire_product_name)
+
+    sw = client.StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+
+    async def fetch(pid: str) -> schemas.JobProductAvailability:
+        try:
+            resp = await sw.get_availability(pid, start, end)
+            avail = _min_availability(resp)
+        except Exception:  # noqa: BLE001 - treat upstream errors as "cannot confirm stock"
+            avail = 0
+        return schemas.JobProductAvailability(
+            product_id=pid,
+            product_name=names.get(pid),
+            needed=needed[pid],
+            available_min=avail,
+            short=avail < needed[pid],
+        )
+
+    items = await asyncio.gather(*(fetch(pid) for pid in needed))
+    items.sort(key=lambda i: (i.product_name or "", i.product_id))
+    return {
+        "configured": True,
+        "missing_dates": False,
+        "start_date": start,
+        "end_date": end,
+        "items": items,
+    }
 
 
 @router.get("/products")

@@ -38,6 +38,26 @@
           v-model="form.event_date"
           :label="t('jobs.fieldEventDate')"
         />
+        <div class="row q-col-gutter-sm">
+          <q-input
+            v-model="form.start_date"
+            class="col-6"
+            dense
+            outlined
+            type="date"
+            :label="t('jobs.fieldStartDate')"
+            data-testid="job-start-date"
+          />
+          <q-input
+            v-model="form.end_date"
+            class="col-6"
+            dense
+            outlined
+            type="date"
+            :label="t('jobs.fieldEndDate')"
+            data-testid="job-end-date"
+          />
+        </div>
         <q-input
           v-model="form.notes"
           dense
@@ -197,7 +217,15 @@ const emit = defineEmits(['update:modelValue', 'saved']);
 const { t } = useI18n();
 const venues = useVenuesStore();
 const stockwire = useStockwireStore();
-const form = reactive({ title: '', venue_name: '', venue_id: null, event_date: '', notes: '' });
+const form = reactive({
+  title: '',
+  venue_name: '',
+  venue_id: null,
+  event_date: '',
+  start_date: '',
+  end_date: '',
+  notes: '',
+});
 const busy = ref(false);
 const pushing = ref(false);
 const message = ref('');
@@ -220,6 +248,8 @@ watch(
       venue_name: props.job?.venue_name || '',
       venue_id: props.job?.venue_id || null,
       event_date: props.job?.event_date || '',
+      start_date: props.job?.start_date || '',
+      end_date: props.job?.end_date || '',
       notes: props.job?.notes || '',
     });
     message.value = '';
@@ -234,6 +264,8 @@ async function save() {
       title: form.title,
       venue_name: form.venue_name,
       event_date: form.event_date || null,
+      start_date: form.start_date || null,
+      end_date: form.end_date || null,
       notes: form.notes,
     });
     if ((form.venue_id || null) !== (props.job?.venue_id || null)) {

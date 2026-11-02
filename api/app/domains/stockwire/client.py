@@ -349,6 +349,21 @@ class StockwireClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_availability(self, product_id: int | str, start_date: str, end_date: str) -> dict:
+        """Minimum available device quantity per day for an inclusive date range.
+
+        The upstream response is a mapping of ``YYYY-MM-DD`` -> available quantity; the caller
+        takes the minimum across the range. We request through the shared ``_client`` so the
+        mock-transport used in tests is honoured.
+        """
+        async with self._client() as client:
+            response = await client.get(
+                f"/api/v1/inventory/products/{product_id}/availability",
+                params={"start_date": start_date, "end_date": end_date},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def list_category_tree(self) -> list[dict]:
         async with httpx.AsyncClient(
             base_url=self.base_url, headers=self._headers(), timeout=15.0

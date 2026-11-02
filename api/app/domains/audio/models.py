@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -25,6 +26,10 @@ class ProductionJob(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     venue_name: Mapped[str] = mapped_column(String(255), default="")
     event_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Inclusive rental date range used for Stockwire availability checks. Stored as plain
+    # dates (not datetimes) because the Stockwire availability endpoint takes $date bounds.
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)

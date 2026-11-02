@@ -157,6 +157,7 @@
       v-model="dialogOpen"
       :node="editing"
       :effective="editing ? graph.effective[editing.id] : null"
+      :job-id="props.jobId"
       @save="save"
     />
   </div>

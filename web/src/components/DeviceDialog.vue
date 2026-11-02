@@ -18,6 +18,55 @@
           data-testid="device-from-stockwire"
           @update:model-value="importProduct"
         />
+        <div
+          v-if="canShowAvailability"
+          class="q-mt-xs"
+          data-testid="device-availability"
+        >
+          <div class="text-subtitle2">
+            {{ t('stockwire.availabilityForJob') }}
+          </div>
+          <div
+            v-if="availLoading"
+            class="text-caption text-grey-6"
+          >
+            …
+          </div>
+          <div
+            v-else-if="!availability || !availability.configured"
+            class="text-caption text-grey-6"
+          >
+            {{ t('stockwire.notConfigured') }}
+          </div>
+          <div
+            v-else-if="availability.missing_dates"
+            class="text-caption text-grey-6"
+          >
+            {{ t('stockwire.missingDates') }}
+          </div>
+          <div
+            v-else-if="availabilityItem"
+            class="row items-center q-gutter-xs"
+          >
+            <q-chip
+              :color="availabilityItem.short ? 'negative' : 'positive'"
+              text-color="white"
+              dense
+            >
+              {{ availabilityItem.short ? t('stockwire.shortBy', { n: availabilityItem.needed - availabilityItem.available_min }) : t('stockwire.inStock') }}
+            </q-chip>
+            <span class="text-caption">
+              {{ t('stockwire.available') }}: {{ availabilityItem.available_min }}
+              · {{ t('stockwire.needed') }}: {{ availabilityItem.needed }}
+            </span>
+          </div>
+          <div
+            v-else
+            class="text-caption text-grey-6"
+          >
+            {{ t('stockwire.availabilityEmpty') }}
+          </div>
+        </div>
         <div class="row q-col-gutter-sm">
           <q-input
             v-model="form.name"
@@ -378,6 +427,7 @@ import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { api } from '@/boot/api';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
+import { useStockwireStore } from '@/stores/stockwire';
 import {
   diagonalToMm,
   findPreset,
@@ -405,11 +455,44 @@ const props = defineProps({
   node: { type: Object, default: null },
   // the server's computed values for this device (weight/power and where they come from)
   effective: { type: Object, default: null },
+  // the job this device belongs to, used to show its Stockwire availability inline
+  jobId: { type: String, default: null },
 });
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const $q = useQuasar();
+const stockwire = useStockwireStore();
 const form = reactive(deviceForm(null));
+
+// Inline availability: when the device is linked to a Stockwire product and we know the job,
+// reuse the cached availability so the user sees stock vs need without opening the panel.
+const availLoading = ref(false);
+const availability = ref(null);
+const availabilityItem = computed(() => {
+  if (!availability.value?.items || !props.node) return null;
+  const pid = props.node.stockwire_product_id;
+  if (!pid) return null;
+  return (
+    availability.value.items.find((i) => String(i.product_id) === String(pid)) || null
+  );
+});
+const canShowAvailability = computed(
+  () => Boolean(props.jobId) && Boolean(props.node?.stockwire_product_id),
+);
+
+watch(
+  () => [props.modelValue, props.node?.stockwire_product_id, props.jobId],
+  async ([open, pid, jobId]) => {
+    availability.value = null;
+    if (!open || !jobId || !pid) return;
+    availLoading.value = true;
+    try {
+      availability.value = await stockwire.ensureJobAvailability(jobId);
+    } finally {
+      availLoading.value = false;
+    }
+  },
+);
 function hintFor(valueKey, sourceKey) {
   const { key, value } = physicalHintKey(props.effective, valueKey, sourceKey);
   return t(key, { value });
