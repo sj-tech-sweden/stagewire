@@ -552,6 +552,23 @@ export default {
     importWirelessWorkbench: "Importera Wireless Workbench (.shw)",
     wwbImportedUpdated: "Uppdaterade {count} av {total} rader",
     wwbImportUnmatched: "{count} rader matchade ingen kanal",
+    wwbMapTitle: "Matcha Wireless Workbench-kanaler",
+    wwbMapHint:
+      "Välj vilken Stagewire-kanal varje Wireless Workbench-kanal ska matchas mot. Lämna en rad tom för att hoppa över den.",
+    wwbMapWwbChannel: "Wireless Workbench-kanal",
+    wwbMapMapsTo: "Motsvarar",
+    wwbMapStagewireChannel: "Stagewire-kanal",
+    wwbMapFrequency: "Frekw.",
+    wwbMapGroup: "Grupp / kanal",
+    wwbMapNoChannels:
+      "Listan har inga trådlösa kanaler. Filen lagras ändå så att du kan exportera en round-trip senare.",
+    wwbMapConfirm: "Importera",
+    wwbMapCancel: "Avbryt",
+    wwbMapMatchedByName: "Rader markerade i grönt föreslås utifrån namn.",
+    wwbMapMatchedByOrder: "Rader markerade i blått föreslås utifrån ordning.",
+    wwbMapMatchedNone: "Inga automatiska träffar hittades.",
+    wwbMapNoMatch: "Ingen matchning (hoppa över)",
+    wwbParseFailed: "Kunde inte läsa Wireless Workbench-filen.",
     wirelessDetails: "Trådlös information",
     instrumentGroup: "Instrumentgrupp",
     instrumentGroups: {

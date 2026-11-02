@@ -2,6 +2,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement
 
+from app.domains.audio import wwb
+
 from .base import ConsoleExporter, ExportResult
 
 
@@ -15,9 +17,10 @@ def _gr_ch_strings(group: str | None, channel: str | None) -> tuple[str, str]:
 class WirelessWorkbenchExporter(ConsoleExporter):
     """A Wireless Workbench ``.shw`` show file of the list's wireless channels.
 
-    The coordinated channels carry the frequency (in kHz), group/channel and name so
-    the file can be opened back in WWB or re-imported into Stagewire. Only channels
-    with ``input_type == 'wireless'`` are included.
+    When the list has previously imported a ``.shw`` (attached to the channel list node
+    as ``wwb_show_file_content`` by the caller), that file is re-emitted with Stagewire's
+    coordinated frequencies written back into it, so it round-trips through WWB. Otherwise
+    a minimal ``.shw`` is generated from the channels.
     """
 
     key = "wireless_workbench"
@@ -30,6 +33,23 @@ class WirelessWorkbenchExporter(ConsoleExporter):
     file_extension = ".shw"
 
     def export(self, channel_list, channels, outputs) -> ExportResult:
+        template = getattr(channel_list, "wwb_show_file_content", None)
+        if template:
+            try:
+                content = wwb.apply_stagewire_to_show_file(template, channels).encode("utf-8")
+                name = (channel_list.name or "channel-list").replace(" ", "_")
+                return ExportResult(
+                    content=content,
+                    filename=f"{name}_wireless.shw",
+                    media_type=self.media_type,
+                )
+            except ET.ParseError:
+                # fall through to a generated file if the stored template is corrupt
+                pass
+
+        return self._build_from_scratch(channel_list, channels)
+
+    def _build_from_scratch(self, channel_list, channels) -> ExportResult:
         wireless = [c for c in channels if getattr(c, "input_type", None) == "wireless"]
         wireless = sorted(wireless, key=lambda c: c.channel_number or 0)
 
@@ -41,7 +61,7 @@ class WirelessWorkbenchExporter(ConsoleExporter):
                 "source": "Stagewire",
                 "version": "1.0",
                 "time": now.strftime("%H:%M:%S"),
-                "appl_version": "Stagewire",
+                "appl_version": "7.9.0.104",
             },
         )
         props = SubElement(show, "show_properties", {"version": "1.0"})

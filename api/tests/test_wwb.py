@@ -35,6 +35,38 @@ SHW_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+SHW_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<show version="1.0" appl_version="7.9.0.104">
+  <inventory>
+    <device>
+      <model>SLXD4D</model>
+      <band>H56</band>
+      <channel>
+        <channel_name><![CDATA[Vox]]></channel_name>
+        <frequency type="3">559825</frequency>
+        <gr_ch>G:-- Ch:--</gr_ch>
+        <group_channel>--,--</group_channel>
+      </channel>
+    </device>
+  </inventory>
+  <coordination_info>
+    <channel_management>
+      <channels>
+        <active_channel_list>
+          <channel>
+            <channel_name><![CDATA[Vox]]></channel_name>
+            <frequency type="3">559825</frequency>
+            <gr_ch>G:-- Ch:--</gr_ch>
+            <group_channel>--,--</group_channel>
+          </channel>
+        </active_channel_list>
+      </channels>
+    </channel_management>
+  </coordination_info>
+</show>
+"""
+
+
 async def _auth_client(auth_headers: dict) -> AsyncClient:
     return AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", headers=auth_headers
@@ -144,6 +176,81 @@ async def test_export_wwb_produces_shw(auth_headers: dict) -> None:
     assert "G:50 Ch:12" in text
 
 
+async def test_parse_endpoint_returns_preview_with_suggestions(auth_headers: dict) -> None:
+    client = await _auth_client(auth_headers)
+    job = await client.post(f"{BASE}/jobs", json={"title": "WWBp", "venue_name": "V"})
+    job_id = job.json()["id"]
+    cl = await client.post(
+        f"{BASE}/jobs/{job_id}/channel-lists", json={"name": "FOH", "position": 0}
+    )
+    list_id = cl.json()["id"]
+    await client.post(
+        f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels",
+        json={
+            "channel_number": 1,
+            "source_label": "Vox",
+            "input_type": "wireless",
+            "wireless_pack": "Shure SLXD4D",
+        },
+    )
+    resp = await client.post(
+        f"{BASE}/jobs/{job_id}/graph/lists/{list_id}/wireless-workbench/parse",
+        files={"file": ("show.shw", SHW_SAMPLE, "application/xml")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["rows"]) == 2
+    assert body["matched_by"] == "name"
+    vox_row = next(r for r in body["rows"] if r["name"] == "Vox")
+    assert vox_row["suggested_channel_id"] is not None
+    keys_row = next(r for r in body["rows"] if r["name"] == "Keys")
+    assert keys_row["suggested_channel_id"] is None  # no matching Stagewire channel
+
+
+async def test_import_and_export_round_trips_template(auth_headers: dict) -> None:
+    client = await _auth_client(auth_headers)
+    job = await client.post(f"{BASE}/jobs", json={"title": "RTr", "venue_name": "V"})
+    job_id = job.json()["id"]
+    cl = await client.post(
+        f"{BASE}/jobs/{job_id}/channel-lists", json={"name": "FOH", "position": 0}
+    )
+    list_id = cl.json()["id"]
+    channel = await client.post(
+        f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels",
+        json={
+            "channel_number": 1,
+            "source_label": "Vox",
+            "input_type": "wireless",
+            "wireless_pack": "Shure SLXD4D",
+        },
+    )
+    channel_id = channel.json()["id"]
+
+    # Import the .shw, storing the template.
+    imp = await client.post(
+        f"{BASE}/jobs/{job_id}/graph/lists/{list_id}/wireless-workbench/import",
+        files={"file": ("show.shw", SHW_TEMPLATE, "application/xml")},
+    )
+    assert imp.status_code == 200, imp.text
+    assert imp.json()["updated"] == 1
+
+    # Export should round-trip the imported template (its <model> is preserved, proving it
+    # is the stored file and not a from-scratch regeneration) with Stagewire's frequency.
+    exp = await client.get(
+        f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/export",
+        params={"plugin": "wireless_workbench"},
+    )
+    assert exp.status_code == 200, exp.text
+    text = exp.content.decode("utf-8")
+    assert "<model>SLXD4D</model>" in text  # original device preserved
+    assert "559825" in text  # matched "Vox" frequency written back
+
+    # The Stagewire channel itself holds the imported frequency.
+    reloaded = await client.get(f"{BASE}/jobs/{job_id}/channel-lists/{list_id}/channels")
+    updated = next(c for c in reloaded.json() if c["id"] == channel_id)
+    assert updated["wireless_frequency_mhz"] == 559.825
+
+
 def test_parse_mhz_handles_units_and_european_decimals() -> None:
     assert wwb.parse_mhz("518.125 MHz") == 518.125
     assert wwb.parse_mhz("606,250") == 606.25
@@ -236,10 +343,11 @@ def test_match_wireless_rows_matches_by_name_and_reports_unmatched() -> None:
         _channel(3, "Shure SLXD4D", "Bass", input_type="microphone"),  # ignored
     ]
     rows = wwb.parse_wwb_show_file(SHW_SAMPLE)  # names: Vox, Keys
-    matched, unmatched = wwb.match_wireless_rows(channels, rows)
+    matched, unmatched, method = wwb.match_wireless_rows(channels, rows)
     assert len(matched) == 2
     assert {m[0].id for m in matched} == {1, 2}
     assert unmatched == []
+    assert method == "name"
 
 
 def test_match_wireless_rows_falls_back_to_number_and_source() -> None:
@@ -252,9 +360,19 @@ def test_match_wireless_rows_falls_back_to_number_and_source() -> None:
             "source_label": "Vox",
         }
     ]
-    matched, unmatched = wwb.match_wireless_rows(channels, rows)
+    matched, unmatched, method = wwb.match_wireless_rows(channels, rows)
     assert len(matched) == 1
     assert matched[0][0].id == 1
+
+
+def test_match_wireless_rows_positional_fallback_when_names_blank() -> None:
+    # WWB channel names ("Vox"/"Keys") match no Stagewire channel, so the matcher falls
+    # back to positional order.
+    channels = [_channel(1, "", "Alpha"), _channel(2, "", "Beta")]
+    rows = wwb.parse_wwb_show_file(SHW_SAMPLE)
+    matched, unmatched, method = wwb.match_wireless_rows(channels, rows)
+    assert len(matched) == 2
+    assert method == "order"
 
 
 def test_wireless_frequency_summary() -> None:

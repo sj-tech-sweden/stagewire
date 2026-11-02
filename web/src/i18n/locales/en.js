@@ -551,6 +551,23 @@ export default {
     importWirelessWorkbench: "Import Wireless Workbench (.shw)",
     wwbImportedUpdated: "Updated {count} of {total} rows",
     wwbImportUnmatched: "{count} rows did not match a channel",
+    wwbMapTitle: "Match Wireless Workbench channels",
+    wwbMapHint:
+      "Choose which Stagewire channel each Wireless Workbench channel matches. Leave a row blank to skip it.",
+    wwbMapWwbChannel: "Wireless Workbench channel",
+    wwbMapMapsTo: "Maps to",
+    wwbMapStagewireChannel: "Stagewire channel",
+    wwbMapFrequency: "Freq",
+    wwbMapGroup: "Group / channel",
+    wwbMapNoChannels:
+      "This list has no wireless channels. The file is still stored so you can export a round-trip later.",
+    wwbMapConfirm: "Import",
+    wwbMapCancel: "Cancel",
+    wwbMapMatchedByName: "Rows highlighted in green are suggested by name.",
+    wwbMapMatchedByOrder: "Rows highlighted in blue are suggested by order.",
+    wwbMapMatchedNone: "No automatic matches were found.",
+    wwbMapNoMatch: "No match (skip)",
+    wwbParseFailed: "Could not read the Wireless Workbench file.",
     wirelessDetails: "Wireless details",
     instrumentGroup: "Instrument group",
     instrumentGroups: {

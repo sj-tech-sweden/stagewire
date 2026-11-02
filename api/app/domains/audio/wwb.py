@@ -155,20 +155,27 @@ def parse_wwb_show_file(xml_text: str) -> list[dict]:
     return rows
 
 
-def match_wireless_rows(channels: list, rows: list[dict]) -> tuple[list[tuple], list[dict]]:
+def match_wireless_rows(
+    channels: list, rows: list[dict], positional: bool = True
+) -> tuple[list[tuple], list[dict], str]:
     """Match parsed WWB rows to existing wireless channels.
 
-    Returns ``(matched, unmatched)`` where ``matched`` is a list of
-    ``(channel, row)`` for channels whose ``input_type == 'wireless'`` and whose
-    name (pack or source label) matches a row's ``name`` or ``wireless_pack``,
-    falling back to channel number + source. ``unmatched`` is the list of rows that
-    matched no channel.
+    Returns ``(matched, unmatched, method)`` where ``matched`` is a list of
+    ``(channel, row)``. Channels whose ``input_type == 'wireless'`` are matched by
+    name (pack or source label, or the row's device model) and, when a row carries a
+    channel number, by number + source.
+
+    WWB show files frequently leave ``channel_name`` at its default ("Shure"), so a
+    name match finds nothing. When no row matches by name we fall back to a positional
+    match (the n-th tuned channel to the n-th wireless channel by channel number),
+    which ``method`` reports as ``"order"`` so the caller can warn the user to verify.
+    ``method`` is ``"name"`` when at least one row matched by name/number, ``"order"``
+    when only the positional fallback applied, and ``"none"`` when nothing matched.
     """
+    wireless = [c for c in channels if getattr(c, "input_type", None) == "wireless"]
     by_name: dict[str, list] = {}
     by_number_source: dict[tuple, list] = {}
-    for channel in channels:
-        if getattr(channel, "input_type", None) != "wireless":
-            continue
+    for channel in wireless:
         for field in ("wireless_pack", "source_label"):
             key = (getattr(channel, field, None) or "").strip().lower()
             if key:
@@ -180,7 +187,9 @@ def match_wireless_rows(channels: list, rows: list[dict]) -> tuple[list[tuple], 
 
     matched: list[tuple] = []
     seen_channel_ids = set()
+    seen_row_ids = set()
     unmatched: list[dict] = []
+    matched_by_name = False
     for row in rows:
         candidates: list = []
         for field in ("name", "wireless_pack"):
@@ -197,8 +206,23 @@ def match_wireless_rows(channels: list, rows: list[dict]) -> tuple[list[tuple], 
             unmatched.append(row)
             continue
         seen_channel_ids.add(id(channel))
+        seen_row_ids.add(id(row))
         matched.append((channel, row))
-    return matched, unmatched
+        matched_by_name = True
+
+    if positional and not matched_by_name and unmatched:
+        wireless_sorted = sorted(wireless, key=lambda c: getattr(c, "channel_number", 0) or 0)
+        rows_sorted = sorted(unmatched, key=lambda r: r.get("channel_number") or 0)
+        for channel, row in zip(wireless_sorted, rows_sorted, strict=False):
+            if id(channel) in seen_channel_ids:
+                continue
+            seen_channel_ids.add(id(channel))
+            seen_row_ids.add(id(row))
+            matched.append((channel, row))
+
+    unmatched = [r for r in unmatched if id(r) not in seen_row_ids]
+    method = "none" if not matched else ("name" if matched_by_name else "order")
+    return matched, unmatched, method
 
 
 def wireless_frequency_summary(mhz: float | None, group: str | None, channel: str | None) -> str:
@@ -209,3 +233,77 @@ def wireless_frequency_summary(mhz: float | None, group: str | None, channel: st
     if group or channel:
         parts.append("/".join(p for p in (group, channel) if p))
     return " · ".join(parts)
+
+
+def _gr_ch_markup(group: str | None, channel: str | None) -> tuple[str, str]:
+    """Render WWB group/channel markers for an export, using the unset form when empty."""
+    if group and channel:
+        return f"G:{group} Ch:{channel}", f"{group},{channel}"
+    return "G:-- Ch:--", "--,--"
+
+
+def _set_text(element: Element, tag: str, value: str) -> None:
+    """Set (creating if absent) a child element's text under ``element``."""
+    child = element.find(tag)
+    if child is None:
+        child = ET.SubElement(element, tag)
+    child.text = value
+
+
+def _channel_display_name(channel) -> str:
+    return (
+        getattr(channel, "source_label", None)
+        or getattr(channel, "wireless_pack", None)
+        or f"Channel {getattr(channel, 'channel_number', None) or '?'}"
+    )
+
+
+def apply_stagewire_to_show_file(template_xml: str, channels: list) -> str:
+    """Return ``template_xml`` with Stagewire's coordinated frequencies written back.
+
+    The tuned channels are matched to the show file's channels (by name, falling back to
+    order) and each show-file channel has its ``<frequency>``/``<channel_name>``/group
+    markers, plus the parallel ``coordinated_data_root/mic_channels/freq_entry`` values,
+    updated. Channels that do not match a Stagewire wireless channel are left untouched.
+    """
+    root = ET.fromstring(template_xml)
+
+    device_channels = [c for c in root.iter("channel") if c.find("frequency") is not None]
+    freq_entries = root.findall(".//coordinated_data_root/mic_channels/freq_entry")
+    rows = parse_wwb_show_file(template_xml)
+
+    matched, _unmatched, _method = match_wireless_rows(channels, rows)
+    row_to_channel = {id(row): channel for channel, row in matched}
+
+    for index, element in enumerate(device_channels):
+        row = rows[index] if index < len(rows) else None
+        channel = row_to_channel.get(id(row)) if row is not None else None
+        if channel is None:
+            continue
+        mhz = getattr(channel, "wireless_frequency_mhz", None)
+        khz = int(round(mhz * 1000)) if mhz is not None else 0
+        _set_text(element, "frequency", str(khz))
+        _set_text(element, "channel_name", _channel_display_name(channel))
+        gr_ch, group_channel = _gr_ch_markup(
+            getattr(channel, "wireless_group", None),
+            getattr(channel, "wireless_channel", None),
+        )
+        _set_text(element, "gr_ch", gr_ch)
+        _set_text(element, "group_channel", group_channel)
+
+    for index, entry in enumerate(freq_entries):
+        row = rows[index] if index < len(rows) else None
+        channel = row_to_channel.get(id(row)) if row is not None else None
+        if channel is None:
+            continue
+        mhz = getattr(channel, "wireless_frequency_mhz", None)
+        khz = int(round(mhz * 1000)) if mhz is not None else 0
+        _set_text(entry, "value", str(khz))
+        gr_ch, _group_channel = _gr_ch_markup(
+            getattr(channel, "wireless_group", None),
+            getattr(channel, "wireless_channel", None),
+        )
+        _set_text(entry, "gr_ch", gr_ch)
+        _set_text(entry, "source_name", _channel_display_name(channel))
+
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<show version="1.0" appl_version="7.9.0.104">
+  <inventory>
+    <device>
+      <model>SLXD4D</model>
+      <band>H56</band>
+      <channel>
+        <channel_name><![CDATA[Vox]]></channel_name>
+        <frequency type="3">559825</frequency>
+        <gr_ch>G:-- Ch:--</gr_ch>
+        <group_channel>--,--</group_channel>
+      </channel>
+    </device>
+  </inventory>
+  <coordination_info>
+    <channel_management>
+      <channels>
+        <active_channel_list>
+          <channel>
+            <channel_name><![CDATA[Vox]]></channel_name>
+            <frequency type="3">559825</frequency>
+            <gr_ch>G:-- Ch:--</gr_ch>
+            <group_channel>--,--</group_channel>
+          </channel>
+        </active_channel_list>
+      </channels>
+    </channel_management>
+  </coordination_info>
+</show>

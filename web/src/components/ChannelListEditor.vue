@@ -113,7 +113,7 @@
           icon="file_upload"
           :label="t('channels.importWirelessWorkbench')"
           data-testid="import-wwb"
-          :loading="wwbImporting"
+          :loading="wwbImporting || wwbParsing"
           @click="wwbFileInput?.click()"
         />
         <input
@@ -721,6 +721,105 @@
       "
       @save="saveChain"
     />
+
+    <!-- Two-step Wireless Workbench import: the parsed rows are shown with a per-row select so
+         the user can pick which Stagewire channel each WWB row maps to before importing. -->
+    <q-dialog v-model="wwbParseOpen" persistent>
+      <q-card style="width: 720px; max-width: 95vw">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">{{ t("channels.wwbMapTitle") }}</div>
+          <q-space />
+          <q-btn
+            icon="close"
+            flat
+            round
+            dense
+            @click="wwbParseOpen = false"
+          />
+        </q-card-section>
+        <q-card-section>
+          <div class="text-caption text-grey-7 q-mb-sm">
+            {{ t("channels.wwbMapHint") }}
+          </div>
+          <q-banner
+            v-if="wwbParseChannels.length === 0"
+            dense
+            class="bg-grey-2 text-grey-8 q-mb-sm"
+          >
+            {{ t("channels.wwbMapNoChannels") }}
+          </q-banner>
+          <q-banner
+            v-else-if="wwbParseMatchedBy === 'name'"
+            dense
+            class="bg-green-1 text-green-9 q-mb-sm"
+          >
+            {{ t("channels.wwbMapMatchedByName") }}
+          </q-banner>
+          <q-banner
+            v-else-if="wwbParseMatchedBy === 'order'"
+            dense
+            class="bg-blue-1 text-blue-9 q-mb-sm"
+          >
+            {{ t("channels.wwbMapMatchedByOrder") }}
+          </q-banner>
+          <q-banner v-else dense class="bg-grey-2 text-grey-8 q-mb-sm">
+            {{ t("channels.wwbMapMatchedNone") }}
+          </q-banner>
+          <q-list separator>
+            <q-item
+              v-for="(row, idx) in wwbParseRows"
+              :key="row.index"
+              data-testid="wwb-map-row"
+            >
+              <q-item-section>
+                <div class="text-subtitle2">
+                  {{ row.name || `row ${row.index + 1}` }}
+                </div>
+                <div class="text-caption text-grey-6">
+                  {{ wwbRowHint(row) }}<span
+                    v-if="wwbRowGroup(row)"
+                    >· {{ wwbRowGroup(row) }}</span
+                  >
+                </div>
+              </q-item-section>
+              <q-item-section
+                side
+                style="min-width: 240px; max-width: 340px"
+              >
+                <q-select
+                  :model-value="wwbMapping[idx]?.channelId"
+                  :options="wwbChannelOptions(idx)"
+                  :label="t('channels.wwbMapStagewireChannel')"
+                  outlined
+                  dense
+                  clearable
+                  emit-value
+                  map-options
+                  :data-testid="`wwb-map-select-${row.index}`"
+                  @update:model-value="(v) => (wwbMapping[idx].channelId = v)"
+                />
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            flat
+            :label="t('channels.wwbMapCancel')"
+            color="primary"
+            @click="wwbParseOpen = false"
+          />
+          <q-btn
+            :loading="wwbImporting"
+            :label="t('channels.wwbMapConfirm')"
+            color="primary"
+            unelevated
+            data-testid="wwb-map-confirm"
+            @click="confirmWwbImport"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -870,14 +969,84 @@ const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
 
 // Import a Shure Wireless Workbench .shw show file onto the current list's wireless
-// channels. The backend matches rows to channels and returns how many were updated.
+// channels. Two steps: first the file is parsed and the backend suggests a channel
+// per row, then the user confirms (and can change) the mapping in a dialog. The
+// confirmed mapping (or an empty one) is sent to the import endpoint, which also
+// stores the file so it can be re-exported as a round-trip later.
+const wwbParsing = ref(false);
+const wwbParseOpen = ref(false);
+const wwbParseRows = ref([]);
+const wwbParseChannels = ref([]);
+const wwbParseMatchedBy = ref("none");
+const wwbParseFile = ref(null);
+const wwbMapping = ref([]);
+
 async function onWwbFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  wwbImporting.value = true;
+  wwbParsing.value = true;
   try {
     const body = new FormData();
     body.append("file", file);
+    const { data } = await api.post(
+      `/jobs/${props.jobId}/graph/lists/${listId.value}/wireless-workbench/parse`,
+      body,
+    );
+    wwbParseRows.value = data.rows;
+    wwbParseChannels.value = data.channels;
+    wwbParseMatchedBy.value = data.matched_by || "none";
+    wwbParseFile.value = file;
+    // Start each row on the backend's suggested channel; the user can change it.
+    wwbMapping.value = data.rows.map((r) => ({
+      row: r.index,
+      channelId: r.suggested_channel_id || null,
+    }));
+    wwbParseOpen.value = true;
+  } catch (err) {
+    $q.notify({
+      type: "negative",
+      message: t("channels.wwbParseFailed"),
+    });
+  } finally {
+    wwbParsing.value = false;
+    event.target.value = "";
+  }
+}
+
+// The Stagewire channel options for a row's select, hiding any channel already picked by
+// another row so a single channel is never mapped from two Wireless Workbench rows.
+function wwbChannelOptions(rowIndex) {
+  const taken = new Set(
+    wwbMapping.value
+      .filter((m, i) => i !== rowIndex && m.channelId)
+      .map((m) => m.channelId),
+  );
+  return wwbParseChannels.value.map((c) => ({
+    value: c.id,
+    label: `#${c.channel_number} ${c.source_label || c.wireless_pack || t("channels.channel")}`,
+    disable: taken.has(c.id),
+  }));
+}
+
+const wwbRowHint = (row) =>
+  row.wireless_frequency_mhz != null
+    ? `${t("channels.wwbMapFrequency")} ${row.wireless_frequency_mhz} MHz`
+    : "";
+const wwbRowGroup = (row) =>
+  row.wireless_group && row.wireless_channel
+    ? `${row.wireless_group}/${row.wireless_channel}`
+    : "";
+
+async function confirmWwbImport() {
+  if (!wwbParseFile.value) return;
+  wwbImporting.value = true;
+  try {
+    const mapping = wwbMapping.value
+      .filter((m) => m.channelId)
+      .map((m) => ({ row: m.row, channel_id: m.channelId }));
+    const body = new FormData();
+    body.append("file", wwbParseFile.value);
+    body.append("mapping", JSON.stringify(mapping));
     const { data } = await api.post(
       `/jobs/${props.jobId}/graph/lists/${listId.value}/wireless-workbench/import`,
       body,
@@ -894,11 +1063,12 @@ async function onWwbFile(event) {
       );
     }
     $q.notify({ type: "positive", message: parts.join(" · ") });
+    wwbParseOpen.value = false;
   } catch (err) {
     $q.notify({ type: "negative", message: apiErrorText(err) });
   } finally {
     wwbImporting.value = false;
-    event.target.value = "";
+    wwbParseFile.value = null;
   }
 }
 // Ticking "stereo" pairs the channel with its odd/even neighbour (see stereoPairPlan); unticking

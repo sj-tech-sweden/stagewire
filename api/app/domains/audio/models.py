@@ -64,3 +64,26 @@ class StockwireRequirementLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
+
+
+class WwbShowFile(Base):
+    """The Shure Wireless Workbench ``.shw`` show file imported for a channel list.
+
+    Kept so the same file can be re-exported with Stagewire's coordinated frequencies
+    written back into it (round-tripping through WWB). Keyed one-to-one by the channel
+    list's graph node id.
+    """
+
+    __tablename__ = "wwb_show_files"
+
+    list_node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("graph_devices.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now()
+    )
