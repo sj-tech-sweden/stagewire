@@ -5,7 +5,6 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
@@ -1033,6 +1032,7 @@ async def create_device(
     await _check_device_lists(db, job_id, data)
     device = await service.create_device(db, job_id, data)
     read = await _device_read(db, device)
+    await audio_native.publish_nodes(db, job_id, [device.node_id])
     await publish_job_event(job_id, "device.upsert", read)
     return read
 
@@ -1064,6 +1064,7 @@ async def update_device(
     await _check_device_lists(db, job_id, data)
     device = await service.update_device(db, device, data)
     read = await _device_read(db, device)
+    await audio_native.publish_nodes(db, job_id, [device.node_id])
     await publish_job_event(job_id, "device.upsert", read)
     return read
 
@@ -1086,7 +1087,8 @@ async def delete_device(
             status.HTTP_409_CONFLICT,
             "Move or delete the patch points on this device before removing it",
         )
-    await service.delete_device(db, device)
+    removed = await service.delete_device(db, device)
+    await audio_native.publish_removed(job_id, removed)
     await publish_job_event(job_id, "device.delete", {"id": str(device_id)})
 
 
@@ -1103,7 +1105,10 @@ class StockwireSyncResult(BaseModel):
 
 
 def _desired_stockwire_items(
-    job: ProductionJob, video_inputs: list | None = None, channel_lists: list | None = None
+    job: ProductionJob,
+    video_inputs: list | None = None,
+    channel_lists: list | None = None,
+    devices: list | None = None,
 ) -> tuple[dict[int, dict], list[str]]:
     """Catalog products used in the job, one entry per product with its total quantity.
 
@@ -1153,7 +1158,7 @@ def _desired_stockwire_items(
             f"Video in {video_input.input_number} {video_input.source_label or ''}".strip(),
             freetext_name=video_input.stockwire_product_name,
         )
-    for device in job.devices:
+    for device in job.devices if devices is None else devices:
         put(
             device.stockwire_product_id,
             device.stockwire_product_name or device.name,
@@ -1180,13 +1185,7 @@ async def sync_job_to_stockwire(
     cfg = await load_integration_config(db)
     if not cfg.get("api_key"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Stockwire integration is not configured")
-    result = await db.execute(
-        select(ProductionJob)
-        .options(
-            selectinload(ProductionJob.devices),
-        )
-        .where(ProductionJob.id == job_id)
-    )
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_id))
     job = result.scalars().first()
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
@@ -1199,7 +1198,10 @@ async def sync_job_to_stockwire(
     target = job.stockwire_job_id
     video_inputs = [vin for vlist in await load_video_lists(db, job.id) for vin in vlist.inputs]
     desired, freetext = _desired_stockwire_items(
-        job, video_inputs, await service.list_channel_lists(db, job.id)
+        job,
+        video_inputs,
+        await service.list_channel_lists(db, job.id),
+        await service.list_devices(db, job.id),
     )
     sw = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
 

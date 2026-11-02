@@ -4,10 +4,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import (
-    AudioDevice,
     ProductionJob,
 )
-from app.domains.graph import audio_native, plot_native
+from app.domains.graph import audio_native, devices_native, plot_native
 
 _POINT_STRING_FIELDS = {"connector", "patch_label", "notes", "point_type"}
 
@@ -57,28 +56,6 @@ async def list_jobs(
 async def get_job(db: AsyncSession, job_id: UUID) -> ProductionJob | None:
     return await db.get(ProductionJob, job_id)
 
-
-DEVICE_CLEARABLE_KEYS = {
-    "weight_kg",
-    "power_watts",
-    "fixture_type",
-    "channel_mode",
-    "footprint_channels",
-    "default_gel",
-    "sensor_width_mm",
-    "focal_min_mm",
-    "focal_max_mm",
-    "max_distance_m",
-    "throw_ratio_min",
-    "throw_ratio_max",
-    "image_aspect_ratio",
-    "sound_list_id",
-    "video_list_id",
-    "stockwire_product_id",
-    "stockwire_product_name",
-    "input_override",
-    "output_override",
-}
 
 PLOT_CLEARABLE_KEYS = {
     "linked_lens_device_id",
@@ -277,33 +254,27 @@ async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID):
     return deleted
 
 
-async def create_device(db: AsyncSession, job_id: UUID, data: dict) -> AudioDevice:
-    device = AudioDevice(job_id=job_id, **data)
-    db.add(device)
+# Devices are graph nodes (graph/devices_native.py); these return objects shaped like the old rows.
+
+
+async def create_device(db: AsyncSession, job_id: UUID, data: dict):
+    device = await devices_native.create_device(db, job_id, data)
     await db.commit()
-    await db.refresh(device)
     return device
 
 
-async def list_devices(db: AsyncSession, job_id: UUID) -> list[AudioDevice]:
-    result = await db.execute(
-        select(AudioDevice).where(AudioDevice.job_id == job_id).order_by(AudioDevice.position)
-    )
-    return list(result.scalars().all())
+async def list_devices(db: AsyncSession, job_id: UUID) -> list:
+    return await devices_native.load_devices(db, job_id)
 
 
-async def get_device(db: AsyncSession, device_id: UUID) -> AudioDevice | None:
-    result = await db.execute(select(AudioDevice).where(AudioDevice.id == device_id))
-    return result.scalars().first()
+async def get_device(db: AsyncSession, device_id: UUID):
+    return await devices_native.get_device(db, device_id)
 
 
-async def update_device(db: AsyncSession, device: AudioDevice, data: dict) -> AudioDevice:
-    for key, value in data.items():
-        if value is not None or key in DEVICE_CLEARABLE_KEYS:
-            setattr(device, key, value)
+async def update_device(db: AsyncSession, device, data: dict):
+    updated = await devices_native.update_device(db, device.id, data, device.job_id)
     await db.commit()
-    await db.refresh(device)
-    return device
+    return updated
 
 
 async def job_io_totals(db: AsyncSession, job_id: UUID) -> tuple[int, int]:
@@ -314,6 +285,8 @@ async def list_io_totals(db: AsyncSession, list_id: UUID) -> tuple[int, int]:
     return await audio_native.list_totals(db, list_id)
 
 
-async def delete_device(db: AsyncSession, device: AudioDevice) -> None:
-    await db.delete(device)
+async def delete_device(db: AsyncSession, device):
+    """The ids of the node and edges removed (for the caller to publish)."""
+    removed = await devices_native.delete_device(db, device.id, device.job_id)
     await db.commit()
+    return removed

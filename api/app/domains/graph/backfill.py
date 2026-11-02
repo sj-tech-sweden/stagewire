@@ -1,48 +1,15 @@
 import asyncio
-import copy
 import uuid
 from dataclasses import dataclass, field
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import (
-    AudioDevice,
-)
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 
 FAN_OUT = 64
 
-CHANNEL_FIELDS = (
-    "channel_number",
-    "input_type",
-    "connector",
-    "device",
-    "stand_type",
-    "instrument_group",
-    "performer_name",
-    "wireless_pack",
-    "wireless_frequency",
-    "phantom_power",
-    "stereo",
-    "stereo_channel",
-    "color_code",
-    "stockwire_asset_id",
-    "stand_product_id",
-    "stand_product_name",
-)
-OUTPUT_FIELDS = ("mode", "connector", "color_code")
-
-DEVICE_SPEC_FIELDS = (
-    "sensor_width_mm",
-    "focal_min_mm",
-    "focal_max_mm",
-    "max_distance_m",
-    "throw_ratio_min",
-    "throw_ratio_max",
-    "image_aspect_ratio",
-)
 FIXTURE_ATTRS = (
     "universe",
     "dmx_address",
@@ -52,38 +19,6 @@ FIXTURE_ATTRS = (
     "location",
     "gel",
     "purpose",
-)
-LOAD_ATTRS = ("rigging_point_id", "power_node_id", "power_connector")
-FIXTURE_ONLY_ATTRS = (
-    "universe",
-    "dmx_address",
-    "footprint",
-    "location",
-    "gel",
-    "purpose",
-    *LOAD_ATTRS,
-)
-# Rows whose legacy editors the graph mirrors both ways: legacy-owned fields keep flowing into
-# the graph even when the twin was edited there, because graph edits are mirrored back at once.
-OWNED_ATTRS: dict[str, set[str]] = {
-    "audio_devices": {
-        "power_inlet",
-        *DEVICE_SPEC_FIELDS,
-        "device_type",
-        "weight_kg",
-        "power_w",
-        "input_override",
-        "output_override",
-        "footprint_channels",
-        "default_gel",
-    },
-}
-OWNED_DEVICE_FIELDS = (
-    "name",
-    "notes",
-    "position",
-    "stockwire_product_id",
-    "stockwire_product_name",
 )
 MIRRORED_EDGE_TABLES = {
     "channel_patch_points",
@@ -110,39 +45,6 @@ class BackfillResult:
     changed_edges: list[uuid.UUID] = field(default_factory=list)
     removed_devices: list[tuple[uuid.UUID, list[uuid.UUID]]] = field(default_factory=list)
     removed_edges: list[uuid.UUID] = field(default_factory=list)
-
-
-def _domain_for(device: AudioDevice) -> str:
-    if device.fixture_type:
-        return "lighting"
-    if device.video_list_id or device.throw_ratio_min or device.sensor_width_mm:
-        return "video"
-    return "audio"
-
-
-def _group_ports(device: AudioDevice, signal: str) -> list[dict]:
-    ports: list[dict] = []
-    seen: set[str] = set()
-    for group in device.ports or []:
-        direction = group.get("direction") or "in"
-        connector = (group.get("connector") or "").lower()
-        base = f"{direction}-{connector or 'x'}"
-        pid, n = base, 1
-        while pid in seen:
-            n += 1
-            pid = f"{base}-{n}"
-        seen.add(pid)
-        ports.append(
-            {
-                "id": pid,
-                "direction": direction,
-                "signal": signal,
-                "connector": connector or None,
-                "channels": group.get("count") or None,
-                "label": "",
-            }
-        )
-    return ports
 
 
 def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False) -> dict:
@@ -186,7 +88,8 @@ class Backfill:
         ).all():
             if device.legacy_ref:
                 self.devices[device.legacy_ref] = device
-                self.loaded_devices.add(device.legacy_ref)
+                if not device.legacy_ref.startswith("audio_devices:"):
+                    self.loaded_devices.add(device.legacy_ref)  # a device's ref is its identity
                 self.loaded_revisions[device.id] = device.revision
             power_id = power_id_of(device)
             if power_id is not None:
@@ -209,47 +112,6 @@ class Backfill:
                 self.edge_rows[ref] = edge
                 self.loaded_edges.add(ref)
                 self.loaded_revisions[edge.id] = edge.revision
-
-    def device(self, ref: str, **fields) -> GraphDevice:
-        self.seen_devices.add(ref)
-        existing = self.devices.get(ref)
-        if existing is not None:
-            if not existing.graph_edited:
-                for key, value in fields.items():
-                    if key in ("attributes", "ports"):
-                        value = (
-                            copy.deepcopy(value) if value else ({} if key == "attributes" else [])
-                        )
-                    setattr(existing, key, value)
-            elif _table(ref) in OWNED_ATTRS:
-                table = _table(ref)
-                for key in OWNED_DEVICE_FIELDS:
-                    if key in fields:
-                        setattr(existing, key, fields[key])
-                attrs = {
-                    k: v for k, v in existing.attributes.items() if k not in OWNED_ATTRS[table]
-                }
-                owned_new = fields.get("attributes") or {}
-                attrs.update({k: v for k, v in owned_new.items() if k in OWNED_ATTRS[table]})
-                existing.attributes = attrs
-                if table == "audio_devices":
-                    existing.kind = fields["kind"]
-                    # a device that carries a fixture belongs to lighting (fixtures_native)
-                    existing.domain = (
-                        "lighting"
-                        if (existing.attributes or {}).get("fixture_id")
-                        else fields["domain"]
-                    )
-                    existing.ports = copy.deepcopy(fields.get("ports") or [])
-            self.result.skipped += 1
-            return existing
-        device = GraphDevice(id=uuid.uuid4(), job_id=self.job_id, legacy_ref=ref, **fields)
-        device.attributes = fields.get("attributes") or {}
-        device.ports = fields.get("ports") or []
-        self.db.add(device)
-        self.devices[ref] = device
-        self.result.devices += 1
-        return device
 
     @staticmethod
     def port(device: GraphDevice, direction: str, signal: str, connector: str = "") -> str:
@@ -346,41 +208,6 @@ class Backfill:
         )
         self.result.edges += 1
 
-    async def audio_devices(self) -> None:
-        rows = await self.db.scalars(select(AudioDevice).where(AudioDevice.job_id == self.job_id))
-        for row in rows.all():
-            domain = _domain_for(row)
-            signal = {"lighting": "dmx", "video": "video"}.get(domain, "audio")
-            attributes = {
-                k: v
-                for k, v in {
-                    "device_type": row.device_type,
-                    "weight_kg": row.weight_kg,
-                    "power_w": row.power_watts,
-                    "input_override": row.input_override,
-                    "output_override": row.output_override,
-                    "fixture_type": row.fixture_type,
-                    "channel_mode": row.channel_mode,
-                    "footprint_channels": row.footprint_channels,
-                    "default_gel": row.default_gel,
-                    "power_inlet": row.power_inlet,
-                    **{key: getattr(row, key) for key in DEVICE_SPEC_FIELDS},
-                }.items()
-                if v not in (None, "")
-            }
-            self.device(
-                f"audio_devices:{row.id}",
-                domain=domain,
-                kind=row.device_type or "other",
-                name=row.name or row.device_type or "Device",
-                notes=row.notes or "",
-                position=row.position,
-                attributes=attributes,
-                ports=_group_ports(row, signal),
-                stockwire_product_id=row.stockwire_product_id,
-                stockwire_product_name=row.stockwire_product_name,
-            )
-
     async def audio_lists(self) -> None:
         """Channel lists, channels and outputs are graph nodes (audio_native.py); the sync draws
         the patch edges from their points."""
@@ -446,48 +273,29 @@ class Backfill:
         await self._device_power()
 
     async def _device_power(self) -> None:
-        """Devices plugged into a power node: the load attributes and the power edge to the node.
+        """Devices plugged into a power node get a power edge from it.
 
-        Only plain devices use the columns on the device row; a device that has fixtures gets its
-        load attributes from them (see ``lighting``). The edge is mirrored back like a fixture's.
+        A device holds its feeder as the graph node id of the power host (``power_node_id``) and
+        ``power_connector``. A device that hosts a fixture has the fixture's load there instead; its
+        edge is the fixture's (``fixtures_native.sync_power_edges``).
         """
-        hung = (
-            await self.db.scalars(
-                select(AudioDevice).where(
-                    AudioDevice.job_id == self.job_id, AudioDevice.rigging_point_id.is_not(None)
-                )
-            )
-        ).all()
-        for row in hung:
-            node = self.devices.get(f"audio_devices:{row.id}")
-            point = self.rigging_points.get(row.rigging_point_id)
-            if node is not None and point is not None:
-                node.attributes = {**node.attributes, "rigging_point_id": str(point.id)}
-        plugged = (
-            await self.db.scalars(
-                select(AudioDevice).where(
-                    AudioDevice.job_id == self.job_id, AudioDevice.power_node_id.is_not(None)
-                )
-            )
-        ).all()
-        for row in plugged:
-            node = self.devices.get(f"audio_devices:{row.id}")
-            feeder = self.power_nodes.get(row.power_node_id)
-            if node is None or feeder is None:
+        hosts = {str(h.id): h for h in self.power_nodes.values()}
+        for ref, node in list(self.devices.items()):
+            if not ref.startswith("audio_devices:"):
                 continue
-            node.attributes = {
-                **node.attributes,
-                "power_node_id": str(feeder.id),
-                "power_connector": row.power_connector or None,
-            }
+            attributes = node.attributes or {}
+            feeder = hosts.get(attributes.get("power_node_id"))
+            if feeder is None or attributes.get("fixture_id") or feeder.id == node.id:
+                continue
+            connector = attributes.get("power_connector") or ""
             self.edge(
-                f"audio_devices.power:{row.id}",
+                f"audio_devices.power:{ref.partition(':')[2]}",
                 "power",
                 feeder,
-                self.port(feeder, "out", "power", row.power_connector),
+                self.port(feeder, "out", "power", connector),
                 node,
-                self.port(node, "in", "power", row.power_connector),
-                attributes={"connector": row.power_connector},
+                self.port(node, "in", "power", connector),
+                attributes={"connector": connector},
             )
 
 
@@ -547,7 +355,6 @@ async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillR
     builder = Backfill(db, job_id)
     await builder.load_existing()
     with db.no_autoflush:
-        await builder.audio_devices()
         await builder.power()
         await builder.audio_lists()
         await builder.plot_elements()

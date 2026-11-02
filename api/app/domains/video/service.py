@@ -1,9 +1,8 @@
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice
+from app.domains.graph import devices_native
 
 
 async def build_video_sheets(db: AsyncSession, job_id: UUID, lists: list) -> list[dict]:
@@ -13,9 +12,7 @@ async def build_video_sheets(db: AsyncSession, job_id: UUID, lists: list) -> lis
     """
     names = {
         d.id: (d.name or "Device", d.device_type or "other")
-        for d in (await db.execute(select(AudioDevice).where(AudioDevice.job_id == job_id)))
-        .scalars()
-        .all()
+        for d in await devices_native.load_devices(db, job_id)
     }
     sheets: dict[UUID, list[dict]] = {}
     for lst in lists:

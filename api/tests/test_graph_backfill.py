@@ -1,9 +1,9 @@
 import pytest
-from audio_seed import seed_channel, seed_list, seed_output, seed_point
+from audio_seed import seed_channel, seed_device, seed_list, seed_output, seed_point
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.audio.models import ProductionJob
 from app.domains.graph.backfill import backfill_job
 from app.main import app
 
@@ -15,8 +15,9 @@ async def _seed() -> str:
         job = ProductionJob(title="Legacy")
         db.add(job)
         await db.flush()
-        stagebox = AudioDevice(
-            job_id=job.id,
+        stagebox = await seed_device(
+            db,
+            job.id,
             name="Stagebox",
             device_type="analog_stagebox",
             ports=[
@@ -25,16 +26,15 @@ async def _seed() -> str:
             ],
             power_watts=120,
         )
-        desk = AudioDevice(
-            job_id=job.id,
+        desk = await seed_device(
+            db,
+            job.id,
             name="Desk",
             device_type="mixer",
             ports=[{"direction": "in", "connector": "XLR3", "count": 32}],
         )
-        node = AudioDevice(job_id=job.id, name="Moving head", device_type="light")
-        db.add_all([stagebox, desk, node])
+        await seed_device(db, job.id, name="Moving head", device_type="light")
         await db.commit()
-        await backfill_job(db, job.id)  # the points refer to the devices' graph nodes
         lst = await seed_list(db, job.id, name="FOH")
         for number in (1, 2):
             channel = await seed_channel(
@@ -90,16 +90,10 @@ async def test_backfill_maps_output_chains(auth_headers):
         job = ProductionJob(title="Outputs")
         db.add(job)
         await db.flush()
-        mk = lambda name, kind: AudioDevice(  # noqa: E731
-            job_id=job.id, name=name, device_type=kind
-        )
-        console, amp, spk_a, spk_b = (
-            mk("Console", "mixer"),
-            mk("Amp", "amp"),
-            mk("Spk A", "speaker"),
-            mk("Spk B", "speaker"),
-        )
-        db.add_all([console, amp, spk_a, spk_b])
+        console = await seed_device(db, job.id, name="Console", device_type="mixer")
+        amp = await seed_device(db, job.id, name="Amp", device_type="amp")
+        spk_a = await seed_device(db, job.id, name="Spk A", device_type="speaker")
+        spk_b = await seed_device(db, job.id, name="Spk B", device_type="speaker")
         await db.commit()
         await backfill_job(db, job.id)
         lst = await seed_list(db, job.id, name="FOH")

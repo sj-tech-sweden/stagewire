@@ -11,10 +11,9 @@ point is deleted, as ``ON DELETE SET NULL`` used to.
 import uuid
 from types import SimpleNamespace
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import GraphDevice
 
@@ -72,11 +71,7 @@ async def get_point(
 
 
 async def clear_references(db: AsyncSession, node: GraphDevice) -> None:
-    ref = public_id(node)
-    await db.execute(
-        update(AudioDevice).where(AudioDevice.rigging_point_id == ref).values(rigging_point_id=None)
-    )
-    # fixtures and plot elements live on the graph: their link holds the point's graph node id
+    # devices, fixtures and plot elements live on the graph: their link holds the point's node id
     for host in (
         await db.scalars(select(GraphDevice).where(GraphDevice.job_id == node.job_id))
     ).all():

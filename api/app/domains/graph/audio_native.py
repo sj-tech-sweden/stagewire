@@ -33,11 +33,10 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice
-from app.domains.graph import plot_native
+from app.domains.graph import devices_native, plot_native
 from app.domains.graph.backfill import FAN_OUT, _point_attrs
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -493,11 +492,7 @@ async def delete_node_tree(
             await db.delete(edge)
     if node.kind == LIST:
         # a device's sound list was a foreign key with ON DELETE SET NULL
-        await db.execute(
-            update(AudioDevice)
-            .where(AudioDevice.sound_list_id == public_id(node))
-            .values(sound_list_id=None)
-        )
+        await devices_native.clear_attribute(db, node.job_id, "sound_list_id", public_id(node))
     for member in nodes[1:] if keep_root else nodes:
         await db.delete(member)
     await db.flush()

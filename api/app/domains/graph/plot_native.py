@@ -31,9 +31,6 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import (
-    AudioDevice,
-)
 from app.domains.graph import power_native
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -396,9 +393,9 @@ async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, da
 
 async def _existing_devices(db: AsyncSession, job_id: uuid.UUID) -> set[str]:
     """The ids of the job's devices, to tell a dangling device link."""
-    return {
-        str(i) for i in await db.scalars(select(AudioDevice.id).where(AudioDevice.job_id == job_id))
-    }
+    from app.domains.graph import devices_native
+
+    return {str(public_id(n)) for n in await devices_native.device_nodes(db, job_id)}
 
 
 async def sync_links(builder) -> None:

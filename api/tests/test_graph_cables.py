@@ -1,12 +1,11 @@
 import pytest
-from audio_seed import seed_channel, seed_list, seed_output, seed_point
+from audio_seed import seed_channel, seed_device, seed_list, seed_output, seed_point
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ProductionJob
-from app.domains.graph import audio_native, plot_native
-from app.domains.graph.backfill import backfill_job
+from app.domains.audio.models import ProductionJob
+from app.domains.graph import audio_native, devices_native, plot_native
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.domains.graph.video_readers import load_video_lists
@@ -38,21 +37,18 @@ async def _seed():
         job = ProductionJob(title="Cables")
         db.add(job)
         await db.flush()
-        devices = {
-            name: AudioDevice(job_id=job.id, name=name, device_type=kind)
-            for name, kind in (
-                ("Stagebox", "analog_stagebox"),
-                ("Desk", "mixer"),
-                ("Amp", "amp"),
-                ("Matrix", "switcher"),
-                ("Scaler", "other"),
-                ("Camrig", "other"),
-                ("Wedge", "monitor"),
-            )
-        }
-        db.add_all(devices.values())
+        devices = {}
+        for name, kind in (
+            ("Stagebox", "analog_stagebox"),
+            ("Desk", "mixer"),
+            ("Amp", "amp"),
+            ("Matrix", "switcher"),
+            ("Scaler", "other"),
+            ("Camrig", "other"),
+            ("Wedge", "monitor"),
+        ):
+            devices[name] = await seed_device(db, job.id, name=name, device_type=kind)
         await db.commit()
-        await backfill_job(db, job.id)  # the points refer to the devices' graph nodes
         lst = await seed_list(db, job.id, name="FOH")
         channels = []
         for number in (1, 2):
@@ -204,4 +200,4 @@ async def _native_video(client, h, job_id):
 
 async def _legacy_devices(job_id):
     async with db_mod.SessionLocal() as db:
-        return (await db.scalars(select(AudioDevice).where(AudioDevice.job_id == job_id))).all()
+        return await devices_native.load_devices(db, job_id)

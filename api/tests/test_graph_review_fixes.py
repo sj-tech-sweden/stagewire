@@ -2,10 +2,11 @@ import asyncio
 from uuid import UUID
 
 import pytest
+from audio_seed import seed_device
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.audio.models import ProductionJob
 from app.domains.graph.mirror import sync_job_to_graph
 from app.main import app
 
@@ -174,8 +175,8 @@ async def test_overlapping_syncs_do_not_create_duplicate_nodes(auth_headers):
         job = ProductionJob(title="Race")
         db.add(job)
         await db.flush()
-        db.add(AudioDevice(job_id=job.id, name="Kick", device_type="other"))
-        db.add(AudioDevice(job_id=job.id, name="FOH", device_type="mixer"))
+        await seed_device(db, job.id, name="Kick", device_type="other")
+        await seed_device(db, job.id, name="FOH", device_type="mixer")
         await db.commit()
         job_id = job.id
     await asyncio.gather(*[sync_job_to_graph(UUID(str(job_id))) for _ in range(6)])

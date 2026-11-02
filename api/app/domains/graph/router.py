@@ -15,6 +15,7 @@ from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
     audio_native,
     backfill,
+    devices_native,
     dmx_native,
     fixtures_native,
     mirror,
@@ -152,17 +153,15 @@ async def update_device(
     )
 
     async def apply() -> GraphDevice:
-        protect = mirror.device_needs_protection(device, data)
         for key, value in mirror.merged_attributes(device, data).items():
             setattr(device, key, value)
-        if protect:
-            device.graph_edited = True
         await db.flush()  # the version check fails here, before the legacy row is touched
         await dmx_native.after_patch(db, device, data)
         await power_native.after_patch(db, job_id, device, data)
         await fixtures_native.after_patch(db, job_id, device, data)
         await plot_native.after_patch(db, job_id, device, data)
         await audio_native.after_patch(db, device, data)
+        await devices_native.after_patch(device, data)
         mirrored = await mirror.device_to_legacy(db, job_id, device, data) or (
             # a channel's number and an output's order are on its edges: redraw them
             device.kind in audio_native.KINDS and not device.legacy_ref

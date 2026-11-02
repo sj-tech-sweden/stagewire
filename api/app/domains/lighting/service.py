@@ -1,12 +1,12 @@
 import uuid
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice
-from app.domains.graph import fixtures_native
+from app.domains.graph import devices_native, fixtures_native
 from app.domains.lighting.models import FixtureMode, FixtureType
 
 FIXTURE_DEVICE_TYPE = "fixture"
@@ -180,29 +180,26 @@ def dmx_flags(fixtures: list) -> dict[UUID, tuple[bool, bool]]:
 
 async def find_or_create_device(
     db: AsyncSession, job_id: UUID, name: str, defaults: dict
-) -> tuple[AudioDevice, bool]:
-    result = await db.execute(
-        select(AudioDevice).where(
-            AudioDevice.job_id == job_id,
-            AudioDevice.device_type == FIXTURE_DEVICE_TYPE,
-            func.lower(AudioDevice.name) == name.lower(),
-        )
+) -> tuple[SimpleNamespace, bool]:
+    for device in await devices_native.load_devices(db, job_id):
+        if (
+            device.device_type == FIXTURE_DEVICE_TYPE
+            and (device.name or "").lower() == name.lower()
+        ):
+            return device, False
+    device = await devices_native.create_device(
+        db,
+        job_id,
+        {
+            "name": name,
+            "device_type": FIXTURE_DEVICE_TYPE,
+            "fixture_type": defaults.get("fixture_type") or None,
+            "channel_mode": defaults.get("channel_mode") or None,
+            "footprint_channels": defaults.get("footprint"),
+            "default_gel": defaults.get("gel") or None,
+        },
     )
-    device = result.scalars().first()
-    if device is None:
-        device = AudioDevice(
-            job_id=job_id,
-            name=name,
-            device_type=FIXTURE_DEVICE_TYPE,
-            fixture_type=defaults.get("fixture_type") or None,
-            channel_mode=defaults.get("channel_mode") or None,
-            footprint_channels=defaults.get("footprint"),
-            default_gel=defaults.get("gel") or None,
-        )
-        db.add(device)
-        await db.flush()
-        return device, True
-    return device, False
+    return device, True
 
 
 async def apply_device(db: AsyncSession, job_id: UUID, data: dict) -> tuple[dict, bool]:

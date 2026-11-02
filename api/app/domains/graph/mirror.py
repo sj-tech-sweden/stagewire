@@ -13,6 +13,7 @@ from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
 from app.domains.graph import (
     audio_native,
+    devices_native,
     dmx_native,
     fixtures_native,
     plot_native,
@@ -20,10 +21,8 @@ from app.domains.graph import (
     video_native,
 )
 from app.domains.graph.backfill import (
-    DEVICE_SPEC_FIELDS,
     FIXTURE_ATTRS,
     MIRRORED_EDGE_TABLES,
-    OWNED_ATTRS,
     backfill_job,
 )
 from app.domains.graph.ids import power_id_of, public_id
@@ -72,18 +71,6 @@ class MirrorToGraphRoute(APIRoute):
 # editors and every unmoved reader stay consistent. Graph-only fields (canvas position, cable
 # label, phase) are never mirrored.
 
-DEVICE_ATTRS = {
-    "power_w": "power_watts",
-    "weight_kg": "weight_kg",
-    "input_override": "input_override",
-    "output_override": "output_override",
-    "fixture_type": "fixture_type",
-    "channel_mode": "channel_mode",
-    "footprint_channels": "footprint_channels",
-    "default_gel": "default_gel",
-    "power_inlet": "power_inlet",
-    **{key: key for key in DEVICE_SPEC_FIELDS},
-}
 POINT_KEYS = ("connector", "patch_label", "notes")
 
 
@@ -120,62 +107,19 @@ async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -
     return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
 
 
-def _audio_device_changes(data: dict) -> dict:
-    out: dict = {}
-    attrs = data.get("attributes") or {}
-    if "name" in data and data["name"] is not None:
-        out["name"] = data["name"]
-    if "notes" in data:
-        out["notes"] = data["notes"] or ""
-    if "position" in data and data["position"] is not None:
-        out["position"] = data["position"]
-    if data.get("kind"):
-        out["device_type"] = data["kind"]
-    elif attrs.get("device_type"):
-        out["device_type"] = attrs["device_type"]
-    for graph_key, column in DEVICE_ATTRS.items():
-        if graph_key in attrs:
-            out[column] = attrs[graph_key]
-    for key in ("stockwire_product_id", "stockwire_product_name"):
-        if key in data:
-            out[key] = data[key]
-    if "ports" in data and data["ports"] is not None:
-        # a connector group is a port with a connector or a channel count; the generic
-        # ports the graph adds on its own carry neither and are not legacy data
-        out["ports"] = [
-            {
-                "direction": p.get("direction") or "in",
-                "connector": p.get("connector") or "",
-                "count": p.get("channels") or 0,
-            }
-            for p in data["ports"]
-            if p.get("connector") or p.get("channels")
-        ]
-    return out
-
-
 async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, data: dict) -> bool:
-    """Write a graph device PATCH through to its legacy row. True when a legacy row changed."""
-    target = legacy_target(device)
-    if target is None:
-        return False
-    table, legacy_id = target
-    if table == "audio_devices":
-        row, changes = await service.get_device(db, legacy_id), _audio_device_changes(data)
-        if row is None:
-            return False
-        persisted = False
-        if changes:
-            row = await service.update_device(db, row, changes)
-            persisted = True
-        if not persisted:
-            return False
-        from app.domains.audio.router import _device_read
+    """After a graph PATCH of a device node: tell the open workspaces (the node is the device).
 
-        await publish_job_event(job_id, "device.upsert", await _device_read(db, row))
-    else:
+    Returns False: there is no legacy row to write, so nothing needs a sync.
+    """
+    if not devices_native.is_device(device):
         return False
-    return True
+    from app.domains.audio.router import _device_read
+
+    row = await devices_native.get_device(db, public_id(device), job_id)
+    if row is not None:
+        await publish_job_event(job_id, "device.upsert", await _device_read(db, row))
+    return False
 
 
 async def _publish_list(db: AsyncSession, job_id: UUID, list_id: UUID) -> None:
@@ -201,28 +145,23 @@ async def _publish_owner(db: AsyncSession, job_id: UUID, owner: GraphDevice) -> 
 
 
 async def delete_device_twin(db: AsyncSession, job_id: UUID, device: GraphDevice) -> bool:
-    """Delete the legacy row behind a graph device (checked first, so the caller can abort)."""
-    target = legacy_target(device)
-    if target is None:
+    """The rules for removing a device node (checked first, so the caller can abort).
+
+    A device with patch points cannot be removed (409); a fixture on it goes with it.
+    """
+    if not devices_native.is_device(device):
         return False
-    table, legacy_id = target
-    if table == "audio_devices":
-        row = await service.get_device(db, legacy_id)
-        if row is None:
-            return False
-        if await audio_native.node_has_points(db, job_id, device.id) or (
-            await _video_input_points(db, job_id, legacy_id)
-        ):
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Move or delete the patch points on this device before removing it",
-            )
-        for fixture in await _fixtures_on_device(db, job_id, legacy_id):
-            await lighting_service.delete_fixture(db, fixture)
-        await service.delete_device(db, row)
-        await publish_job_event(job_id, "device.delete", {"id": str(legacy_id)})
-    else:
-        return False
+    device_id = public_id(device)
+    if await audio_native.node_has_points(db, job_id, device.id) or (
+        await _video_input_points(db, job_id, device_id)
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Move or delete the patch points on this device before removing it",
+        )
+    for fixture in await _fixtures_on_device(db, job_id, device_id):
+        await lighting_service.delete_fixture(db, fixture)
+    await publish_job_event(job_id, "device.delete", {"id": str(device_id)})
     return True
 
 
@@ -442,29 +381,6 @@ DERIVED_DEVICE_FIELDS = (
     "stockwire_product_id",
     "stockwire_product_name",
 )
-
-
-def device_needs_protection(device: GraphDevice, data: dict) -> bool:
-    """Does this PATCH change something sync would otherwise overwrite from the legacy row?
-
-    Fields the mirror writes back to the legacy row never need protecting, and neither do canvas
-    fields (sync does not set them). Rows without a legacy twin are never synced.
-    """
-    target = legacy_target(device)
-    if target is None:
-        return False
-    table = target[0]
-    if table not in OWNED_ATTRS:
-        return any(key in data for key in DERIVED_DEVICE_FIELDS)
-    if "ports" in data and table != "audio_devices":
-        return True
-    attrs = data.get("attributes")
-    if attrs is None:
-        return False
-    owned = OWNED_ATTRS[table]
-    old = device.attributes or {}
-    merged = {**old, **attrs}
-    return any(merged.get(k) != old.get(k) for k in merged if k not in owned)
 
 
 def edge_needs_protection(edge: ConnectionEdge, data: dict) -> bool:

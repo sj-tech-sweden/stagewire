@@ -14,8 +14,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.audio.models import AudioDevice
-from app.domains.graph import fixtures_native, plot_native, power_native
+from app.domains.graph import devices_native, fixtures_native, plot_native, power_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.graph.ids import public_id
 from app.domains.graph.models import GraphDevice
@@ -111,10 +110,7 @@ async def power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, Any]:
         for row in await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
         if row.legacy_ref
     }
-    devices = {
-        str(d.id): d
-        for d in await db.scalars(select(AudioDevice).where(AudioDevice.job_id == job_id))
-    }
+    devices = {str(d.id): d for d in await devices_native.load_devices(db, job_id)}
     nodes = {n["id"]: n for n in summary["nodes"]}
     settings = cable_settings(job)
     outlets = {

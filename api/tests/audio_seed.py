@@ -23,3 +23,10 @@ async def seed_point(db, owner, **data):
     """A patch point on a channel (``channel_id`` in the row) or an output."""
     kind = an.CHANNEL if hasattr(owner, "source_label") else an.OUTPUT
     return await an.create_point(db, kind, owner.id, data)
+
+
+async def seed_device(db, job_id, **data):
+    """A device (a graph node); its ``.id`` is the id patch points and plot links use."""
+    from app.domains.graph import devices_native
+
+    return await devices_native.create_device(db, job_id, data)

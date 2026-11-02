@@ -14,16 +14,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.domains.audio import schemas as audio_schemas
 from app.domains.audio import service
-from app.domains.audio.models import AudioDevice
 from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import audio_native, dmx_native, fixtures_native, schemas, video_native
+from app.domains.graph import (
+    audio_native,
+    devices_native,
+    dmx_native,
+    fixtures_native,
+    schemas,
+    video_native,
+)
 from app.domains.graph.backfill import backfill_job, job_lock
 from app.domains.graph.ids import power_id_of, public_id
 from app.domains.graph.mirror import (
     KNOWN_DEVICE_TYPES,
-    _audio_device_changes,
     _publish_list,
     legacy_target,
 )
@@ -132,7 +137,7 @@ async def _read(db: AsyncSession, job_id: UUID, ref: str) -> schemas.GraphDevice
 
 
 async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
-    """The legacy device row behind a graph device, created on demand for catalog items."""
+    """The device id of a graph node; a catalog item is made a device on demand."""
     node = await db.get(GraphDevice, node_id)
     if node is None or node.job_id != job_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
@@ -143,23 +148,10 @@ async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
     if node.kind in NON_DEVICE_KINDS or (node.domain == "power" and power_id_of(node) is not None):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That node is not a device")
-    changes = _audio_device_changes(
-        {
-            "name": node.name,
-            "notes": node.notes,
-            "position": node.position,
-            "kind": node.kind if node.kind in KNOWN_DEVICE_TYPES else None,
-            "attributes": node.attributes,
-            "ports": node.ports,
-            "stockwire_product_id": node.stockwire_product_id,
-            "stockwire_product_name": node.stockwire_product_name,
-        }
-    )
-    changes.setdefault("device_type", "other")
-    device = await service.create_device(db, job_id, changes)
-    node.legacy_ref = f"audio_devices:{device.id}"
+    # a catalog item becomes a device in place: it takes its own id as the device id
+    devices_native.promote(node, KNOWN_DEVICE_TYPES)
     await db.commit()
-    return device.id
+    return node.id
 
 
 async def _publish_graph(db: AsyncSession, job_id: UUID, nodes: list[GraphDevice]) -> None:
@@ -531,7 +523,7 @@ async def fill_video_list_from_switcher(
     list_node = await _video_list_node(db, job_id, list_id)
     ref = public_id(list_node)
     attrs = list_node.attributes or {}
-    device = (await db.scalars(select(AudioDevice).where(AudioDevice.video_list_id == ref))).first()
+    device = await devices_native.find_with(db, job_id, "video_list_id", ref)
     if device is None:
         product = attrs.get("switcher_product_name") or "Switcher"
         device = await service.create_device(

@@ -1,10 +1,9 @@
 import pytest
-from audio_seed import seed_channel, seed_list, seed_output, seed_point
+from audio_seed import seed_channel, seed_device, seed_list, seed_output, seed_point
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.audio.models import ProductionJob
 from app.domains.graph import plot_native
-from app.domains.graph.backfill import backfill_job
 from app.domains.reports import registry
 
 BASE = "/api/v1"
@@ -15,18 +14,11 @@ async def _seed():
         job = ProductionJob(title="Report parity")
         db.add(job)
         await db.flush()
-        mk = lambda name, kind: AudioDevice(  # noqa: E731
-            job_id=job.id, name=name, device_type=kind
-        )
-        stagebox, desk, amp, spk = (
-            mk("Stagebox", "analog_stagebox"),
-            mk("Desk", "mixer"),
-            mk("Amp", "amp"),
-            mk("Wedge", "monitor"),
-        )
-        db.add_all([stagebox, desk, amp, spk])
+        stagebox = await seed_device(db, job.id, name="Stagebox", device_type="analog_stagebox")
+        desk = await seed_device(db, job.id, name="Desk", device_type="mixer")
+        amp = await seed_device(db, job.id, name="Amp", device_type="amp")
+        spk = await seed_device(db, job.id, name="Wedge", device_type="monitor")
         await db.commit()
-        await backfill_job(db, job.id)  # the points refer to the devices' graph nodes
         first = await seed_list(db, job.id, name="FOH", position=0)
         second = await seed_list(db, job.id, name="Monitors", position=1)
         chans = []

@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.domains.audio import service as audio_service
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
-from app.domains.graph import fixtures_native, plot_native, power_native
+from app.domains.graph import devices_native, fixtures_native, plot_native, power_native
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting import service as lighting_service
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
@@ -503,15 +503,9 @@ async def assign_load(
         device = await audio_service.get_device(db, load_id)
         if device is None or device.job_id != job_id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Load not found")
-        target = device
-    for key, value in data.items():
-        if key == "power_node_id":
-            target.power_node_id = value
-        elif key == "rigging_point_id":
-            target.rigging_point_id = value
-        elif key == "power_connector":
-            target.power_connector = value or ""
-    if target.power_node_id is None:
-        target.power_connector = ""
-    await db.commit()
-    await db.commit()
+        # devices live on the graph: their load links are set by the device store
+        changes = {k: v for k, v in data.items() if k in ("power_node_id", "rigging_point_id")}
+        if "power_connector" in data:
+            changes["power_connector"] = data["power_connector"] or ""
+        await devices_native.update_device(db, load_id, changes, job_id)
+        await db.commit()

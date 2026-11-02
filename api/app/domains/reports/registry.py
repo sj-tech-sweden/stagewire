@@ -4,10 +4,9 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import ProductionJob
-from app.domains.graph import audio_native
+from app.domains.graph import audio_native, devices_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
@@ -67,13 +66,7 @@ class ReportDefinition:
 
 
 async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
-    result = await db.execute(
-        select(ProductionJob)
-        .where(ProductionJob.id == job_id)
-        .options(
-            selectinload(ProductionJob.devices),
-        )
-    )
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_id))
     job = result.scalars().first()
     if job is None:
         raise LookupError("Production job not found")
@@ -85,7 +78,7 @@ async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job}
 
 
-async def _camera_specs(db: AsyncSession, job: ProductionJob, plot_elements) -> dict[str, dict]:
+async def _camera_specs(db: AsyncSession, devices: list, plot_elements) -> dict[str, dict]:
     from app.domains.audio.camera_specs import resolve_camera_specs
     from app.domains.audio.router import stockwire_product_fetcher
 
@@ -99,7 +92,7 @@ async def _camera_specs(db: AsyncSession, job: ProductionJob, plot_elements) -> 
             "focal_max_mm": device.focal_max_mm,
             "max_distance_m": device.max_distance_m,
         }
-        for device in job.devices
+        for device in devices
     }
     elements = [
         {
@@ -139,6 +132,7 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
         }
         for element in plot_elements
     ]
+    devices = await devices_native.load_devices(db, job_id)
     return {
         "job": job,
         "channel_lists": await audio_native.load_lists(db, job_id),
@@ -146,8 +140,8 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
         "stage_plot_elements": rows,
         "cables": cables,
         "audience": audience,
-        "cameras": await _camera_specs(db, job, plot_elements),
-        "devices_by_id": {str(device.id): device for device in job.devices},
+        "cameras": await _camera_specs(db, devices, plot_elements),
+        "devices_by_id": {str(device.id): device for device in devices},
     }
 
 
@@ -155,7 +149,9 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
     job = await _load_job(db, job_id)
     fixtures = await lighting_service.list_fixtures(db, job_id)
     flags = lighting_service.dmx_flags(fixtures)
-    names = {str(device.id): device.name for device in job.devices}
+    names = {
+        str(device.id): device.name for device in await devices_native.load_devices(db, job_id)
+    }
     rows = []
     for fixture in fixtures:
         overlap, overflow = flags[fixture.id]

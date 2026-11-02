@@ -1,9 +1,9 @@
 import pytest
-from audio_seed import seed_channel, seed_list, seed_point
+from audio_seed import seed_channel, seed_device, seed_list, seed_point
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ProductionJob
+from app.domains.audio.models import ProductionJob
 from app.domains.graph.backfill import backfill_job
 from app.main import app
 
@@ -15,10 +15,8 @@ async def _seed():
         job = ProductionJob(title="Sync")
         db.add(job)
         await db.flush()
-        box = AudioDevice(job_id=job.id, name="Stagebox", device_type="analog_stagebox")
-        db.add(box)
+        box = await seed_device(db, job.id, name="Stagebox", device_type="analog_stagebox")
         await db.commit()
-        await backfill_job(db, job.id)  # the points refer to the device's graph node
         lst = await seed_list(db, job.id, name="FOH")
         ids = []
         for number, label in ((1, "Kick"), (2, "Snare")):
