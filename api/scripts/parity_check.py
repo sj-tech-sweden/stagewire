@@ -45,20 +45,6 @@ async def main() -> int:
                     registry._patch_sheet_context,
                 ),
             )
-            from app.domains.graph.video_readers import describe, load_video_lists
-            from app.domains.video import service as video_service
-
-            checked += 1
-            try:
-                old_video = describe(await video_service.list_input_lists(db, job_id))
-                db.expire_all()
-                new_video = describe(await load_video_lists(db, job_id, sync=True))
-                if old_video != new_video:
-                    mismatched += 1
-                    print(f"{job_id} video_lists: differs")
-            except Exception as exc:  # noqa: BLE001
-                mismatched += 1
-                print(f"{job_id} video_lists: error {type(exc).__name__}: {exc}")
             for key, legacy, graph in pairs:
                 checked += 1
                 try:

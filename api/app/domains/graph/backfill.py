@@ -211,22 +211,6 @@ def _point_attrs(point, chain_root: GraphDevice, *, bus_connector: bool = False)
     return attrs
 
 
-# Legacy video mirrors are not synced any more: video lives on the graph (video_native.py) and a
-# job's remaining table rows are brought over once by video_native.import_legacy.
-LEGACY_VIDEO_REFS = (
-    "video_input_lists:",
-    "video_inputs:",
-    "video_outputs:",
-    "video_patch_points:",
-    "video_output_patch_points:",
-    "video_outputs.dest:",
-)
-
-
-def _is_video(ref: str | None) -> bool:
-    return bool(ref) and ref.startswith(LEGACY_VIDEO_REFS)
-
-
 class Backfill:
     def __init__(self, db: AsyncSession, job_id: uuid.UUID) -> None:
         self.db = db
@@ -249,7 +233,7 @@ class Backfill:
         for device in (
             await self.db.scalars(select(GraphDevice).where(GraphDevice.job_id == self.job_id))
         ).all():
-            if device.legacy_ref and not _is_video(device.legacy_ref):
+            if device.legacy_ref:
                 self.devices[device.legacy_ref] = device
                 self.loaded_devices.add(device.legacy_ref)
                 self.loaded_revisions[device.id] = device.revision
@@ -262,7 +246,7 @@ class Backfill:
             )
         ).all():
             ref = (edge.attributes or {}).get("legacy_ref")
-            if ref and not _is_video(ref):
+            if ref:
                 self.edge_refs.add(ref)
                 self.edge_rows[ref] = edge
                 self.loaded_edges.add(ref)
@@ -1110,14 +1094,7 @@ async def backfill_job(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             key = job_id.int & 0x7FFFFFFFFFFFFFFF
             await db.execute(text("select pg_advisory_xact_lock(:key)"), {"key": key})
-        result = await _backfill_job_locked(db, job_id)
-        # video still in the legacy tables is imported once; the plot links to its inputs are only
-        # visible to a sync that runs after it
-        from app.domains.graph import video_native
-
-        if await video_native.import_legacy(db, job_id):
-            result = await _backfill_job_locked(db, job_id)
-        return result
+        return await _backfill_job_locked(db, job_id)
 
 
 async def _backfill_job_locked(db: AsyncSession, job_id: uuid.UUID) -> BackfillResult:

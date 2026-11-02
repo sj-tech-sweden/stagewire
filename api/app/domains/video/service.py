@@ -2,21 +2,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domains.audio.models import AudioDevice
-from app.domains.video.models import VideoInput, VideoInputList
-
-
-async def list_input_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputList]:
-    """The legacy table rows; only the parity check reads them now (the graph is the source)."""
-    result = await db.execute(
-        select(VideoInputList)
-        .where(VideoInputList.job_id == job_id)
-        .order_by(VideoInputList.position)
-        .options(selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points))
-    )
-    return list(result.scalars().all())
 
 
 async def build_video_sheets(db: AsyncSession, job_id: UUID, lists: list) -> list[dict]:

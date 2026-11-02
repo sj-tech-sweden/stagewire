@@ -14,7 +14,6 @@ from app.domains.reports.cable_routing import routed_cable_paths_from_graph
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.power_context import power_sheet_context
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
-from app.domains.video.models import VideoInput, VideoInputList, VideoOutput
 
 DEFAULT_STAGE_PLOT_OPTIONS = {
     "view": "stage",
@@ -130,19 +129,6 @@ async def _channel_list_context_legacy(db: AsyncSession, job_id: UUID) -> dict:
         for channel in channel_list.channels
     ]
     return {"job": job, "channels": rows}
-
-
-async def _load_video_lists(db: AsyncSession, job_id: UUID) -> list[VideoInputList]:
-    result = await db.execute(
-        select(VideoInputList)
-        .where(VideoInputList.job_id == job_id)
-        .options(
-            selectinload(VideoInputList.inputs).selectinload(VideoInput.patch_points),
-            selectinload(VideoInputList.outputs).selectinload(VideoOutput.patch_points),
-        )
-        .order_by(VideoInputList.position)
-    )
-    return list(result.scalars().all())
 
 
 async def _camera_specs(db: AsyncSession, job: ProductionJob) -> dict[str, dict]:
