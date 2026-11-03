@@ -408,6 +408,7 @@ export default {
     category: "Kategori",
     manufacturer: "Tillverkare",
     inStock: "Bara i lager",
+    includeRentals: "Inkludera hyrprodukter",
     dateRangeHint:
       "Ange jobbets uthyrningsdatum för att se tillgänglighet för den perioden.",
     available: "I lager",

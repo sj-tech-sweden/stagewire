@@ -406,6 +406,7 @@ export default {
     category: "Category",
     manufacturer: "Manufacturer",
     inStock: "In stock only",
+    includeRentals: "Include rentals",
     dateRangeHint:
       "Set the job rental dates to see availability for that period.",
     available: "In stock",
