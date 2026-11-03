@@ -113,7 +113,8 @@ async def test_search_uses_date_ranged_availability_when_window_supplied():
         start_date="2026-11-02", end_date="2026-11-04"
     )
     by_name = {i["name"]: i for i in result["items"]}
-    assert by_name["SM58"]["available_qty"] == 3  # availability endpoint, not eventory_available_qty (8)
+    # availability endpoint, not the upstream current-stock count (which is 8 for SM58)
+    assert by_name["SM58"]["available_qty"] == 3
     assert by_name["e935"]["available_qty"] == 0
     assert by_name["Matrix"]["available_qty"] == 1
     assert result["availability"] == {"date_range_supported": True}
@@ -128,11 +129,85 @@ async def test_search_falls_back_to_current_stock_when_no_window():
 
 
 @pytest.mark.asyncio
+async def test_search_fetches_availability_only_for_the_returned_page():
+    # Performance: availability is queried per returned product, not for the whole catalog, so the
+    # cost scales with the page size rather than the total number of matches.
+    calls = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+            pid = int(path.split("/")[-2])
+            calls.append(pid)
+            return httpx.Response(
+                200,
+                json={
+                    "product_id": pid,
+                    "available_quantity": 1,
+                    "total_quantity": 1,
+                    "max_reserved_quantity": 0,
+                },
+            )
+        if path == "/api/v1/inventory/products":
+            rows = [{"id": i, "name": f"P{i}", "eventory_available_qty": 5} for i in range(1, 11)]
+            return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+        if path == "/api/v1/jobs/requirements":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    sw = StockwireClient(
+        base_url="http://sw.test", token="t", transport=httpx.MockTransport(counting_handler)
+    )
+    result = await sw.search_catalog(
+        start_date="2026-01-01", end_date="2026-01-02", limit=3
+    )
+    assert len(result["items"]) == 3
+    assert len(calls) == 3  # only the page, not all 10 products
+
+
+@pytest.mark.asyncio
 async def test_search_attribute_filter_and_paging():
     result = await client().search_catalog(attributes={"manufacturer": "shure"})
     assert [i["name"] for i in result["items"]] == ["SM58"]
     paged = await client().search_catalog(skip=1, limit=1)
     assert paged["total"] == 3 and [i["name"] for i in paged["items"]] == ["e935"]
+
+
+@pytest.mark.asyncio
+async def test_search_excludes_rental_products_by_default_but_can_include_them():
+    # Rental-in products (e.g. from Eventory) are hidden unless the caller opts in. The upstream
+    # flag is a pass-through, so we assert the client sends it and that the flag controls results.
+    mixed = [
+        {
+            "id": 1,
+            "name": "Own Mic",
+            "category": "Microphones",
+            "source": "own",
+            "eventory_available_qty": 5,
+        },
+        {
+            "id": 2,
+            "name": "Rental Mic",
+            "category": "Microphones",
+            "source": "eventory",
+            "eventory_available_qty": 2,
+        },
+    ]
+
+    def mixed_handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        excluded = str(params.get("exclude_rental", "True")).lower() != "false"
+        rows = [r for r in mixed if not (excluded and r["source"] != "own")]
+        return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+
+    sw = StockwireClient(
+        base_url="http://sw.test", token="t", transport=httpx.MockTransport(mixed_handler)
+    )
+    defaulted = await sw.search_catalog()
+    assert [i["name"] for i in defaulted["items"]] == ["Own Mic"]
+    included = await sw.search_catalog(exclude_rental=False)
+    assert {i["name"] for i in included["items"]} == {"Own Mic", "Rental Mic"}
+
 
 
 @pytest.mark.asyncio

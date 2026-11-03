@@ -203,19 +203,24 @@ class StockwireClient:
         limit: int = 50,
         start_date: str | None = None,
         end_date: str | None = None,
+        exclude_rental: bool = True,
     ) -> dict:
         """Faceted global catalog search over ``GET /api/v1/inventory/products``.
 
         Not limited to items booked on the job. The upstream only filters on one value per
         facet and has no attribute filters and no facet counts, so multi-value facets,
         ``attributes`` and the facet counts are computed here over the search result. ``job_id``
-        (a rental job id) marks each hit with the quantity already booked.
+        (a rental job id) marks each hit with the quantity already booked. ``exclude_rental``
+        hides rental-in products (e.g. from Eventory) by default so the catalog shows the
+        company's own stock unless the caller opts in.
 
         When ``start_date``/``end_date`` are supplied the window is a rental period, and each
         product's ``available_qty`` is taken from the per-product availability endpoint (the
-        minimum available across that window) instead of the upstream's current-stock count.
+        minimum available across that window) instead of the upstream's current-stock count. Only
+        the products actually returned on this page are queried, so the cost scales with the page
+        size rather than the whole catalog.
         """
-        params: dict[str, object] = {}
+        params: dict[str, object] = {"exclude_rental": exclude_rental}
         if q:
             params["search"] = q
         if categories and len(categories) == 1:
@@ -241,14 +246,14 @@ class StockwireClient:
             rows = [r for r in rows if str(r.get(key, "")).lower() == str(wanted).lower()]
         booked = await self.booked_quantities(job_id) if job_id else {}
 
-        # Date-ranged availability: fetch the minimum available quantity per product across the
-        # rental window concurrently. A failed upstream call degrades to ``None`` for that
-        # product so we keep the current-stock fallback rather than blanking the row.
+        # Only the page we return needs availability; querying the whole catalog would mean one
+        # upstream call per product. ``total`` still reflects every matched row for paging.
+        page_rows = rows[skip : skip + limit]
         date_supported = bool(start_date and end_date)
         range_avail: dict[str, int | None] = {}
         if date_supported:
             range_avail = await self._availability_for_products(
-                [str(r.get("id")) for r in rows], start_date, end_date
+                [str(r.get("id")) for r in page_rows], start_date, end_date
             )
 
         def available_qty(row: dict) -> int | None:
@@ -265,11 +270,11 @@ class StockwireClient:
                 "booked_qty": booked.get(str(row.get("id")), 0),
                 "booked": booked.get(str(row.get("id")), 0) > 0 if job_id else None,
             }
-            for row in rows
+            for row in page_rows
         ]
         return {
-            "items": items[skip : skip + limit],
-            "total": len(items),
+            "items": items,
+            "total": len(rows),
             "facets": facets,
             "availability": {"date_range_supported": date_supported},
             "truncated": self.truncated,
@@ -280,21 +285,29 @@ class StockwireClient:
     ) -> dict[str, int | None]:
         """Minimum available quantity per product across the rental window.
 
-        Calls ``get_availability`` concurrently for every product. Each call that fails (or
-        returns an unrecognised shape) yields ``None`` so the caller can fall back to the
-        product's current-stock count instead of dropping the row.
+        Uses a single shared HTTP client and bounds concurrency (a large catalog page should not
+        open hundreds of simultaneous upstream connections). Each call that fails (or returns an
+        unrecognised shape) yields ``None`` so the caller can fall back to current stock.
         """
+        sem = asyncio.Semaphore(20)
 
         async def one(pid: str) -> tuple[str, int | None]:
-            try:
-                resp = await self.get_availability(pid, start_date, end_date)
-            except Exception:  # noqa: BLE001 - degrade to current stock on upstream error
-                return pid, None
-            if isinstance(resp, dict):
-                if "available_quantity" in resp:
-                    return pid, int(resp["available_quantity"])
-                if "total_quantity" in resp and "max_reserved_quantity" in resp:
-                    return pid, int(resp["total_quantity"]) - int(resp["max_reserved_quantity"])
+            async with sem:
+                try:
+                    async with self._client() as client:
+                        resp = await client.get(
+                            f"/api/v1/inventory/products/{pid}/availability",
+                            params={"start_date": start_date, "end_date": end_date},
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                except Exception:  # noqa: BLE001 - degrade to current stock on upstream error
+                    return pid, None
+            if isinstance(data, dict):
+                if "available_quantity" in data:
+                    return pid, int(data["available_quantity"])
+                if "total_quantity" in data and "max_reserved_quantity" in data:
+                    return pid, int(data["total_quantity"]) - int(data["max_reserved_quantity"])
             return pid, None
 
         results = await asyncio.gather(*(one(pid) for pid in product_ids))
