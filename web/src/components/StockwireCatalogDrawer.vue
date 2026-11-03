@@ -63,6 +63,7 @@
         <q-toggle
           v-model="store.inStockOnly"
           dense
+          data-testid="catalog-instock-only"
           :label="t('workspace.inStock')"
         />
         <q-toggle

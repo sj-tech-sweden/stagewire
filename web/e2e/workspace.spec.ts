@@ -118,7 +118,9 @@ test('layer toggles and the catalog drawer open', async ({ page, request }) => {
 
   await page.getByTestId('open-catalog').click();
   await expect(page.getByTestId('catalog-search')).toBeVisible();
-  await expect(page.getByText(/date-range availability|tillgänglighet per datum/i)).toBeVisible();
+  // The drawer's availability controls render once the catalog loads (date-range support is
+  // reported by Stockwire, so the legacy "not available" hint is intentionally absent).
+  await expect(page.getByTestId('catalog-instock-only')).toBeVisible();
 });
 
 test('on a phone the list becomes cards and the catalog is full screen', async ({ page, request }) => {

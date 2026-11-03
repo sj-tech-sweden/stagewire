@@ -78,6 +78,8 @@ test('wireless workbench file auto-matches by name and imports the frequency', a
   // The matching channel is pre-selected by name, so the select already has a value.
   await expect(page.getByTestId('wwb-map-select-0')).not.toHaveValue('');
   await page.getByTestId('wwb-map-confirm').click();
+  // Wait for the import to finish and the mapping dialog to close before reading back.
+  await expect(page.getByTestId('wwb-map-confirm')).toBeHidden();
 
   const channel = await getChannel(request, headers, jobId, listId, channelId);
   expect(channel?.wireless_frequency_mhz).toBe(559.825);
@@ -106,6 +108,8 @@ test('wireless workbench file can be mapped manually when names differ', async (
   await page.getByTestId('wwb-map-select-0').click();
   await page.getByRole('option', { name: /Vox/ }).click();
   await page.getByTestId('wwb-map-confirm').click();
+  // Wait for the import to finish and the mapping dialog to close before reading back.
+  await expect(page.getByTestId('wwb-map-confirm')).toBeHidden();
 
   const channel = await getChannel(request, headers, jobId, listId, channelId);
   expect(channel?.wireless_frequency_mhz).toBe(606.25);

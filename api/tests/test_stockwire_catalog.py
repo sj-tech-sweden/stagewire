@@ -128,9 +128,7 @@ async def test_search_marks_items_booked_on_the_job_only():
 async def test_search_uses_date_ranged_availability_when_window_supplied():
     # With a rental window the available_qty comes from the availability endpoint (min across the
     # range), not the upstream current-stock count, and the catalog reports date support.
-    result = await client().search_catalog(
-        start_date="2026-11-02", end_date="2026-11-04"
-    )
+    result = await client().search_catalog(start_date="2026-11-02", end_date="2026-11-04")
     by_name = {i["name"]: i for i in result["items"]}
     # availability endpoint, not the upstream current-stock count (which is 8 for SM58)
     assert by_name["SM58"]["available_qty"] == 3
@@ -181,9 +179,7 @@ async def test_search_uses_batch_with_availability_endpoint_and_no_per_product_c
     sw = StockwireClient(
         base_url="http://sw.test", token="t", transport=httpx.MockTransport(counting_handler)
     )
-    result = await sw.search_catalog(
-        start_date="2026-01-01", end_date="2026-01-02", limit=3
-    )
+    result = await sw.search_catalog(start_date="2026-01-01", end_date="2026-01-02", limit=3)
     assert len(result["items"]) == 3
     assert all(i["available_qty"] == 1 for i in result["items"])
     assert len(with_availability_calls) == 1  # one batch sweep, not per product
@@ -232,7 +228,6 @@ async def test_search_excludes_rental_products_by_default_but_can_include_them()
     assert [i["name"] for i in defaulted["items"]] == ["Own Mic"]
     included = await sw.search_catalog(exclude_rental=False)
     assert {i["name"] for i in included["items"]} == {"Own Mic", "Rental Mic"}
-
 
 
 @pytest.mark.asyncio
