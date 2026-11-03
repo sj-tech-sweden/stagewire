@@ -51,6 +51,21 @@ def handler(request: httpx.Request) -> httpx.Response:
         if "category" in params:
             rows = [r for r in rows if r["category"] == params["category"]]
         return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+    if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+        pid = int(path.split("/")[-2])
+        # Min available across the requested window, per product.
+        avail = {1: 3, 2: 0, 3: 1}.get(pid, 0)
+        return httpx.Response(
+            200,
+            json={
+                "product_id": pid,
+                "start_date": params.get("start_date"),
+                "end_date": params.get("end_date"),
+                "total_quantity": avail,
+                "max_reserved_quantity": 0,
+                "available_quantity": avail,
+            },
+        )
     if path.startswith("/api/v1/inventory/products/"):
         pid = int(path.rsplit("/", 1)[1])
         return httpx.Response(200, json=next(r for r in PRODUCTS if r["id"] == pid))
@@ -88,6 +103,28 @@ async def test_search_marks_items_booked_on_the_job_only():
     assert by_name["SM58"]["available_qty"] == 8
     unbooked = await client().search_catalog()
     assert unbooked["items"][0]["booked"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_uses_date_ranged_availability_when_window_supplied():
+    # With a rental window the available_qty comes from the availability endpoint (min across the
+    # range), not the upstream current-stock count, and the catalog reports date support.
+    result = await client().search_catalog(
+        start_date="2026-11-02", end_date="2026-11-04"
+    )
+    by_name = {i["name"]: i for i in result["items"]}
+    assert by_name["SM58"]["available_qty"] == 3  # availability endpoint, not eventory_available_qty (8)
+    assert by_name["e935"]["available_qty"] == 0
+    assert by_name["Matrix"]["available_qty"] == 1
+    assert result["availability"] == {"date_range_supported": True}
+
+
+@pytest.mark.asyncio
+async def test_search_falls_back_to_current_stock_when_no_window():
+    result = await client().search_catalog()
+    by_name = {i["name"]: i for i in result["items"]}
+    assert by_name["SM58"]["available_qty"] == 8  # current stock
+    assert result["availability"] == {"date_range_supported": False}
 
 
 @pytest.mark.asyncio

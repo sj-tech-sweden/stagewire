@@ -742,6 +742,8 @@
       v-model="catalogOpen"
       :job-id="jobId"
       :stockwire-job-id="job?.stockwire_job_id || null"
+      :start-date="job?.start_date || null"
+      :end-date="job?.end_date || null"
     />
   </q-page>
 </template>

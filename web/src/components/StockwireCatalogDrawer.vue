@@ -69,7 +69,7 @@
           v-if="!store.dateRangeSupported"
           class="text-caption text-grey-6"
         >
-          {{ t('workspace.noDateFilter') }}
+          {{ t('workspace.dateRangeHint') }}
         </div>
       </q-card-section>
 
@@ -206,6 +206,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   jobId: { type: String, required: true },
   stockwireJobId: { type: String, default: null },
+  startDate: { type: String, default: null },
+  endDate: { type: String, default: null },
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -217,7 +219,10 @@ const caseId = ref(null);
 const caseOptions = ref([]);
 const adding = ref(false);
 
-const run = () => store.search(props.stockwireJobId);
+const run = () => store.search(props.stockwireJobId, {
+  startDate: props.startDate,
+  endDate: props.endDate,
+});
 
 watch(
   () => props.modelValue,

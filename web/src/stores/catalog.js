@@ -22,7 +22,7 @@ export const useCatalogStore = defineStore('catalog', {
     selectedItems: (state) => state.items.filter((i) => state.selected[i.id]),
   },
   actions: {
-    async search(stockwireJobId) {
+    async search(stockwireJobId, { startDate = null, endDate = null } = {}) {
       this.loading = true;
       this.error = null;
       try {
@@ -33,6 +33,10 @@ export const useCatalogStore = defineStore('catalog', {
           jobId: stockwireJobId,
           limit: 200,
         });
+        // A job rental window makes the search date-ranged: the backend swaps each product's
+        // current stock for its minimum available quantity across that window.
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
         const { data } = await api.get(`/stockwire/catalog/search?${params.toString()}`);
         this.items = data.items || [];
         this.total = data.total || 0;

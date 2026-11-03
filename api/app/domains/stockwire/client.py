@@ -201,14 +201,19 @@ class StockwireClient:
         job_id: str | None = None,
         skip: int = 0,
         limit: int = 50,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> dict:
         """Faceted global catalog search over ``GET /api/v1/inventory/products``.
 
         Not limited to items booked on the job. The upstream only filters on one value per
-        facet and has no attribute filters, no facet counts and no date-ranged availability
-        (only ``eventory_available_qty``), so multi-value facets, ``attributes`` and the facet
-        counts are computed here over the search result. ``job_id`` (a rental job id) marks
-        each hit with the quantity already booked.
+        facet and has no attribute filters and no facet counts, so multi-value facets,
+        ``attributes`` and the facet counts are computed here over the search result. ``job_id``
+        (a rental job id) marks each hit with the quantity already booked.
+
+        When ``start_date``/``end_date`` are supplied the window is a rental period, and each
+        product's ``available_qty`` is taken from the per-product availability endpoint (the
+        minimum available across that window) instead of the upstream's current-stock count.
         """
         params: dict[str, object] = {}
         if q:
@@ -235,10 +240,28 @@ class StockwireClient:
         for key, wanted in (attributes or {}).items():
             rows = [r for r in rows if str(r.get(key, "")).lower() == str(wanted).lower()]
         booked = await self.booked_quantities(job_id) if job_id else {}
+
+        # Date-ranged availability: fetch the minimum available quantity per product across the
+        # rental window concurrently. A failed upstream call degrades to ``None`` for that
+        # product so we keep the current-stock fallback rather than blanking the row.
+        date_supported = bool(start_date and end_date)
+        range_avail: dict[str, int | None] = {}
+        if date_supported:
+            range_avail = await self._availability_for_products(
+                [str(r.get("id")) for r in rows], start_date, end_date
+            )
+
+        def available_qty(row: dict) -> int | None:
+            if date_supported:
+                ranged = range_avail.get(str(row.get("id")))
+                if ranged is not None:
+                    return ranged
+            return row.get("eventory_available_qty")
+
         items = [
             {
                 **row,
-                "available_qty": row.get("eventory_available_qty"),
+                "available_qty": available_qty(row),
                 "booked_qty": booked.get(str(row.get("id")), 0),
                 "booked": booked.get(str(row.get("id")), 0) > 0 if job_id else None,
             }
@@ -248,9 +271,34 @@ class StockwireClient:
             "items": items[skip : skip + limit],
             "total": len(items),
             "facets": facets,
-            "availability": {"date_range_supported": False},
+            "availability": {"date_range_supported": date_supported},
             "truncated": self.truncated,
         }
+
+    async def _availability_for_products(
+        self, product_ids: list[str], start_date: str, end_date: str
+    ) -> dict[str, int | None]:
+        """Minimum available quantity per product across the rental window.
+
+        Calls ``get_availability`` concurrently for every product. Each call that fails (or
+        returns an unrecognised shape) yields ``None`` so the caller can fall back to the
+        product's current-stock count instead of dropping the row.
+        """
+
+        async def one(pid: str) -> tuple[str, int | None]:
+            try:
+                resp = await self.get_availability(pid, start_date, end_date)
+            except Exception:  # noqa: BLE001 - degrade to current stock on upstream error
+                return pid, None
+            if isinstance(resp, dict):
+                if "available_quantity" in resp:
+                    return pid, int(resp["available_quantity"])
+                if "total_quantity" in resp and "max_reserved_quantity" in resp:
+                    return pid, int(resp["total_quantity"]) - int(resp["max_reserved_quantity"])
+            return pid, None
+
+        results = await asyncio.gather(*(one(pid) for pid in product_ids))
+        return dict(results)
 
     async def search_own_products(
         self,

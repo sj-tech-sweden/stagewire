@@ -225,6 +225,8 @@ async def search_catalog(
     manufacturer: list[str] | None = Query(default=None),
     attr: list[str] | None = Query(default=None, description="key:value spec filters"),
     job_id: str | None = Query(default=None, description="Stockwire rental job id"),
+    start_date: str | None = Query(default=None, description="Inclusive rental start (YYYY-MM-DD)"),
+    end_date: str | None = Query(default=None, description="Inclusive rental end (YYYY-MM-DD)"),
     skip: int = 0,
     limit: int = 50,
     db=Depends(get_db),
@@ -245,6 +247,8 @@ async def search_catalog(
             manufacturers=manufacturer,
             attributes=attributes,
             job_id=job_id,
+            start_date=start_date,
+            end_date=end_date,
             skip=skip,
             limit=limit,
         )

@@ -408,8 +408,8 @@ export default {
     category: "Kategori",
     manufacturer: "Tillverkare",
     inStock: "Bara i lager",
-    noDateFilter:
-      "Tillgänglighet per datum finns inte i Stockwire än; visat lager är aktuellt.",
+    dateRangeHint:
+      "Ange jobbets uthyrningsdatum för att se tillgänglighet för den perioden.",
     available: "I lager",
     bookedOnJob: "På jobbet",
     addSelected: "Lägg till {n} valda",

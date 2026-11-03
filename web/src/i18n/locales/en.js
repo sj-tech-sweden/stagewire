@@ -406,8 +406,8 @@ export default {
     category: "Category",
     manufacturer: "Manufacturer",
     inStock: "In stock only",
-    noDateFilter:
-      "Date-range availability is not available from Stockwire yet; stock shown is current.",
+    dateRangeHint:
+      "Set the job rental dates to see availability for that period.",
     available: "In stock",
     bookedOnJob: "On job",
     addSelected: "Add {n} selected",
