@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.1.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.0.0...stagewire-v1.1.0) (2026-11-03)
+
+
+### Features
+
+* **audio:** integrate Wireless Workbench frequency import and export ([cbf6fad](https://github.com/sj-tech-sweden/stagewire/commit/cbf6fad7034328471b29166c361774dc073adc3f))
+* **audio:** Wireless Workbench frequency import & export ([fc189cd](https://github.com/sj-tech-sweden/stagewire/commit/fc189cd27b10c5f5a471b3d29cefbe6841f53b1c))
+* **jobs:** prefill rental dates from event date and use date pickers ([423bceb](https://github.com/sj-tech-sweden/stagewire/commit/423bceb586de9ee4572e7bf2357de30c1bf21838))
+* **stockwire:** make catalog search date-ranged ([10e33a7](https://github.com/sj-tech-sweden/stagewire/commit/10e33a79b9d28bddeae13a90855b15c5f73119fe))
+* **stockwire:** show product availability for the job ([bffa9d3](https://github.com/sj-tech-sweden/stagewire/commit/bffa9d36fbcecbd3c6f74a558ba0dfb87313cb7c))
+* **stockwire:** show product availability for the job ([145a2dc](https://github.com/sj-tech-sweden/stagewire/commit/145a2dcd33b1c3eda266b6741dbb5c168a8c0a85))
+* **wwb:** manual channel mapping UI and round-trip .shw export ([c326d1a](https://github.com/sj-tech-sweden/stagewire/commit/c326d1a51f62d15884764461949ee197d411b914))
+
+
+### Bug Fixes
+
+* **ci:** address ruff format and e2e failures on the merged workbench branch ([dc67e98](https://github.com/sj-tech-sweden/stagewire/commit/dc67e98bfd25a500f284117bc42f5d64a4fb7270))
+* **migrations:** use unique revision id for wireless frequency migration ([8084c62](https://github.com/sj-tech-sweden/stagewire/commit/8084c623eb85b64b595ceb4b874ea28516bc2363))
+* **stockwire:** parse real availability response shape ([1fd710a](https://github.com/sj-tech-sweden/stagewire/commit/1fd710a5bc60e8a472724a362cd9d4cf0d17ac9f))
+* **wwb:** generate from-scratch .shw from a real WWB template; declutter wireless table ([64db1aa](https://github.com/sj-tech-sweden/stagewire/commit/64db1aa8b2c897f9b56797dd502ccf13ce96147c))
+* **wwb:** stop double-counting coordinated channels so manual mapping isn't blocked ([2df4b75](https://github.com/sj-tech-sweden/stagewire/commit/2df4b754224e0285c34310aba70bfa3dacf9175d))
+
+
+### Performance Improvements
+
+* **stockwire:** batch the job-level availability endpoint via products/availability ([34451cd](https://github.com/sj-tech-sweden/stagewire/commit/34451cd0579ba335c9d1135b18b70186beccb71f))
+* **stockwire:** fetch catalog availability per page and exclude rentals by default ([8c7f142](https://github.com/sj-tech-sweden/stagewire/commit/8c7f142d48e2b828c2f347f3b4f945f479576820))
+* **stockwire:** lazy-load catalog pages and add include-rentals toggle ([caa444e](https://github.com/sj-tech-sweden/stagewire/commit/caa444e017aaba3e08d0287b31d301bc7a129f40))
+* **stockwire:** use batch with-availability endpoint for catalog date search ([fa1f0c9](https://github.com/sj-tech-sweden/stagewire/commit/fa1f0c9f60734ee9792ba9d6b3e64d7000266bfe))
+
 ## [1.0.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v0.7.0...stagewire-v1.0.0) (2026-11-02)
 
 
