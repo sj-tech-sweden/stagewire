@@ -38,6 +38,20 @@
           v-model="form.event_date"
           :label="t('jobs.fieldEventDate')"
         />
+        <div class="row q-col-gutter-sm">
+          <DatePicker
+            v-model="form.start_date"
+            class="col-6"
+            :label="t('jobs.fieldStartDate')"
+            data-testid="job-start-date"
+          />
+          <DatePicker
+            v-model="form.end_date"
+            class="col-6"
+            :label="t('jobs.fieldEndDate')"
+            data-testid="job-end-date"
+          />
+        </div>
         <q-input
           v-model="form.notes"
           dense
@@ -182,6 +196,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import DateTimePicker from '@/components/DateTimePicker.vue';
+import DatePicker from '@/components/DatePicker.vue';
 import { useVenuesStore } from '@/stores/venues';
 import { useStockwireStore } from '@/stores/stockwire';
 
@@ -197,7 +212,15 @@ const emit = defineEmits(['update:modelValue', 'saved']);
 const { t } = useI18n();
 const venues = useVenuesStore();
 const stockwire = useStockwireStore();
-const form = reactive({ title: '', venue_name: '', venue_id: null, event_date: '', notes: '' });
+const form = reactive({
+  title: '',
+  venue_name: '',
+  venue_id: null,
+  event_date: '',
+  start_date: '',
+  end_date: '',
+  notes: '',
+});
 const busy = ref(false);
 const pushing = ref(false);
 const message = ref('');
@@ -215,11 +238,17 @@ watch(
   () => props.modelValue,
   (open) => {
     if (!open) return;
+    const eventDate = props.job?.event_date || '';
+    // Seed the rental range from the event date when the job has no explicit range yet. The
+    // rental dates stay editable afterwards, so an event spanning more days can be widened.
+    const eventDay = eventDate ? eventDate.slice(0, 10) : '';
     Object.assign(form, {
       title: props.job?.title || '',
       venue_name: props.job?.venue_name || '',
       venue_id: props.job?.venue_id || null,
-      event_date: props.job?.event_date || '',
+      event_date: eventDate,
+      start_date: props.job?.start_date || eventDay,
+      end_date: props.job?.end_date || eventDay,
       notes: props.job?.notes || '',
     });
     message.value = '';
@@ -234,6 +263,8 @@ async function save() {
       title: form.title,
       venue_name: form.venue_name,
       event_date: form.event_date || null,
+      start_date: form.start_date || null,
+      end_date: form.end_date || null,
       notes: form.notes,
     });
     if ((form.venue_id || null) !== (props.job?.venue_id || null)) {

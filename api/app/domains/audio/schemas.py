@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -11,6 +11,8 @@ class ProductionJobBase(BaseModel):
     title: str = Field(..., max_length=255)
     venue_name: str = ""
     event_date: datetime | None = None
+    start_date: date | None = None
+    end_date: date | None = None
     stockwire_job_id: str | None = None
     notes: str = ""
     stage_width_cm: float = 0.0
@@ -37,6 +39,8 @@ class ProductionJobUpdate(BaseModel):
     title: str | None = None
     venue_name: str | None = None
     event_date: datetime | None = None
+    start_date: date | None = None
+    end_date: date | None = None
     stockwire_job_id: str | None = None
     notes: str | None = None
     stage_width_cm: float | None = Field(None, ge=0)

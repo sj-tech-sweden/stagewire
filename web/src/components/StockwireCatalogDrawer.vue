@@ -65,11 +65,17 @@
           dense
           :label="t('workspace.inStock')"
         />
+        <q-toggle
+          v-model="store.includeRentals"
+          dense
+          :label="t('workspace.includeRentals')"
+          @update:model-value="run"
+        />
         <div
           v-if="!store.dateRangeSupported"
           class="text-caption text-grey-6"
         >
-          {{ t('workspace.noDateFilter') }}
+          {{ t('workspace.dateRangeHint') }}
         </div>
       </q-card-section>
 
@@ -105,10 +111,12 @@
       />
 
       <q-virtual-scroll
+        ref="scrollRef"
         class="col"
         :items="store.visibleItems"
         :virtual-scroll-item-size="64"
         separator
+        @load="onScrollLoad"
       >
         <template #default="{ item }">
           <q-item
@@ -195,7 +203,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useCatalogStore } from '@/stores/catalog';
@@ -206,6 +214,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   jobId: { type: String, required: true },
   stockwireJobId: { type: String, default: null },
+  startDate: { type: String, default: null },
+  endDate: { type: String, default: null },
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -216,8 +226,30 @@ const graph = useGraphStore();
 const caseId = ref(null);
 const caseOptions = ref([]);
 const adding = ref(false);
+const scrollRef = ref(null);
 
-const run = () => store.search(props.stockwireJobId);
+const run = async () => {
+  await store.search(props.stockwireJobId, {
+    startDate: props.startDate,
+    endDate: props.endDate,
+  });
+  // New search resets the result set, so send the virtual scroll back to the top.
+  await nextTick();
+  scrollRef.value?.scrollTo(0);
+};
+
+// q-virtual-scroll lazy-loads the next page once the user nears the end of the current results.
+function onScrollLoad(index, done) {
+  if (index < store.visibleItems.length - 5) {
+    done();
+    return;
+  }
+  if (!store.hasMore || store.loadingMore) {
+    done();
+    return;
+  }
+  store.loadMore().finally(() => done());
+}
 
 watch(
   () => props.modelValue,

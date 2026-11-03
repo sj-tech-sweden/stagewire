@@ -201,23 +201,47 @@ class StockwireClient:
         job_id: str | None = None,
         skip: int = 0,
         limit: int = 50,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        exclude_rental: bool = True,
     ) -> dict:
-        """Faceted global catalog search over ``GET /api/v1/inventory/products``.
+        """Faceted global catalog search over the Stockwire product list.
 
         Not limited to items booked on the job. The upstream only filters on one value per
-        facet and has no attribute filters, no facet counts and no date-ranged availability
-        (only ``eventory_available_qty``), so multi-value facets, ``attributes`` and the facet
-        counts are computed here over the search result. ``job_id`` (a rental job id) marks
-        each hit with the quantity already booked.
+        facet and has no attribute filters and no facet counts, so multi-value facets,
+        ``attributes`` and the facet counts are computed here over the search result. ``job_id``
+        (a rental job id) marks each hit with the quantity already booked. ``exclude_rental``
+        hides rental-in products (e.g. from Eventory) by default so the catalog shows the
+        company's own stock unless the caller opts in.
+
+        When ``start_date``/``end_date`` are supplied the window is a rental period. We call the
+        upstream ``with-availability`` endpoint, which returns the same paginated product list but
+        with ``available_quantity`` (the minimum available across the window) inlined on every
+        product — a single sweep replaces the one availability call per product we used to make.
+        Without a window we fall back to the plain product list and use each product's
+        current-stock count. Both endpoints reuse the same filters/pagination, so facets, ``total``
+        and truncation are identical either way.
         """
-        params: dict[str, object] = {}
+        date_supported = bool(start_date and end_date)
+        # The availability-bearing list endpoint reuses the same filters/pagination as the plain
+        # list endpoint, so pointing ``_all_pages`` at it keeps facets/total/truncation intact
+        # while inlining availability on every row.
+        path = (
+            "/api/v1/inventory/products/with-availability"
+            if date_supported
+            else "/api/v1/inventory/products"
+        )
+        params: dict[str, object] = {"exclude_rental": exclude_rental}
+        if date_supported:
+            params["start_date"] = start_date
+            params["end_date"] = end_date
         if q:
             params["search"] = q
         if categories and len(categories) == 1:
             params["category"] = categories[0]
         if manufacturers and len(manufacturers) == 1:
             params["manufacturer"] = manufacturers[0]
-        rows = await self._all_pages("/api/v1/inventory/products", params)
+        rows = await self._all_pages(path, params)
 
         def facet(field: str) -> dict[str, int]:
             counts: dict[str, int] = {}
@@ -235,20 +259,28 @@ class StockwireClient:
         for key, wanted in (attributes or {}).items():
             rows = [r for r in rows if str(r.get(key, "")).lower() == str(wanted).lower()]
         booked = await self.booked_quantities(job_id) if job_id else {}
+
+        def available_qty(row: dict) -> int | None:
+            if date_supported:
+                ranged = row.get("available_quantity")
+                if ranged is not None:
+                    return int(ranged)
+            return row.get("eventory_available_qty")
+
         items = [
             {
                 **row,
-                "available_qty": row.get("eventory_available_qty"),
+                "available_qty": available_qty(row),
                 "booked_qty": booked.get(str(row.get("id")), 0),
                 "booked": booked.get(str(row.get("id")), 0) > 0 if job_id else None,
             }
-            for row in rows
+            for row in rows[skip : skip + limit]
         ]
         return {
-            "items": items[skip : skip + limit],
-            "total": len(items),
+            "items": items,
+            "total": len(rows),
             "facets": facets,
-            "availability": {"date_range_supported": False},
+            "availability": {"date_range_supported": date_supported},
             "truncated": self.truncated,
         }
 
@@ -348,6 +380,48 @@ class StockwireClient:
             response = await client.get(f"/api/v1/inventory/products/{product_id}")
             response.raise_for_status()
             return response.json()
+
+    async def get_availability(self, product_id: int | str, start_date: str, end_date: str) -> dict:
+        """Minimum available device quantity for an inclusive date range.
+
+        The upstream response is a single object such as
+        ``{"product_id": 888, "start_date": "...", "end_date": "...", "total_quantity": 2,
+        "max_reserved_quantity": 0, "available_quantity": 2}`` where ``available_quantity`` is
+        already the minimum available across the range. We request through the shared
+        ``_client`` so the mock-transport used in tests is honoured.
+        """
+        async with self._client() as client:
+            response = await client.get(
+                f"/api/v1/inventory/products/{product_id}/availability",
+                params={"start_date": start_date, "end_date": end_date},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_availability_batch(
+        self, product_ids: list[str | int], start_date: str, end_date: str
+    ) -> dict[str, dict]:
+        """Availability for many products over a window in a single call.
+
+        Hits ``GET /api/v1/inventory/products/availability?product_ids=1,2,3`` and returns
+        ``{str(product_id): raw availability dict}`` so callers can map straight back onto their
+        product ids — the upstream returns a flat list, not a keyed object. Replaces the
+        per-product loop the job-level availability endpoint used to run.
+
+        A failed upstream call (e.g. a 404 for a product id that no longer exists) is raised to the
+        caller, which can degrade to the isolated per-product path rather than blanking every row.
+        """
+        if not product_ids:
+            return {}
+        ids = ",".join(str(p) for p in product_ids)
+        async with self._client() as client:
+            response = await client.get(
+                "/api/v1/inventory/products/availability",
+                params={"product_ids": ids, "start_date": start_date, "end_date": end_date},
+            )
+            response.raise_for_status()
+            rows = response.json()
+        return {str(r.get("product_id")): r for r in rows}
 
     async def list_category_tree(self) -> list[dict]:
         async with httpx.AsyncClient(
