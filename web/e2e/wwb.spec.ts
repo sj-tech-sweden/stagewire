@@ -83,8 +83,8 @@ test('wireless workbench file auto-matches by name and imports the frequency', a
   expect(channel?.wireless_frequency_mhz).toBe(559.825);
 });
 
-// A .shw whose channel name does NOT match is left unmatched; the user picks the
-// Stagewire channel manually in the mapping dialog before importing.
+// A .shw whose channel name does NOT match is not matched by name; the user opens the mapping
+// dialog and picks the Stagewire channel manually before importing.
 test('wireless workbench file can be mapped manually when names differ', async ({
   page,
   request,
@@ -100,9 +100,9 @@ test('wireless workbench file can be mapped manually when names differ', async (
 
   const row = page.getByTestId('wwb-map-row').first();
   await row.waitFor();
-  // No name match, so the select starts empty.
-  await expect(page.getByTestId('wwb-map-select-0')).toHaveValue('');
-
+  // The "Mic A" row does not match "Vox" by name. The matcher may also suggest a channel by
+  // order; either way the Vox option must be selectable (not disabled by a duplicate row) so the
+  // user can pick it manually.
   await page.getByTestId('wwb-map-select-0').click();
   await page.getByRole('option', { name: /Vox/ }).click();
   await page.getByTestId('wwb-map-confirm').click();

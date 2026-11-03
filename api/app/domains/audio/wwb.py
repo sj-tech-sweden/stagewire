@@ -116,7 +116,10 @@ def parse_wwb_show_file(xml_text: str) -> list[dict]:
     """
     root = ET.fromstring(xml_text)
     parents = _parent_map(root)
-    rows: list[dict] = []
+    # A tuned channel appears twice in a show file: once inside its <device> (carrying model/band
+    # and channel number) and once as a coordination view under <channel_management>. Both carry
+    # the frequency, so we collect every frequency-bearing channel and reconcile below.
+    raw_rows: list[tuple[dict, bool]] = []
     for channel in root.iter("channel"):
         freq_el = channel.find("frequency")
         khz = _to_float(_text(freq_el)) if freq_el is not None else None
@@ -131,7 +134,8 @@ def parse_wwb_show_file(xml_text: str) -> list[dict]:
         node = parents.get(channel)
         while node is not None and node.tag != "device":
             node = parents.get(node)
-        if node is not None and node.tag == "device":
+        from_device = node is not None and node.tag == "device"
+        if from_device:
             device = node
         model = _text(device.find("model")) if device is not None else None
         band = _text(device.find("band")) if device is not None else None
@@ -144,17 +148,28 @@ def parse_wwb_show_file(xml_text: str) -> list[dict]:
         pack = f"{model} {band}".strip() if (model or band) else None
         if not name and pack and channel_number:
             name = f"{pack} {channel_number}"
-        rows.append(
-            {
-                "name": name or None,
-                "wireless_frequency_mhz": round(khz / 1000.0, 3),
-                "wireless_group": group,
-                "wireless_channel": chan,
-                "wireless_pack": pack,
-                "channel_number": channel_number,
-            }
+        raw_rows.append(
+            (
+                {
+                    "name": name or None,
+                    "wireless_frequency_mhz": round(khz / 1000.0, 3),
+                    "wireless_group": group,
+                    "wireless_channel": chan,
+                    "wireless_pack": pack,
+                    "channel_number": channel_number,
+                },
+                from_device,
+            )
         )
-    return rows
+    # A tuned channel appears twice in a show file: once inside its <device> (carrying model/band
+    # and channel number) and once as a coordination view under <channel_management>. When the file
+    # has device channels we keep only those — they are authoritative and distinct (one per
+    # physically-tuned channel) — and drop the coordination-view duplicates. Show files that carry
+    # no <device> (only a coordination list) keep those channels as-is.
+    device_rows = [row for row, from_device in raw_rows if from_device]
+    if device_rows:
+        return device_rows
+    return [row for row, from_device in raw_rows if not from_device]
 
 
 def match_wireless_rows(
