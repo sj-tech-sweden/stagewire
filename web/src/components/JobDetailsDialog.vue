@@ -39,21 +39,15 @@
           :label="t('jobs.fieldEventDate')"
         />
         <div class="row q-col-gutter-sm">
-          <q-input
+          <DatePicker
             v-model="form.start_date"
             class="col-6"
-            dense
-            outlined
-            type="date"
             :label="t('jobs.fieldStartDate')"
             data-testid="job-start-date"
           />
-          <q-input
+          <DatePicker
             v-model="form.end_date"
             class="col-6"
-            dense
-            outlined
-            type="date"
             :label="t('jobs.fieldEndDate')"
             data-testid="job-end-date"
           />
@@ -202,6 +196,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import DateTimePicker from '@/components/DateTimePicker.vue';
+import DatePicker from '@/components/DatePicker.vue';
 import { useVenuesStore } from '@/stores/venues';
 import { useStockwireStore } from '@/stores/stockwire';
 
@@ -243,13 +238,17 @@ watch(
   () => props.modelValue,
   (open) => {
     if (!open) return;
+    const eventDate = props.job?.event_date || '';
+    // Seed the rental range from the event date when the job has no explicit range yet. The
+    // rental dates stay editable afterwards, so an event spanning more days can be widened.
+    const eventDay = eventDate ? eventDate.slice(0, 10) : '';
     Object.assign(form, {
       title: props.job?.title || '',
       venue_name: props.job?.venue_name || '',
       venue_id: props.job?.venue_id || null,
-      event_date: props.job?.event_date || '',
-      start_date: props.job?.start_date || '',
-      end_date: props.job?.end_date || '',
+      event_date: eventDate,
+      start_date: props.job?.start_date || eventDay,
+      end_date: props.job?.end_date || eventDay,
       notes: props.job?.notes || '',
     });
     message.value = '';
