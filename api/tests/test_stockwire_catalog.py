@@ -51,6 +51,25 @@ def handler(request: httpx.Request) -> httpx.Response:
         if "category" in params:
             rows = [r for r in rows if r["category"] == params["category"]]
         return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+    if path == "/api/v1/inventory/products/with-availability":
+        # Batch availability endpoint: same list, but each product carries availability for the
+        # requested window. ``available_quantity`` here is the min available across the window.
+        rows = PRODUCTS
+        if "search" in params:
+            rows = [r for r in rows if params["search"].lower() in r["name"].lower()]
+        if "category" in params:
+            rows = [r for r in rows if r["category"] == params["category"]]
+        window = {1: 3, 2: 0, 3: 1}
+        rows = [
+            {
+                **r,
+                "total_quantity": window.get(r["id"], 0),
+                "max_reserved_quantity": 0,
+                "available_quantity": window.get(r["id"], 0),
+            }
+            for r in rows
+        ]
+        return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
     if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
         pid = int(path.split("/")[-2])
         # Min available across the requested window, per product.
@@ -129,28 +148,32 @@ async def test_search_falls_back_to_current_stock_when_no_window():
 
 
 @pytest.mark.asyncio
-async def test_search_fetches_availability_only_for_the_returned_page():
-    # Performance: availability is queried per returned product, not for the whole catalog, so the
-    # cost scales with the page size rather than the total number of matches.
-    calls = []
+async def test_search_uses_batch_with_availability_endpoint_and_no_per_product_calls():
+    # Performance: with a rental window the catalog hits the batch ``with-availability`` endpoint,
+    # which inlines availability on every product in a single sweep, instead of firing one
+    # per-product availability call.
+    per_product_calls = []
+    with_availability_calls = []
 
     def counting_handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
-            pid = int(path.split("/")[-2])
-            calls.append(pid)
-            return httpx.Response(
-                200,
-                json={
-                    "product_id": pid,
-                    "available_quantity": 1,
-                    "total_quantity": 1,
+        if path == "/api/v1/inventory/products/with-availability":
+            with_availability_calls.append(1)
+            rows = [
+                {
+                    "id": i,
+                    "name": f"P{i}",
+                    "eventory_available_qty": 5,
+                    "total_quantity": 5,
                     "max_reserved_quantity": 0,
-                },
-            )
-        if path == "/api/v1/inventory/products":
-            rows = [{"id": i, "name": f"P{i}", "eventory_available_qty": 5} for i in range(1, 11)]
+                    "available_quantity": 1,
+                }
+                for i in range(1, 11)
+            ]
             return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+        if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+            per_product_calls.append(int(path.split("/")[-2]))
+            return httpx.Response(200, json={"available_quantity": 1})
         if path == "/api/v1/jobs/requirements":
             return httpx.Response(200, json=[])
         return httpx.Response(404, json={"detail": "Not Found"})
@@ -162,7 +185,9 @@ async def test_search_fetches_availability_only_for_the_returned_page():
         start_date="2026-01-01", end_date="2026-01-02", limit=3
     )
     assert len(result["items"]) == 3
-    assert len(calls) == 3  # only the page, not all 10 products
+    assert all(i["available_qty"] == 1 for i in result["items"])
+    assert len(with_availability_calls) == 1  # one batch sweep, not per product
+    assert per_product_calls == []  # no per-product availability calls
 
 
 @pytest.mark.asyncio

@@ -205,7 +205,7 @@ class StockwireClient:
         end_date: str | None = None,
         exclude_rental: bool = True,
     ) -> dict:
-        """Faceted global catalog search over ``GET /api/v1/inventory/products``.
+        """Faceted global catalog search over the Stockwire product list.
 
         Not limited to items booked on the job. The upstream only filters on one value per
         facet and has no attribute filters and no facet counts, so multi-value facets,
@@ -214,20 +214,34 @@ class StockwireClient:
         hides rental-in products (e.g. from Eventory) by default so the catalog shows the
         company's own stock unless the caller opts in.
 
-        When ``start_date``/``end_date`` are supplied the window is a rental period, and each
-        product's ``available_qty`` is taken from the per-product availability endpoint (the
-        minimum available across that window) instead of the upstream's current-stock count. Only
-        the products actually returned on this page are queried, so the cost scales with the page
-        size rather than the whole catalog.
+        When ``start_date``/``end_date`` are supplied the window is a rental period. We call the
+        upstream ``with-availability`` endpoint, which returns the same paginated product list but
+        with ``available_quantity`` (the minimum available across the window) inlined on every
+        product — a single sweep replaces the one availability call per product we used to make.
+        Without a window we fall back to the plain product list and use each product's
+        current-stock count. Both endpoints reuse the same filters/pagination, so facets, ``total``
+        and truncation are identical either way.
         """
+        date_supported = bool(start_date and end_date)
+        # The availability-bearing list endpoint reuses the same filters/pagination as the plain
+        # list endpoint, so pointing ``_all_pages`` at it keeps facets/total/truncation intact
+        # while inlining availability on every row.
+        path = (
+            "/api/v1/inventory/products/with-availability"
+            if date_supported
+            else "/api/v1/inventory/products"
+        )
         params: dict[str, object] = {"exclude_rental": exclude_rental}
+        if date_supported:
+            params["start_date"] = start_date
+            params["end_date"] = end_date
         if q:
             params["search"] = q
         if categories and len(categories) == 1:
             params["category"] = categories[0]
         if manufacturers and len(manufacturers) == 1:
             params["manufacturer"] = manufacturers[0]
-        rows = await self._all_pages("/api/v1/inventory/products", params)
+        rows = await self._all_pages(path, params)
 
         def facet(field: str) -> dict[str, int]:
             counts: dict[str, int] = {}
@@ -246,21 +260,11 @@ class StockwireClient:
             rows = [r for r in rows if str(r.get(key, "")).lower() == str(wanted).lower()]
         booked = await self.booked_quantities(job_id) if job_id else {}
 
-        # Only the page we return needs availability; querying the whole catalog would mean one
-        # upstream call per product. ``total`` still reflects every matched row for paging.
-        page_rows = rows[skip : skip + limit]
-        date_supported = bool(start_date and end_date)
-        range_avail: dict[str, int | None] = {}
-        if date_supported:
-            range_avail = await self._availability_for_products(
-                [str(r.get("id")) for r in page_rows], start_date, end_date
-            )
-
         def available_qty(row: dict) -> int | None:
             if date_supported:
-                ranged = range_avail.get(str(row.get("id")))
+                ranged = row.get("available_quantity")
                 if ranged is not None:
-                    return ranged
+                    return int(ranged)
             return row.get("eventory_available_qty")
 
         items = [
@@ -270,7 +274,7 @@ class StockwireClient:
                 "booked_qty": booked.get(str(row.get("id")), 0),
                 "booked": booked.get(str(row.get("id")), 0) > 0 if job_id else None,
             }
-            for row in page_rows
+            for row in rows[skip : skip + limit]
         ]
         return {
             "items": items,
@@ -279,39 +283,6 @@ class StockwireClient:
             "availability": {"date_range_supported": date_supported},
             "truncated": self.truncated,
         }
-
-    async def _availability_for_products(
-        self, product_ids: list[str], start_date: str, end_date: str
-    ) -> dict[str, int | None]:
-        """Minimum available quantity per product across the rental window.
-
-        Uses a single shared HTTP client and bounds concurrency (a large catalog page should not
-        open hundreds of simultaneous upstream connections). Each call that fails (or returns an
-        unrecognised shape) yields ``None`` so the caller can fall back to current stock.
-        """
-        sem = asyncio.Semaphore(20)
-
-        async def one(pid: str) -> tuple[str, int | None]:
-            async with sem:
-                try:
-                    async with self._client() as client:
-                        resp = await client.get(
-                            f"/api/v1/inventory/products/{pid}/availability",
-                            params={"start_date": start_date, "end_date": end_date},
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                except Exception:  # noqa: BLE001 - degrade to current stock on upstream error
-                    return pid, None
-            if isinstance(data, dict):
-                if "available_quantity" in data:
-                    return pid, int(data["available_quantity"])
-                if "total_quantity" in data and "max_reserved_quantity" in data:
-                    return pid, int(data["total_quantity"]) - int(data["max_reserved_quantity"])
-            return pid, None
-
-        results = await asyncio.gather(*(one(pid) for pid in product_ids))
-        return dict(results)
 
     async def search_own_products(
         self,
