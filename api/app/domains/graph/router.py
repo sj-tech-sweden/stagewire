@@ -1,15 +1,19 @@
+import json
+import xml.etree.ElementTree as ET
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
+from app.domains.audio import wwb_store
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
+from app.domains.audio.wwb import match_wireless_rows, parse_wwb_show_file
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import (
@@ -533,9 +537,150 @@ async def export_list(
     view = await readers.load_channel_list(db, job_id, list_id)
     if view is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    # If this list has imported a .shw before, let the exporter round-trip it.
+    stored = await wwb_store.get_show_file(db, list_id)
+    if stored is not None:
+        view[0].wwb_show_file_content = stored
     result = exporter.export(*view)
     return Response(
         content=result.content,
         media_type=result.media_type,
         headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
     )
+
+
+_WWB_WIRELESS_FIELDS = ("wireless_frequency_mhz", "wireless_group", "wireless_channel")
+
+
+@router.post("/lists/{list_id}/wireless-workbench/parse")
+async def parse_wireless_workbench(
+    job_id: UUID,
+    list_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Preview a Shure Wireless Workbench ``.shw`` before importing.
+
+    Parses the file and returns the coordinated channels (``rows``), the list's existing
+    wireless channels (``channels``) and a suggested mapping (``suggested_channel_id`` per
+    row). The client edits the mapping and posts it back to the import endpoint.
+    """
+    await _require_job(db, job_id)
+    raw = (await file.read()).decode("utf-8-sig")
+    try:
+        rows = parse_wwb_show_file(raw)
+    except ET.ParseError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Invalid Wireless Workbench file: {exc}"
+        ) from exc
+    view = await readers.load_channel_list(db, job_id, list_id)
+    if view is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    _, channels, _ = view
+    wireless = [c for c in channels if getattr(c, "input_type", None) == "wireless"]
+    matched, _unmatched, method = match_wireless_rows(wireless, rows)
+    row_to_channel = {id(row): c.id for c, row in matched}
+
+    preview_rows = [
+        {
+            "index": index,
+            "name": row.get("name"),
+            "wireless_frequency_mhz": row.get("wireless_frequency_mhz"),
+            "wireless_group": row.get("wireless_group"),
+            "wireless_channel": row.get("wireless_channel"),
+            "suggested_channel_id": row_to_channel.get(id(row)),
+        }
+        for index, row in enumerate(rows)
+    ]
+    preview_channels = [
+        {
+            "id": c.id,
+            "channel_number": c.channel_number,
+            "source_label": getattr(c, "source_label", None),
+            "wireless_pack": getattr(c, "wireless_pack", None),
+            "wireless_frequency_mhz": getattr(c, "wireless_frequency_mhz", None),
+            "wireless_group": getattr(c, "wireless_group", None),
+            "wireless_channel": getattr(c, "wireless_channel", None),
+        }
+        for c in wireless
+    ]
+    return {
+        "rows": preview_rows,
+        "channels": preview_channels,
+        "matched_by": method,
+        "filename": file.filename,
+    }
+
+
+@router.post("/lists/{list_id}/wireless-workbench/import")
+async def import_wireless_workbench(
+    job_id: UUID,
+    list_id: UUID,
+    file: UploadFile = File(...),
+    mapping: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Import a Shure Wireless Workbench ``.shw`` show file onto the list's wireless channels.
+
+    If ``mapping`` (a JSON list of ``{"row": <index>, "channel_id": <uuid>}``) is given,
+    only those rows are applied; otherwise channels are matched automatically by name
+    (channel name, pack or source label), falling back to order. The imported file is
+    stored so it can later be re-exported with Stagewire's frequencies written back.
+    """
+    await _require_job(db, job_id)
+    raw = (await file.read()).decode("utf-8-sig")
+    try:
+        rows = parse_wwb_show_file(raw)
+    except ET.ParseError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Invalid Wireless Workbench file: {exc}"
+        ) from exc
+    view = await readers.load_channel_list(db, job_id, list_id)
+    if view is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    _, channels, _ = view
+    wireless_by_id = {c.id: c for c in channels if getattr(c, "input_type", None) == "wireless"}
+
+    if mapping:
+        try:
+            mapping_list = json.loads(mapping)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"Invalid mapping JSON: {exc}"
+            ) from exc
+        pairs: list[tuple] = []
+        for entry in mapping_list:
+            row_index = entry.get("row")
+            channel_id = entry.get("channel_id")
+            if channel_id is None or row_index is None:
+                continue
+            try:
+                channel_id = UUID(str(channel_id))
+            except (ValueError, TypeError):
+                continue
+            if channel_id in wireless_by_id and 0 <= int(row_index) < len(rows):
+                pairs.append((wireless_by_id[channel_id], rows[int(row_index)]))
+    else:
+        pairs, _unmatched, _method = match_wireless_rows(list(wireless_by_id.values()), rows)
+
+    updated_ids: list[UUID] = []
+    for channel, row in pairs:
+        data = {key: row[key] for key in _WWB_WIRELESS_FIELDS if key in row}
+        await audio_native.update_channel(db, channel.id, data, job_id)
+        updated_ids.append(channel.id)
+    await wwb_store.upsert_show_file(db, list_id, job_id, raw, file.filename or "show.shw")
+    await db.commit()
+    await audio_native.publish_nodes(db, job_id, updated_ids)
+    if updated_ids:
+        await publish_job_event(job_id, "list.upsert", {"id": str(list_id)})
+    matched_rows = {id(row) for _channel, row in pairs}
+    return {
+        "matched": len(pairs),
+        "updated": len(updated_ids),
+        "rows": len(rows),
+        "unmatched": [
+            row.get("name") or row.get("wireless_pack") or f"row {index + 1}"
+            for index, row in enumerate(rows)
+            if id(row) not in matched_rows
+        ],
+    }

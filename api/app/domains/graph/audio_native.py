@@ -36,6 +36,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.audio.wwb import normalize_wireless_attributes
 from app.domains.graph import devices_native, plot_native
 from app.domains.graph.backfill import FAN_OUT, _point_attrs
 from app.domains.graph.ids import public_id
@@ -53,7 +54,9 @@ CHANNEL_ATTRS = (
     "instrument_group",
     "performer_name",
     "wireless_pack",
-    "wireless_frequency",
+    "wireless_frequency_mhz",
+    "wireless_group",
+    "wireless_channel",
     "phantom_power",
     "stereo",
     "stereo_channel",
@@ -179,7 +182,10 @@ def _points(node: GraphDevice, devices: dict) -> list[SimpleNamespace]:
 
 
 def channel_row(node: GraphDevice, devices: dict) -> SimpleNamespace:
-    a = node.attributes or {}
+    a = {**CHANNEL_DEFAULTS, **(node.attributes or {})}
+    # fold the structured MHz (or a legacy free-text ``wireless_frequency`` string) into
+    # the read model so unmigrated rows still expose ``wireless_frequency_mhz``
+    a = {**a, **normalize_wireless_attributes(a)}
     return SimpleNamespace(
         id=public_id(node),
         job_id=node.job_id,

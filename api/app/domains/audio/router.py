@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
-from app.domains.audio import schemas, service
+from app.domains.audio import schemas, service, wwb_store
 from app.domains.audio.camera_specs import resolve_camera_specs
 from app.domains.audio.coverage import coverage_grid, sector_for
 from app.domains.audio.device_specs import (
@@ -221,6 +221,10 @@ async def export_channel_list(
     view = container and await graph_readers.load_channel_list(db, job_id, container.id)
     if view is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    # If this list has imported a .shw before, let the exporter round-trip it.
+    stored = await wwb_store.get_show_file(db, container.id)
+    if stored is not None:
+        view[0].wwb_show_file_content = stored
     result = exporter.export(*view)
     return Response(
         content=result.content,

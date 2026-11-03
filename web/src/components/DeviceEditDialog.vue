@@ -3,6 +3,7 @@
     :model-value="modelValue"
     :node="device"
     :effective="device ? graph.effective[device.id] : null"
+    :job-id="jobId"
     @update:model-value="(v) => emit('update:modelValue', v)"
     @save="save"
   />

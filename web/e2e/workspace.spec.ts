@@ -118,7 +118,9 @@ test('layer toggles and the catalog drawer open', async ({ page, request }) => {
 
   await page.getByTestId('open-catalog').click();
   await expect(page.getByTestId('catalog-search')).toBeVisible();
-  await expect(page.getByText(/date-range availability|tillgänglighet per datum/i)).toBeVisible();
+  // The drawer's availability controls render once the catalog loads (date-range support is
+  // reported by Stockwire, so the legacy "not available" hint is intentionally absent).
+  await expect(page.getByTestId('catalog-instock-only')).toBeVisible();
 });
 
 test('on a phone the list becomes cards and the catalog is full screen', async ({ page, request }) => {
@@ -1541,10 +1543,10 @@ test('a channel is paired as stereo with its neighbour and a wireless channel ke
   await page.getByTestId('wireless-pack').press('Enter');
   // the second edit waits for the first save: both patch the same row, so it needs the new revision
   await expect.poll(async () => (await channels())[0].attributes.wireless_pack).toBe('Shure P10T');
-  await page.getByTestId('wireless-frequency').fill('606.250');
-  await page.getByTestId('wireless-frequency').press('Enter');
+  await page.getByTestId('wireless-frequency-mhz').fill('606.250');
+  await page.getByTestId('wireless-frequency-mhz').press('Enter');
   await expect.poll(async () => (await channels())[0].attributes.wireless_pack).toBe('Shure P10T');
-  await expect.poll(async () => (await channels())[0].attributes.wireless_frequency).toBe('606.250');
+  await expect.poll(async () => (await channels())[0].attributes.wireless_frequency_mhz).toBe(606.25);
 
   // ticking stereo makes the missing partner channel 2 and labels the legs L and R
   await page.getByTestId('channel-stereo').first().click();

@@ -74,7 +74,9 @@ class ChannelCreate(BaseModel):
     instrument_group: str = "other"
     performer_name: str | None = None
     wireless_pack: str | None = None
-    wireless_frequency: str | None = None
+    wireless_frequency_mhz: float | None = None
+    wireless_group: str | None = None
+    wireless_channel: str | None = None
     phantom_power: bool = False
     stereo: bool = False
     stereo_channel: int | None = None

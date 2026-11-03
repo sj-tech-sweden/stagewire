@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +10,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio.models import ProductionJob
 from app.domains.auth.deps import get_current_user
+from app.domains.graph.models import GraphDevice
 from app.domains.stockwire import client, schemas
 from app.domains.stockwire.config import (
     STAGEWIRE_RENTAL_INSTANCE_ID,
@@ -48,6 +50,139 @@ async def get_job(job_id: str, db=Depends(get_db)) -> dict:
     except Exception as exc:  # noqa: BLE001 - surface upstream errors to caller
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+
+def _availability(resp) -> tuple[int, int, int]:
+    """Pull (available, total, reserved) out of a Stockwire availability response.
+
+    The endpoint returns a single object whose ``available_quantity`` is already the minimum
+    available across the requested date range. We fall back to ``total_quantity`` minus
+    ``max_reserved_quantity`` when the explicit field is missing, and tolerate a bare integer
+    or a per-day mapping as a last resort. Unrecognised shapes count as zero available.
+    """
+    if isinstance(resp, dict):
+        if "available_quantity" in resp:
+            available = int(resp["available_quantity"])
+        elif "total_quantity" in resp and "max_reserved_quantity" in resp:
+            available = int(resp["total_quantity"]) - int(resp["max_reserved_quantity"])
+        else:
+            nums = [v for v in resp.values() if isinstance(v, (int, float))]
+            available = int(min(nums)) if nums else 0
+        total = int(resp.get("total_quantity", 0) or 0)
+        reserved = int(resp.get("max_reserved_quantity", 0) or 0)
+        return available, total, reserved
+    if isinstance(resp, (int, float)):
+        return int(resp), int(resp), 0
+    return 0, 0, 0
+
+
+@router.get(
+    "/jobs/{job_id}/availability",
+    response_model=schemas.JobAvailabilityResponse,
+)
+async def job_availability(job_id: str, db=Depends(get_db)) -> dict:
+    """Minimum available quantity per Stockwire product over the job's date range.
+
+    Every device in the job that is linked to a Stockwire product is counted as "needed";
+    for each product we ask Stockwire for the minimum available quantity across the job's
+    start/end dates and flag ``short`` when the job needs more than is available. Degrades
+    gracefully: ``configured`` is false when the integration is off, ``missing_dates`` when
+    the job has no date range to query against.
+    """
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found") from None
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_uuid))
+    job = result.scalars().first()
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+
+    cfg = await load_integration_config(db)
+    if not cfg.get("api_key"):
+        return {"configured": False, "items": []}
+
+    start = job.start_date.isoformat() if job.start_date else None
+    end = job.end_date.isoformat() if job.end_date else None
+    if not start or not end:
+        return {
+            "configured": True,
+            "missing_dates": True,
+            "start_date": start,
+            "end_date": end,
+            "items": [],
+        }
+
+    devices = (
+        (
+            await db.execute(
+                select(GraphDevice).where(
+                    GraphDevice.job_id == job.id,
+                    GraphDevice.stockwire_product_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    needed: dict[str, int] = {}
+    names: dict[str, str | None] = {}
+    for d in devices:
+        pid = str(d.stockwire_product_id)
+        needed[pid] = needed.get(pid, 0) + 1
+        names.setdefault(pid, d.stockwire_product_name)
+
+    sw = client.StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+
+    async def fetch(pid: str) -> schemas.JobProductAvailability:
+        try:
+            resp = await sw.get_availability(pid, start, end)
+            available, total, reserved = _availability(resp)
+        except Exception:  # noqa: BLE001 - treat upstream errors as "cannot confirm stock"
+            available, total, reserved = 0, 0, 0
+        return schemas.JobProductAvailability(
+            product_id=pid,
+            product_name=names.get(pid),
+            needed=needed[pid],
+            available=available,
+            total=total,
+            reserved=reserved,
+            short=available < needed[pid],
+        )
+
+    product_ids = list(needed)
+    if not product_ids:
+        items = []
+    else:
+        try:
+            # One batch call covers every product the job links to, replacing the per-product loop.
+            # The upstream returns a flat list; map it back onto product ids before parsing.
+            raw = await sw.get_availability_batch(product_ids, start, end)
+            items = []
+            for pid in product_ids:
+                available, total, reserved = _availability(raw.get(pid, {}))
+                items.append(
+                    schemas.JobProductAvailability(
+                        product_id=pid,
+                        product_name=names.get(pid),
+                        needed=needed[pid],
+                        available=available,
+                        total=total,
+                        reserved=reserved,
+                        short=available < needed[pid],
+                    )
+                )
+        except Exception:  # noqa: BLE001 - degrade to the isolated per-product path
+            items = await asyncio.gather(*(fetch(pid) for pid in product_ids))
+    items.sort(key=lambda i: (i.product_name or "", i.product_id))
+    return {
+        "configured": True,
+        "missing_dates": False,
+        "start_date": start,
+        "end_date": end,
+        "items": items,
+    }
 
 
 @router.get("/products")
@@ -113,6 +248,9 @@ async def search_catalog(
     manufacturer: list[str] | None = Query(default=None),
     attr: list[str] | None = Query(default=None, description="key:value spec filters"),
     job_id: str | None = Query(default=None, description="Stockwire rental job id"),
+    start_date: str | None = Query(default=None, description="Inclusive rental start (YYYY-MM-DD)"),
+    end_date: str | None = Query(default=None, description="Inclusive rental end (YYYY-MM-DD)"),
+    exclude_rental: bool = Query(default=True, description="Hide rental-in products by default"),
     skip: int = 0,
     limit: int = 50,
     db=Depends(get_db),
@@ -133,6 +271,9 @@ async def search_catalog(
             manufacturers=manufacturer,
             attributes=attributes,
             job_id=job_id,
+            start_date=start_date,
+            end_date=end_date,
+            exclude_rental=exclude_rental,
             skip=skip,
             limit=limit,
         )

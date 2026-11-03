@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -25,6 +26,10 @@ class ProductionJob(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     venue_name: Mapped[str] = mapped_column(String(255), default="")
     event_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Inclusive rental date range used for Stockwire availability checks. Stored as plain
+    # dates (not datetimes) because the Stockwire availability endpoint takes $date bounds.
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
@@ -61,6 +66,29 @@ class StockwireRequirementLink(Base):
     product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rental_requirement_id: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now()
+    )
+
+
+class WwbShowFile(Base):
+    """The Shure Wireless Workbench ``.shw`` show file imported for a channel list.
+
+    Kept so the same file can be re-exported with Stagewire's coordinated frequencies
+    written back into it (round-tripping through WWB). Keyed one-to-one by the channel
+    list's graph node id.
+    """
+
+    __tablename__ = "wwb_show_files"
+
+    list_node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("graph_devices.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

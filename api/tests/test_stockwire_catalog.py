@@ -51,6 +51,40 @@ def handler(request: httpx.Request) -> httpx.Response:
         if "category" in params:
             rows = [r for r in rows if r["category"] == params["category"]]
         return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+    if path == "/api/v1/inventory/products/with-availability":
+        # Batch availability endpoint: same list, but each product carries availability for the
+        # requested window. ``available_quantity`` here is the min available across the window.
+        rows = PRODUCTS
+        if "search" in params:
+            rows = [r for r in rows if params["search"].lower() in r["name"].lower()]
+        if "category" in params:
+            rows = [r for r in rows if r["category"] == params["category"]]
+        window = {1: 3, 2: 0, 3: 1}
+        rows = [
+            {
+                **r,
+                "total_quantity": window.get(r["id"], 0),
+                "max_reserved_quantity": 0,
+                "available_quantity": window.get(r["id"], 0),
+            }
+            for r in rows
+        ]
+        return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+    if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+        pid = int(path.split("/")[-2])
+        # Min available across the requested window, per product.
+        avail = {1: 3, 2: 0, 3: 1}.get(pid, 0)
+        return httpx.Response(
+            200,
+            json={
+                "product_id": pid,
+                "start_date": params.get("start_date"),
+                "end_date": params.get("end_date"),
+                "total_quantity": avail,
+                "max_reserved_quantity": 0,
+                "available_quantity": avail,
+            },
+        )
     if path.startswith("/api/v1/inventory/products/"):
         pid = int(path.rsplit("/", 1)[1])
         return httpx.Response(200, json=next(r for r in PRODUCTS if r["id"] == pid))
@@ -91,11 +125,109 @@ async def test_search_marks_items_booked_on_the_job_only():
 
 
 @pytest.mark.asyncio
+async def test_search_uses_date_ranged_availability_when_window_supplied():
+    # With a rental window the available_qty comes from the availability endpoint (min across the
+    # range), not the upstream current-stock count, and the catalog reports date support.
+    result = await client().search_catalog(start_date="2026-11-02", end_date="2026-11-04")
+    by_name = {i["name"]: i for i in result["items"]}
+    # availability endpoint, not the upstream current-stock count (which is 8 for SM58)
+    assert by_name["SM58"]["available_qty"] == 3
+    assert by_name["e935"]["available_qty"] == 0
+    assert by_name["Matrix"]["available_qty"] == 1
+    assert result["availability"] == {"date_range_supported": True}
+
+
+@pytest.mark.asyncio
+async def test_search_falls_back_to_current_stock_when_no_window():
+    result = await client().search_catalog()
+    by_name = {i["name"]: i for i in result["items"]}
+    assert by_name["SM58"]["available_qty"] == 8  # current stock
+    assert result["availability"] == {"date_range_supported": False}
+
+
+@pytest.mark.asyncio
+async def test_search_uses_batch_with_availability_endpoint_and_no_per_product_calls():
+    # Performance: with a rental window the catalog hits the batch ``with-availability`` endpoint,
+    # which inlines availability on every product in a single sweep, instead of firing one
+    # per-product availability call.
+    per_product_calls = []
+    with_availability_calls = []
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/inventory/products/with-availability":
+            with_availability_calls.append(1)
+            rows = [
+                {
+                    "id": i,
+                    "name": f"P{i}",
+                    "eventory_available_qty": 5,
+                    "total_quantity": 5,
+                    "max_reserved_quantity": 0,
+                    "available_quantity": 1,
+                }
+                for i in range(1, 11)
+            ]
+            return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+        if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+            per_product_calls.append(int(path.split("/")[-2]))
+            return httpx.Response(200, json={"available_quantity": 1})
+        if path == "/api/v1/jobs/requirements":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    sw = StockwireClient(
+        base_url="http://sw.test", token="t", transport=httpx.MockTransport(counting_handler)
+    )
+    result = await sw.search_catalog(start_date="2026-01-01", end_date="2026-01-02", limit=3)
+    assert len(result["items"]) == 3
+    assert all(i["available_qty"] == 1 for i in result["items"])
+    assert len(with_availability_calls) == 1  # one batch sweep, not per product
+    assert per_product_calls == []  # no per-product availability calls
+
+
+@pytest.mark.asyncio
 async def test_search_attribute_filter_and_paging():
     result = await client().search_catalog(attributes={"manufacturer": "shure"})
     assert [i["name"] for i in result["items"]] == ["SM58"]
     paged = await client().search_catalog(skip=1, limit=1)
     assert paged["total"] == 3 and [i["name"] for i in paged["items"]] == ["e935"]
+
+
+@pytest.mark.asyncio
+async def test_search_excludes_rental_products_by_default_but_can_include_them():
+    # Rental-in products (e.g. from Eventory) are hidden unless the caller opts in. The upstream
+    # flag is a pass-through, so we assert the client sends it and that the flag controls results.
+    mixed = [
+        {
+            "id": 1,
+            "name": "Own Mic",
+            "category": "Microphones",
+            "source": "own",
+            "eventory_available_qty": 5,
+        },
+        {
+            "id": 2,
+            "name": "Rental Mic",
+            "category": "Microphones",
+            "source": "eventory",
+            "eventory_available_qty": 2,
+        },
+    ]
+
+    def mixed_handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        excluded = str(params.get("exclude_rental", "True")).lower() != "false"
+        rows = [r for r in mixed if not (excluded and r["source"] != "own")]
+        return httpx.Response(200, json={"items": rows, "total": len(rows), "has_more": False})
+
+    sw = StockwireClient(
+        base_url="http://sw.test", token="t", transport=httpx.MockTransport(mixed_handler)
+    )
+    defaulted = await sw.search_catalog()
+    assert [i["name"] for i in defaulted["items"]] == ["Own Mic"]
+    included = await sw.search_catalog(exclude_rental=False)
+    assert {i["name"] for i in included["items"]} == {"Own Mic", "Rental Mic"}
 
 
 @pytest.mark.asyncio

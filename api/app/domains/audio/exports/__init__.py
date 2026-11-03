@@ -4,6 +4,7 @@ from .allen_heath_qu import AllenHeathQuExporter
 from .base import ConsoleExporter
 from .generic_csv import GenericCsvExporter
 from .generic_xlsx import GenericXlsxExporter
+from .wireless_workbench import WirelessWorkbenchExporter
 
 EXPORTERS: list[ConsoleExporter] = [
     GenericCsvExporter(),
@@ -11,6 +12,7 @@ EXPORTERS: list[ConsoleExporter] = [
     AllenHeathQuExporter(),
     AllenHeathCqExporter(),
     AllenHeathGldExporter(),
+    WirelessWorkbenchExporter(),
 ]
 
 _EXPORTER_MAP = {e.key: e for e in EXPORTERS}

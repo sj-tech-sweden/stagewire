@@ -10,6 +10,11 @@
       :job="job"
       @saved="reloadJob"
     />
+    <StockwireAvailabilityPanel
+      v-model="availabilityOpen"
+      :job-id="jobId"
+      :job="job"
+    />
     <StageVenueDialog
       v-model="stageVenueOpen"
       :job-id="jobId"
@@ -78,6 +83,14 @@
         :label="t('workspace.catalog')"
         data-testid="open-catalog"
         @click="catalogOpen = true"
+      />
+      <q-btn
+        flat
+        no-caps
+        icon="inventory"
+        :label="t('stockwire.availabilityTitle')"
+        data-testid="open-availability"
+        @click="availabilityOpen = true"
       />
       <q-btn-dropdown
         flat
@@ -729,6 +742,8 @@
       v-model="catalogOpen"
       :job-id="jobId"
       :stockwire-job-id="job?.stockwire_job_id || null"
+      :start-date="job?.start_date || null"
+      :end-date="job?.end_date || null"
     />
   </q-page>
 </template>
@@ -740,6 +755,7 @@ import OutletInspector from '@/components/OutletInspector.vue';
 import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
 import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import JobDetailsDialog from '@/components/JobDetailsDialog.vue';
+import StockwireAvailabilityPanel from '@/components/StockwireAvailabilityPanel.vue';
 import { useStockwireStore } from '@/stores/stockwire';
 import StageVenueDialog from '@/components/StageVenueDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
@@ -796,6 +812,7 @@ const jobId = String(route.params.jobId);
 
 const job = ref(null);
 const catalogOpen = ref(false);
+const availabilityOpen = ref(false);
 const importing = ref(false);
 // The order follows how a job is built: the plan, then each discipline (sound, lights, video,
 // power and rigging), then the cross-cutting gear views.

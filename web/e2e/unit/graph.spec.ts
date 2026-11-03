@@ -53,11 +53,11 @@ test('only a revision conflict is a conflict; other 409s are real errors to show
 });
 
 test('edits to different attribute keys merge, the same key changed twice still conflicts', () => {
-  const base = { revision: 1, attributes: { wireless_pack: '', wireless_frequency: '' } };
-  const theirs = { revision: 2, attributes: { wireless_pack: 'P10T', wireless_frequency: '' } };
-  const clean = threeWayMerge(base, { attributes: { wireless_frequency: '606.250' } }, theirs);
+  const base = { revision: 1, attributes: { wireless_pack: '', wireless_frequency_mhz: null } };
+  const theirs = { revision: 2, attributes: { wireless_pack: 'P10T', wireless_frequency_mhz: null } };
+  const clean = threeWayMerge(base, { attributes: { wireless_frequency_mhz: 606.25 } }, theirs);
   expect(clean.conflicts).toEqual([]);
-  expect(clean.merged).toEqual({ attributes: { wireless_frequency: '606.250' } });
+  expect(clean.merged).toEqual({ attributes: { wireless_frequency_mhz: 606.25 } });
   const clash = threeWayMerge(base, { attributes: { wireless_pack: 'P9R' } }, theirs);
   expect(clash.conflicts.map((c) => c.field)).toEqual(['attributes']);
 });
