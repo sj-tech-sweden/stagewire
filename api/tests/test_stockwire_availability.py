@@ -44,9 +44,19 @@ AVAIL = {
 }
 
 
+# Records which upstream availability endpoint the job endpoint hit, so we can assert it batches.
+BATCH_CALLS: list[tuple[str, ...]] = []
+
+
 def _avail_handler(request: httpx.Request) -> httpx.Response:
-    if "/availability" in request.url.path:
-        pid = request.url.path.split("/")[-2]
+    path = request.url.path
+    if path == "/api/v1/inventory/products/availability":
+        # Batch endpoint: returns one entry per requested product_id as a flat list.
+        ids = tuple(p for p in request.url.params.get("product_ids", "").split(",") if p)
+        BATCH_CALLS.append(ids)
+        return httpx.Response(200, json=[AVAIL[pid] for pid in ids if pid in AVAIL])
+    if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+        pid = path.split("/")[-2]
         return httpx.Response(200, json=AVAIL.get(pid, {}))
     return httpx.Response(404, json={"detail": "not found"})
 
@@ -57,6 +67,26 @@ class _MockStockwireClient(StockwireClient):
     def __init__(self, base_url=None, token=None, transport=None):
         super().__init__(
             base_url=base_url, token=token, transport=httpx.MockTransport(_avail_handler)
+        )
+
+
+def _failing_batch_handler(request: httpx.Request) -> httpx.Response:
+    """Batch endpoint 500s; per-product endpoint still works, exercising the fallback path."""
+    path = request.url.path
+    if path == "/api/v1/inventory/products/availability":
+        return httpx.Response(500, json={"detail": "boom"})
+    if path.startswith("/api/v1/inventory/products/") and path.endswith("/availability"):
+        pid = path.split("/")[-2]
+        return httpx.Response(200, json=AVAIL.get(pid, {}))
+    return httpx.Response(404, json={"detail": "not found"})
+
+
+class _FailingBatchClient(StockwireClient):
+    """Mock client whose batch endpoint fails so the endpoint must fall back per product."""
+
+    def __init__(self, base_url=None, token=None, transport=None):
+        super().__init__(
+            base_url=base_url, token=token, transport=httpx.MockTransport(_failing_batch_handler)
         )
 
 
@@ -104,6 +134,7 @@ async def _create_job(ac, auth_headers, start_date, end_date):
 async def test_availability_reports_min_and_flags_short(
     auth_headers, mock_stockwire, integration_config
 ):
+    BATCH_CALLS.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         job_id = await _create_job(ac, auth_headers, "2026-11-02", "2026-11-04")
         # 1x product 1 (min avail 5) and 2x product 2 (min avail 1 -> short)
@@ -133,6 +164,31 @@ async def test_availability_reports_min_and_flags_short(
     assert by_pid["2"]["short"] is True
     # Sorted by product name.
     assert [i["product_name"] for i in body["items"]] == ["SM58", "e935"]
+
+    # The job endpoint fetched availability for both products in a single batch call, not one
+    # per product.
+    assert BATCH_CALLS == [("1", "2")]
+
+
+async def test_availability_falls_back_to_per_product_when_batch_fails(
+    auth_headers, integration_config, monkeypatch
+):
+    # If the batch endpoint errors, the job endpoint must still report each product (degrading
+    # per product) instead of failing the whole request.
+    monkeypatch.setattr(sw_client_mod, "StockwireClient", _FailingBatchClient)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        job_id = await _create_job(ac, auth_headers, "2026-11-02", "2026-11-04")
+        async with db_mod.SessionLocal() as db:
+            db.add(_device(job_id, 1, "SM58"))
+            db.add(_device(job_id, 2, "e935"))
+            await db.commit()
+
+        resp = await ac.get(f"{BASE}/stockwire/jobs/{job_id}/availability", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_pid = {i["product_id"]: i for i in body["items"]}
+    assert by_pid["1"]["available"] == 5
+    assert by_pid["2"]["available"] == 1
 
 
 async def test_availability_missing_dates(auth_headers, mock_stockwire, integration_config):

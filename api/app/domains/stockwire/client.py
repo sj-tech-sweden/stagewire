@@ -398,6 +398,31 @@ class StockwireClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_availability_batch(
+        self, product_ids: list[str | int], start_date: str, end_date: str
+    ) -> dict[str, dict]:
+        """Availability for many products over a window in a single call.
+
+        Hits ``GET /api/v1/inventory/products/availability?product_ids=1,2,3`` and returns
+        ``{str(product_id): raw availability dict}`` so callers can map straight back onto their
+        product ids — the upstream returns a flat list, not a keyed object. Replaces the
+        per-product loop the job-level availability endpoint used to run.
+
+        A failed upstream call (e.g. a 404 for a product id that no longer exists) is raised to the
+        caller, which can degrade to the isolated per-product path rather than blanking every row.
+        """
+        if not product_ids:
+            return {}
+        ids = ",".join(str(p) for p in product_ids)
+        async with self._client() as client:
+            response = await client.get(
+                "/api/v1/inventory/products/availability",
+                params={"product_ids": ids, "start_date": start_date, "end_date": end_date},
+            )
+            response.raise_for_status()
+            rows = response.json()
+        return {str(r.get("product_id")): r for r in rows}
+
     async def list_category_tree(self) -> list[dict]:
         async with httpx.AsyncClient(
             base_url=self.base_url, headers=self._headers(), timeout=15.0

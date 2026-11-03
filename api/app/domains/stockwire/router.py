@@ -151,7 +151,30 @@ async def job_availability(job_id: str, db=Depends(get_db)) -> dict:
             short=available < needed[pid],
         )
 
-    items = await asyncio.gather(*(fetch(pid) for pid in needed))
+    product_ids = list(needed)
+    if not product_ids:
+        items = []
+    else:
+        try:
+            # One batch call covers every product the job links to, replacing the per-product loop.
+            # The upstream returns a flat list; map it back onto product ids before parsing.
+            raw = await sw.get_availability_batch(product_ids, start, end)
+            items = []
+            for pid in product_ids:
+                available, total, reserved = _availability(raw.get(pid, {}))
+                items.append(
+                    schemas.JobProductAvailability(
+                        product_id=pid,
+                        product_name=names.get(pid),
+                        needed=needed[pid],
+                        available=available,
+                        total=total,
+                        reserved=reserved,
+                        short=available < needed[pid],
+                    )
+                )
+        except Exception:  # noqa: BLE001 - degrade to the isolated per-product path
+            items = await asyncio.gather(*(fetch(pid) for pid in product_ids))
     items.sort(key=lambda i: (i.product_name or "", i.product_id))
     return {
         "configured": True,
