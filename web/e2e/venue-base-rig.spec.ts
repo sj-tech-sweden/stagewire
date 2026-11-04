@@ -84,6 +84,31 @@ test('base rig audio entities are authored through the venue /rig API', async ({
   expect(cross.status()).toBe(404);
 });
 
+test('venue base rig sections are reachable via the rig tab navigation', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const name = `E2E Base Rig Tabs ${Date.now()}`;
+  const venueId = await createVenue(request, headers, name);
+
+  await page.goto(`/venues/${venueId}/base-rig`);
+  await expect(page.locator('canvas').first()).toBeVisible();
+
+  // Lighting section (the DMX fixture patch) renders the owner-aware editor.
+  await page.getByRole('tab', { name: 'Lighting' }).click();
+  await expect(page).toHaveURL(new RegExp(`/venues/${venueId}/lighting$`));
+  await expect(page.getByText('Fixture patch')).toBeVisible();
+
+  // Rigging section renders the owner-aware editor.
+  await page.getByRole('tab', { name: 'Rigging' }).click();
+  await expect(page).toHaveURL(new RegExp(`/venues/${venueId}/rigging$`));
+  await expect(page.getByText('Rigging & power')).toBeVisible();
+
+  // Video section renders the owner-aware list editor.
+  await page.getByRole('tab', { name: 'Video' }).click();
+  await expect(page).toHaveURL(new RegExp(`/venues/${venueId}/video$`));
+  await expect(page.getByText('Input lists')).toBeVisible();
+});
+
 test('job audio authoring is unchanged by the owner-aware refactor', async ({ page, request }) => {
   await login(page);
   const headers = await authedHeaders(page);
