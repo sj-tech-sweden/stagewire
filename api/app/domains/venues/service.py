@@ -22,6 +22,13 @@ SNAPSHOT_SHAPE_MAP = {
     "stage_shape": "venue_stage_shape",
 }
 
+# Custom-polygon outlines (footprint in venue cm, stage in stage-relative cm) copied
+# onto the job so the stage plot shows the same drawn shape once the venue is assigned.
+SNAPSHOT_POLYGON_MAP = {
+    "footprint_polygon": "venue_footprint_polygon",
+    "stage_polygon": "venue_stage_polygon",
+}
+
 
 async def list_venues(db: AsyncSession) -> list[Venue]:
     result = await db.execute(select(Venue).order_by(Venue.name))
@@ -61,6 +68,8 @@ def _apply_venue_snapshot(job: ProductionJob, venue: Venue) -> None:
         setattr(job, field, getattr(venue, field))
     for venue_field, job_field in SNAPSHOT_SHAPE_MAP.items():
         setattr(job, job_field, getattr(venue, venue_field))
+    for venue_field, job_field in SNAPSHOT_POLYGON_MAP.items():
+        setattr(job, job_field, list(getattr(venue, venue_field) or []))
     job.venue_background_image_url = venue.background_image_url
     job.audience_polygon = list(venue.audience_polygon or [])
     job.venue_name = venue.name

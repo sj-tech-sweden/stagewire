@@ -29,6 +29,8 @@ class Venue(Base):
     stage_shape: Mapped[str] = mapped_column(String(32), default="proscenium", nullable=False)
     background_image_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
     audience_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    footprint_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    stage_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     propagated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()

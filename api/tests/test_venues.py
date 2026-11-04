@@ -230,6 +230,61 @@ async def test_venue_geometry_shapes(auth_headers):
         assert assigned.json()["venue_stage_shape"] == "arena_center"
 
 
+async def test_venue_custom_polygons(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        poly = [[0, 0], [1000, 0], [1000, 800], [0, 800]]
+        stage_poly = [[0, 0], [300, 0], [300, 200], [0, 200]]
+        created = await client.post(
+            f"{BASE}/venues",
+            json={
+                **VENUE,
+                "footprint_shape": "custom_polygon",
+                "stage_shape": "custom_polygon",
+                "footprint_polygon": poly,
+                "stage_polygon": stage_poly,
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 201, created.text
+        body = created.json()
+        assert body["footprint_shape"] == "custom_polygon"
+        assert body["stage_shape"] == "custom_polygon"
+        assert body["footprint_polygon"] == poly
+        assert body["stage_polygon"] == stage_poly
+
+        # A polygon with fewer than three corners is rejected.
+        bad = await client.post(
+            f"{BASE}/venues",
+            json={**VENUE, "footprint_shape": "custom_polygon", "footprint_polygon": [[0, 0], [1, 1]]},
+            headers=auth_headers,
+        )
+        assert bad.status_code == 422
+
+        # Patching the polygon is reflected on read.
+        vid = body["id"]
+        patched = await client.patch(
+            f"{BASE}/venues/{vid}",
+            json={"footprint_polygon": [[0, 0], [500, 0], [500, 500], [0, 500]]},
+            headers=auth_headers,
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["footprint_polygon"] == [[0, 0], [500, 0], [500, 500], [0, 500]]
+
+        # Assigning the venue copies both polygons onto the job snapshot.
+        job = (
+            await client.post(f"{BASE}/jobs", json={"title": "Poly Job"}, headers=auth_headers)
+        ).json()
+        assigned = await client.put(
+            f"{BASE}/jobs/{job['id']}/venue", json={"venue_id": vid}, headers=auth_headers
+        )
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["venue_footprint_polygon"] == patched.json()["footprint_polygon"]
+        assert assigned.json()["venue_stage_polygon"] == stage_poly
+        assert assigned.json()["venue_footprint_shape"] == "custom_polygon"
+        assert assigned.json()["venue_stage_shape"] == "custom_polygon"
+
+
 async def test_base_rig_is_cloned_on_assign(auth_headers):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

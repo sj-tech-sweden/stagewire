@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.domains.audio.polygon import check_polygon
 
 FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
-StageShape = Literal["proscenium", "thrust", "arena_center", "runway"]
+StageShape = Literal["proscenium", "thrust", "arena_center", "runway", "custom_polygon"]
 
 
 class ProductionJobBase(BaseModel):
@@ -28,11 +28,13 @@ class ProductionJobBase(BaseModel):
     venue_footprint_shape: FootprintShape = "rectangular"
     venue_stage_shape: StageShape = "proscenium"
     audience_polygon: list[list[float]] = Field(default_factory=list)
+    venue_footprint_polygon: list[list[float]] = Field(default_factory=list)
+    venue_stage_polygon: list[list[float]] = Field(default_factory=list)
     cable_plan: dict = Field(default_factory=dict)
 
-    @field_validator("audience_polygon")
+    @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod
-    def _check_audience_polygon(cls, value):
+    def _check_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -58,10 +60,12 @@ class ProductionJobUpdate(BaseModel):
     venue_stage_shape: StageShape | None = None
     cable_plan: dict | None = None
     audience_polygon: list[list[float]] | None = None
+    venue_footprint_polygon: list[list[float]] | None = None
+    venue_stage_polygon: list[list[float]] | None = None
 
-    @field_validator("audience_polygon")
+    @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod
-    def _check_audience_polygon(cls, value):
+    def _check_polygons(cls, value):
         return check_polygon(value)
 
 

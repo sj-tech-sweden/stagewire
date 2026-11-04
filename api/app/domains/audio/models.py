@@ -46,6 +46,8 @@ class ProductionJob(Base):
     )
     venue_stage_shape: Mapped[str] = mapped_column(String(32), default="proscenium", nullable=False)
     audience_polygon: Mapped[list] = mapped_column(JSON, default=list)
+    venue_footprint_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    venue_stage_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()

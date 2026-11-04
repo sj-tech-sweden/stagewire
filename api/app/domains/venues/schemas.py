@@ -8,7 +8,7 @@ from app.domains.audio.polygon import check_polygon
 from app.domains.graph.schemas import Domain, Port, Signal
 
 FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
-StageShape = Literal["proscenium", "thrust", "arena_center", "runway"]
+StageShape = Literal["proscenium", "thrust", "arena_center", "runway", "custom_polygon"]
 
 
 class VenueBase(BaseModel):
@@ -24,10 +24,19 @@ class VenueBase(BaseModel):
     stage_shape: StageShape = "proscenium"
     background_image_url: str = Field("", max_length=1024)
     audience_polygon: list[list[float]] = Field(default_factory=list)
+    # Custom footprints/stages are drawn as polygons (venue cm for the footprint,
+    # stage-relative cm for the stage) when the matching *_shape is "custom_polygon".
+    footprint_polygon: list[list[float]] = Field(default_factory=list)
+    stage_polygon: list[list[float]] = Field(default_factory=list)
 
     @field_validator("audience_polygon")
     @classmethod
     def _check_audience_polygon(cls, value):
+        return check_polygon(value)
+
+    @field_validator("footprint_polygon", "stage_polygon")
+    @classmethod
+    def _check_custom_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -48,10 +57,17 @@ class VenueUpdate(BaseModel):
     stage_shape: StageShape | None = None
     background_image_url: str | None = Field(None, max_length=1024)
     audience_polygon: list[list[float]] | None = None
+    footprint_polygon: list[list[float]] | None = None
+    stage_polygon: list[list[float]] | None = None
 
     @field_validator("audience_polygon")
     @classmethod
     def _check_audience_polygon(cls, value):
+        return check_polygon(value)
+
+    @field_validator("footprint_polygon", "stage_polygon")
+    @classmethod
+    def _check_custom_polygons(cls, value):
         return check_polygon(value)
 
 
