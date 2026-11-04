@@ -25,6 +25,8 @@ class Venue(Base):
     stage_y_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_width_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_height_cm: Mapped[float] = mapped_column(Float, default=0.0)
+    footprint_shape: Mapped[str] = mapped_column(String(32), default="rectangular", nullable=False)
+    stage_shape: Mapped[str] = mapped_column(String(32), default="proscenium", nullable=False)
     background_image_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
     audience_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     propagated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -142,6 +142,30 @@
             />
           </div>
 
+          <div class="text-subtitle2">
+            {{ t('venues.geometrySection') }}
+          </div>
+          <div class="row q-gutter-sm">
+            <q-select
+              v-model="form.footprint_shape"
+              :options="footprintShapeOptions"
+              emit-value
+              map-options
+              :label="t('venues.footprintShape')"
+              dense
+              class="col"
+            />
+            <q-select
+              v-model="form.stage_shape"
+              :options="stageShapeOptions"
+              emit-value
+              map-options
+              :label="t('venues.stageShape')"
+              dense
+              class="col"
+            />
+          </div>
+
           <div>
             <q-file
               :model-value="null"
@@ -274,9 +298,24 @@ const EMPTY = {
   stage_y_cm: 0,
   stage_width_cm: 0,
   stage_height_cm: 0,
+  footprint_shape: 'rectangular',
+  stage_shape: 'proscenium',
   background_image_url: '',
 };
 const form = reactive({ ...EMPTY });
+
+const footprintShapeOptions = [
+  { value: 'rectangular', label: t('venues.footprintShapes.rectangular') },
+  { value: 'arena_circular', label: t('venues.footprintShapes.arena_circular') },
+  { value: 'amphitheater', label: t('venues.footprintShapes.amphitheater') },
+  { value: 'custom_polygon', label: t('venues.footprintShapes.custom_polygon') },
+];
+const stageShapeOptions = [
+  { value: 'proscenium', label: t('venues.stageShapes.proscenium') },
+  { value: 'thrust', label: t('venues.stageShapes.thrust') },
+  { value: 'arena_center', label: t('venues.stageShapes.arena_center') },
+  { value: 'runway', label: t('venues.stageShapes.runway') },
+];
 
 const lastPropagatedText = computed(() => {
   const at = editingVenue.value?.propagated_at;
@@ -309,6 +348,8 @@ function openEdit(v) {
     stage_y_cm: v.stage_y_cm,
     stage_width_cm: v.stage_width_cm,
     stage_height_cm: v.stage_height_cm,
+    footprint_shape: v.footprint_shape || 'rectangular',
+    stage_shape: v.stage_shape || 'proscenium',
     background_image_url: v.background_image_url || '',
   });
   dialog.value = true;
@@ -324,6 +365,8 @@ function payload() {
     stage_y_cm: Number(form.stage_y_cm) || 0,
     stage_width_cm: Number(form.stage_width_cm) || 0,
     stage_height_cm: Number(form.stage_height_cm) || 0,
+    footprint_shape: form.footprint_shape || 'rectangular',
+    stage_shape: form.stage_shape || 'proscenium',
   };
 }
 

@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.audio.polygon import check_polygon
 
+FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
+StageShape = Literal["proscenium", "thrust", "arena_center", "runway"]
+
 
 class VenueBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -16,6 +19,8 @@ class VenueBase(BaseModel):
     stage_y_cm: float = Field(0.0, ge=0)
     stage_width_cm: float = Field(0.0, ge=0)
     stage_height_cm: float = Field(0.0, ge=0)
+    footprint_shape: FootprintShape = "rectangular"
+    stage_shape: StageShape = "proscenium"
     background_image_url: str = Field("", max_length=1024)
     audience_polygon: list[list[float]] = Field(default_factory=list)
 
@@ -38,6 +43,8 @@ class VenueUpdate(BaseModel):
     stage_y_cm: float | None = Field(None, ge=0)
     stage_width_cm: float | None = Field(None, ge=0)
     stage_height_cm: float | None = Field(None, ge=0)
+    footprint_shape: FootprintShape | None = None
+    stage_shape: StageShape | None = None
     background_image_url: str | None = Field(None, max_length=1024)
     audience_polygon: list[list[float]] | None = None
 

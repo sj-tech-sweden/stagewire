@@ -78,6 +78,8 @@ async def test_assign_snapshots_venue_and_unassign_keeps_it(auth_headers):
         assert body["stage_width_cm"] == 300
         assert body["stage_height_cm"] == 200
         assert body["venue_background_image_url"] == "/static/hall.png"
+        assert body["venue_footprint_shape"] == "rectangular"
+        assert body["venue_stage_shape"] == "proscenium"
 
         unassigned = await client.put(
             f"{BASE}/jobs/{job['id']}/venue", json={"venue_id": None}, headers=auth_headers
@@ -179,3 +181,46 @@ async def test_propagate_all_and_newer(auth_headers):
             f"{BASE}/venues/{venue_id}/propagate", json={"scope": "some"}, headers=auth_headers
         )
         assert bad_scope.status_code == 422
+
+
+async def test_venue_geometry_shapes(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            f"{BASE}/venues",
+            json={**VENUE, "footprint_shape": "arena_circular", "stage_shape": "thrust"},
+            headers=auth_headers,
+        )
+        assert created.status_code == 201, created.text
+        body = created.json()
+        assert body["footprint_shape"] == "arena_circular"
+        assert body["stage_shape"] == "thrust"
+
+        defaulted = await client.post(f"{BASE}/venues", json=VENUE, headers=auth_headers)
+        assert defaulted.status_code == 201, defaulted.text
+        assert defaulted.json()["footprint_shape"] == "rectangular"
+        assert defaulted.json()["stage_shape"] == "proscenium"
+
+        bad = await client.post(
+            f"{BASE}/venues", json={**VENUE, "footprint_shape": "hexagon"}, headers=auth_headers
+        )
+        assert bad.status_code == 422
+
+        vid = created.json()["id"]
+        patched = await client.patch(
+            f"{BASE}/venues/{vid}", json={"stage_shape": "arena_center"}, headers=auth_headers
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["stage_shape"] == "arena_center"
+
+        job = (
+            await client.post(f"{BASE}/jobs", json={"title": "Gig shapes"}, headers=auth_headers)
+        ).json()
+        assigned = await client.put(
+            f"{BASE}/jobs/{job['id']}/venue",
+            json={"venue_id": vid},
+            headers=auth_headers,
+        )
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["venue_footprint_shape"] == "arena_circular"
+        assert assigned.json()["venue_stage_shape"] == "arena_center"

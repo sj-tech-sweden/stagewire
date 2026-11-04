@@ -16,6 +16,11 @@ SNAPSHOT_FIELDS = (
     "stage_height_cm",
 )
 
+SNAPSHOT_SHAPE_MAP = {
+    "footprint_shape": "venue_footprint_shape",
+    "stage_shape": "venue_stage_shape",
+}
+
 
 async def list_venues(db: AsyncSession) -> list[Venue]:
     result = await db.execute(select(Venue).order_by(Venue.name))
@@ -53,6 +58,8 @@ async def delete_venue(db: AsyncSession, venue: Venue) -> None:
 def _apply_venue_snapshot(job: ProductionJob, venue: Venue) -> None:
     for field in SNAPSHOT_FIELDS:
         setattr(job, field, getattr(venue, field))
+    for venue_field, job_field in SNAPSHOT_SHAPE_MAP.items():
+        setattr(job, job_field, getattr(venue, venue_field))
     job.venue_background_image_url = venue.background_image_url
     job.audience_polygon = list(venue.audience_polygon or [])
     job.venue_name = venue.name
