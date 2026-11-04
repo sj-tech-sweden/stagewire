@@ -22,55 +22,99 @@
       </q-card-section>
     </q-card>
 
-    <q-list
-      v-else
-      bordered
-      separator
-      class="rounded-borders"
-    >
-      <q-item
-        v-for="v in venues.venues"
-        :key="v.id"
-        v-ripple
-        clickable
-        @click="openEdit(v)"
+    <template v-else>
+      <div class="row q-gutter-sm q-mb-md items-center">
+        <q-input
+          v-model="venueSearch"
+          :placeholder="t('venues.searchPlaceholder')"
+          dense
+          outlined
+          clearable
+          class="col"
+        >
+          <template #append>
+            <q-icon name="search" />
+          </template>
+        </q-input>
+        <q-select
+          v-model="venueFootprintFilter"
+          :options="footprintFilterOptions"
+          emit-value
+          map-options
+          clearable
+          dense
+          outlined
+          :label="t('venues.filterFootprint')"
+          style="min-width: 180px"
+        />
+        <q-select
+          v-model="venueStageFilter"
+          :options="stageFilterOptions"
+          emit-value
+          map-options
+          clearable
+          dense
+          outlined
+          :label="t('venues.filterStage')"
+          style="min-width: 180px"
+        />
+      </div>
+      <q-list
+        v-if="filteredVenues.length"
+        bordered
+        separator
+        class="rounded-borders"
       >
-        <q-item-section avatar>
-          <q-avatar
-            rounded
-            size="48px"
-          >
-            <img
-              v-if="v.background_image_url"
-              :src="fullImageUrl(v.background_image_url)"
-              alt=""
+        <q-item
+          v-for="v in filteredVenues"
+          :key="v.id"
+          v-ripple
+          clickable
+          @click="openEdit(v)"
+        >
+          <q-item-section avatar>
+            <q-avatar
+              rounded
+              size="48px"
             >
-            <q-icon
-              v-else
-              name="meeting_room"
+              <img
+                v-if="v.background_image_url"
+                :src="fullImageUrl(v.background_image_url)"
+                alt=""
+              >
+              <q-icon
+                v-else
+                name="meeting_room"
+              />
+            </q-avatar>
+          </q-item-section>
+          <q-item-section>
+            <q-item-label>{{ v.name }}</q-item-label>
+            <q-item-label caption>
+              {{ t('venues.sizeSummary', { w: v.venue_width_cm, h: v.venue_height_cm }) }}
+              · {{ t('venues.stageSummary', { w: v.stage_width_cm, h: v.stage_height_cm }) }}
+            </q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <q-btn
+              flat
+              round
+              dense
+              icon="delete"
+              color="negative"
+              :aria-label="t('common.delete')"
+              @click.stop="confirmDelete(v)"
             />
-          </q-avatar>
-        </q-item-section>
-        <q-item-section>
-          <q-item-label>{{ v.name }}</q-item-label>
-          <q-item-label caption>
-            {{ t('venues.sizeSummary', { w: v.venue_width_cm, h: v.venue_height_cm }) }}
-            · {{ t('venues.stageSummary', { w: v.stage_width_cm, h: v.stage_height_cm }) }}
-          </q-item-label>
-        </q-item-section>
-        <q-item-section side>
-          <q-btn
-            flat
-            round
-            dense
-            icon="delete"
-            color="negative"
-            :aria-label="t('common.delete')"
-            @click.stop="confirmDelete(v)"
-          />
-        </q-item-section>
-      </q-item>
-    </q-list>
+          </q-item-section>
+        </q-item>
+      </q-list>
+      <div
+        v-else
+        class="text-grey-7 q-pa-md"
+      >
+        {{ t('venues.noResults') }}
+      </div>
+    </template>
 
     <q-dialog
       v-model="dialog"
@@ -316,6 +360,33 @@ const stageShapeOptions = [
   { value: 'arena_center', label: t('venues.stageShapes.arena_center') },
   { value: 'runway', label: t('venues.stageShapes.runway') },
 ];
+
+const venueSearch = ref('');
+const venueFootprintFilter = ref(null);
+const venueStageFilter = ref(null);
+
+const footprintFilterOptions = [
+  { value: 'rectangular', label: t('venues.footprintShapes.rectangular') },
+  { value: 'arena_circular', label: t('venues.footprintShapes.arena_circular') },
+  { value: 'amphitheater', label: t('venues.footprintShapes.amphitheater') },
+  { value: 'custom_polygon', label: t('venues.footprintShapes.custom_polygon') },
+];
+const stageFilterOptions = [
+  { value: 'proscenium', label: t('venues.stageShapes.proscenium') },
+  { value: 'thrust', label: t('venues.stageShapes.thrust') },
+  { value: 'arena_center', label: t('venues.stageShapes.arena_center') },
+  { value: 'runway', label: t('venues.stageShapes.runway') },
+];
+
+const filteredVenues = computed(() => {
+  const term = venueSearch.value.trim().toLowerCase();
+  return venues.venues.filter(
+    (v) =>
+      (!venueFootprintFilter.value || v.footprint_shape === venueFootprintFilter.value) &&
+      (!venueStageFilter.value || v.stage_shape === venueStageFilter.value) &&
+      (!term || v.name.toLowerCase().includes(term)),
+  );
+});
 
 const lastPropagatedText = computed(() => {
   const at = editingVenue.value?.propagated_at;

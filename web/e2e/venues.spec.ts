@@ -79,3 +79,45 @@ test('venue geometry shapes persist and are exposed in the venues page', async (
   await expect(page.getByLabel('Footprint shape')).toBeVisible();
   await expect(page.getByLabel('Stage shape')).toBeVisible();
 });
+
+test('venue directory supports name search and exposes shape filters', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const arena = `E2E Search Arena ${Date.now()}`;
+  const hall = `E2E Search Hall ${Date.now()}`;
+  await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: {
+      name: arena,
+      venue_width_cm: 800,
+      venue_height_cm: 600,
+      footprint_shape: 'arena_circular',
+      stage_shape: 'thrust',
+    },
+  });
+  await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: {
+      name: hall,
+      venue_width_cm: 800,
+      venue_height_cm: 600,
+      footprint_shape: 'rectangular',
+      stage_shape: 'proscenium',
+    },
+  });
+
+  await page.goto('/venues');
+  await expect(page.getByLabel('Footprint')).toBeVisible();
+  await expect(page.getByLabel('Stage')).toBeVisible();
+
+  const search = page.getByPlaceholder('Search venues by name');
+  await search.fill(arena);
+  await expect(page.getByText(arena, { exact: true })).toBeVisible();
+  await expect(page.getByText(hall, { exact: true })).toHaveCount(0);
+
+  await search.fill('');
+  await expect(page.getByText(hall, { exact: true })).toBeVisible();
+});
