@@ -12,8 +12,11 @@ class FixtureType(Base):
     __tablename__ = "fixture_types"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String(255), default="")
     manufacturer: Mapped[str] = mapped_column(String(255), default="")
@@ -36,6 +39,9 @@ class FixtureMode(Base):
     __tablename__ = "fixture_modes"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     fixture_type_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("fixture_types.id", ondelete="CASCADE"), index=True
     )

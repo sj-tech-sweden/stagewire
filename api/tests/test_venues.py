@@ -1,7 +1,14 @@
 import asyncio
+from uuid import UUID, uuid4
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
+from app.core import db as db_mod
+from app.domains.audio.models import AudioDevice, ChannelList, StagePlotElement
+from app.domains.lighting.models import FixtureType, LightingFixture
+from app.domains.rigging.models import PowerNode, RiggingPoint
+from app.domains.video.models import VideoInput, VideoInputList
 from app.main import app
 
 BASE = "/api/v1"
@@ -224,3 +231,154 @@ async def test_venue_geometry_shapes(auth_headers):
         assert assigned.status_code == 200, assigned.text
         assert assigned.json()["venue_footprint_shape"] == "arena_circular"
         assert assigned.json()["venue_stage_shape"] == "arena_center"
+
+
+async def test_base_rig_is_cloned_on_assign(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue = (
+            await client.post(
+                f"{BASE}/venues", json={**VENUE, "name": "Base Rig Venue"}, headers=auth_headers
+            )
+        ).json()
+        venue_id = UUID(venue["id"])
+
+        async with db_mod.SessionLocal() as db:
+            cl = ChannelList(job_id=None, venue_id=venue_id, name="House Inputs")
+            dev = AudioDevice(id=uuid4(), job_id=None, venue_id=venue_id, name="House Stagebox")
+            pe = StagePlotElement(
+                job_id=None,
+                venue_id=venue_id,
+                element_type="speaker_main",
+                linked_device_id=dev.id,
+            )
+            rp = RiggingPoint(job_id=None, venue_id=venue_id, name="House Point")
+            pn = PowerNode(job_id=None, venue_id=venue_id, name="House Mains")
+            ft = FixtureType(id=uuid4(), job_id=None, venue_id=venue_id, name="House Fixture")
+            lf = LightingFixture(
+                job_id=None,
+                venue_id=venue_id,
+                fixture_type="House Light",
+                fixture_type_id=ft.id,
+                import_batch_id=uuid4(),
+            )
+            vil = VideoInputList(id=uuid4(), job_id=None, venue_id=venue_id, name="House Cams")
+            vi = VideoInput(list_id=vil.id, venue_id=venue_id)
+            db.add_all([cl, dev, pe, rp, pn, ft, lf, vil, vi])
+            await db.commit()
+            cl_id, dev_id, ft_id = cl.id, dev.id, ft.id
+
+        job = (
+            await client.post(f"{BASE}/jobs", json={"title": "Rig Job"}, headers=auth_headers)
+        ).json()
+        assigned = await client.put(
+            f"{BASE}/jobs/{job['id']}/venue",
+            json={"venue_id": str(venue_id)},
+            headers=auth_headers,
+        )
+        assert assigned.status_code == 200, assigned.text
+
+        async with db_mod.SessionLocal() as db:
+            new_cls = (
+                (await db.execute(select(ChannelList).where(ChannelList.job_id == UUID(job["id"]))))
+                .scalars()
+                .all()
+            )
+            assert len(new_cls) == 1
+            assert new_cls[0].id != cl_id
+            assert new_cls[0].venue_id is None
+
+            new_devs = (
+                (await db.execute(select(AudioDevice).where(AudioDevice.job_id == UUID(job["id"]))))
+                .scalars()
+                .all()
+            )
+            assert len(new_devs) == 1
+            new_dev = new_devs[0]
+            assert new_dev.id != dev_id
+
+            new_pes = (
+                (
+                    await db.execute(
+                        select(StagePlotElement).where(StagePlotElement.job_id == UUID(job["id"]))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(new_pes) == 1
+            assert new_pes[0].linked_device_id == new_dev.id
+
+            assert (
+                await db.execute(select(RiggingPoint).where(RiggingPoint.job_id == UUID(job["id"])))
+            ).scalars().first() is not None
+            assert (
+                await db.execute(select(PowerNode).where(PowerNode.job_id == UUID(job["id"])))
+            ).scalars().first() is not None
+
+            new_lf = (
+                (
+                    await db.execute(
+                        select(LightingFixture).where(LightingFixture.job_id == UUID(job["id"]))
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            assert new_lf is not None
+            assert new_lf.fixture_type_id != ft_id
+            assert new_lf.import_batch_id == lf.import_batch_id
+
+            new_vil = (
+                (
+                    await db.execute(
+                        select(VideoInputList).where(VideoInputList.job_id == UUID(job["id"]))
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            assert new_vil is not None
+            new_vi = (
+                (await db.execute(select(VideoInput).where(VideoInput.list_id == new_vil.id)))
+                .scalars()
+                .first()
+            )
+            assert new_vi is not None
+            assert new_vi.list_id == new_vil.id
+
+
+async def test_base_rig_not_cloned_when_job_already_has_graph(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue = (
+            await client.post(
+                f"{BASE}/venues", json={**VENUE, "name": "Empty Rig Venue"}, headers=auth_headers
+            )
+        ).json()
+        venue_id = UUID(venue["id"])
+
+        async with db_mod.SessionLocal() as db:
+            db.add(AudioDevice(job_id=None, venue_id=venue_id, name="House Stagebox"))
+            await db.commit()
+
+        job = (
+            await client.post(f"{BASE}/jobs", json={"title": "Prebuilt Job"}, headers=auth_headers)
+        ).json()
+        async with db_mod.SessionLocal() as db:
+            db.add(AudioDevice(job_id=UUID(job["id"]), name="User Device"))
+            await db.commit()
+
+        await client.put(
+            f"{BASE}/jobs/{job['id']}/venue",
+            json={"venue_id": str(venue_id)},
+            headers=auth_headers,
+        )
+
+        async with db_mod.SessionLocal() as db:
+            count = len(
+                (await db.execute(select(AudioDevice).where(AudioDevice.job_id == UUID(job["id"]))))
+                .scalars()
+                .all()
+            )
+        assert count == 1

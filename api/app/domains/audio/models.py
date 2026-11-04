@@ -62,8 +62,11 @@ class StockwireRequirementLink(Base):
     __table_args__ = (UniqueConstraint("job_id", "item_key", name="uq_stockwire_link_job_item"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     item_key: Mapped[str] = mapped_column(String(255), nullable=False)
     product_id: Mapped[str] = mapped_column(String(64), nullable=False)
