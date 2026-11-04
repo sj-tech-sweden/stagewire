@@ -33,7 +33,7 @@ class FixtureRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     position: int
     device_id: UUID | None = None
     device_name: str | None = None
@@ -100,7 +100,7 @@ class FixtureTypeRead(FixtureTypeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     category: str = ""
     source: str = "manual"
     stockwire_product_id: str | None = None

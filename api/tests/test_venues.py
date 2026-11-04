@@ -382,3 +382,100 @@ async def test_base_rig_not_cloned_when_job_already_has_graph(auth_headers):
                 .all()
             )
         assert count == 1
+
+
+async def test_venue_base_rig_crud(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue = (
+            await client.post(
+                f"{BASE}/venues", json={**VENUE, "name": "Rig Venue"}, headers=auth_headers
+            )
+        ).json()
+        venue_id = venue["id"]
+
+        # 404 for unknown venue
+        missing = await client.get(
+            f"{BASE}/venues/00000000-0000-0000-0000-000000000000/rig/audio-devices",
+            headers=auth_headers,
+        )
+        assert missing.status_code == 404
+
+        # create
+        created = await client.post(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices",
+            json={"name": "House Stagebox", "device_type": "stagebox"},
+            headers=auth_headers,
+        )
+        assert created.status_code == 201, created.text
+        dev_id = created.json()["id"]
+
+        # list
+        listed = await client.get(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices", headers=auth_headers
+        )
+        assert listed.status_code == 200
+        assert len(listed.json()) == 1
+
+        # get by id
+        got = await client.get(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+        )
+        assert got.status_code == 200
+        assert got.json()["name"] == "House Stagebox"
+
+        # patch (partial)
+        patched = await client.patch(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}",
+            json={"notes": "Back of house"},
+            headers=auth_headers,
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["notes"] == "Back of house"
+        assert patched.json()["name"] == "House Stagebox"
+
+        # ownership: row belongs to the venue, not a job
+        async with db_mod.SessionLocal() as db:
+            row = (
+                (await db.execute(select(AudioDevice).where(AudioDevice.id == UUID(dev_id))))
+                .scalars()
+                .first()
+            )
+            assert row.venue_id == UUID(venue_id)
+            assert row.job_id is None
+
+        # child entity referencing a venue-owned parent
+        cl = await client.post(
+            f"{BASE}/venues/{venue_id}/rig/audio-channel-lists",
+            json={"name": "House Inputs"},
+            headers=auth_headers,
+        )
+        assert cl.status_code == 201, cl.text
+        cl_id = cl.json()["id"]
+        ch = await client.post(
+            f"{BASE}/venues/{venue_id}/rig/audio-channels",
+            json={"channel_list_id": cl_id, "channel_number": 1},
+            headers=auth_headers,
+        )
+        assert ch.status_code == 201, ch.text
+        assert ch.json()["channel_list_id"] == cl_id
+
+        # delete
+        deleted = await client.delete(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+        )
+        assert deleted.status_code == 204
+        gone = await client.get(
+            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+        )
+        assert gone.status_code == 404
+
+        # 404 when row belongs to a different venue
+        other = await client.post(
+            f"{BASE}/venues", json={**VENUE, "name": "Other Venue"}, headers=auth_headers
+        )
+        other_id = other.json()["id"]
+        cross = await client.get(
+            f"{BASE}/venues/{other_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+        )
+        assert cross.status_code == 404

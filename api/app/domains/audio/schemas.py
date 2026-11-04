@@ -258,7 +258,7 @@ class ChannelListRead(ChannelListBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     created_at: datetime
     channels: list[AudioChannelPatchRead] = []
     outputs: list[ChannelListOutputRead] = []
@@ -307,7 +307,7 @@ class StagePlotElementRead(StagePlotElementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
 
 
 class AudioDevicePort(BaseModel):
@@ -359,7 +359,7 @@ class AudioDeviceRead(AudioDeviceBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     patch_point_count: int = 0
     input_override: int | None = None
     output_override: int | None = None
