@@ -20,6 +20,17 @@ from app.domains.auth.security import (  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 async def _setup_db():
+    # Import every domain model so the full metadata (with cross-domain FKs) is
+    # registered before create_all, regardless of which test file triggered the
+    # session. Mirrors migrations/env.py.
+    import app.domains.audio.models  # noqa: F401
+    import app.domains.auth.models  # noqa: F401
+    import app.domains.lighting.models  # noqa: F401
+    import app.domains.reports.models  # noqa: F401
+    import app.domains.rigging.models  # noqa: F401
+    import app.domains.venues.models  # noqa: F401
+    import app.domains.video.models  # noqa: F401
+
     db_mod.engine = create_async_engine(db_mod.settings.database_url, future=True)
     db_mod.SessionLocal = async_sessionmaker(db_mod.engine, expire_on_commit=False)
     # Import every domain model so all tables are registered on the metadata before create_all
