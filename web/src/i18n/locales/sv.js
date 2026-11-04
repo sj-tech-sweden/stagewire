@@ -1261,6 +1261,33 @@ export default {
     assignLabel: "Sparad lokal",
     assignHint:
       "Kopierar den sparade lokalens storlek och scenposition till jobbet.",
+    searchPlaceholder: "Sök lokaler",
+    noResults: "Inga lokaler matchar filtren",
+    filterFootprint: "Form",
+    filterStage: "Scen",
+    geometrySection: "Geometriförinställningar",
+    footprintShape: "Lokalform",
+    stageShape: "Scenform",
+    footprintShapes: {
+      rectangular: "Rektangel",
+      arena_circular: "Arena (cirkulär)",
+      amphitheater: "Amfiteater",
+      custom_polygon: "Anpassad polygon",
+    },
+    stageShapes: {
+      proscenium: "Proscenium",
+      thrust: "Thrust",
+      arena_center: "Arena (mitt)",
+      runway: "Catwalk",
+      custom_polygon: "Anpassad polygon",
+    },
+    geometry: {
+      drawFootprint: "Rita lokalform",
+      drawStage: "Rita scenform",
+      clear: "Rensa ritning",
+      hint: "Dra scenen inuti lokalen; använd hörnhandtaget för att ändra storlek.",
+      drawHint: "Klicka för att lägga till en punkt; dra punkter för att flytta; dubbelklicka på en punkt för att ta bort den.",
+    },
   },
   cables: {
     saveFailed: "Kunde inte spara kabelplanen",
