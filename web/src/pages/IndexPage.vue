@@ -144,10 +144,6 @@
             v-model="form.event_date"
             :label="t('jobs.fieldEventDate')"
           />
-          <q-input
-            v-model="form.stockwire_job_id"
-            :label="t('jobs.fieldStockwireId')"
-          />
         </q-card-section>
         <q-card-actions align="right">
           <q-btn
@@ -197,7 +193,6 @@ const form = ref({
   title: '',
   venue_id: null,
   event_date: '',
-  stockwire_job_id: '',
 });
 
 // The venue picker filters the cached venue list; the no-option button adds a brand new venue
@@ -234,7 +229,7 @@ async function create() {
     await venues.assignJobVenue(job.id, venue_id);
   }
   dialog.value = false;
-  form.value = { title: '', venue_id: null, event_date: '', stockwire_job_id: '' };
+  form.value = { title: '', venue_id: null, event_date: '' };
   query.value = '';
   await store.fetchJobs({ search: '' });
 }
