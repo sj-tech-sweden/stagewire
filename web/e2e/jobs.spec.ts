@@ -9,14 +9,21 @@ test('create a production job from the UI', async ({ page }) => {
   await login(page);
 
   const title = `E2E Show ${Date.now()}`;
+  const venue = `E2E Hall ${Date.now()}`;
   await page.getByRole('button', { name: /new job/i }).click();
 
   const dialog = page.locator('.q-dialog');
   await dialog.locator('input').nth(0).fill(title);
-  await dialog.locator('input').nth(1).fill('E2E Hall');
+
+  // The venue is a searchable picker; typing a name that does not match offers a "create" action.
+  await dialog.locator('.q-select input').fill(venue);
+  await dialog.getByRole('button', { name: /create new venue/i }).click();
+  await expect(dialog.getByText(venue)).toBeVisible();
+
   await dialog.getByRole('button', { name: /create/i }).click();
 
   await expect(page.getByText(title)).toBeVisible();
+  await expect(page.getByText(venue)).toBeVisible();
 });
 
 test('jobs can be searched and are listed newest first, a page at a time', async ({ page, request }) => {

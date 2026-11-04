@@ -496,6 +496,7 @@ export default {
     fieldStockwireId: "Stockwire job ID",
     fieldNotes: "Job notes",
     create: "Create",
+    venueHint: "Search existing venues, or type a name and create a new one",
   },
   channels: {
     editJob: "Edit job",
@@ -1223,6 +1224,7 @@ export default {
   venues: {
     title: "Venues",
     newVenue: "New venue",
+    createNew: "Create new venue \"{name}\"",
     editVenue: "Edit venue",
     empty: "No saved venues yet. Create one to reuse it across jobs.",
     sizeSummary: "Venue {w} × {h} cm",
