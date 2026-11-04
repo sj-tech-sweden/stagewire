@@ -5,10 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.core import db as db_mod
-from app.domains.audio.models import AudioDevice, ChannelList, StagePlotElement
-from app.domains.lighting.models import FixtureType, LightingFixture
-from app.domains.rigging.models import PowerNode, RiggingPoint
-from app.domains.video.models import VideoInput, VideoInputList
+from app.domains.graph.models import ConnectionEdge, GraphDevice
 from app.main import app
 
 BASE = "/api/v1"
@@ -243,30 +240,44 @@ async def test_base_rig_is_cloned_on_assign(auth_headers):
         ).json()
         venue_id = UUID(venue["id"])
 
-        async with db_mod.SessionLocal() as db:
-            cl = ChannelList(job_id=None, venue_id=venue_id, name="House Inputs")
-            dev = AudioDevice(id=uuid4(), job_id=None, venue_id=venue_id, name="House Stagebox")
-            pe = StagePlotElement(
-                job_id=None,
-                venue_id=venue_id,
-                element_type="speaker_main",
-                linked_device_id=dev.id,
-            )
-            rp = RiggingPoint(job_id=None, venue_id=venue_id, name="House Point")
-            pn = PowerNode(job_id=None, venue_id=venue_id, name="House Mains")
-            ft = FixtureType(id=uuid4(), job_id=None, venue_id=venue_id, name="House Fixture")
-            lf = LightingFixture(
-                job_id=None,
-                venue_id=venue_id,
-                fixture_type="House Light",
-                fixture_type_id=ft.id,
-                import_batch_id=uuid4(),
-            )
-            vil = VideoInputList(id=uuid4(), job_id=None, venue_id=venue_id, name="House Cams")
-            vi = VideoInput(list_id=vil.id, venue_id=venue_id)
-            db.add_all([cl, dev, pe, rp, pn, ft, lf, vil, vi])
-            await db.commit()
-            cl_id, dev_id, ft_id = cl.id, dev.id, ft.id
+        # Seed the venue's Standard Base Rig through the graph endpoint.
+        dev_a = uuid4()
+        dev_b = uuid4()
+        edge = uuid4()
+        rig = {
+            "devices": [
+                {
+                    "id": str(dev_a),
+                    "domain": "audio",
+                    "kind": "speaker",
+                    "name": "House Stagebox",
+                    "attributes": {},
+                    "ports": [],
+                },
+                {
+                    "id": str(dev_b),
+                    "domain": "audio",
+                    "kind": "console",
+                    "name": "House Console",
+                    "attributes": {},
+                    "ports": [],
+                },
+            ],
+            "edges": [
+                {
+                    "id": str(edge),
+                    "signal": "audio",
+                    "src_device_id": str(dev_a),
+                    "src_port": "out",
+                    "dst_device_id": str(dev_b),
+                    "dst_port": "in",
+                }
+            ],
+        }
+        put = await client.put(f"{BASE}/venues/{venue_id}/graph", json=rig, headers=auth_headers)
+        assert put.status_code == 200, put.text
+        assert len(put.json()["devices"]) == 2
+        assert len(put.json()["edges"]) == 1
 
         job = (
             await client.post(f"{BASE}/jobs", json={"title": "Rig Job"}, headers=auth_headers)
@@ -279,73 +290,43 @@ async def test_base_rig_is_cloned_on_assign(auth_headers):
         assert assigned.status_code == 200, assigned.text
 
         async with db_mod.SessionLocal() as db:
-            new_cls = (
-                (await db.execute(select(ChannelList).where(ChannelList.job_id == UUID(job["id"]))))
+            # The job got a clone of the rig: same count, fresh ids, venue_id cleared.
+            cloned = (
+                (await db.execute(select(GraphDevice).where(GraphDevice.job_id == UUID(job["id"]))))
                 .scalars()
                 .all()
             )
-            assert len(new_cls) == 1
-            assert new_cls[0].id != cl_id
-            assert new_cls[0].venue_id is None
+            assert len(cloned) == 2
+            assert all(d.venue_id is None for d in cloned)
+            assert {d.name for d in cloned} == {"House Stagebox", "House Console"}
 
-            new_devs = (
-                (await db.execute(select(AudioDevice).where(AudioDevice.job_id == UUID(job["id"]))))
-                .scalars()
-                .all()
-            )
-            assert len(new_devs) == 1
-            new_dev = new_devs[0]
-            assert new_dev.id != dev_id
-
-            new_pes = (
+            cloned_edges = (
                 (
                     await db.execute(
-                        select(StagePlotElement).where(StagePlotElement.job_id == UUID(job["id"]))
+                        select(ConnectionEdge).where(ConnectionEdge.job_id == UUID(job["id"]))
                     )
                 )
                 .scalars()
                 .all()
             )
-            assert len(new_pes) == 1
-            assert new_pes[0].linked_device_id == new_dev.id
+            assert len(cloned_edges) == 1
+            cloned_ids = {d.id for d in cloned}
+            assert cloned_edges[0].src_device_id in cloned_ids
+            assert cloned_edges[0].dst_device_id in cloned_ids
 
-            assert (
-                await db.execute(select(RiggingPoint).where(RiggingPoint.job_id == UUID(job["id"])))
-            ).scalars().first() is not None
-            assert (
-                await db.execute(select(PowerNode).where(PowerNode.job_id == UUID(job["id"])))
-            ).scalars().first() is not None
-
-            new_lf = (
+            # The venue still owns its template rig.
+            template = (
                 (
                     await db.execute(
-                        select(LightingFixture).where(LightingFixture.job_id == UUID(job["id"]))
+                        select(GraphDevice).where(
+                            GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None)
+                        )
                     )
                 )
                 .scalars()
-                .first()
+                .all()
             )
-            assert new_lf is not None
-            assert new_lf.fixture_type_id != ft_id
-            assert new_lf.import_batch_id == lf.import_batch_id
-
-            new_vil = (
-                (
-                    await db.execute(
-                        select(VideoInputList).where(VideoInputList.job_id == UUID(job["id"]))
-                    )
-                )
-                .scalars()
-                .first()
-            )
-            assert new_vil is not None
-            new_vi = (
-                (await db.execute(select(VideoInput).where(VideoInput.list_id == new_vil.id)))
-                .scalars()
-                .first()
-            )
-            assert new_vi is not None
-            assert new_vi.list_id == new_vil.id
+            assert len(template) == 2
 
 
 async def test_base_rig_not_cloned_when_job_already_has_graph(auth_headers):
@@ -358,15 +339,36 @@ async def test_base_rig_not_cloned_when_job_already_has_graph(auth_headers):
         ).json()
         venue_id = UUID(venue["id"])
 
-        async with db_mod.SessionLocal() as db:
-            db.add(AudioDevice(job_id=None, venue_id=venue_id, name="House Stagebox"))
-            await db.commit()
+        # Venue carries a base-rig device.
+        dev = uuid4()
+        await client.put(
+            f"{BASE}/venues/{venue_id}/graph",
+            json={
+                "devices": [
+                    {
+                        "id": str(dev),
+                        "domain": "audio",
+                        "kind": "speaker",
+                        "name": "House Stagebox",
+                        "attributes": {},
+                        "ports": [],
+                    }
+                ],
+                "edges": [],
+            },
+            headers=auth_headers,
+        )
 
         job = (
             await client.post(f"{BASE}/jobs", json={"title": "Prebuilt Job"}, headers=auth_headers)
         ).json()
         async with db_mod.SessionLocal() as db:
-            db.add(AudioDevice(job_id=UUID(job["id"]), name="User Device"))
+            # A job that already carries its own graph must not be overwritten by the rig.
+            db.add(
+                GraphDevice(
+                    job_id=UUID(job["id"]), domain="audio", kind="console", name="User Device"
+                )
+            )
             await db.commit()
 
         await client.put(
@@ -377,7 +379,7 @@ async def test_base_rig_not_cloned_when_job_already_has_graph(auth_headers):
 
         async with db_mod.SessionLocal() as db:
             count = len(
-                (await db.execute(select(AudioDevice).where(AudioDevice.job_id == UUID(job["id"]))))
+                (await db.execute(select(GraphDevice).where(GraphDevice.job_id == UUID(job["id"]))))
                 .scalars()
                 .all()
             )
@@ -396,90 +398,85 @@ async def test_venue_base_rig_crud(auth_headers):
 
         # 404 for unknown venue
         missing = await client.get(
-            f"{BASE}/venues/00000000-0000-0000-0000-000000000000/rig/devices",
-            headers=auth_headers,
+            f"{BASE}/venues/00000000-0000-0000-0000-000000000000/graph", headers=auth_headers
         )
         assert missing.status_code == 404
 
-        # create
-        created = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/devices",
-            json={"name": "House Stagebox", "device_type": "stagebox"},
-            headers=auth_headers,
+        # Empty rig initially
+        empty = await client.get(f"{BASE}/venues/{venue_id}/graph", headers=auth_headers)
+        assert empty.status_code == 200
+        assert empty.json()["devices"] == []
+        assert empty.json()["edges"] == []
+
+        # PUT a rig with two devices + one edge
+        dev_a = uuid4()
+        dev_b = uuid4()
+        edge = uuid4()
+        rig = {
+            "devices": [
+                {
+                    "id": str(dev_a),
+                    "domain": "audio",
+                    "kind": "speaker",
+                    "name": "A",
+                    "attributes": {},
+                    "ports": [],
+                },
+                {
+                    "id": str(dev_b),
+                    "domain": "audio",
+                    "kind": "speaker",
+                    "name": "B",
+                    "attributes": {},
+                    "ports": [],
+                },
+            ],
+            "edges": [
+                {
+                    "id": str(edge),
+                    "signal": "audio",
+                    "src_device_id": str(dev_a),
+                    "src_port": "out",
+                    "dst_device_id": str(dev_b),
+                    "dst_port": "in",
+                }
+            ],
+        }
+        created = await client.put(
+            f"{BASE}/venues/{venue_id}/graph", json=rig, headers=auth_headers
         )
-        assert created.status_code == 201, created.text
-        dev_id = created.json()["id"]
+        assert created.status_code == 200, created.text
+        assert len(created.json()["devices"]) == 2
+        assert len(created.json()["edges"]) == 1
 
-        # list
-        listed = await client.get(f"{BASE}/venues/{venue_id}/rig/devices", headers=auth_headers)
-        assert listed.status_code == 200
-        assert len(listed.json()) == 1
-
-        # get by id
-        got = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
+        # Replacing keeps ids stable and discards removed devices
+        rig2 = {
+            "devices": [
+                {
+                    "id": str(dev_a),
+                    "domain": "audio",
+                    "kind": "speaker",
+                    "name": "A renamed",
+                    "attributes": {},
+                    "ports": [],
+                }
+            ],
+            "edges": [],
+        }
+        replaced = await client.put(
+            f"{BASE}/venues/{venue_id}/graph", json=rig2, headers=auth_headers
         )
-        assert got.status_code == 200
-        assert got.json()["name"] == "House Stagebox"
+        assert replaced.status_code == 200, replaced.text
+        assert len(replaced.json()["devices"]) == 1
+        assert replaced.json()["devices"][0]["name"] == "A renamed"
 
-        # patch (partial)
-        patched = await client.patch(
-            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}",
-            json={"notes": "Back of house"},
-            headers=auth_headers,
-        )
-        assert patched.status_code == 200, patched.text
-        assert patched.json()["notes"] == "Back of house"
-        assert patched.json()["name"] == "House Stagebox"
-
-        # ownership: row belongs to the venue, not a job
+        # Persistence: the row is venue-owned with a null job_id
         async with db_mod.SessionLocal() as db:
             row = (
-                (await db.execute(select(AudioDevice).where(AudioDevice.id == UUID(dev_id))))
+                (await db.execute(select(GraphDevice).where(GraphDevice.id == dev_a)))
                 .scalars()
                 .first()
             )
+            assert row is not None
             assert row.venue_id == UUID(venue_id)
             assert row.job_id is None
-
-        # child entity referencing a venue-owned parent (nested path)
-        cl = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/channel-lists",
-            json={"name": "House Inputs"},
-            headers=auth_headers,
-        )
-        assert cl.status_code == 201, cl.text
-        cl_id = cl.json()["id"]
-        ch = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/channel-lists/{cl_id}/channels",
-            json={"channel_number": 1},
-            headers=auth_headers,
-        )
-        assert ch.status_code == 201, ch.text
-        assert ch.json()["channel_list_id"] == cl_id
-        ch_id = ch.json()["id"]
-        got_ch = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/channels/{ch_id}", headers=auth_headers
-        )
-        assert got_ch.status_code == 200
-        assert got_ch.json()["channel_list_id"] == cl_id
-
-        # delete
-        deleted = await client.delete(
-            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
-        )
-        assert deleted.status_code == 204
-        gone = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
-        )
-        assert gone.status_code == 404
-
-        # 404 when row belongs to a different venue
-        other = await client.post(
-            f"{BASE}/venues", json={**VENUE, "name": "Other Venue"}, headers=auth_headers
-        )
-        other_id = other.json()["id"]
-        cross = await client.get(
-            f"{BASE}/venues/{other_id}/rig/devices/{dev_id}", headers=auth_headers
-        )
-        assert cross.status_code == 404

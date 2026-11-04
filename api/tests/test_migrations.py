@@ -85,21 +85,27 @@ def test_migration_graph_is_fully_connected() -> None:
                 f"Revision {rev.revision} references missing down_revision {ref}."
             )
 
-    # Ordering guard for the venue-branch fork regression: the trunk migration
-    # that creates video_input_lists (c9d0e1f2a3b4) must run before the venue
-    # base-rig migration (z2a3b4c5d6e7) that adds venue_id to it. Re-parenting
-    # the venue branch onto the trunk tip (a9f8e7d6c5b4) guarantees this; forking
-    # it off an earlier branchpoint lets alembic schedule z2 first and crash with
-    # "relation video_input_lists does not exist".
+    # Ordering guard for the venue branch: the unified graph migration that creates
+    # graph_devices (c3d4e5f6g7h8) must run before the venue base-rig merge
+    # (z9b0c1d2e3f4) that adds venue_id to it and makes job_id nullable. The venue
+    # geometry migration (z1a2b3c4d5e6) and the reports head (d4e5f6a7b8c9) must
+    # also precede the merge. A fork that scheduled the venue migration before those
+    # would crash with "relation graph_devices does not exist".
     order = {rev.revision: i for i, rev in enumerate(walked)}
-    created = "c9d0e1f2a3b4"
-    altered = "z2a3b4c5d6e7"
-    assert created in order, f"{created} (video_input_lists creation) missing from chain."
-    assert altered in order, f"{altered} (venue base-rig ownership) missing from chain."
-    assert order[created] < order[altered], (
-        f"{created} must run before {altered} so video_input_lists exists when "
-        "venue_id is added to it (venue-branch fork regression)."
+    graph_root = "c3d4e5f6g7h8"
+    geometry = "z1a2b3c4d5e6"
+    reports_head = "d4e5f6a7b8c9"
+    merge = "z9b0c1d2e3f4"
+    assert graph_root in order, f"{graph_root} (unified graph) missing from chain."
+    assert geometry in order, f"{geometry} (venue geometry) missing from chain."
+    assert reports_head in order, f"{reports_head} (reports head) missing from chain."
+    assert merge in order, f"{merge} (venue base-rig merge) missing from chain."
+    assert order[graph_root] < order[merge], (
+        f"{graph_root} must run before {merge} so graph_devices exists when the "
+        "venue base-rig migration alters it."
     )
+    assert order[geometry] < order[merge], f"{geometry} must run before {merge}."
+    assert order[reports_head] < order[merge], f"{reports_head} must run before {merge}."
 
 
 @pytest.mark.skipif(
@@ -138,18 +144,21 @@ def test_alembic_upgrade_head_succeeds_on_postgres() -> None:
 
         inspector = inspect(conn)
         tables = set(inspector.get_table_names())
-        assert "video_input_lists" in tables, "video_input_lists table missing after upgrade."
+        assert "graph_devices" in tables, "graph_devices table missing after upgrade."
 
-        video_input_lists_columns = {
-            col["name"] for col in inspector.get_columns("video_input_lists")
-        }
-        assert "venue_id" in video_input_lists_columns, (
-            "video_input_lists.venue_id missing: the venue base-rig migration "
-            "ran before the trunk created video_input_lists (fork regression)."
+        graph_devices_columns = {col["name"] for col in inspector.get_columns("graph_devices")}
+        # The venue base-rig migration (z9b0c1d2e3f4) adds venue_id to graph_devices
+        # and makes job_id nullable so a venue-owned rig carries job_id NULL.
+        assert "venue_id" in graph_devices_columns, (
+            "graph_devices.venue_id missing: the venue base-rig migration did "
+            "not run (venue branch dropped from the chain)."
         )
+        job_id_col = next(
+            c for c in inspector.get_columns("graph_devices") if c["name"] == "job_id"
+        )
+        assert job_id_col["nullable"], "graph_devices.job_id must be nullable for venue rigs."
 
-        # The venue geometry migration (z1a2b3c4d5e6) adds footprint_shape to
-        # venues; its presence proves the whole venue branch ran after the trunk.
+        # The venue geometry migration (z1a2b3c4d5e6) adds footprint_shape to venues.
         venues_columns = {col["name"] for col in inspector.get_columns("venues")}
         assert "footprint_shape" in venues_columns, (
             "venues.footprint_shape missing: the venue geometry migration did "

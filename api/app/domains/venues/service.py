@@ -5,7 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import ProductionJob
-from app.domains.venues.base_rig import clone_base_rig_to_job
+from app.domains.graph.models import GraphDevice
 from app.domains.venues.models import Venue
 
 SNAPSHOT_FIELDS = (
@@ -70,7 +70,11 @@ async def assign_venue(db: AsyncSession, job: ProductionJob, venue: Venue | None
     job.venue_id = venue.id if venue else None
     if venue is not None:
         _apply_venue_snapshot(job, venue)
+        # A job that already has a graph was either assigned before or edited by hand, so we leave
+        # it untouched. Otherwise the venue's Standard Base Rig seeds the job's graph.
         if not await _job_has_graph(db, job.id):
+            from app.domains.venues.base_rig import clone_base_rig_to_job
+
             await clone_base_rig_to_job(db, venue.id, job.id)
     await db.commit()
     await db.refresh(job)
@@ -78,13 +82,10 @@ async def assign_venue(db: AsyncSession, job: ProductionJob, venue: Venue | None
 
 
 async def _job_has_graph(db: AsyncSession, job_id: UUID) -> bool:
-    from app.domains.venues.base_rig import ROOT_MODELS
-
-    for model in ROOT_MODELS:
-        found = (await db.execute(select(model).where(model.job_id == job_id))).scalars().first()
-        if found is not None:
-            return True
-    return False
+    existing = (
+        await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id).limit(1))
+    ).first()
+    return existing is not None
 
 
 async def propagate_venue(db: AsyncSession, venue: Venue, scope: str) -> list[ProductionJob]:

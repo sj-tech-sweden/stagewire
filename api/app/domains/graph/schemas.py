@@ -63,7 +63,8 @@ class GraphDeviceRead(GraphDeviceBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
+    venue_id: UUID | None = None
     stockwire_request_status: str | None = None
     legacy_ref: str | None = None
     created_at: datetime
@@ -100,7 +101,8 @@ class ConnectionEdgeRead(ConnectionEdgeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
+    venue_id: UUID | None = None
     revision: int
 
 

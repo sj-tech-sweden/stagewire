@@ -22,20 +22,8 @@ from app.domains.auth.security import (  # noqa: E402
 async def _setup_db():
     # Import every domain model so the full metadata (with cross-domain FKs) is
     # registered before create_all, regardless of which test file triggered the
-    # session. Mirrors migrations/env.py.
-    import app.domains.audio.models  # noqa: F401
-    import app.domains.auth.models  # noqa: F401
-    import app.domains.lighting.models  # noqa: F401
-    import app.domains.reports.models  # noqa: F401
-    import app.domains.rigging.models  # noqa: F401
-    import app.domains.venues.models  # noqa: F401
-    import app.domains.video.models  # noqa: F401
-
-    db_mod.engine = create_async_engine(db_mod.settings.database_url, future=True)
-    db_mod.SessionLocal = async_sessionmaker(db_mod.engine, expire_on_commit=False)
-    # Import every domain model so all tables are registered on the metadata before create_all
-    # runs; otherwise FKs to not-yet-imported tables (e.g. venues, referenced by production_jobs)
-    # raise at setup and break every test that pulls those models in.
+    # session. Mirrors migrations/env.py. The unified graph domain owns the device
+    # and connection models; rigging/video no longer carry their own models module.
     import app.domains.audio.models  # noqa: F401
     import app.domains.auth.models  # noqa: F401
     import app.domains.connectors.models  # noqa: F401
@@ -43,6 +31,9 @@ async def _setup_db():
     import app.domains.lighting.models  # noqa: F401
     import app.domains.reports.models  # noqa: F401
     import app.domains.venues.models  # noqa: F401
+
+    db_mod.engine = create_async_engine(db_mod.settings.database_url, future=True)
+    db_mod.SessionLocal = async_sessionmaker(db_mod.engine, expire_on_commit=False)
 
     async with db_mod.engine.begin() as conn:
         await conn.run_sync(db_mod.Base.metadata.create_all)

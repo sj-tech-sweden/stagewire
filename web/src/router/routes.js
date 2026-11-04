@@ -26,28 +26,7 @@ const routes = [
       { path: 'venues', component: () => import('@/pages/VenuesPage.vue') },
       {
         path: 'venues/:venueId/base-rig',
-        component: () => import('@/pages/StagePlotPage.vue'),
-        meta: { title: 'venues.baseRig' },
-      },
-      {
-        path: 'venues/:venueId/devices',
-        component: () => import('@/pages/DevicesPage.vue'),
-        meta: { title: 'venues.baseRig' },
-      },
-      {
-        path: 'venues/:venueId/lighting',
-        component: () => import('@/pages/VenueLightingPage.vue'),
-        meta: { title: 'venues.baseRig' },
-      },
-      {
-        path: 'venues/:venueId/rigging',
-        component: () => import('@/pages/VenueRiggingPage.vue'),
-        meta: { title: 'venues.baseRig' },
-      },
-      {
-        path: 'venues/:venueId/video',
-        component: () => import('@/pages/VenueVideoPage.vue'),
-        meta: { title: 'venues.baseRig' },
+        component: () => import('@/pages/VenueBaseRigPage.vue'),
       },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     ],

@@ -11,6 +11,30 @@
 
 export const DEFAULT_STAGE = { w: 1000, h: 600 };
 
+// A venue carries the same geometry fields as a job's snapshot, so its base-rig editor can reuse
+// the exact same canvas frame a job would get once the venue is assigned.
+export function frameFromVenue(venue) {
+  const stageW = venue?.stage_width_cm > 0 ? venue.stage_width_cm : DEFAULT_STAGE.w;
+  const stageH = venue?.stage_height_cm > 0 ? venue.stage_height_cm : DEFAULT_STAGE.h;
+  const stageX = venue?.stage_x_cm || 0;
+  const stageY = venue?.stage_y_cm || 0;
+  const venueW = venue?.venue_width_cm || 0;
+  const venueH = venue?.venue_height_cm || 0;
+  const hasVenue = venueW > 0 && venueH > 0;
+  return {
+    stageX,
+    stageY,
+    stageW,
+    stageH,
+    venueW,
+    venueH,
+    hasVenue,
+    width: hasVenue ? venueW : stageX + stageW,
+    height: hasVenue ? venueH : stageY + stageH,
+    audience: venue?.audience_polygon || [],
+  };
+}
+
 export function frameFromJob(job) {
   const stageW = job?.stage_width_cm > 0 ? job.stage_width_cm : DEFAULT_STAGE.w;
   const stageH = job?.stage_height_cm > 0 ? job.stage_height_cm : DEFAULT_STAGE.h;

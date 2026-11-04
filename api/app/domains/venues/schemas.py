@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.audio.polygon import check_polygon
+from app.domains.graph.schemas import Domain, Port, Signal
 
 FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
 StageShape = Literal["proscenium", "thrust", "arena_center", "runway"]
@@ -131,3 +132,49 @@ class VenuePowerOutletRead(VenuePowerOutletBase):
 
     id: UUID
     venue_id: UUID
+
+
+# --- Standard Base Rig -------------------------------------------------------------------------
+# A venue's Standard Base Rig is a graph (devices + connection edges) owned by the venue rather
+# than by a job. It is stored in the same unified `graph_*` tables and cloned onto a job when the
+# venue is assigned. The write schemas mirror the job graph's device/edge shapes so the same
+# editor can drive both; the client keeps device/edge ids stable across a GET -> edit -> PUT round
+# trip, which avoids any id remapping on the server.
+
+
+class VenueBaseRigDeviceWrite(BaseModel):
+    id: UUID
+    domain: Domain
+    kind: str = ""
+    name: str
+    notes: str = ""
+    position: int = 0
+    attributes: dict = Field(default_factory=dict)
+    ports: list[Port] = Field(default_factory=list)
+    canvas_x_cm: float | None = None
+    canvas_y_cm: float | None = None
+    canvas_rotation: float = 0.0
+    case_parent_id: UUID | None = None
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
+    stockwire_device_id: str | None = None
+    stockwire_booked: bool | None = None
+
+
+class VenueBaseRigEdgeWrite(BaseModel):
+    id: UUID
+    signal: Signal
+    src_device_id: UUID
+    src_port: str
+    dst_device_id: UUID
+    dst_port: str
+    channels: int = 1
+    phase: Literal["L1", "L2", "L3"] | None = None
+    cable_label: str = ""
+    notes: str = ""
+    attributes: dict = Field(default_factory=dict)
+
+
+class VenueBaseRigWrite(BaseModel):
+    devices: list[VenueBaseRigDeviceWrite] = Field(default_factory=list)
+    edges: list[VenueBaseRigEdgeWrite] = Field(default_factory=list)

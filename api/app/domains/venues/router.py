@@ -11,8 +11,10 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph.models import GraphDevice
+from app.domains.graph.schemas import GraphRead
 from app.domains.rigging import connectors
 from app.domains.venues import schemas, service
+from app.domains.venues.base_rig import get_base_rig, replace_base_rig
 from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
 
 router = APIRouter(
@@ -241,3 +243,27 @@ async def delete_power_outlet(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found")
     await db.delete(outlet)
     await db.commit()
+
+
+# --- Standard Base Rig -------------------------------------------------------------------------
+
+
+@router.get("/venues/{venue_id}/graph", response_model=GraphRead)
+async def get_venue_base_rig(venue_id: UUID, db: AsyncSession = Depends(get_db)) -> GraphRead:
+    """The venue's Standard Base Rig: the graph of devices/edges it seeds jobs with."""
+    await _get_venue_or_404(db, venue_id)
+    return await get_base_rig(db, venue_id)
+
+
+@router.put("/venues/{venue_id}/graph", response_model=GraphRead)
+async def put_venue_base_rig(
+    venue_id: UUID, payload: schemas.VenueBaseRigWrite, db: AsyncSession = Depends(get_db)
+) -> GraphRead:
+    """Replace the venue's entire Standard Base Rig.
+
+    The editor holds the full graph locally and PUTs it back in one shot, keeping device/edge ids
+    stable so no remapping is required. This is the venue counterpart to a job's incremental graph
+    edits and intentionally skips the job-only mirroring machinery.
+    """
+    await _get_venue_or_404(db, venue_id)
+    return await replace_base_rig(db, venue_id, payload)
