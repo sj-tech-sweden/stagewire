@@ -96,15 +96,26 @@
             </q-item-label>
           </q-item-section>
           <q-item-section side>
-            <q-btn
-              flat
-              round
-              dense
-              icon="delete"
-              color="negative"
-              :aria-label="t('common.delete')"
-              @click.stop="confirmDelete(v)"
-            />
+            <div class="row items-center no-wrap">
+              <q-btn
+                flat
+                round
+                dense
+                icon="account_tree"
+                color="primary"
+                :aria-label="t('venues.openBaseRig')"
+                @click.stop="openBaseRig(v)"
+              />
+              <q-btn
+                flat
+                round
+                dense
+                icon="delete"
+                color="negative"
+                :aria-label="t('common.delete')"
+                @click.stop="confirmDelete(v)"
+              />
+            </div>
           </q-item-section>
         </q-item>
       </q-list>
@@ -318,13 +329,19 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
+import { useRouter } from 'vue-router';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { useVenuesStore } from '@/stores/venues';
 
 const { t } = useI18n({ useScope: 'global' });
 const $q = useQuasar();
+const router = useRouter();
 const venues = useVenuesStore();
+
+function openBaseRig(v) {
+  router.push({ path: `/venues/${v.id}/base-rig` });
+}
 
 const dialog = ref(false);
 const editingId = ref(null);
