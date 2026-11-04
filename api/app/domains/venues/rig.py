@@ -12,8 +12,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import create_model
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.db import get_db
 from app.domains.audio import schemas as audio_schemas
@@ -207,18 +209,59 @@ async def _require_venue(db: AsyncSession, venue_id: UUID) -> Venue:
     return venue
 
 
-async def _get_owned(db: AsyncSession, model, venue_id: UUID, row_id: UUID):
-    row = await db.get(model, row_id)
+async def _get_owned(db: AsyncSession, model, venue_id: UUID, row_id: UUID, load: bool = False):
+    stmt = select(model).where(model.id == row_id)
+    if load:
+        stmt = stmt.options(*_eager_options(model))
+    row = (await db.execute(stmt)).scalars().first()
     if row is None or row.venue_id != venue_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resource not found")
     return row
+
+
+def _eager_options(model, depth: int = 2):
+    """Build selectinload options for the model's relationship graph.
+
+    Eager-loading avoids relying on implicit async lazy loads during response
+    serialization (which can raise MissingGreenlet off the request path and
+    causes N+1 queries). selectinload emits a separate SELECT per collection, so
+    multiple one-to-many collections on one parent are safe.
+    """
+
+    paths: list[list] = []
+
+    def _walk(m, d, seen, prefix):
+        if d == 0:
+            return
+        for rel in sa_inspect(m).relationships:
+            path = prefix + [rel]
+            paths.append(path)
+            target = rel.mapper.class_
+            if target not in seen:
+                _walk(target, d - 1, seen | {m}, path)
+
+    _walk(model, depth, set(), [])
+    opts = []
+    for path in paths:
+        opt = selectinload(path[0])
+        for rel in path[1:]:
+            opt = opt.selectinload(rel)
+        opts.append(opt)
+    return opts
 
 
 def _list_factory(model, read_schema):
     async def handler(venue_id: UUID, db: AsyncSession = Depends(get_db)):
         await _require_venue(db, venue_id)
         rows = (
-            (await db.execute(select(model).where(model.venue_id == venue_id).order_by(model.id)))
+            (
+                await db.execute(
+                    select(model)
+                    .where(model.venue_id == venue_id)
+                    .order_by(model.id)
+                    .options(*_eager_options(model))
+                )
+            )
             .scalars()
             .all()
         )
@@ -244,7 +287,7 @@ def _create_factory(model, create_schema, read_schema):
 
 def _get_factory(model, read_schema):
     async def handler(venue_id: UUID, row_id: UUID, db: AsyncSession = Depends(get_db)):
-        return await _get_owned(db, model, venue_id, row_id)
+        return await _get_owned(db, model, venue_id, row_id, load=True)
 
     return handler
 
