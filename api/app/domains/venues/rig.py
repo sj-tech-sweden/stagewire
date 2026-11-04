@@ -1,17 +1,23 @@
-"""Owner-agnostic CRUD for a venue's Standard Base Rig.
+"""Venue Standard Base Rig API — mirrors the job graph API's nested routes.
 
-A venue's base rig is stored as device/patch rows that belong to the venue
-(``venue_id`` set, ``job_id`` NULL). This router exposes the same create/read/
-update/delete operations the job graph uses, but scoped to a venue, so the
-Venues "Base Rig" editor can reuse the normal graph tools against venue-owned
-rows. It reuses the existing per-domain Pydantic schemas for validation and the
-domain models directly.
+A venue's Standard Base Rig is stored as device/patch rows that belong to the
+venue (``venue_id`` set, ``job_id`` NULL). To let the frontend's existing graph
+editors (StagePlotPage, patch-flow, DMX, rigging) be reused unchanged, every
+route here mirrors the corresponding ``/jobs/{job_id}/...`` path but is scoped to
+``/venues/{venue_id}/rig/...``. The handlers reuse the per-domain Pydantic
+schemas and models directly; the only difference from the job API is ownership
+(``venue_id`` instead of ``job_id``) and that child FK values are taken from the
+path (matching the job API's nested URLs).
+
+Only the authoring (CRUD + nested children) routes are mirrored here. Read-only
+compute/report endpoints (coverage, specs, exports, patch-sheets, …) are added in
+a follow-up once the editor is wired.
 """
 
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import create_model
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +36,6 @@ from app.domains.audio.models import (
 )
 from app.domains.lighting import schemas as lighting_schemas
 from app.domains.lighting.models import (
-    DmxStep,
     DmxUniverse,
     FixtureMode,
     FixtureType,
@@ -50,156 +55,9 @@ from app.domains.video.models import (
 
 router = APIRouter(prefix="/venues/{venue_id}/rig", tags=["venue-base-rig"])
 
-# slug -> (model, Create schema, Update schema, Read schema)
-RIG_REGISTRY: dict[str, tuple] = {
-    "audio-devices": (
-        AudioDevice,
-        audio_schemas.AudioDeviceCreate,
-        audio_schemas.AudioDeviceUpdate,
-        audio_schemas.AudioDeviceRead,
-    ),
-    "audio-channel-lists": (
-        ChannelList,
-        audio_schemas.ChannelListCreate,
-        audio_schemas.ChannelListUpdate,
-        audio_schemas.ChannelListRead,
-    ),
-    "audio-channels": (
-        AudioChannelPatch,
-        audio_schemas.AudioChannelPatchCreate,
-        audio_schemas.AudioChannelPatchUpdate,
-        audio_schemas.AudioChannelPatchRead,
-    ),
-    "audio-channel-outputs": (
-        ChannelListOutput,
-        audio_schemas.ChannelListOutputCreate,
-        audio_schemas.ChannelListOutputUpdate,
-        audio_schemas.ChannelListOutputRead,
-    ),
-    "audio-channel-patch-points": (
-        ChannelPatchPoint,
-        audio_schemas.ChannelPatchPointCreate,
-        audio_schemas.ChannelPatchPointUpdate,
-        audio_schemas.ChannelPatchPointRead,
-    ),
-    "audio-output-patch-points": (
-        OutputPatchPoint,
-        audio_schemas.OutputPatchPointCreate,
-        audio_schemas.OutputPatchPointUpdate,
-        audio_schemas.OutputPatchPointRead,
-    ),
-    "stage-plot-elements": (
-        StagePlotElement,
-        audio_schemas.StagePlotElementCreate,
-        audio_schemas.StagePlotElementUpdate,
-        audio_schemas.StagePlotElementRead,
-    ),
-    "video-input-lists": (
-        VideoInputList,
-        video_schemas.VideoInputListCreate,
-        video_schemas.VideoInputListUpdate,
-        video_schemas.VideoInputListRead,
-    ),
-    "video-inputs": (
-        VideoInput,
-        video_schemas.VideoInputCreate,
-        video_schemas.VideoInputUpdate,
-        video_schemas.VideoInputRead,
-    ),
-    "video-outputs": (
-        VideoOutput,
-        video_schemas.VideoOutputCreate,
-        video_schemas.VideoOutputUpdate,
-        video_schemas.VideoOutputRead,
-    ),
-    "video-patch-points": (
-        VideoPatchPoint,
-        video_schemas.VideoPatchPointCreate,
-        video_schemas.VideoPatchPointUpdate,
-        video_schemas.VideoPatchPointRead,
-    ),
-    "video-output-patch-points": (
-        VideoOutputPatchPoint,
-        video_schemas.VideoOutputPatchPointCreate,
-        video_schemas.VideoOutputPatchPointUpdate,
-        video_schemas.VideoOutputPatchPointRead,
-    ),
-    "lighting-fixtures": (
-        LightingFixture,
-        lighting_schemas.FixtureCreate,
-        lighting_schemas.FixtureUpdate,
-        lighting_schemas.FixtureRead,
-    ),
-    "fixture-types": (
-        FixtureType,
-        lighting_schemas.FixtureTypeCreate,
-        lighting_schemas.FixtureTypeUpdate,
-        lighting_schemas.FixtureTypeRead,
-    ),
-    "fixture-modes": (
-        FixtureMode,
-        lighting_schemas.FixtureModeCreate,
-        lighting_schemas.FixtureModeUpdate,
-        lighting_schemas.FixtureModeRead,
-    ),
-    "dmx-universes": (
-        DmxUniverse,
-        lighting_schemas.DmxUniverseCreate,
-        lighting_schemas.DmxUniverseUpdate,
-        lighting_schemas.DmxUniverseRead,
-    ),
-    "dmx-steps": (
-        DmxStep,
-        lighting_schemas.DmxStepCreate,
-        lighting_schemas.DmxStepUpdate,
-        lighting_schemas.DmxStepRead,
-    ),
-    "rigging-points": (
-        RiggingPoint,
-        rigging_schemas.RiggingPointCreate,
-        rigging_schemas.RiggingPointUpdate,
-        rigging_schemas.RiggingPointRead,
-    ),
-    "power-nodes": (
-        PowerNode,
-        rigging_schemas.PowerNodeCreate,
-        rigging_schemas.PowerNodeUpdate,
-        rigging_schemas.PowerNodeRead,
-    ),
-    "power-node-feeds": (
-        PowerNodeFeed,
-        rigging_schemas.PowerNodeFeedCreate,
-        rigging_schemas.PowerNodeFeedUpdate,
-        rigging_schemas.PowerNodeFeedRead,
-    ),
-}
 
-# Child entities whose Create schema omits the parent FK (the job API supplies it
-# via the path). The venue rig API accepts it in the POST body instead.
-PARENT_FK: dict[str, str] = {
-    "audio-channels": "channel_list_id",
-    "audio-channel-outputs": "channel_list_id",
-    "audio-channel-patch-points": "channel_id",
-    "audio-output-patch-points": "output_id",
-    "video-inputs": "list_id",
-    "video-outputs": "list_id",
-    "video-patch-points": "input_id",
-    "video-output-patch-points": "output_id",
-    "fixture-modes": "fixture_type_id",
-    "dmx-steps": "universe_id",
-}
-
-
-def _rig_create_schema(key: str, create_schema):
-    fk = PARENT_FK.get(key)
-    if fk is None or fk in create_schema.model_fields:
-        return create_schema
-    extended = create_model(
-        f"{create_schema.__name__}Rig",
-        **{fk: (UUID, ...)},
-        __base__=create_schema,
-    )
-    return extended
+def _path_params(path: str) -> list[str]:
+    return re.findall(r"{([^}]+)}", path)
 
 
 async def _require_venue(db: AsyncSession, venue_id: UUID) -> Venue:
@@ -209,11 +67,8 @@ async def _require_venue(db: AsyncSession, venue_id: UUID) -> Venue:
     return venue
 
 
-async def _get_owned(db: AsyncSession, model, venue_id: UUID, row_id: UUID, load: bool = False):
-    stmt = select(model).where(model.id == row_id)
-    if load:
-        stmt = stmt.options(*_eager_options(model))
-    row = (await db.execute(stmt)).scalars().first()
+async def _get_owned(db: AsyncSession, model, venue_id: UUID, row_id: UUID):
+    row = await db.get(model, row_id)
     if row is None or row.venue_id != venue_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resource not found")
     return row
@@ -222,10 +77,10 @@ async def _get_owned(db: AsyncSession, model, venue_id: UUID, row_id: UUID, load
 def _eager_options(model, depth: int = 2):
     """Build selectinload options for the model's relationship graph.
 
-    Eager-loading avoids relying on implicit async lazy loads during response
-    serialization (which can raise MissingGreenlet off the request path and
-    causes N+1 queries). selectinload emits a separate SELECT per collection, so
-    multiple one-to-many collections on one parent are safe.
+    Eager-loading avoids implicit async lazy loads during response serialization
+    (which can raise MissingGreenlet off the request path) and prevents N+1
+    queries. selectinload issues a separate SELECT per collection, so multiple
+    one-to-many collections on one parent are safe.
     """
 
     paths: list[list] = []
@@ -270,85 +125,390 @@ def _list_factory(model, read_schema):
     return handler
 
 
-def _create_factory(model, create_schema, read_schema):
-    async def handler(venue_id: UUID, payload: create_schema, db: AsyncSession = Depends(get_db)):
-        await _require_venue(db, venue_id)
-        data = payload.model_dump()
-        data.pop("job_id", None)
-        data.pop("venue_id", None)
-        row = model(venue_id=venue_id, **data)
-        db.add(row)
-        await db.commit()
-        await db.refresh(row)
-        return row
+def _build_create(model, create_schema, parent_params, set_fields):
+    if not parent_params:
 
-    return handler
+        async def handler(
+            venue_id: UUID, payload: create_schema, db: AsyncSession = Depends(get_db)
+        ):
+            await _require_venue(db, venue_id)
+            data = payload.model_dump()
+            data.pop("job_id", None)
+            data.pop("venue_id", None)
+            row = model(venue_id=venue_id, **data)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
 
+        return handler
 
-def _get_factory(model, read_schema):
-    async def handler(venue_id: UUID, row_id: UUID, db: AsyncSession = Depends(get_db)):
-        return await _get_owned(db, model, venue_id, row_id, load=True)
-
-    return handler
-
-
-def _update_factory(model, update_schema):
-    async def handler(
-        venue_id: UUID,
-        row_id: UUID,
-        payload: update_schema,
-        db: AsyncSession = Depends(get_db),
-    ):
-        row = await _get_owned(db, model, venue_id, row_id)
-        for key, value in payload.model_dump(exclude_unset=True).items():
-            setattr(row, key, value)
-        await db.commit()
-        await db.refresh(row)
-        return row
-
-    return handler
-
-
-def _delete_factory(model):
-    async def handler(venue_id: UUID, row_id: UUID, db: AsyncSession = Depends(get_db)):
-        row = await _get_owned(db, model, venue_id, row_id)
-        await db.delete(row)
-        await db.commit()
-        return None
-
-    return handler
-
-
-for _key, (_model, _create, _update, _read) in RIG_REGISTRY.items():
-    _create = _rig_create_schema(_key, _create)
-    router.add_api_route(
-        f"/{_key}",
-        _list_factory(_model, _read),
-        methods=["GET"],
-        response_model=list[_read],
+    pnames = ", ".join(parent_params)
+    assigns = "\n".join(f"    data['{field}'] = {p}" for p, field in set_fields.items())
+    src = (
+        f"async def handler(venue_id: UUID, {pnames}: UUID, payload: {create_schema.__name__}, "
+        "db: AsyncSession = Depends(get_db)):\n"
+        "    await _require_venue(db, venue_id)\n"
+        "    data = payload.model_dump()\n"
+        "    data.pop('job_id', None)\n"
+        "    data.pop('venue_id', None)\n" + assigns + "\n"
+        "    row = model(venue_id=venue_id, **data)\n"
+        "    db.add(row)\n"
+        "    await db.commit()\n"
+        "    await db.refresh(row)\n"
+        "    return row\n"
     )
+    ns = {
+        "UUID": UUID,
+        "Depends": Depends,
+        "AsyncSession": AsyncSession,
+        "get_db": get_db,
+        "_require_venue": _require_venue,
+        "model": model,
+        create_schema.__name__: create_schema,
+    }
+    exec(compile(src, f"<rig create {model.__name__}>", "exec"), ns)
+    return ns["handler"]
+
+
+def _build_get(model, parent_params):
+    if not parent_params:
+
+        async def handler(venue_id: UUID, row_id: UUID, db: AsyncSession = Depends(get_db)):
+            return await _get_owned(db, model, venue_id, row_id)
+
+        return handler
+
+    pnames = ", ".join(parent_params + ["row_id"])
+    src = (
+        f"async def handler(venue_id: UUID, {pnames}: UUID, "
+        "db: AsyncSession = Depends(get_db)):\n"
+        "    return await _get_owned(db, model, venue_id, row_id)\n"
+    )
+    ns = {
+        "UUID": UUID,
+        "Depends": Depends,
+        "AsyncSession": AsyncSession,
+        "get_db": get_db,
+        "_get_owned": _get_owned,
+        "model": model,
+    }
+    exec(compile(src, f"<rig get {model.__name__}>", "exec"), ns)
+    return ns["handler"]
+
+
+def _build_update(model, update_schema, parent_params):
+    if not parent_params:
+
+        async def handler(
+            venue_id: UUID,
+            row_id: UUID,
+            payload: update_schema,
+            db: AsyncSession = Depends(get_db),
+        ):
+            row = await _get_owned(db, model, venue_id, row_id)
+            for key, value in payload.model_dump(exclude_unset=True).items():
+                setattr(row, key, value)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+        return handler
+
+    pnames = ", ".join(parent_params + ["row_id"])
+    src = (
+        f"async def handler(venue_id: UUID, {pnames}: UUID, payload: {update_schema.__name__}, "
+        "db: AsyncSession = Depends(get_db)):\n"
+        "    row = await _get_owned(db, model, venue_id, row_id)\n"
+        "    for key, value in payload.model_dump(exclude_unset=True).items():\n"
+        "        setattr(row, key, value)\n"
+        "    await db.commit()\n"
+        "    await db.refresh(row)\n"
+        "    return row\n"
+    )
+    ns = {
+        "UUID": UUID,
+        "Depends": Depends,
+        "AsyncSession": AsyncSession,
+        "get_db": get_db,
+        "_get_owned": _get_owned,
+        "model": model,
+        update_schema.__name__: update_schema,
+    }
+    exec(compile(src, f"<rig update {model.__name__}>", "exec"), ns)
+    return ns["handler"]
+
+
+def _build_delete(model, parent_params):
+    if not parent_params:
+
+        async def handler(venue_id: UUID, row_id: UUID, db: AsyncSession = Depends(get_db)):
+            row = await _get_owned(db, model, venue_id, row_id)
+            await db.delete(row)
+            await db.commit()
+            return None
+
+        return handler
+
+    pnames = ", ".join(parent_params + ["row_id"])
+    src = (
+        f"async def handler(venue_id: UUID, {pnames}: UUID, "
+        "db: AsyncSession = Depends(get_db)):\n"
+        "    row = await _get_owned(db, model, venue_id, row_id)\n"
+        "    await db.delete(row)\n"
+        "    await db.commit()\n"
+        "    return None\n"
+    )
+    ns = {
+        "UUID": UUID,
+        "Depends": Depends,
+        "AsyncSession": AsyncSession,
+        "get_db": get_db,
+        "_get_owned": _get_owned,
+        "model": model,
+    }
+    exec(compile(src, f"<rig delete {model.__name__}>", "exec"), ns)
+    return ns["handler"]
+
+
+def _register(
+    create_path,
+    get_path,
+    model,
+    create_schema,
+    update_schema,
+    read_schema,
+    list_path=None,
+    set_fields=None,
+):
+    """Register CRUD routes mirroring the job API's nested path layout.
+
+    ``set_fields`` maps a path parameter name to the model attribute it should be
+    written to on create (e.g. ``{"parent_id": "channel_list_id"}``). Path params
+    not present in ``set_fields`` are still declared (FastAPI requires it) but are
+    not written to the row.
+    """
+    set_fields = set_fields or {}
+    create_params = _path_params(create_path)
+    get_params = [p for p in _path_params(get_path) if p != "row_id"]
+
+    if list_path:
+        router.add_api_route(
+            list_path,
+            _list_factory(model, read_schema),
+            methods=["GET"],
+            response_model=list[read_schema],
+        )
     router.add_api_route(
-        f"/{_key}",
-        _create_factory(_model, _create, _read),
+        create_path,
+        _build_create(model, create_schema, create_params, set_fields),
         methods=["POST"],
-        response_model=_read,
+        response_model=read_schema,
         status_code=status.HTTP_201_CREATED,
     )
     router.add_api_route(
-        f"/{_key}/{{row_id}}",
-        _get_factory(_model, _read),
+        get_path,
+        _build_get(model, get_params),
         methods=["GET"],
-        response_model=_read,
+        response_model=read_schema,
     )
     router.add_api_route(
-        f"/{_key}/{{row_id}}",
-        _update_factory(_model, _update),
+        get_path,
+        _build_update(model, update_schema, get_params),
         methods=["PATCH"],
-        response_model=_read,
+        response_model=read_schema,
     )
     router.add_api_route(
-        f"/{_key}/{{row_id}}",
-        _delete_factory(_model),
+        get_path,
+        _build_delete(model, get_params),
         methods=["DELETE"],
         status_code=status.HTTP_204_NO_CONTENT,
     )
+
+
+# ---------------------------------------------------------------------------
+# Audio
+# ---------------------------------------------------------------------------
+_register(
+    "/channel-lists",
+    "/channel-lists/{row_id}",
+    ChannelList,
+    audio_schemas.ChannelListCreate,
+    audio_schemas.ChannelListUpdate,
+    audio_schemas.ChannelListRead,
+    list_path="/channel-lists",
+)
+_register(
+    "/channel-lists/{parent_id}/channels",
+    "/channels/{row_id}",
+    AudioChannelPatch,
+    audio_schemas.AudioChannelPatchCreate,
+    audio_schemas.AudioChannelPatchUpdate,
+    audio_schemas.AudioChannelPatchRead,
+    set_fields={"parent_id": "channel_list_id"},
+)
+_register(
+    "/channels/{parent_id}/patch-points",
+    "/channels/{parent_id}/patch-points/{row_id}",
+    ChannelPatchPoint,
+    audio_schemas.ChannelPatchPointCreate,
+    audio_schemas.ChannelPatchPointUpdate,
+    audio_schemas.ChannelPatchPointRead,
+    set_fields={"parent_id": "channel_id"},
+)
+_register(
+    "/channel-lists/{parent_id}/outputs",
+    "/channel-lists/{parent_id}/outputs/{row_id}",
+    ChannelListOutput,
+    audio_schemas.ChannelListOutputCreate,
+    audio_schemas.ChannelListOutputUpdate,
+    audio_schemas.ChannelListOutputRead,
+    set_fields={"parent_id": "channel_list_id"},
+)
+_register(
+    "/channel-lists/{parent_id}/outputs/{output_id}/points",
+    "/channel-lists/{parent_id}/outputs/{output_id}/points/{row_id}",
+    OutputPatchPoint,
+    audio_schemas.OutputPatchPointCreate,
+    audio_schemas.OutputPatchPointUpdate,
+    audio_schemas.OutputPatchPointRead,
+    set_fields={"output_id": "output_id"},
+)
+_register(
+    "/devices",
+    "/devices/{row_id}",
+    AudioDevice,
+    audio_schemas.AudioDeviceCreate,
+    audio_schemas.AudioDeviceUpdate,
+    audio_schemas.AudioDeviceRead,
+    list_path="/devices",
+)
+_register(
+    "/plot-elements",
+    "/plot-elements/{row_id}",
+    StagePlotElement,
+    audio_schemas.StagePlotElementCreate,
+    audio_schemas.StagePlotElementUpdate,
+    audio_schemas.StagePlotElementRead,
+    list_path="/plot-elements",
+)
+
+# ---------------------------------------------------------------------------
+# Video
+# ---------------------------------------------------------------------------
+_register(
+    "/video-lists",
+    "/video-lists/{row_id}",
+    VideoInputList,
+    video_schemas.VideoInputListCreate,
+    video_schemas.VideoInputListUpdate,
+    video_schemas.VideoInputListRead,
+    list_path="/video-lists",
+)
+_register(
+    "/video-lists/{parent_id}/inputs",
+    "/video-inputs/{row_id}",
+    VideoInput,
+    video_schemas.VideoInputCreate,
+    video_schemas.VideoInputUpdate,
+    video_schemas.VideoInputRead,
+    set_fields={"parent_id": "list_id"},
+)
+_register(
+    "/video-inputs/{parent_id}/patch-points",
+    "/video-inputs/{parent_id}/patch-points/{row_id}",
+    VideoPatchPoint,
+    video_schemas.VideoPatchPointCreate,
+    video_schemas.VideoPatchPointUpdate,
+    video_schemas.VideoPatchPointRead,
+    set_fields={"parent_id": "input_id"},
+)
+_register(
+    "/video-lists/{parent_id}/outputs",
+    "/video-outputs/{row_id}",
+    VideoOutput,
+    video_schemas.VideoOutputCreate,
+    video_schemas.VideoOutputUpdate,
+    video_schemas.VideoOutputRead,
+    set_fields={"parent_id": "list_id"},
+)
+_register(
+    "/video-outputs/{parent_id}/patch-points",
+    "/video-outputs/{parent_id}/patch-points/{row_id}",
+    VideoOutputPatchPoint,
+    video_schemas.VideoOutputPatchPointCreate,
+    video_schemas.VideoOutputPatchPointUpdate,
+    video_schemas.VideoOutputPatchPointRead,
+    set_fields={"parent_id": "output_id"},
+)
+
+# ---------------------------------------------------------------------------
+# Lighting
+# ---------------------------------------------------------------------------
+_register(
+    "/fixtures",
+    "/fixtures/{row_id}",
+    LightingFixture,
+    lighting_schemas.FixtureCreate,
+    lighting_schemas.FixtureUpdate,
+    lighting_schemas.FixtureRead,
+    list_path="/fixtures",
+)
+_register(
+    "/fixture-types",
+    "/fixture-types/{row_id}",
+    FixtureType,
+    lighting_schemas.FixtureTypeCreate,
+    lighting_schemas.FixtureTypeUpdate,
+    lighting_schemas.FixtureTypeRead,
+    list_path="/fixture-types",
+)
+_register(
+    "/fixture-types/{parent_id}/modes",
+    "/fixture-types/{parent_id}/modes/{row_id}",
+    FixtureMode,
+    lighting_schemas.FixtureModeCreate,
+    lighting_schemas.FixtureModeUpdate,
+    lighting_schemas.FixtureModeRead,
+    set_fields={"parent_id": "fixture_type_id"},
+)
+_register(
+    "/dmx-universes",
+    "/dmx-universes/{row_id}",
+    DmxUniverse,
+    lighting_schemas.DmxUniverseCreate,
+    lighting_schemas.DmxUniverseUpdate,
+    lighting_schemas.DmxUniverseRead,
+    list_path="/dmx-universes",
+)
+
+# ---------------------------------------------------------------------------
+# Rigging
+# ---------------------------------------------------------------------------
+_register(
+    "/rigging-points",
+    "/rigging-points/{row_id}",
+    RiggingPoint,
+    rigging_schemas.RiggingPointCreate,
+    rigging_schemas.RiggingPointUpdate,
+    rigging_schemas.RiggingPointRead,
+    list_path="/rigging-points",
+)
+_register(
+    "/power-nodes",
+    "/power-nodes/{row_id}",
+    PowerNode,
+    rigging_schemas.PowerNodeCreate,
+    rigging_schemas.PowerNodeUpdate,
+    rigging_schemas.PowerNodeRead,
+    list_path="/power-nodes",
+)
+_register(
+    "/power-nodes/{parent_id}/feeds",
+    "/power-nodes/{parent_id}/feeds/{row_id}",
+    PowerNodeFeed,
+    rigging_schemas.PowerNodeFeedCreate,
+    rigging_schemas.PowerNodeFeedUpdate,
+    rigging_schemas.PowerNodeFeedRead,
+    set_fields={"parent_id": "parent_id"},
+)

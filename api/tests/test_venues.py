@@ -396,14 +396,14 @@ async def test_venue_base_rig_crud(auth_headers):
 
         # 404 for unknown venue
         missing = await client.get(
-            f"{BASE}/venues/00000000-0000-0000-0000-000000000000/rig/audio-devices",
+            f"{BASE}/venues/00000000-0000-0000-0000-000000000000/rig/devices",
             headers=auth_headers,
         )
         assert missing.status_code == 404
 
         # create
         created = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices",
+            f"{BASE}/venues/{venue_id}/rig/devices",
             json={"name": "House Stagebox", "device_type": "stagebox"},
             headers=auth_headers,
         )
@@ -411,22 +411,20 @@ async def test_venue_base_rig_crud(auth_headers):
         dev_id = created.json()["id"]
 
         # list
-        listed = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices", headers=auth_headers
-        )
+        listed = await client.get(f"{BASE}/venues/{venue_id}/rig/devices", headers=auth_headers)
         assert listed.status_code == 200
         assert len(listed.json()) == 1
 
         # get by id
         got = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
         )
         assert got.status_code == 200
         assert got.json()["name"] == "House Stagebox"
 
         # patch (partial)
         patched = await client.patch(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}",
+            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}",
             json={"notes": "Back of house"},
             headers=auth_headers,
         )
@@ -444,29 +442,35 @@ async def test_venue_base_rig_crud(auth_headers):
             assert row.venue_id == UUID(venue_id)
             assert row.job_id is None
 
-        # child entity referencing a venue-owned parent
+        # child entity referencing a venue-owned parent (nested path)
         cl = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/audio-channel-lists",
+            f"{BASE}/venues/{venue_id}/rig/channel-lists",
             json={"name": "House Inputs"},
             headers=auth_headers,
         )
         assert cl.status_code == 201, cl.text
         cl_id = cl.json()["id"]
         ch = await client.post(
-            f"{BASE}/venues/{venue_id}/rig/audio-channels",
-            json={"channel_list_id": cl_id, "channel_number": 1},
+            f"{BASE}/venues/{venue_id}/rig/channel-lists/{cl_id}/channels",
+            json={"channel_number": 1},
             headers=auth_headers,
         )
         assert ch.status_code == 201, ch.text
         assert ch.json()["channel_list_id"] == cl_id
+        ch_id = ch.json()["id"]
+        got_ch = await client.get(
+            f"{BASE}/venues/{venue_id}/rig/channels/{ch_id}", headers=auth_headers
+        )
+        assert got_ch.status_code == 200
+        assert got_ch.json()["channel_list_id"] == cl_id
 
         # delete
         deleted = await client.delete(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
         )
         assert deleted.status_code == 204
         gone = await client.get(
-            f"{BASE}/venues/{venue_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+            f"{BASE}/venues/{venue_id}/rig/devices/{dev_id}", headers=auth_headers
         )
         assert gone.status_code == 404
 
@@ -476,6 +480,6 @@ async def test_venue_base_rig_crud(auth_headers):
         )
         other_id = other.json()["id"]
         cross = await client.get(
-            f"{BASE}/venues/{other_id}/rig/audio-devices/{dev_id}", headers=auth_headers
+            f"{BASE}/venues/{other_id}/rig/devices/{dev_id}", headers=auth_headers
         )
         assert cross.status_code == 404
