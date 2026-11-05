@@ -98,24 +98,33 @@ async def test_summarize_ignores_stale_element_links():
 
 
 async def _venue_with_supply(client, h, venue_id):
+    # A representative supply tree: incoming mains -> a panel -> a fused circuit, with an outlet on
+    # the circuit (outlets plug into circuits/groups, not directly into panels).
     incoming = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-groups",
-            json={"name": "Incoming", "rating_amps": 50, "is_incoming": True},
+            json={"name": "Incoming", "rating_amps": 50, "kind": "incoming"},
             headers=h,
         )
     ).json()
     panel = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-groups",
-            json={"name": "Panel A", "rating_amps": 32, "parent_id": incoming["id"]},
+            json={"name": "Panel A", "rating_amps": 32, "kind": "panel", "parent_id": incoming["id"]},
+            headers=h,
+        )
+    ).json()
+    circuit = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={"name": "Circuit 1", "rating_amps": 16, "kind": "group", "parent_id": panel["id"]},
             headers=h,
         )
     ).json()
     outlet = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-outlets",
-            json={"name": "O1", "connector": "schuko", "group_id": panel["id"], "rating_amps": 16},
+            json={"name": "O1", "connector": "schuko", "group_id": circuit["id"], "rating_amps": 16},
             headers=h,
         )
     ).json()
@@ -158,8 +167,6 @@ async def test_venue_power_load_uses_base_rig_device_watts(auth_headers):
         )
         assert res.status_code == 200, res.text
 
-        graph = (await client.get(f"{BASE}/venues/{venue_id}/graph", headers=h)).json()
-        print("GRAPH DEVICES:", graph["devices"])
         load = (await client.get(f"{BASE}/venues/{venue_id}/power-load", headers=h)).json()
         outlet_load = next(e for e in load["outlets"] if e["id"] == outlet["id"])
         panel_load = next(e for e in load["groups"] if e["id"] == panel["id"])

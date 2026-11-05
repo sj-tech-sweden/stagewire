@@ -41,10 +41,20 @@ class Venue(Base):
 
 
 class VenuePowerGroup(Base):
-    """A circuit of the venue's power: one fuse/breaker feeding several outlets.
+    """A node in the venue's power supply tree.
 
-    The group's rating is shared by every load on its outlets, so the power tree treats a used
-    group as one source with the group's rating and one output per outlet connector.
+    The tree has three kinds, which together model how a real installation is wired:
+
+    - ``incoming``: the single supply the venue draws from (the mains). It has no parent and its
+      load is every outlet beneath the whole tree.
+    - ``panel``: a distribution board. It hangs off the incoming supply or off another panel
+      (panel-to-panel feed), and it *contains* circuits. It carries the panel's main breaker rating.
+    - ``group``: a fused circuit inside a panel. Outlets connect to groups (not to panels), and the
+      group's rating is the fuse/breaker for everything on its outlets.
+
+    ``is_incoming`` mirrors ``kind == 'incoming'`` so existing callers can keep spotting the supply
+    root without caring about the finer panel/circuit split. ``parent_id`` is self-referential and
+    set NULL if the parent is removed (a detached panel becomes top-level).
     """
 
     __tablename__ = "venue_power_groups"
@@ -59,9 +69,10 @@ class VenuePowerGroup(Base):
     # Which phase a one-phase group is on (L1 when not set); a three-phase group spreads its load.
     phase: Mapped[str | None] = mapped_column(String(2), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # What this node is in the supply tree: 'incoming' | 'panel' | 'group' (see class docstring).
+    kind: Mapped[str] = mapped_column(String(16), default="group", nullable=False, index=True)
     # The power tree is nested: a panel may hang under another panel (or the incoming supply).
-    # parent_id is self-referential and set NULL if the parent is removed. is_incoming marks the
-    # single supply the venue draws from; its load is every outlet rating summed across the tree.
+    # parent_id is self-referential and set NULL if the parent is removed.
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("venue_power_groups.id", ondelete="SET NULL"), nullable=True, index=True
     )

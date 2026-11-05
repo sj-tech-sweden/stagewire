@@ -117,6 +117,44 @@ async def _check_group(db: AsyncSession, venue_id: UUID, group_id: UUID | None) 
     group = await db.get(VenuePowerGroup, group_id)
     if group is None or group.venue_id != venue_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Power group not found")
+    # Outlets are connected to a circuit (kind='group'), never directly to a panel.
+    if group.kind != "group":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Outlets must be connected to a circuit (group), not a panel",
+        )
+
+
+async def _validate_supply_topology(
+    db: AsyncSession, venue_id: UUID, kind: str, parent_id: UUID | None
+) -> None:
+    """Enforce how the supply tree may be wired.
+
+    incoming: the mains, no parent. panel: a board hung off the incoming supply or another panel.
+    group: a fused circuit that must live inside a panel. Matches ``kind`` on ``VenuePowerGroup``.
+    """
+    if kind == "incoming" and parent_id is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The incoming supply cannot have a parent",
+        )
+    if parent_id is None:
+        # A top-level panel or a single circuit without a named panel are both allowed (a small
+        # venue may feed circuits straight from the incoming supply); the UI steers toward panels.
+        return
+    parent = await db.get(VenuePowerGroup, parent_id)
+    if parent is None or parent.venue_id != venue_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Parent power group not found")
+    if kind == "panel" and parent.kind not in ("incoming", "panel"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A panel can only hang off the incoming supply or another panel",
+        )
+    if kind == "group" and parent.kind != "panel":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A circuit (group) must belong to a panel",
+        )
 
 
 @router.get("/venues/{venue_id}/power-groups", response_model=list[schemas.VenuePowerGroupRead])
@@ -139,7 +177,10 @@ async def create_power_group(
     venue_id: UUID, payload: schemas.VenuePowerGroupCreate, db: AsyncSession = Depends(get_db)
 ):
     await _get_venue_or_404(db, venue_id)
+    await _validate_supply_topology(db, venue_id, payload.kind, payload.parent_id)
     group = VenuePowerGroup(venue_id=venue_id, **payload.model_dump())
+    # is_incoming mirrors kind=='incoming' so it stays a reliable "is this the supply root?" flag.
+    group.is_incoming = payload.kind == "incoming"
     db.add(group)
     await db.commit()
     await db.refresh(group)
@@ -159,14 +200,18 @@ async def update_power_group(
     group = await db.get(VenuePowerGroup, group_id)
     if group is None or group.venue_id != venue_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Power group not found")
+    data = payload.model_dump(exclude_unset=True)
+    # Effective kind/parent after this edit, used for both the cycle and topology checks.
+    new_kind = data.get("kind", group.kind)
+    new_parent = data.get("parent_id", group.parent_id)
     # A group cannot be nested under itself or under one of its own descendants, otherwise the
     # recursive load sum would loop. Walk up from the proposed parent and stop at a cycle.
-    if payload.parent_id is not None:
-        if payload.parent_id == group_id:
+    if new_parent is not None:
+        if new_parent == group_id:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "A power group cannot be its own parent"
             )
-        ancestor = await db.get(VenuePowerGroup, payload.parent_id)
+        ancestor = await db.get(VenuePowerGroup, new_parent)
         while ancestor is not None:
             if ancestor.id == group_id:
                 raise HTTPException(
@@ -176,8 +221,11 @@ async def update_power_group(
             ancestor = (
                 await db.get(VenuePowerGroup, ancestor.parent_id) if ancestor.parent_id else None
             )
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    await _validate_supply_topology(db, venue_id, new_kind, new_parent)
+    for key, value in data.items():
         setattr(group, key, value)
+    # Keep is_incoming mirroring kind so the supply root stays unambiguous.
+    group.is_incoming = group.kind == "incoming"
     await db.commit()
     await db.refresh(group)
     return group

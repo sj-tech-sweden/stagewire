@@ -98,7 +98,11 @@ class VenuePowerGroupBase(BaseModel):
     phases: int = Field(1, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str = ""
-    # parent_id nests a panel under another group (or the incoming supply); null = top level.
+    # kind classifies the node in the supply tree: 'incoming' (mains) | 'panel' (board) |
+    # 'group' (fused circuit inside a panel that outlets plug into). Kept in sync with is_incoming.
+    kind: Literal["incoming", "panel", "group"] = "group"
+    # parent_id nests a panel under another panel (or the incoming supply); null = top level.
+    # For a 'group' the parent is the panel it belongs to.
     parent_id: UUID | None = None
     # True for the single supply the venue draws from (its load is the sum of every outlet).
     is_incoming: bool = False
@@ -114,6 +118,7 @@ class VenuePowerGroupUpdate(BaseModel):
     phases: int | None = Field(None, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str | None = None
+    kind: Literal["incoming", "panel", "group"] | None = None
     parent_id: UUID | None = None
     is_incoming: bool | None = None
 

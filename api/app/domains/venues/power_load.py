@@ -113,7 +113,15 @@ def summarize_venue_power(
     # two attribution maps (no double counting across the tree).
     total_watts = sum(clean_outlet.values()) + sum(clean_group.values())
 
-    incoming_group = next((g for g in groups if g.is_incoming), None)
+    # The supply root is the incoming node: prefer an explicit kind, fall back to is_incoming.
+    incoming_group = next(
+        (
+            g
+            for g in groups
+            if getattr(g, "kind", None) == "incoming" or getattr(g, "is_incoming", False)
+        ),
+        None,
+    )
     incoming = None
     if incoming_group is not None:
         incoming = VenuePowerElement(
