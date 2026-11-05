@@ -1169,6 +1169,76 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
   await expect(page.locator('.q-menu .q-item', { hasText: 'SL 2' })).toBeVisible();
 });
 
+test('venue power panel builds a tree of panels, circuits, generators and temporary kit', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const venue = await post(request, headers, '/venues', { name: `Hall ${Date.now()}` });
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Power tree ${Date.now()}` })).id as string;
+  await request.put(`${API_BASE}/api/v1/jobs/${jobId}/venue`, { headers, data: { venue_id: venue.id } });
+
+  const groups = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/venues/${venue.id}/power-groups`, { headers })).json()) as any[];
+  const childOf = (parentKind: string) => async () =>
+    (await groups()).some((g) => g.kind === parentKind);
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('venue-power').click();
+
+  // No supply yet, so the only offered root is the incoming mains.
+  await page.getByTestId('add-venue-incoming').click();
+  await expect.poll(childOf('incoming')).toBe(true);
+
+  // A panel nests under the incoming supply by default.
+  await page.getByTestId('add-venue-group').click();
+  await expect.poll(async () => (await groups()).filter((g) => g.kind === 'panel').length).toBe(1);
+  const panel = (await groups()).find((g) => g.kind === 'panel')!;
+
+  // A fused circuit is added inside the panel (not as a standalone node).
+  await page.getByTestId('venue-group')
+    .filter({ hasText: panel.name })
+    .getByTestId('add-venue-circuit')
+    .click();
+  await expect
+    .poll(async () => {
+      const list = await groups();
+      const circuit = list.find((g) => g.kind === 'group');
+      return circuit && circuit.parent_id === panel.id;
+    })
+    .toBe(true);
+
+  // A generator is a second supply root (temporary by default) and shows up in the per-source list.
+  await page.getByTestId('add-venue-generator').click();
+  await expect.poll(async () => {
+    const list = await groups();
+    const gen = list.find((g) => g.kind === 'generator');
+    return gen && gen.temporary === true;
+  }).toBe(true);
+  await expect(page.getByTestId('venue-supply')).toHaveCount(2);
+
+  // A breakout (temporary distro) is added via its own button and defaults under the incoming supply.
+  await page.getByTestId('add-venue-breakout').click();
+  await expect
+    .poll(async () => {
+      const list = await groups();
+      const bo = list.find((g) => g.kind === 'breakout');
+      const incoming = list.find((g) => g.kind === 'incoming');
+      return bo && incoming && bo.parent_id === incoming.id;
+    })
+    .toBe(true);
+
+  // The outlet group select only offers circuits (kind 'group'), never a panel or supply.
+  await page.getByTestId('add-venue-outlet').click();
+  const groupSelect = page.getByTestId('venue-outlet-group');
+  await groupSelect.click();
+  await expect(page.locator('.q-menu .q-item')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+});
+
 test('an outlet is moved on the map and its position is edited in the venue power panel', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);

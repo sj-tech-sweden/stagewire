@@ -132,7 +132,7 @@
       persistent
       :maximized="$q.screen.lt.sm"
     >
-      <q-card style="width: 640px; max-width: 100vw">
+      <q-card style="width: 95vw; max-width: 1320px">
         <q-card-section class="text-h6">
           {{ editingId ? t('venues.editVenue') : t('venues.newVenue') }}
         </q-card-section>

@@ -166,7 +166,7 @@ export default {
     venuePowerNoVenue:
       "Jobbet har ingen lokal. Välj en lokal för jobbet (på dess sida) för att använda lokalens el.",
     venuePowerHint:
-      "Grupper (säkringar) delar en märkström mellan sina uttag. Det som matas från ett uttag räknas på dess grupp.",
+      "En matning (nät eller generator) matar paneler och fördelningslådor; var och en har säkrade kretsar vars uttag du kopplar utrustning till. Belastningen är verkliga watt, jämförd per matning.",
     venueGroups: "Grupper",
     venueGroup: "Grupp",
     venueGroupPhases: "Faser",
@@ -185,6 +185,25 @@ export default {
     venueGroupTop: "Översta nivå",
     venueGroupParent: "Överordnad",
     venueGroupOver: "Över gräns",
+    venueGroupKind: "Typ",
+    kindIncoming: "Inkommande (nät)",
+    kindGenerator: "Generator",
+    kindPanel: "Panel",
+    kindBreakout: "Fördelningslåda",
+    kindGroup: "Krets",
+    temporary: "Tillfällig",
+    temporaryHint: "Hyrutrustning (generator, fördelningslåda, kablar).",
+    venueSupplies: "Matningar",
+    addVenueGenerator: "Lägg till generator",
+    addVenueGeneratorTooltip:
+      "Lägger till en generator som en andra matningsrot (ingen överordnad). Använd när venue-nätet inte räcker.",
+    addVenueBreakout: "Lägg till fördelningslåda",
+    addVenueBreakoutTooltip:
+      "Lägger till en tillfällig fördelningslåda. Häng den under en matning, en panel eller en annan låda.",
+    addVenueCircuit: "Lägg till krets",
+    addVenueCircuitTooltip: 'Skapar en säkrad krets i "{name}". Uttag kopplas till kretsar.',
+    supplyLoad: "{amps} / {rating} A",
+    supplyOver: "Över gräns",
     syncStockwire: "Synka utrustning till Stockwire",
     stockwireSynced:
       "Stockwire-jobbet uppdaterat: {added} tillagda, {updated} ändrade, {removed} borttagna",

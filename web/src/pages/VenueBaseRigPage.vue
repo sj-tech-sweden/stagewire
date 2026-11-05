@@ -476,7 +476,7 @@ const powerTargets = computed(() => {
   }));
   const groups = powerGroups.value.map((g) => ({
     value: g.id,
-    label: `${t('workspace.venueGroup')}: ${g.name || g.id.slice(0, 8)}${g.is_incoming ? ' ⚡' : ''}`,
+    label: `${t('workspace.venueGroup')}: ${g.name || g.id.slice(0, 8)}${g.kind === 'incoming' ? ' ⚡' : ''}`,
     type: 'group',
   }));
   return [...outlets, ...groups];

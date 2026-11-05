@@ -220,11 +220,13 @@ const $q = useQuasar();
 const host = ref(null);
 const stageRef = ref(null);
 const hostWidth = ref(640);
+const hostHeight = ref(380);
 
 let observer = null;
 onMounted(() => {
   const fit = () => {
     hostWidth.value = Math.max(280, host.value?.clientWidth || 640);
+    hostHeight.value = Math.max(240, host.value?.clientHeight || 380);
   };
   fit();
   observer = new ResizeObserver(fit);
@@ -247,8 +249,8 @@ const frame = computed(() => {
     height: Math.max(fp.h, props.stageY + sp.h, 100),
   };
 });
-// Fit the frame into the host, but never zoom past 1.5x or below readability.
-const zoom = computed(() => Math.min(1.5, fitZoom(frame.value, hostWidth.value, 380, 12)));
+// Fit the frame into the host (both axes), but never zoom past 1.5x or below readability.
+const zoom = computed(() => Math.min(1.5, fitZoom(frame.value, hostWidth.value, hostHeight.value, 12)));
 const canvasW = computed(() => Math.round(frame.value.width * zoom.value));
 const canvasH = computed(() => Math.round(frame.value.height * zoom.value));
 
@@ -450,7 +452,7 @@ function onStageDragEnd(e) {
 <style scoped>
 .canvas-host {
   width: 100%;
-  height: 380px;
+  height: clamp(320px, 52vh, 560px);
   overflow: hidden;
   border-radius: 4px;
   touch-action: none;

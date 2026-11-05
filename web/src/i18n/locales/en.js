@@ -166,7 +166,7 @@ export default {
     venuePowerNoVenue:
       "This job has no venue. Pick a venue for the job (on its page) to use the venue's power.",
     venuePowerHint:
-      "Circuits (groups) share a rating between their outlets. Something fed from an outlet counts on its group.",
+      "A supply (mains or generator) feeds panels and breakouts; each holds fused circuits whose outlets you plug gear into. Load is the real watts drawn, compared per supply.",
     venueGroups: "Groups",
     venueGroup: "Group",
     venueGroupPhases: "Phases",
@@ -185,6 +185,25 @@ export default {
     venueGroupTop: "Top level",
     venueGroupParent: "Parent",
     venueGroupOver: "Over limit",
+    venueGroupKind: "Type",
+    kindIncoming: "Incoming (mains)",
+    kindGenerator: "Generator",
+    kindPanel: "Panel",
+    kindBreakout: "Breakout",
+    kindGroup: "Circuit",
+    temporary: "Temporary",
+    temporaryHint: "Hired/non-permanent kit (generator, breakout, cables).",
+    venueSupplies: "Supplies",
+    addVenueGenerator: "Add generator",
+    addVenueGeneratorTooltip:
+      "Adds a generator as a second supply root (no parent). Use it when the venue mains are not enough.",
+    addVenueBreakout: "Add breakout",
+    addVenueBreakoutTooltip:
+      "Adds a temporary breakout distro. Hang it off a supply root, a panel, or another breakout.",
+    addVenueCircuit: "Add circuit",
+    addVenueCircuitTooltip: 'Creates a fused circuit inside "{name}". Outlets plug into circuits.',
+    supplyLoad: "{amps} / {rating} A",
+    supplyOver: "Over limit",
     syncStockwire: "Sync gear to Stockwire",
     stockwireSynced:
       "Stockwire job updated: {added} added, {updated} changed, {removed} removed",
