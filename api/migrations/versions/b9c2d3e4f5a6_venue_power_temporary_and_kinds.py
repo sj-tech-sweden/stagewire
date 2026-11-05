@@ -1,6 +1,6 @@
 """temporary flag on venue power groups; widen kind to generator/breakout
 
-Revision ID: b1c2d3e4f5a6
+Revision ID: b9c2d3e4f5a6
 Revises: a0b1c2d3e4f5
 
 Extends the venue supply tree so it can model temporary equipment and a second supply:
@@ -18,7 +18,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "b1c2d3e4f5a6"
+revision: str = "b9c2d3e4f5a6"
 down_revision: str | None = "a0b1c2d3e4f5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
