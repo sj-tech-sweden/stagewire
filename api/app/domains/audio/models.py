@@ -93,8 +93,13 @@ class WwbShowFile(Base):
     list_node_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("graph_devices.id", ondelete="CASCADE"), primary_key=True
     )
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    # Owned by exactly one context: a job or a venue. A venue's Standard Base Rig keeps its
+    # own .shw files, so the storage row is scoped the same way as the lighting library.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

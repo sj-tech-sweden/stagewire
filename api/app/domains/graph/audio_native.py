@@ -125,15 +125,30 @@ def _device_public(nodes: list[GraphDevice]) -> dict[uuid.UUID, uuid.UUID]:
 
 
 async def find_node(
-    db: AsyncSession, kind: str, ident: uuid.UUID, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    kind: str,
+    ident: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> GraphDevice | None:
-    """The native node of ``kind`` whose public id is ``ident`` (a node id or an imported id)."""
+    """The native node of ``kind`` whose public id is ``ident`` (a node id or an imported id).
+
+    Scoped by ``job_id`` (a job graph) or ``venue_id`` (a venue Standard Base Rig). When neither
+    is given the job_id on the resolved node is not checked (legacy cross-job lookup).
+    """
     node = await db.get(GraphDevice, ident)
-    if _native(node, kind) and (job_id is None or node.job_id == job_id):
+    scoped = node is not None and (
+        (job_id is None and venue_id is None)
+        or (job_id is not None and node.job_id == job_id)
+        or (venue_id is not None and node.venue_id == venue_id)
+    )
+    if _native(node, kind) and scoped:
         return node
     query = select(GraphDevice).where(GraphDevice.kind == kind, GraphDevice.legacy_ref.is_(None))
     if job_id is not None:
         query = query.where(GraphDevice.job_id == job_id)
+    if venue_id is not None:
+        query = query.where(GraphDevice.venue_id == venue_id)
     query = query.where(GraphDevice.attributes["legacy_id"].as_string() == str(ident))
     return (await db.scalars(query)).first()
 
@@ -376,7 +391,10 @@ def _channel_name(attributes: dict) -> str:
     return attributes.get("source_label") or f"Ch {attributes.get('channel_number') or 0}"
 
 
-def channel_node(job_id: uuid.UUID, list_node: GraphDevice, data: dict) -> GraphDevice:
+def channel_node(job_id: uuid.UUID | None, list_node: GraphDevice, data: dict) -> GraphDevice:
+    # A channel inherits the scope (job or venue) of the list it belongs to, so the same
+    # helper builds both job and venue channel-list members.
+    venue_id = list_node.venue_id
     attributes: dict[str, Any] = {
         "list_id": str(list_node.id),
         "channel_list_id": str(public_id(list_node)),
@@ -386,7 +404,8 @@ def channel_node(job_id: uuid.UUID, list_node: GraphDevice, data: dict) -> Graph
     }
     return GraphDevice(
         id=uuid.uuid4(),
-        job_id=job_id,
+        job_id=job_id if venue_id is None else None,
+        venue_id=venue_id,
         domain="audio",
         kind=CHANNEL,
         name=_channel_name(attributes),
@@ -400,8 +419,9 @@ def channel_node(job_id: uuid.UUID, list_node: GraphDevice, data: dict) -> Graph
 
 
 def output_node(
-    job_id: uuid.UUID, list_node: GraphDevice, data: dict, position: int
+    job_id: uuid.UUID | None, list_node: GraphDevice, data: dict, position: int
 ) -> GraphDevice:
+    venue_id = list_node.venue_id
     attributes: dict[str, Any] = {
         "list_id": str(list_node.id),
         "channel_list_id": str(public_id(list_node)),
@@ -410,7 +430,8 @@ def output_node(
     }
     return GraphDevice(
         id=uuid.uuid4(),
-        job_id=job_id,
+        job_id=job_id if venue_id is None else None,
+        venue_id=venue_id,
         domain="audio",
         kind=OUTPUT,
         name=data.get("name") or "Output",
@@ -424,10 +445,18 @@ def output_node(
     )
 
 
-async def create_list(db: AsyncSession, job_id: uuid.UUID, data: dict) -> SimpleNamespace:
+async def create_list(
+    db: AsyncSession,
+    job_id: uuid.UUID | None = None,
+    data: dict | None = None,
+    *,
+    venue_id: uuid.UUID | None = None,
+) -> SimpleNamespace:
+    data = data or {}
     node = GraphDevice(
         id=uuid.uuid4(),
         job_id=job_id,
+        venue_id=venue_id,
         domain="audio",
         kind=LIST,
         name=data.get("name") or "Input List",
@@ -551,9 +580,13 @@ def apply_channel(node: GraphDevice, data: dict) -> None:
 
 
 async def update_channel(
-    db: AsyncSession, channel_id: uuid.UUID, data: dict, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    channel_id: uuid.UUID,
+    data: dict,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    node = await find_node(db, CHANNEL, channel_id, job_id)
+    node = await find_node(db, CHANNEL, channel_id, job_id, venue_id)
     if node is None:
         return None
     apply_channel(node, data)

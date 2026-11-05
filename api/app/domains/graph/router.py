@@ -668,7 +668,7 @@ async def import_wireless_workbench(
         data = {key: row[key] for key in _WWB_WIRELESS_FIELDS if key in row}
         await audio_native.update_channel(db, channel.id, data, job_id)
         updated_ids.append(channel.id)
-    await wwb_store.upsert_show_file(db, list_id, job_id, raw, file.filename or "show.shw")
+    await wwb_store.upsert_show_file(db, list_id, raw, file.filename or "show.shw", job_id=job_id)
     await db.commit()
     await audio_native.publish_nodes(db, job_id, updated_ids)
     if updated_ids:

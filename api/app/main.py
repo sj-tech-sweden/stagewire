@@ -16,6 +16,7 @@ from app.domains.graph.elements import router as graph_elements_router
 from app.domains.graph.lists import router as graph_lists_router
 from app.domains.graph.rigging import router as graph_rigging_router
 from app.domains.graph.router import router as graph_router
+from app.domains.graph.venue_graph import router as graph_venue_router
 from app.domains.lighting.router import router as lighting_router
 from app.domains.reports.router import router as reports_router
 from app.domains.rigging.router import router as rigging_router
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(connectors_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
     app.include_router(graph_lists_router, prefix="/api/v1")
+    app.include_router(graph_venue_router, prefix="/api/v1")
     app.include_router(graph_elements_router, prefix="/api/v1")
     app.include_router(graph_rigging_router, prefix="/api/v1")
     app.include_router(lighting_router, prefix="/api/v1")
