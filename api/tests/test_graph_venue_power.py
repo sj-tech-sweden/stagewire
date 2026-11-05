@@ -231,14 +231,24 @@ async def test_power_groups_form_a_nested_tree_with_an_incoming_supply(auth_head
         panel_a = (
             await client.post(
                 gp,
-                json={"name": "Panel A", "rating_amps": 32, "kind": "panel", "parent_id": incoming["id"]},
+                json={
+                    "name": "Panel A",
+                    "rating_amps": 32,
+                    "kind": "panel",
+                    "parent_id": incoming["id"],
+                },
                 headers=h,
             )
         ).json()
         panel_b = (
             await client.post(
                 gp,
-                json={"name": "Panel B", "rating_amps": 32, "kind": "panel", "parent_id": panel_a["id"]},
+                json={
+                    "name": "Panel B",
+                    "rating_amps": 32,
+                    "kind": "panel",
+                    "parent_id": panel_a["id"],
+                },
                 headers=h,
             )
         ).json()

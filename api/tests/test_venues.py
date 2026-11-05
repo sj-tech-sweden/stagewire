@@ -256,7 +256,11 @@ async def test_venue_custom_polygons(auth_headers):
         # A polygon with fewer than three corners is rejected.
         bad = await client.post(
             f"{BASE}/venues",
-            json={**VENUE, "footprint_shape": "custom_polygon", "footprint_polygon": [[0, 0], [1, 1]]},
+            json={
+                **VENUE,
+                "footprint_shape": "custom_polygon",
+                "footprint_polygon": [[0, 0], [1, 1]],
+            },
             headers=auth_headers,
         )
         assert bad.status_code == 422
