@@ -33,6 +33,12 @@
         :disable="!venueGraph.dirty || venueGraph.loading"
         @click="save"
       />
+      <q-btn
+        outline
+        icon="auto_awesome_motion"
+        :label="t('workspace.library')"
+        @click="libraryOpen = true"
+      />
     </div>
 
     <div
@@ -329,6 +335,11 @@
           :venue-id="venueId"
           @changed="reloadOutlets"
         />
+
+        <FixtureLibraryDialog
+          v-model="libraryOpen"
+          :venue-id="venueId"
+        />
       </div>
     </div>
   </q-page>
@@ -346,6 +357,7 @@ import { useVenueGraphStore } from '@/stores/venueGraph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
+import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -354,6 +366,7 @@ const router = useRouter();
 const venueGraph = useVenueGraphStore();
 
 const venueId = computed(() => route.params.venueId);
+const libraryOpen = ref(false);
 const venue = ref(null);
 const outlets = ref([]);
 const powerOutlets = ref([]);

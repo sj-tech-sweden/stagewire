@@ -94,3 +94,45 @@ test('assigning a venue clones its base rig onto the job', async ({ page, reques
   expect(jobGraph.devices[0].name).toBe('House Stagebox');
   expect(jobGraph.devices[0].venue_id).toBeNull();
 });
+
+test('venue fixture library is managed through the base rig and stays venue-scoped', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+
+  const venueRes = await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: { name: `E2E Venue Lib ${Date.now()}`, venue_width_cm: 800, venue_height_cm: 600 },
+  });
+  expect(venueRes.status()).toBe(201);
+  const venue = await venueRes.json();
+
+  await page.goto(`/venues/${venue.id}/base-rig`);
+
+  // Open the fixture library from the base rig header and add a type.
+  await page.getByRole('button', { name: 'Fixture library' }).click();
+  await expect(page.getByTestId('library-type-name')).toBeVisible();
+  await page.getByTestId('library-type-name').fill('House Spot');
+  await page.getByTestId('library-add-type').click();
+
+  // It shows up in the dialog...
+  await expect(page.getByTestId('library-type').filter({ hasText: 'House Spot' })).toBeVisible();
+
+  // ...and is stored venue-owned (job_id null, venue_id set) via the venue endpoint.
+  const types = await (
+    await request.get(`${API_BASE}/api/v1/venues/${venue.id}/fixture-types`, { headers })
+  ).json();
+  expect(types).toHaveLength(1);
+  expect(types[0].name).toBe('House Spot');
+  expect(types[0].venue_id).toBe(venue.id);
+  expect(types[0].job_id).toBeNull();
+
+  // The same type never leaks into a separate job's library.
+  const jobId = await createJob(request, headers);
+  const jobTypes = await (
+    await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixture-types`, { headers })
+  ).json();
+  expect(jobTypes).toHaveLength(0);
+});

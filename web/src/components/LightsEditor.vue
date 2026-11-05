@@ -426,6 +426,7 @@ import {
 } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });
+const context = computed(() => ({ kind: 'job', id: props.jobId }));
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
@@ -507,7 +508,7 @@ async function chooseMode(row, name) {
   await save(fixture, {
     attributes: mode ? modeAttributes(mode) : { channel_mode: name || null },
   });
-  library.fetch(props.jobId).catch(() => {});
+  library.fetch(context.value).catch(() => {});
 }
 
 async function save(node, changes) {
@@ -576,7 +577,7 @@ async function addFixtures(count) {
   }
 }
 
-onMounted(() => library.fetch(props.jobId).catch(() => {}));
+onMounted(() => library.fetch(context.value).catch(() => {}));
 
 function remove(fixture) {
   $q.dialog({ title: t('workspace.remove'), message: fixture.name, cancel: true, persistent: true }).onOk(

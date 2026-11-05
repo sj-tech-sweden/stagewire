@@ -145,7 +145,7 @@
                 color="negative"
                 icon="close"
                 :aria-label="t('workspace.remove')"
-                @click="run(() => library.deleteMode(jobId, type.id, mode.id))"
+                @click="run(() => library.deleteMode(context.value, type.id, mode.id))"
               />
             </div>
             <div class="row q-col-gutter-xs items-center">
@@ -196,7 +196,7 @@
 
 <script setup>
 import { apiErrorText } from '@/utils/errors';
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useFixtureLibraryStore } from '@/stores/fixtureLibrary';
@@ -204,7 +204,10 @@ import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  jobId: { type: String, required: true },
+  // Either a job or a venue owns the library; the dialog builds its store context from whichever is
+  // provided (venue takes precedence so a venue mount never silently hits the job endpoints).
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
 });
 const emit = defineEmits(['update:modelValue']);
 const { t } = useI18n();
@@ -212,6 +215,12 @@ const $q = useQuasar();
 const library = useFixtureLibraryStore();
 const newType = ref('');
 const drafts = reactive({});
+
+const context = computed(() =>
+  props.venueId
+    ? { kind: 'venue', id: props.venueId }
+    : { kind: 'job', id: props.jobId },
+);
 
 watch(
   () => library.types,
@@ -223,7 +232,7 @@ watch(
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) library.fetch(props.jobId).catch(() => {});
+    if (open) library.fetch(context.value).catch(() => {});
   },
 );
 
@@ -238,15 +247,15 @@ async function run(action) {
   }
 }
 
-const saveType = (type, changes) => run(() => library.updateType(props.jobId, type.id, changes));
+const saveType = (type, changes) => run(() => library.updateType(context.value, type.id, changes));
 const saveMode = (type, mode, changes) =>
-  run(() => library.updateMode(props.jobId, type.id, mode.id, changes));
+  run(() => library.updateMode(context.value, type.id, mode.id, changes));
 
 function addType() {
   const name = newType.value.trim();
   if (!name) return;
   run(async () => {
-    await library.createType(props.jobId, { name });
+    await library.createType(context.value, { name });
     newType.value = '';
   });
 }
@@ -254,7 +263,7 @@ function addType() {
 function addMode(type) {
   const draft = drafts[type.id];
   run(async () => {
-    await library.createMode(props.jobId, type.id, { name: draft.name.trim(), footprint: draft.footprint });
+    await library.createMode(context.value, type.id, { name: draft.name.trim(), footprint: draft.footprint });
     draft.name = '';
     draft.footprint = null;
   });
@@ -262,14 +271,14 @@ function addMode(type) {
 
 function removeType(type) {
   $q.dialog({ title: t('workspace.deleteType'), message: type.name, cancel: true, persistent: true }).onOk(() =>
-    run(() => library.deleteType(props.jobId, type.id)),
+    run(() => library.deleteType(context.value, type.id)),
   );
 }
 
 function importFromStockwire(product) {
   if (!product?.id) return;
   run(async () => {
-    const data = await library.importFromStockwire(props.jobId, product.id);
+    const data = await library.importFromStockwire(context.value, product.id);
     $q.notify({ type: 'positive', message: t('lights.fromStockwireDone', { name: data.name }) });
   });
 }
