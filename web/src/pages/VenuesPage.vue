@@ -144,6 +144,37 @@
             :rules="[(val) => !!val || t('common.required')]"
           />
 
+          <div class="row q-gutter-xs q-mb-xs items-center wrap">
+            <q-btn
+              dense
+              no-caps
+              :color="drawFootprint ? 'primary' : 'grey-7'"
+              :flat="!drawFootprint"
+              icon="draw"
+              :label="t('venues.geometry.drawFootprint')"
+              @click="onDrawFootprint"
+            />
+            <q-btn
+              dense
+              no-caps
+              :color="drawStage ? 'primary' : 'grey-7'"
+              :flat="!drawStage"
+              icon="draw"
+              :label="t('venues.geometry.drawStage')"
+              @click="onDrawStage"
+            />
+            <q-btn
+              dense
+              no-caps
+              flat
+              color="grey-7"
+              icon="delete_sweep"
+              :label="t('venues.geometry.clear')"
+              :disable="form.footprint_shape !== 'custom_polygon' && form.stage_shape !== 'custom_polygon'"
+              @click="clearAll"
+            />
+          </div>
+
           <VenueGeometryCanvas
             :venue-width="form.venue_width_cm"
             :venue-height="form.venue_height_cm"
@@ -155,6 +186,8 @@
             :footprint-polygon="form.footprint_polygon"
             :stage-shape="form.stage_shape"
             :stage-polygon="form.stage_polygon"
+            :draw-footprint="drawFootprint"
+            :draw-stage="drawStage"
             @change="onGeometryChange"
           />
 
@@ -374,6 +407,11 @@ const editingVenue = ref(null);
 const saving = ref(false);
 const uploading = ref(false);
 const propagating = ref(false);
+// Draw mode is owned by the parent so activating "Draw" can also flip the matching
+// shape to custom_polygon. Without that flip, the clicked points are appended to an
+// array that is never rendered, so the canvas would appear to do nothing.
+const drawFootprint = ref(false);
+const drawStage = ref(false);
 
 const EMPTY = {
   name: '',
@@ -523,6 +561,29 @@ function onStageShapeChange(val) {
     form.stage_polygon = [];
   }
   form.stage_shape = val;
+}
+
+// Entering draw mode flips the matching shape to custom_polygon (and seeds a default
+// rectangle the first time) so the freshly drawn outline is actually rendered. The two
+// draw modes are mutually exclusive.
+function onDrawFootprint() {
+  drawFootprint.value = !drawFootprint.value;
+  if (drawFootprint.value) drawStage.value = false;
+  if (form.footprint_shape !== 'custom_polygon') onFootprintShapeChange('custom_polygon');
+}
+
+function onDrawStage() {
+  drawStage.value = !drawStage.value;
+  if (drawStage.value) drawFootprint.value = false;
+  if (form.stage_shape !== 'custom_polygon') onStageShapeChange('custom_polygon');
+}
+
+// Clears any drawn polygons and returns both shapes to their rectangular presets.
+function clearAll() {
+  drawFootprint.value = false;
+  drawStage.value = false;
+  if (form.footprint_shape === 'custom_polygon') onFootprintShapeChange('rectangular');
+  if (form.stage_shape === 'custom_polygon') onStageShapeChange('rectangular');
 }
 
 function payload() {

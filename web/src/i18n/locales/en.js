@@ -1303,6 +1303,11 @@ export default {
       clear: "Clear drawing",
       hint: "Drag the stage inside the venue; use the corner handle to resize.",
       drawHint: "Click to add a point; drag points to move; double-click a point to remove it.",
+      footprintCorners: "Footprint corners (cm)",
+      stageCorners: "Stage corners (cm)",
+      xCm: "X (cm)",
+      yCm: "Y (cm)",
+      addCorner: "Add corner",
     },
   },
   cables: {

@@ -1,40 +1,9 @@
 <template>
   <div>
-    <div class="row q-gutter-xs q-mb-xs items-center wrap">
-      <q-btn
-        dense
-        no-caps
-        :color="drawingFootprint ? 'primary' : 'grey-7'"
-        :flat="!drawingFootprint"
-        icon="draw"
-        :label="t('venues.geometry.drawFootprint')"
-        @click="toggleDraw('footprint')"
-      />
-      <q-btn
-        dense
-        no-caps
-        :color="drawingStage ? 'primary' : 'grey-7'"
-        :flat="!drawingStage"
-        icon="draw"
-        :label="t('venues.geometry.drawStage')"
-        @click="toggleDraw('stage')"
-      />
-      <q-btn
-        dense
-        no-caps
-        flat
-        color="grey-7"
-        icon="delete_sweep"
-        :label="t('venues.geometry.clear')"
-        :disable="!hasFootprintPolygon && !hasStagePolygon"
-        @click="clearAll"
-      />
-    </div>
-
     <div
       ref="host"
       class="canvas-host"
-      :class="{ 'hand-cursor': drawingFootprint || drawingStage }"
+      :class="{ 'hand-cursor': drawFootprint || drawStage }"
     >
       <v-stage
         ref="stageRef"
@@ -95,7 +64,116 @@
     </div>
 
     <div class="text-caption text-grey-6 q-mt-xs">
-      {{ drawingFootprint || drawingStage ? t('venues.geometry.drawHint') : t('venues.geometry.hint') }}
+      {{ drawFootprint || drawStage ? t('venues.geometry.drawHint') : t('venues.geometry.hint') }}
+    </div>
+
+    <!-- Precise corner editor: set every wall endpoint exactly, even while drawing. -->
+    <div
+      v-if="footprintShape === 'custom_polygon' && footprintPolygon.length"
+      class="q-mt-sm"
+    >
+      <div class="text-caption text-grey-7">
+        {{ t('venues.geometry.footprintCorners') }}
+      </div>
+      <div
+        v-for="(p, i) in footprintPolygon"
+        :key="`fe${i}`"
+        class="row items-center q-gutter-xs q-mb-xs"
+      >
+        <span
+          class="text-caption text-grey-6"
+          style="width: 22px"
+        >{{ i + 1 }}.</span>
+        <q-input
+          dense
+          outlined
+          type="number"
+          :label="t('venues.geometry.xCm')"
+          :model-value="p[0]"
+          class="col"
+          @update:model-value="(v) => onVertexInput('footprint', i, 0, v)"
+        />
+        <q-input
+          dense
+          outlined
+          type="number"
+          :label="t('venues.geometry.yCm')"
+          :model-value="p[1]"
+          class="col"
+          @update:model-value="(v) => onVertexInput('footprint', i, 1, v)"
+        />
+        <q-btn
+          dense
+          flat
+          round
+          icon="remove_circle"
+          color="negative"
+          :disable="footprintPolygon.length <= 3"
+          @click="removeVertex('footprint', i)"
+        />
+      </div>
+      <q-btn
+        dense
+        flat
+        no-caps
+        icon="add"
+        :label="t('venues.geometry.addCorner')"
+        @click="addVertex('footprint')"
+      />
+    </div>
+
+    <div
+      v-if="stageShape === 'custom_polygon' && stagePolygon.length"
+      class="q-mt-sm"
+    >
+      <div class="text-caption text-grey-7">
+        {{ t('venues.geometry.stageCorners') }}
+      </div>
+      <div
+        v-for="(p, i) in stagePolygon"
+        :key="`se${i}`"
+        class="row items-center q-gutter-xs q-mb-xs"
+      >
+        <span
+          class="text-caption text-grey-6"
+          style="width: 22px"
+        >{{ i + 1 }}.</span>
+        <q-input
+          dense
+          outlined
+          type="number"
+          :label="t('venues.geometry.xCm')"
+          :model-value="p[0]"
+          class="col"
+          @update:model-value="(v) => onVertexInput('stage', i, 0, v)"
+        />
+        <q-input
+          dense
+          outlined
+          type="number"
+          :label="t('venues.geometry.yCm')"
+          :model-value="p[1]"
+          class="col"
+          @update:model-value="(v) => onVertexInput('stage', i, 1, v)"
+        />
+        <q-btn
+          dense
+          flat
+          round
+          icon="remove_circle"
+          color="negative"
+          :disable="stagePolygon.length <= 3"
+          @click="removeVertex('stage', i)"
+        />
+      </div>
+      <q-btn
+        dense
+        flat
+        no-caps
+        icon="add"
+        :label="t('venues.geometry.addCorner')"
+        @click="addVertex('stage')"
+      />
     </div>
   </div>
 </template>
@@ -117,6 +195,9 @@ const props = defineProps({
   footprintPolygon: { type: Array, default: () => [] },
   stageShape: { type: String, default: 'proscenium' },
   stagePolygon: { type: Array, default: () => [] },
+  // When true, a click on empty canvas appends a corner to that polygon.
+  drawFootprint: { type: Boolean, default: false },
+  drawStage: { type: Boolean, default: false },
 });
 const emit = defineEmits(['change']);
 
@@ -126,8 +207,6 @@ const $q = useQuasar();
 const host = ref(null);
 const stageRef = ref(null);
 const hostWidth = ref(640);
-const drawingFootprint = ref(false);
-const drawingStage = ref(false);
 
 let observer = null;
 onMounted(() => {
@@ -236,13 +315,6 @@ const stageResizeHandle = computed(() => ({
   listening: true,
 }));
 
-const hasFootprintPolygon = computed(
-  () => props.footprintShape === 'custom_polygon' && props.footprintPolygon.length >= 3,
-);
-const hasStagePolygon = computed(
-  () => props.stageShape === 'custom_polygon' && props.stagePolygon.length >= 3,
-);
-
 function vertexConfig(p) {
   return {
     x: p[0] * zoom.value,
@@ -260,32 +332,21 @@ function emitChange(partial) {
   emit('change', partial);
 }
 
-function toggleDraw(kind) {
-  if (kind === 'footprint') {
-    drawingFootprint.value = !drawingFootprint.value;
-    drawingStage.value = false;
-  } else {
-    drawingStage.value = !drawingStage.value;
-    drawingFootprint.value = false;
-  }
+function currentPolygon(kind) {
+  return kind === 'footprint' ? props.footprintPolygon : props.stagePolygon;
 }
 
-function clearAll() {
-  if (hasFootprintPolygon.value) emitChange({ footprint_polygon: [] });
-  if (hasStagePolygon.value) emitChange({ stage_polygon: [] });
-}
-
-// Clicking empty canvas while drawing appends a corner (footprint in venue cm,
+// Click on empty canvas while drawing appends a corner (footprint in venue cm,
 // stage in stage-relative cm).
 function onStageClick(e) {
   if (e.target !== stageRef.value?.getStage()) return;
-  if (!drawingFootprint.value && !drawingStage.value) return;
+  if (!props.drawFootprint && !props.drawStage) return;
   const pos = stageRef.value.getStage().getRelativePointerPosition();
   const cmX = Math.round(pos.x / zoom.value);
   const cmY = Math.round(pos.y / zoom.value);
-  if (drawingFootprint.value) {
+  if (props.drawFootprint) {
     emitChange({ footprint_polygon: [...props.footprintPolygon, [cmX, cmY]] });
-  } else if (drawingStage.value) {
+  } else if (props.drawStage) {
     emitChange({ stage_polygon: [...props.stagePolygon, [cmX - props.stageX, cmY - props.stageY]] });
   }
 }
@@ -293,13 +354,39 @@ function onStageClick(e) {
 function onVertexDragEnd(e, i, kind) {
   const x = Math.round(e.target.x() / zoom.value);
   const y = Math.round(e.target.y() / zoom.value);
-  const src = kind === 'footprint' ? props.footprintPolygon : props.stagePolygon;
+  const src = currentPolygon(kind);
   const poly = src.map((p, idx) => (idx === i ? [x, y] : p));
   emitChange(kind === 'footprint' ? { footprint_polygon: poly } : { stage_polygon: poly });
 }
 
 function onVertexDblClick(i, kind) {
-  const src = kind === 'footprint' ? props.footprintPolygon : props.stagePolygon;
+  const src = currentPolygon(kind);
+  if (src.length <= 3) return;
+  const poly = src.filter((_, idx) => idx !== i);
+  emitChange(kind === 'footprint' ? { footprint_polygon: poly } : { stage_polygon: poly });
+}
+
+function onVertexInput(kind, i, axis, value) {
+  const v = Number(value);
+  const src = currentPolygon(kind);
+  const poly = src.map((p, idx) => {
+    if (idx !== i) return p;
+    const next = [...p];
+    next[axis] = Number.isFinite(v) ? v : 0;
+    return next;
+  });
+  emitChange(kind === 'footprint' ? { footprint_polygon: poly } : { stage_polygon: poly });
+}
+
+function addVertex(kind) {
+  const src = currentPolygon(kind);
+  const last = src[src.length - 1] || [0, 0];
+  const poly = [...src, [last[0], last[1]]];
+  emitChange(kind === 'footprint' ? { footprint_polygon: poly } : { stage_polygon: poly });
+}
+
+function removeVertex(kind, i) {
+  const src = currentPolygon(kind);
   if (src.length <= 3) return;
   const poly = src.filter((_, idx) => idx !== i);
   emitChange(kind === 'footprint' ? { footprint_polygon: poly } : { stage_polygon: poly });

@@ -1287,6 +1287,11 @@ export default {
       clear: "Rensa ritning",
       hint: "Dra scenen inuti lokalen; använd hörnhandtaget för att ändra storlek.",
       drawHint: "Klicka för att lägga till en punkt; dra punkter för att flytta; dubbelklicka på en punkt för att ta bort den.",
+      footprintCorners: "Lokalkorn (cm)",
+      stageCorners: "Scenkorn (cm)",
+      xCm: "X (cm)",
+      yCm: "Y (cm)",
+      addCorner: "Lägg till hörn",
     },
   },
   cables: {
