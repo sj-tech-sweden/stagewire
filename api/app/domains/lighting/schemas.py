@@ -101,6 +101,7 @@ class FixtureTypeRead(FixtureTypeBase):
 
     id: UUID
     job_id: UUID | None = None
+    venue_id: UUID | None = None
     category: str = ""
     source: str = "manual"
     stockwire_product_id: str | None = None

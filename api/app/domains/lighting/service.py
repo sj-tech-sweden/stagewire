@@ -44,50 +44,95 @@ DEVICE_DEFAULT_KEYS = {
 }
 
 
+def _scope(model, job_id, venue_id):
+    """A fixture type (and its modes) is owned by exactly one context: a job or a venue.
+
+    Returns the SQLAlchemy filter narrowing rows to that context. Passing both or neither is a
+    programming error: a type can never belong to two scopes at once, so the query must be explicit.
+    """
+    if job_id is not None and venue_id is not None:
+        raise ValueError("a fixture type cannot be scoped to both a job and a venue")
+    if job_id is not None:
+        return model.job_id == job_id
+    if venue_id is not None:
+        return model.venue_id == venue_id
+    raise ValueError("a fixture type requires a job_id or venue_id")
+
+
 async def list_fixtures(db: AsyncSession, job_id: UUID):
     """The job's fixtures (graph-backed objects shaped like the old rows)."""
     return await fixtures_native.load_fixtures(db, job_id)
 
 
-async def list_types(db: AsyncSession, job_id: UUID) -> list[FixtureType]:
+async def list_types(
+    db: AsyncSession, job_id: UUID | None = None, venue_id: UUID | None = None
+) -> list[FixtureType]:
     result = await db.execute(
-        select(FixtureType).where(FixtureType.job_id == job_id).order_by(FixtureType.name)
+        select(FixtureType).where(_scope(FixtureType, job_id, venue_id)).order_by(FixtureType.name)
     )
     return list(result.scalars().all())
 
 
-async def get_type(db: AsyncSession, job_id: UUID, type_id: UUID) -> FixtureType | None:
+async def get_type(
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    type_id: UUID | None = None,
+    *,
+    venue_id: UUID | None = None,
+) -> FixtureType | None:
     result = await db.execute(
-        select(FixtureType).where(FixtureType.id == type_id, FixtureType.job_id == job_id)
+        select(FixtureType).where(FixtureType.id == type_id, _scope(FixtureType, job_id, venue_id))
     )
     return result.scalars().first()
 
 
-async def get_mode(db: AsyncSession, job_id: UUID, mode_id: UUID) -> FixtureMode | None:
+async def get_mode(
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    mode_id: UUID | None = None,
+    *,
+    venue_id: UUID | None = None,
+) -> FixtureMode | None:
     result = await db.execute(
         select(FixtureMode)
         .join(FixtureType, FixtureMode.fixture_type_id == FixtureType.id)
-        .where(FixtureMode.id == mode_id, FixtureType.job_id == job_id)
+        .where(FixtureMode.id == mode_id, _scope(FixtureType, job_id, venue_id))
     )
     return result.scalars().first()
 
 
-async def find_type(db: AsyncSession, job_id: UUID, name: str) -> FixtureType | None:
+async def find_type(
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    name: str | None = None,
+    *,
+    venue_id: UUID | None = None,
+) -> FixtureType | None:
     result = await db.execute(
         select(FixtureType).where(
-            FixtureType.job_id == job_id, func.lower(FixtureType.name) == name.lower()
+            _scope(FixtureType, job_id, venue_id),
+            func.lower(FixtureType.name) == (name or "").lower(),
         )
     )
     return result.scalars().first()
 
 
 async def find_or_create_type(
-    db: AsyncSession, job_id: UUID, name: str, source: str
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    name: str | None = None,
+    source: str = "manual",
+    *,
+    venue_id: UUID | None = None,
 ) -> FixtureType:
-    found = await find_type(db, job_id, name)
+    found = await find_type(db, job_id, name, venue_id=venue_id)
     if found is not None:
         return found
-    fixture_type = FixtureType(job_id=job_id, name=name, source=source, modes=[])
+    fixture_type = FixtureType(source=source, name=name or "", modes=[])
+    if job_id is not None:
+        fixture_type.job_id = job_id
+    else:
+        fixture_type.venue_id = venue_id
     db.add(fixture_type)
     await db.flush()
     return fixture_type
@@ -114,22 +159,33 @@ async def ensure_mode(
     return mode
 
 
-async def apply_type(db: AsyncSession, job_id: UUID, data: dict) -> dict:
+async def apply_type(
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    data: dict | None = None,
+    *,
+    venue_id: UUID | None = None,
+) -> dict:
     """Resolve the fixture type and mode. A chosen type/mode sets the text and footprint; text
     from a CSV or MVR row creates the type and mode when they are missing.
     """
+    data = data or {}
     type_modes = data.pop("type_modes", None) or {}
     fixture_type = None
     if data.get("fixture_type_id"):
-        fixture_type = await get_type(db, job_id, data["fixture_type_id"])
+        fixture_type = await get_type(db, job_id, data["fixture_type_id"], venue_id=venue_id)
     elif data.get("fixture_mode_id"):
-        mode = await get_mode(db, job_id, data["fixture_mode_id"])
+        mode = await get_mode(db, job_id, data["fixture_mode_id"], venue_id=venue_id)
         if mode is not None:
-            fixture_type = await get_type(db, job_id, mode.fixture_type_id)
+            fixture_type = await get_type(db, job_id, mode.fixture_type_id, venue_id=venue_id)
             data["fixture_type_id"] = fixture_type.id
     elif (data.get("fixture_type") or "").strip():
         fixture_type = await find_or_create_type(
-            db, job_id, data["fixture_type"].strip(), "mvr" if type_modes else "manual"
+            db,
+            job_id,
+            data["fixture_type"].strip(),
+            "mvr" if type_modes else "manual",
+            venue_id=venue_id,
         )
         data["fixture_type_id"] = fixture_type.id
     if fixture_type is None:
@@ -140,7 +196,7 @@ async def apply_type(db: AsyncSession, job_id: UUID, data: dict) -> dict:
 
     mode = None
     if data.get("fixture_mode_id"):
-        mode = await get_mode(db, job_id, data["fixture_mode_id"])
+        mode = await get_mode(db, job_id, data["fixture_mode_id"], venue_id=venue_id)
     elif (data.get("channel_mode") or "").strip():
         mode = await ensure_mode(
             db, fixture_type, data["channel_mode"].strip(), data.get("footprint")
@@ -293,11 +349,17 @@ async def delete_fixture(db: AsyncSession, fixture) -> None:
 
 
 async def import_rows(
-    db: AsyncSession, job_id: UUID, rows: list[dict], clear_imported: bool
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    rows: list[dict] | None = None,
+    clear_imported: bool = True,
+    *,
+    venue_id: UUID | None = None,
 ) -> tuple[int, int, int]:
     """Insert parsed rows as one import batch. Returns (created, devices created, cleared)."""
+    rows = rows or []
     cleared = 0
-    if clear_imported:
+    if clear_imported and job_id is not None:
         for fixture in await list_fixtures(db, job_id):
             if fixture.import_batch_id is not None:
                 await fixtures_native.delete_fixture(db, job_id, fixture.id)
@@ -305,7 +367,7 @@ async def import_rows(
     batch = uuid.uuid4()
     devices_created = 0
     for row in rows:
-        data = await apply_type(db, job_id, dict(row))
+        data = await apply_type(db, job_id, dict(row), venue_id=venue_id)
         data, created = await apply_device(db, job_id, data)
         devices_created += int(created)
         await _device_node_ready(db, job_id, data)
@@ -314,8 +376,19 @@ async def import_rows(
     return len(rows), devices_created, cleared
 
 
-async def create_type(db: AsyncSession, job_id: UUID, data: dict) -> FixtureType:
-    fixture_type = FixtureType(job_id=job_id, source="manual", modes=[], **data)
+async def create_type(
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    data: dict | None = None,
+    *,
+    venue_id: UUID | None = None,
+) -> FixtureType:
+    data = data or {}
+    fixture_type = FixtureType(source="manual", modes=[], **data)
+    if job_id is not None:
+        fixture_type.job_id = job_id
+    else:
+        fixture_type.venue_id = venue_id
     db.add(fixture_type)
     await db.commit()
     await db.refresh(fixture_type)
@@ -357,19 +430,28 @@ async def delete_mode(db: AsyncSession, mode: FixtureMode) -> None:
 
 
 async def import_stockwire_type(
-    db: AsyncSession, job_id: UUID, product_id: str, values: dict
+    db: AsyncSession,
+    job_id: UUID | None = None,
+    product_id: str | None = None,
+    values: dict | None = None,
+    *,
+    venue_id: UUID | None = None,
 ) -> FixtureType:
     """Create or refresh the type for a Stockwire product, with the product's modes."""
+    values = values or {}
     result = await db.execute(
         select(FixtureType).where(
-            FixtureType.job_id == job_id, FixtureType.stockwire_product_id == product_id
+            _scope(FixtureType, job_id, venue_id),
+            FixtureType.stockwire_product_id == product_id,
         )
     )
     fixture_type = result.scalars().first()
     if fixture_type is None:
-        fixture_type = FixtureType(
-            job_id=job_id, source="stockwire", stockwire_product_id=product_id, modes=[]
-        )
+        fixture_type = FixtureType(source="stockwire", stockwire_product_id=product_id, modes=[])
+        if job_id is not None:
+            fixture_type.job_id = job_id
+        else:
+            fixture_type.venue_id = venue_id
         db.add(fixture_type)
         await db.flush()
     fixture_type.name = values["name"]
