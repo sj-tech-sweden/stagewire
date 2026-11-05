@@ -677,7 +677,11 @@
         />
 
         <div class="q-mt-md">
-          <MultiDomainPatchDrawer :job-id="jobId" />
+          <MultiDomainPatchDrawer
+            :graph="graph"
+            :update-edge="(id, changes) => graph.updateEdge(jobId, id, changes)"
+            :delete-edge="(id) => graph.deleteEdge(jobId, id)"
+          />
         </div>
       </div>
 

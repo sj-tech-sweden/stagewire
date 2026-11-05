@@ -38,22 +38,135 @@
         class="col-12"
         :class="$q.screen.lt.sm ? '' : 'col-9'"
       >
-        <div class="row q-gutter-sm q-mb-sm items-center wrap">
-          <q-btn
-            v-for="kind in addKinds"
-            :key="kind.domain"
-            dense
-            outline
-            :icon="kind.icon"
-            :label="t(`venues.baseRig.${kind.labelKey}`)"
-            @click="addDevice(kind)"
-          />
-          <q-separator vertical />
+        <div
+          class="row q-gutter-sm q-mb-sm items-center wrap canvas-toolbar"
+        >
           <q-btn
             dense
-            :color="connectMode ? 'secondary' : 'grey'"
-            :label="t('venues.baseRig.connect')"
+            no-caps
+            icon="cable"
+            :color="connectMode ? 'primary' : undefined"
+            :label="t('workspace.connectTool')"
             @click="connectMode = !connectMode"
+          />
+          <q-btn
+            dense
+            icon="remove"
+            aria-label="zoom out"
+            @click="zoomOut"
+          />
+          <q-btn
+            dense
+            icon="add"
+            aria-label="zoom in"
+            @click="zoomIn"
+          />
+          <q-btn
+            dense
+            icon="fit_screen"
+            aria-label="fit"
+            @click="fitCanvas"
+          />
+          <q-btn
+            dense
+            no-caps
+            icon="aspect_ratio"
+            :label="t('workspace.gearSize')"
+          >
+            <q-menu>
+              <div class="q-pa-md">
+                <q-slider
+                  v-model="deviceScale"
+                  :min="0.4"
+                  :max="3"
+                  :step="0.1"
+                  style="width: 180px"
+                  label
+                />
+              </div>
+            </q-menu>
+          </q-btn>
+          <q-separator
+            vertical
+            class="q-mx-xs"
+          />
+          <q-btn-dropdown
+            dense
+            no-caps
+            icon="speaker"
+            :label="t('workspace.addGearElement')"
+          >
+            <q-list>
+              <template
+                v-for="group in gearGroups"
+                :key="group"
+              >
+                <q-item-label header>
+                  {{ t(`workspace.gearGroup.${group}`) }}
+                </q-item-label>
+                <q-item
+                  v-for="gear in GEAR_ELEMENTS.filter((g) => g.group === group)"
+                  :key="gear.type"
+                  v-close-popup
+                  clickable
+                  :data-testid="`add-gear-${gear.type}`"
+                  @click="venueAddCatalog(gear)"
+                >
+                  <q-item-section avatar>
+                    <q-icon
+                      :name="gear.icon"
+                      :style="{ color: gear.color }"
+                    />
+                  </q-item-section>
+                  <q-item-section>{{ objectLabel(gear) }}</q-item-section>
+                </q-item>
+              </template>
+            </q-list>
+          </q-btn-dropdown>
+          <q-btn-dropdown
+            dense
+            no-caps
+            icon="category"
+            :label="t('workspace.addObject')"
+          >
+            <q-list>
+              <q-item
+                v-for="object in OBJECT_TYPES"
+                :key="object.type"
+                v-close-popup
+                clickable
+                :data-testid="`add-object-${object.type}`"
+                @click="venueAddCatalog(object)"
+              >
+                <q-item-section avatar>
+                  <q-icon
+                    :name="object.icon"
+                    :style="{ color: object.color }"
+                  />
+                </q-item-section>
+                <q-item-section>{{ objectLabel(object) }}</q-item-section>
+              </q-item>
+            </q-list>
+          </q-btn-dropdown>
+          <q-separator
+            vertical
+            class="q-mx-xs"
+          />
+          <q-btn
+            dense
+            no-caps
+            icon="power"
+            :color="showOutlets ? 'primary' : undefined"
+            :label="t('workspace.layerOutlets')"
+            @click="showOutlets = !showOutlets"
+          />
+          <q-btn
+            dense
+            no-caps
+            icon="groups"
+            :color="showAudience ? 'primary' : undefined"
+            :label="t('workspace.layerAudience')"
+            @click="showAudience = !showAudience"
           />
           <q-btn
             dense
@@ -73,9 +186,10 @@
           :outlets="outlets"
           :selected-id="venueGraph.selectedId"
           :zoom="zoom"
+          :device-scale="deviceScale"
           :connect-mode="connectMode"
-          :show-outlets="true"
-          :show-audience="true"
+          :show-outlets="showOutlets"
+          :show-audience="showAudience"
           @select="onSelect"
           @move="onMove"
           @connect="onConnect"
@@ -108,6 +222,24 @@
             <div class="text-caption q-mt-sm text-grey-7">
               {{ venueGraph.selectedDevice.domain }} / {{ venueGraph.selectedDevice.kind || '—' }}
             </div>
+            <div class="row q-gutter-xs q-mt-sm">
+              <q-input
+                dense
+                type="number"
+                class="col"
+                :label="t('venues.geometry.xCm')"
+                :model-value="venueGraph.selectedDevice.attributes?.width_cm"
+                @update:model-value="(v) => updateDeviceSize('width_cm', v)"
+              />
+              <q-input
+                dense
+                type="number"
+                class="col"
+                :label="t('venues.geometry.yCm')"
+                :model-value="venueGraph.selectedDevice.attributes?.height_cm"
+                @update:model-value="(v) => updateDeviceSize('height_cm', v)"
+              />
+            </div>
             <q-btn
               class="q-mt-sm"
               dense
@@ -125,41 +257,12 @@
           </q-card-section>
         </q-card>
 
-        <q-card
-          v-if="venueGraph.edges.length"
-          flat
-          bordered
+        <MultiDomainPatchDrawer
           class="q-mt-md"
-        >
-          <q-card-section>
-            <div class="text-subtitle2 q-mb-xs">
-              {{ t('venues.baseRig.deleteEdge') }}
-            </div>
-            <q-list
-              dense
-              separator
-            >
-              <q-item
-                v-for="edge in venueGraph.edges"
-                :key="edge.id"
-              >
-                <q-item-section>
-                  {{ labelFor(edge.src_device_id) }} → {{ labelFor(edge.dst_device_id) }}
-                </q-item-section>
-                <q-item-section side>
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    size="sm"
-                    icon="close"
-                    @click="venueGraph.removeEdge(edge.id)"
-                  />
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </q-card-section>
-        </q-card>
+          :graph="venueGraph"
+          :update-edge="(id, changes) => venueGraph.updateEdge(id, changes)"
+          :delete-edge="(id) => venueGraph.removeEdge(id)"
+        />
       </div>
     </div>
   </q-page>
@@ -172,8 +275,10 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar, Notify } from 'quasar';
 import { api } from '@/boot/api';
 import { frameFromVenue, stageCentre } from '@/utils/plotFrame';
+import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { useVenueGraphStore } from '@/stores/venueGraph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
+import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -185,18 +290,17 @@ const venueId = computed(() => route.params.venueId);
 const venue = ref(null);
 const outlets = ref([]);
 const zoom = ref(0.5);
+const deviceScale = ref(1);
 const connectMode = ref(false);
+const showOutlets = ref(true);
+const showAudience = ref(true);
 
 const frame = computed(() => (venue.value ? frameFromVenue(venue.value) : null));
 
-// The device kinds the rig editor can seed a venue with. Positions are relative to the stage.
-const addKinds = [
-  { domain: 'audio', kind: 'speaker', labelKey: 'audio', icon: 'volume_up' },
-  { domain: 'lighting', kind: 'fixture', labelKey: 'lighting', icon: 'lightbulb' },
-  { domain: 'video', kind: 'source', labelKey: 'video', icon: 'videocam' },
-  { domain: 'rigging', kind: 'rigging_point', labelKey: 'rigging', icon: 'anchor' },
-  { domain: 'power', kind: 'power_node', labelKey: 'power', icon: 'power' },
-];
+const gearGroups = ['audio', 'video', 'lighting'];
+
+const objectLabel = (object) =>
+  object.labelKey ? t(object.labelKey, object.label || object.type) : object.label;
 
 async function load() {
   const [venueRes, outletRes] = await Promise.all([
@@ -208,16 +312,46 @@ async function load() {
   await venueGraph.fetchGraph(venueId.value);
 }
 
-function addDevice(kind) {
+// Add a real piece of equipment from the shared catalog rather than a generic 60x30 box.
+// The catalog carries the domain, an icon/colour and true dimensions, so the rig shows
+// correctly-sized, colour-coded gear just like the job workspace plot.
+function venueAddCatalog(item) {
   const centre = frame.value ? stageCentre(frame.value) : { x: 0, y: 0 };
-  venueGraph.addDevice({
-    domain: kind.domain,
-    kind: kind.kind,
-    name: t(`venues.baseRig.${kind.labelKey}`),
-    x: centre.x + Math.round((Math.random() - 0.5) * 80),
-    y: centre.y + Math.round((Math.random() - 0.5) * 80),
+  const device = venueGraph.addDevice({
+    domain: item.group || 'other',
+    kind: item.type,
+    name: objectLabel(item),
+    x: Math.round(centre.x + (Math.random() - 0.5) * 80),
+    y: Math.round(centre.y + (Math.random() - 0.5) * 80),
   });
+  device.attributes = {
+    ...(device.attributes || {}),
+    element_type: item.type,
+    width_cm: item.w,
+    height_cm: item.h,
+  };
+  venueGraph.dirty = true;
   connectMode.value = false;
+}
+
+function zoomIn() {
+  zoom.value = Math.min(2, zoom.value * 1.2);
+}
+function zoomOut() {
+  zoom.value = Math.max(0.05, zoom.value / 1.2);
+}
+function fitCanvas() {
+  if (!frame.value) return;
+  zoom.value = Math.min(2, Math.max(0.05, 700 / Math.max(1, frame.value.width)));
+}
+
+// Per-device dimensions can be overridden precisely (e.g. an unusual box) without
+// losing the catalog colour/type carried in the rest of the attributes object.
+function updateDeviceSize(key, value) {
+  const device = venueGraph.selectedDevice;
+  if (!device) return;
+  device.attributes = { ...(device.attributes || {}), [key]: Number(value) || 0 };
+  venueGraph.dirty = true;
 }
 
 function onSelect(id) {
@@ -232,10 +366,6 @@ function onConnect({ srcId, dstId }) {
 }
 function deleteSelected() {
   if (venueGraph.selectedId) venueGraph.removeDevice(venueGraph.selectedId);
-}
-function labelFor(id) {
-  const device = venueGraph.devices.find((d) => d.id === id);
-  return device ? device.name : id;
 }
 async function save() {
   try {

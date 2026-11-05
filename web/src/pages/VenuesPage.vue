@@ -101,7 +101,7 @@
                 flat
                 round
                 dense
-                icon="account_tree"
+                icon="architecture"
                 color="primary"
                 :aria-label="t('venues.openBaseRig')"
                 @click.stop="openBaseRig(v)"

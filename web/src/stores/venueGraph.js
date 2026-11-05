@@ -7,6 +7,14 @@ import { api } from '@/boot/api';
 // PATCH calls. Edits are kept in memory and flagged dirty until the user saves.
 const base = (venueId) => `/venues/${venueId}/graph`;
 
+// Map a device domain to the signal tab the patch table groups its links under.
+const DOMAIN_SIGNAL = {
+  audio: 'audio',
+  lighting: 'dmx',
+  video: 'video',
+  power: 'power',
+};
+
 const newId = () =>
   (crypto.randomUUID && crypto.randomUUID()) ||
   `dev-${Math.random().toString(16).slice(2)}-${Date.now()}`;
@@ -93,11 +101,15 @@ export const useVenueGraphStore = defineStore('venueGraph', {
       this.dirty = true;
     },
     // A link drawn on the canvas between two devices: an edge with no chosen ports yet.
+    // The signal is derived from the source device's domain so the patch table groups it
+    // under the right tab (audio / dmx / video / power), rather than always "audio".
     connect(srcId, dstId) {
       if (srcId === dstId) return null;
+      const src = this.devices.find((d) => d.id === srcId);
+      const signal = DOMAIN_SIGNAL[src?.domain] || 'audio';
       const edge = {
         id: newId(),
-        signal: 'audio',
+        signal,
         src_device_id: srcId,
         src_port: '',
         dst_device_id: dstId,
@@ -111,6 +123,12 @@ export const useVenueGraphStore = defineStore('venueGraph', {
       this.edges.push(edge);
       this.dirty = true;
       return edge;
+    },
+    updateEdge(id, changes) {
+      const edge = this.edges.find((e) => e.id === id);
+      if (!edge) return;
+      Object.assign(edge, changes);
+      this.dirty = true;
     },
     removeEdge(id) {
       this.edges = this.edges.filter((e) => e.id !== id);
