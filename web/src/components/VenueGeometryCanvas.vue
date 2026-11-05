@@ -70,6 +70,15 @@
     <div class="text-caption text-grey-6 q-mt-xs">
       {{ drawFootprint || drawStage ? t('venues.geometry.drawHint') : t('venues.geometry.hint') }}
     </div>
+    <div class="row q-gutter-sm q-mt-xs items-center text-caption">
+      <span class="row items-center no-wrap">
+        <span class="handle-swatch bg-venue" /> {{ t('venues.geometry.venueHandle') }}
+      </span>
+      <span class="row items-center no-wrap">
+        <span class="handle-swatch bg-stage" /> {{ t('venues.geometry.stageHandle') }}
+      </span>
+      <span class="text-grey-7">{{ t('venues.geometry.handleHint') }}</span>
+    </div>
 
     <!-- Precise corner editor: set every wall endpoint exactly, even while drawing. -->
     <div
@@ -449,5 +458,21 @@ function onStageDragEnd(e) {
 }
 .hand-cursor :deep(canvas) {
   cursor: crosshair;
+}
+.handle-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 4px;
+  border: 2px solid;
+}
+.bg-venue {
+  background: #35a853;
+  border-color: #1b5e20;
+}
+.bg-stage {
+  background: #1e88e5;
+  border-color: #0d47a1;
 }
 </style>

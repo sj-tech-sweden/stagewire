@@ -1230,6 +1230,7 @@ export default {
     title: "Lokaler",
     newVenue: "Ny lokal",
     editVenue: "Redigera lokal",
+    openBaseRig: "Grundscensättning",
     empty:
       "Inga sparade lokaler ännu. Skapa en för att återanvända den i jobb.",
     sizeSummary: "Lokal {w} × {h} cm",
@@ -1294,6 +1295,7 @@ export default {
       addCorner: "Lägg till hörn",
       venueHandle: "Lokal",
       stageHandle: "Scen",
+      handleHint: "Grön punkt = lokalens ytterkant, blå punkt = scenen.",
     },
   },
   cables: {

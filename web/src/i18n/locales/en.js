@@ -1310,6 +1310,7 @@ export default {
       addCorner: "Add corner",
       venueHandle: "Venue",
       stageHandle: "Stage",
+      handleHint: "Green handle = venue footprint, blue handle = stage.",
     },
   },
   cables: {
