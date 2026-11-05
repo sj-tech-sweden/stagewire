@@ -9,7 +9,7 @@
     data-testid="venue-power"
   >
     <q-card flat>
-      <q-card-section v-if="!venueId">
+      <q-card-section v-if="!resolvedVenueId">
         <div class="text-grey-6">
           {{ t('workspace.venuePowerNoVenue') }}
         </div>
@@ -205,18 +205,23 @@ import ConnectorSelect from '@/components/ConnectorSelect.vue';
 // the outlets on them. Outlets and groups belong to the venue, so they are there for every job
 // held in it. A group or outlet is brought into a job's power tree when something is fed from it
 // (see POST /graph/venue-power/outlets/{id}/source), so editing them here is safe at any time.
-const props = defineProps({ jobId: { type: String, required: true } });
+// The panel can be driven either by a job (it resolves the venue from the job) or directly by a
+// venueId, which is what the venue Standard Base Rig editor uses.
+const props = defineProps({
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
+});
 const emit = defineEmits(['changed']);
 const { t } = useI18n();
 const $q = useQuasar();
 const open = ref(false);
-const venueId = ref(null);
+const resolvedVenueId = ref(null);
 const groups = ref([]);
 const outlets = ref([]);
 
 const groupOptions = computed(() => groups.value.map((g) => ({ value: g.id, label: g.name || '—' })));
 const caption = computed(() =>
-  venueId.value ? t('workspace.venuePowerCount', { groups: groups.value.length, outlets: outlets.value.length }) : '',
+  resolvedVenueId.value ? t('workspace.venuePowerCount', { groups: groups.value.length, outlets: outlets.value.length }) : '',
 );
 
 const failed = (err) =>
@@ -224,13 +229,18 @@ const failed = (err) =>
 
 async function load() {
   try {
-    const job = (await api.get(`/jobs/${props.jobId}`)).data;
-    venueId.value = job.venue_id || null;
-    if (!venueId.value) return;
+    // Resolve the venue: directly when venueId is given, otherwise from the job.
+    if (props.venueId) {
+      resolvedVenueId.value = props.venueId;
+    } else {
+      const job = (await api.get(`/jobs/${props.jobId}`)).data;
+      resolvedVenueId.value = job.venue_id || null;
+    }
+    if (!resolvedVenueId.value) return;
     [groups.value, outlets.value] = (
       await Promise.all([
-        api.get(`/venues/${venueId.value}/power-groups`),
-        api.get(`/venues/${venueId.value}/power-outlets`),
+        api.get(`/venues/${resolvedVenueId.value}/power-groups`),
+        api.get(`/venues/${resolvedVenueId.value}/power-outlets`),
       ])
     ).map((res) => res.data);
   } catch (err) {
@@ -250,8 +260,8 @@ async function run(call) {
 }
 
 const addGroup = () =>
-  run(() => api.post(`/venues/${venueId.value}/power-groups`, { name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`, rating_amps: 16, phases: 1 }));
-const saveGroup = (group, changes) => run(() => api.patch(`/venues/${venueId.value}/power-groups/${group.id}`, changes));
+  run(() => api.post(`/venues/${resolvedVenueId.value}/power-groups`, { name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`, rating_amps: 16, phases: 1 }));
+const saveGroup = (group, changes) => run(() => api.patch(`/venues/${resolvedVenueId.value}/power-groups/${group.id}`, changes));
 // A group or outlet belongs to the venue, so deleting one changes every job held there: it is
 // confirmed first and says what it detaches.
 function confirmDelete(message, call) {
@@ -263,14 +273,14 @@ const removeGroup = (group) =>
       name: group.name || '—',
       n: outlets.value.filter((o) => o.group_id === group.id).length,
     }),
-    () => api.delete(`/venues/${venueId.value}/power-groups/${group.id}`),
+    () => api.delete(`/venues/${resolvedVenueId.value}/power-groups/${group.id}`),
   );
 const addOutlet = () =>
-  run(() => api.post(`/venues/${venueId.value}/power-outlets`, { name: `${t('workspace.venueOutlet')} ${outlets.value.length + 1}`, connector: 'schuko', x_cm: 100, y_cm: 100 }));
-const saveOutlet = (outlet, changes) => run(() => api.patch(`/venues/${venueId.value}/power-outlets/${outlet.id}`, changes));
+  run(() => api.post(`/venues/${resolvedVenueId.value}/power-outlets`, { name: `${t('workspace.venueOutlet')} ${outlets.value.length + 1}`, connector: 'schuko', x_cm: 100, y_cm: 100 }));
+const saveOutlet = (outlet, changes) => run(() => api.patch(`/venues/${resolvedVenueId.value}/power-outlets/${outlet.id}`, changes));
 const removeOutlet = (outlet) =>
   confirmDelete(t('workspace.venueOutletDeleteWarn', { name: outlet.name || '—' }), () =>
-    api.delete(`/venues/${venueId.value}/power-outlets/${outlet.id}`),
+    api.delete(`/venues/${resolvedVenueId.value}/power-outlets/${outlet.id}`),
   );
 
 onMounted(load);

@@ -263,6 +263,12 @@
           :update-edge="(id, changes) => venueGraph.updateEdge(id, changes)"
           :delete-edge="(id) => venueGraph.removeEdge(id)"
         />
+
+        <VenuePowerPanel
+          class="q-mt-md"
+          :venue-id="venueId"
+          @changed="reloadOutlets"
+        />
       </div>
     </div>
   </q-page>
@@ -279,6 +285,7 @@ import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { useVenueGraphStore } from '@/stores/venueGraph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
+import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -310,6 +317,16 @@ async function load() {
   venue.value = venueRes.data;
   outlets.value = (outletRes.data || []).filter((o) => o.x_cm != null && o.y_cm != null);
   await venueGraph.fetchGraph(venueId.value);
+}
+
+// The power panel mutates the venue's circuits/outlets; refresh the canvas layer to match.
+async function reloadOutlets() {
+  try {
+    const { data } = await api.get(`/venues/${venueId.value}/power-outlets`);
+    outlets.value = (data || []).filter((o) => o.x_cm != null && o.y_cm != null);
+  } catch {
+    /* leave the previous outlets in place */
+  }
 }
 
 // Add a real piece of equipment from the shared catalog rather than a generic 60x30 box.
