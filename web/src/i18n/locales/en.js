@@ -1308,6 +1308,8 @@ export default {
       xCm: "X (cm)",
       yCm: "Y (cm)",
       addCorner: "Add corner",
+      venueHandle: "Venue",
+      stageHandle: "Stage",
     },
   },
   cables: {

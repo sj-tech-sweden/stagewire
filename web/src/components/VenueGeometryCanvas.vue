@@ -29,6 +29,8 @@
           </template>
           <template v-else>
             <v-rect :config="footprintRectConfig" />
+            <v-text :config="venueLabelConfig" />
+            <!-- Green handle resizes the venue footprint. -->
             <v-circle
               :config="venueResizeHandle"
               @dragend="onVenueResize"
@@ -53,6 +55,8 @@
                 :config="stageRectConfig"
                 @dragend="onStageDragEnd"
               />
+              <v-text :config="stageLabelConfig" />
+              <!-- Blue handle resizes the stage (distinct from the green venue handle). -->
               <v-circle
                 :config="stageResizeHandle"
                 @dragend="onStageResize"
@@ -297,7 +301,7 @@ const stageLineConfig = computed(() => ({
 const venueResizeHandle = computed(() => ({
   x: Math.max(0, props.venueWidth) * zoom.value,
   y: Math.max(0, props.venueHeight) * zoom.value,
-  radius: 8,
+  radius: 9,
   fill: '#35A853',
   stroke: '#1B5E20',
   strokeWidth: 2,
@@ -307,12 +311,32 @@ const venueResizeHandle = computed(() => ({
 const stageResizeHandle = computed(() => ({
   x: Math.max(0, props.stageW) * zoom.value,
   y: Math.max(0, props.stageH) * zoom.value,
-  radius: 8,
-  fill: '#35A853',
-  stroke: '#1B5E20',
+  radius: 9,
+  // Blue so it is never mistaken for the green venue handle.
+  fill: '#1E88E5',
+  stroke: '#0D47A1',
   strokeWidth: 2,
   draggable: true,
   listening: true,
+}));
+// Labels sit just inside each shape so the two handles are self-explanatory.
+const venueLabelConfig = computed(() => ({
+  x: 6,
+  y: 4,
+  text: t('venues.geometry.venueHandle'),
+  fontSize: 12,
+  fontStyle: 'bold',
+  fill: $q.dark.isActive ? '#7BD88F' : '#1B5E20',
+  listening: false,
+}));
+const stageLabelConfig = computed(() => ({
+  x: 6,
+  y: -16,
+  text: t('venues.geometry.stageHandle'),
+  fontSize: 12,
+  fontStyle: 'bold',
+  fill: $q.dark.isActive ? '#90CAF9' : '#0D47A1',
+  listening: false,
 }));
 
 function vertexConfig(p) {

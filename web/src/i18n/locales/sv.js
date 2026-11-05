@@ -1292,6 +1292,8 @@ export default {
       xCm: "X (cm)",
       yCm: "Y (cm)",
       addCorner: "Lägg till hörn",
+      venueHandle: "Lokal",
+      stageHandle: "Scen",
     },
   },
   cables: {
