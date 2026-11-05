@@ -58,7 +58,9 @@
             :label="t('workspace.addVenuePanel')"
             data-testid="add-venue-group"
             @click="addPanel()"
-          />
+          >
+            <q-tooltip>{{ t('workspace.addVenuePanelTooltip') }}</q-tooltip>
+          </q-btn>
         </div>
         <div
           v-for="row in groupRows"
@@ -131,10 +133,12 @@
             dense
             round
             color="primary"
-            icon="account_tree"
+            icon="subdirectory_arrow_right"
             :aria-label="t('workspace.addVenueSubPanel')"
             @click="addPanel(row.group.id)"
-          />
+          >
+            <q-tooltip>{{ t('workspace.addVenueSubPanelTooltip', { name: row.group.name || '—' }) }}</q-tooltip>
+          </q-btn>
           <q-btn
             flat
             dense
@@ -435,10 +439,12 @@ const addIncoming = () =>
 const addPanel = (parentId = null) =>
   run(() =>
     api.post(`/venues/${resolvedVenueId.value}/power-groups`, {
-      name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`,
+      // A panel without an explicit parent is nested under the incoming supply so the hierarchy
+      // reads incoming -> panel -> sub-panel; only a venue with no supply starts a top-level board.
+      name: `${t('workspace.venuePanel')} ${groups.value.length + 1}`,
       rating_amps: 16,
       phases: 1,
-      parent_id: parentId,
+      parent_id: parentId ?? incomingGroup.value?.id ?? null,
     }),
   );
 const saveGroup = (group, changes) => run(() => api.patch(`/venues/${resolvedVenueId.value}/power-groups/${group.id}`, changes));

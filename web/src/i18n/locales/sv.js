@@ -177,7 +177,11 @@ export default {
     venueIncoming: "Inkommande matning",
     addVenueIncoming: "Lägg till inkommande matning",
     addVenuePanel: "Lägg till panel",
+    addVenuePanelTooltip:
+      "Lägger till en distributionspanel. Om en inkommande matning finns placeras panelen under den.",
     addVenueSubPanel: "Lägg till underpanel",
+    addVenueSubPanelTooltip: 'Skapar en underpanel i "{name}".',
+    venuePanel: "Panel",
     venueGroupTop: "Översta nivå",
     venueGroupParent: "Överordnad",
     venueGroupOver: "Över gräns",

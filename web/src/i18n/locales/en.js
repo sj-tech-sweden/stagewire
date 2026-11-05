@@ -177,7 +177,11 @@ export default {
     venueIncoming: "Incoming supply",
     addVenueIncoming: "Add incoming supply",
     addVenuePanel: "Add panel",
+    addVenuePanelTooltip:
+      "Adds a distribution panel. If an incoming supply exists, the panel is nested under it.",
     addVenueSubPanel: "Add sub-panel",
+    addVenueSubPanelTooltip: 'Creates a sub-panel inside "{name}".',
+    venuePanel: "Panel",
     venueGroupTop: "Top level",
     venueGroupParent: "Parent",
     venueGroupOver: "Over limit",
