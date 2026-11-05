@@ -402,11 +402,12 @@ const groupById = computed(() => Object.fromEntries(groups.value.map((g) => [g.i
 const hasIncoming = computed(() => groups.value.some((g) => g.kind === 'incoming'));
 
 // Outlet group select only offers circuits (kind 'group'): outlets plug into fused circuits, never
-// directly into a panel/breakout/supply.
+// directly into a panel/breakout/supply. The label shows the ancestor path (board + circuit) because
+// circuits are usually just numbered 1-24 and the same number recurs across different panels.
 const circuitOptions = computed(() =>
   groups.value
     .filter((g) => g.kind === 'group')
-    .map((g) => ({ value: g.id, label: (g.temporary ? '⏱ ' : '') + (g.name || '—') })),
+    .map((g) => ({ value: g.id, label: (g.temporary ? '⏱ ' : '') + pathNames(g.id) })),
 );
 
 // The power tree, flattened with a depth so an arbitrarily nested hierarchy (incoming -> panel ->
@@ -478,9 +479,25 @@ function descendantIds(groupId, acc = new Set()) {
     });
   return acc;
 }
+// The readable path from the supply root down to a node, e.g. "Mains › Panel 1 › Circuit 3". Used in
+// option labels so that identically-named circuits (typically just numbered 1-24) are distinguishable
+// by the board they hang under, and so a node's parent is always shown by name rather than by raw id.
+function pathNames(groupId) {
+  const names = [];
+  const seen = new Set();
+  let cur = groupById.value[groupId];
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    names.unshift(cur.name || kindLabel(cur.kind) || '—');
+    cur = cur.parent_id ? groupById.value[cur.parent_id] : null;
+  }
+  return names.join(' › ');
+}
 // Eligible parents depend on the node's kind (a supply root has no parent; a circuit may only sit in
 // a panel/breakout; a board may hang off a root, a panel, or another breakout). Self and descendants
-// are excluded so the tree can never loop.
+// are excluded so the tree can never loop. The current parent is always offered even if it would
+// otherwise be ineligible (e.g. it was later reclassified), so a valid stored value never falls back
+// to displaying its raw id in the select.
 function parentOptions(group) {
   const excluded = new Set([group.id, ...descendantIds(group.id)]);
   let allowed;
@@ -491,12 +508,16 @@ function parentOptions(group) {
   } else {
     allowed = groups.value.filter((g) => ['incoming', 'generator', 'panel', 'breakout'].includes(g.kind));
   }
-  return [
-    { value: null, label: t('workspace.venueGroupTop') },
-    ...allowed
-      .filter((g) => !excluded.has(g.id))
-      .map((g) => ({ value: g.id, label: (g.temporary ? '⏱ ' : '') + (g.name || '—') })),
-  ];
+  const opts = allowed
+    .filter((g) => !excluded.has(g.id))
+    .map((g) => ({ value: g.id, label: (g.temporary ? '⏱ ' : '') + pathNames(g.id) }));
+  if (group.parent_id) {
+    const cur = groupById.value[group.parent_id];
+    if (cur && !opts.some((o) => o.value === group.parent_id)) {
+      opts.push({ value: group.parent_id, label: (cur.temporary ? '⏱ ' : '') + pathNames(group.parent_id) });
+    }
+  }
+  return [{ value: null, label: t('workspace.venueGroupTop') }, ...opts];
 }
 
 const caption = computed(() =>

@@ -1197,6 +1197,24 @@ test('venue power panel builds a tree of panels, circuits, generators and tempor
   await page.getByTestId('add-venue-group').click();
   await expect.poll(async () => (await groups()).filter((g) => g.kind === 'panel').length).toBe(1);
   const panel = (await groups()).find((g) => g.kind === 'panel')!;
+  const incomingName = (await groups()).find((g) => g.kind === 'incoming')!.name;
+
+  // The panel's parent select shows the supply root by its name, never a raw id (the parent field
+  // used to fall back to displaying the UUID when the stored value had no matching option).
+  await expect
+    .poll(async () =>
+      (
+        await page
+          .getByTestId('venue-group')
+          .filter({ hasText: panel.name })
+          .getByTestId('venue-group-parent')
+          .innerText()
+      ).trim(),
+    )
+    .not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  await expect(
+    page.getByTestId('venue-group').filter({ hasText: panel.name }).getByTestId('venue-group-parent'),
+  ).toContainText(incomingName);
 
   // A fused circuit is added inside the panel (not as a standalone node).
   await page.getByTestId('venue-group')
@@ -1231,11 +1249,17 @@ test('venue power panel builds a tree of panels, circuits, generators and tempor
     })
     .toBe(true);
 
-  // The outlet group select only offers circuits (kind 'group'), never a panel or supply.
+  // The outlet group select only offers circuits (kind 'group'), never a panel or supply, and each
+  // circuit option is labelled with the board it hangs under so identically-numbered circuits (1-24)
+  // stay distinguishable across different panels.
   await page.getByTestId('add-venue-outlet').click();
   const groupSelect = page.getByTestId('venue-outlet-group');
   await groupSelect.click();
   await expect(page.locator('.q-menu .q-item')).toHaveCount(1);
+  const circuit = (await groups()).find((g) => g.kind === 'group')!;
+  const circuitPanel = (await groups()).find((g) => g.kind === 'panel')!;
+  await expect(page.locator('.q-menu .q-item').first()).toContainText(circuitPanel.name);
+  await expect(page.locator('.q-menu .q-item').first()).toContainText(circuit.name);
   await page.keyboard.press('Escape');
 });
 
