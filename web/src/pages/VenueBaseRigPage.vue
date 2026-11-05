@@ -1,18 +1,24 @@
 <template>
-  <q-page class="column">
-    <q-bar class="bg-primary text-white q-px-md">
+  <q-page
+    padding
+    class="column"
+  >
+    <div class="row items-center q-col-gutter-sm q-mb-md">
       <q-btn
-        dense
         flat
+        round
         icon="arrow_back"
-        :label="t('venues.baseRig.back')"
+        :aria-label="t('venues.baseRig.back')"
         @click="goBack"
       />
-      <div class="q-ml-md text-subtitle1">
-        {{ venue ? venue.name : '' }}
-        <span class="text-caption">· {{ t('venues.baseRig.title') }}</span>
+      <div class="col">
+        <div class="text-h6">
+          {{ venue ? venue.name : '' }}
+        </div>
+        <div class="text-caption">
+          {{ t('venues.baseRig.title') }}
+        </div>
       </div>
-      <q-space />
       <q-badge
         v-if="venueGraph.dirty"
         color="amber"
@@ -21,17 +27,16 @@
         {{ t('venues.baseRig.unsaved') }}
       </q-badge>
       <q-btn
-        dense
-        flat
+        color="primary"
         icon="save"
         :label="t('venues.baseRig.save')"
         :disable="!venueGraph.dirty || venueGraph.loading"
         @click="save"
       />
-    </q-bar>
+    </div>
 
     <div
-      class="row q-col-gutter-md q-pa-md col-grow"
+      class="row q-col-gutter-md col-grow"
       :class="$q.screen.lt.sm ? 'column' : ''"
     >
       <div
@@ -170,6 +175,33 @@
           />
           <q-btn
             dense
+            no-caps
+            icon="edit"
+            :color="audienceDrawing ? 'primary' : undefined"
+            :label="t('stagePlot.audienceDraw')"
+            @click="startAudience"
+          />
+          <template v-if="audienceDrawing">
+            <q-btn
+              dense
+              no-caps
+              icon="check"
+              color="positive"
+              :label="t('stagePlot.audienceFinish')"
+              :disable="audienceDraft.length < 3"
+              @click="finishAudience"
+            />
+            <q-btn
+              dense
+              no-caps
+              icon="clear"
+              color="negative"
+              :label="t('stagePlot.audienceClear')"
+              @click="clearAudienceDraft"
+            />
+          </template>
+          <q-btn
+            dense
             outline
             color="negative"
             icon="delete"
@@ -190,15 +222,24 @@
           :connect-mode="connectMode"
           :show-outlets="showOutlets"
           :show-audience="showAudience"
+          :audience-drawing="audienceDrawing"
+          :audience-draft="audienceDraft"
           @select="onSelect"
           @move="onMove"
           @connect="onConnect"
+          @audience-point="onAudiencePoint"
         />
         <div
           v-if="connectMode"
           class="text-caption q-mt-xs text-grey-7"
         >
           {{ t('venues.baseRig.connecting') }}
+        </div>
+        <div
+          v-else-if="audienceDrawing"
+          class="text-caption q-mt-xs text-grey-7"
+        >
+          {{ t('stagePlot.audienceHint') }}
         </div>
       </div>
 
@@ -301,6 +342,10 @@ const deviceScale = ref(1);
 const connectMode = ref(false);
 const showOutlets = ref(true);
 const showAudience = ref(true);
+// Drawing an audience area: clicks on the canvas (in venue cm) accumulate in audienceDraft until
+// the area is finished and saved onto the venue's audience_polygon.
+const audienceDrawing = ref(false);
+const audienceDraft = ref([]);
 
 const frame = computed(() => (venue.value ? frameFromVenue(venue.value) : null));
 
@@ -380,6 +425,34 @@ function onMove({ id, x, y }) {
 function onConnect({ srcId, dstId }) {
   venueGraph.connect(srcId, dstId);
   connectMode.value = false;
+}
+
+// --- Audience area ---------------------------------------------------------------------------
+function startAudience() {
+  audienceDrawing.value = true;
+  connectMode.value = false;
+  audienceDraft.value = [];
+}
+function onAudiencePoint(point) {
+  audienceDraft.value.push(point);
+}
+// Persist the drawn outline as the venue's audience polygon (venue coordinates, no stage offset).
+async function saveAudience(polygon) {
+  const { data } = await api.patch(`/venues/${venueId.value}`, { audience_polygon: polygon });
+  venue.value = { ...venue.value, audience_polygon: data.audience_polygon ?? polygon };
+}
+async function finishAudience() {
+  if (audienceDraft.value.length < 3) return;
+  await saveAudience(audienceDraft.value);
+  audienceDrawing.value = false;
+  audienceDraft.value = [];
+}
+async function clearAudienceDraft() {
+  audienceDraft.value = [];
+  if (venue.value?.audience_polygon?.length) {
+    await saveAudience([]);
+  }
+  audienceDrawing.value = false;
 }
 function deleteSelected() {
   if (venueGraph.selectedId) venueGraph.removeDevice(venueGraph.selectedId);

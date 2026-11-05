@@ -19,57 +19,87 @@
           {{ t('workspace.venuePowerHint') }}
         </div>
 
+        <div
+          v-if="incomingGroup"
+          class="row items-center q-mb-sm q-px-sm q-py-xs"
+          :class="incomingOver ? 'text-negative' : 'text-grey-7'"
+          style="border-left: 3px solid currentColor"
+        >
+          <q-icon
+            name="electrical_services"
+            class="q-mr-xs"
+          />
+          <div>
+            <span class="text-subtitle2">{{ t('workspace.venueIncoming') }}:</span>
+            <span class="text-weight-bold">
+              {{ formatAmps(totalLoad) }} / {{ formatAmps(incomingGroup.rating_amps) }} A
+            </span>
+            <span v-if="incomingOver"> · {{ t('workspace.venueGroupOver') }}</span>
+          </div>
+        </div>
+
         <div class="row items-center q-mb-xs">
           <div class="text-subtitle2 col">
             {{ t('workspace.venueGroups') }}
           </div>
           <q-btn
+            v-if="!incomingGroup"
+            flat
+            no-caps
+            icon="electrical_services"
+            :label="t('workspace.addVenueIncoming')"
+            data-testid="add-venue-incoming"
+            @click="addIncoming"
+          />
+          <q-btn
             flat
             no-caps
             icon="add"
-            :label="t('workspace.addVenueGroup')"
+            :label="t('workspace.addVenuePanel')"
             data-testid="add-venue-group"
-            @click="addGroup"
+            @click="addPanel()"
           />
         </div>
         <div
-          v-for="group in groups"
-          :key="group.id"
-          class="row q-col-gutter-xs items-center q-mb-xs"
+          v-for="row in groupRows"
+          :key="row.group.id"
+          class="row q-col-gutter-xs items-center q-mb-xs venue-group"
+          :class="groupOver(row.group) ? 'text-negative' : ''"
+          :style="{ marginLeft: row.depth * 18 + 'px' }"
           data-testid="venue-group"
         >
           <q-input
-            :model-value="group.name"
-            class="col-12 col-sm-5"
+            :model-value="row.group.name"
+            class="col-12 col-sm-4"
             dense
             outlined
             :label="t('workspace.trussName')"
             data-testid="venue-group-name"
-            @change="(v) => saveGroup(group, { name: v })"
+            @change="(v) => saveGroup(row.group, { name: v })"
           />
           <q-input
-            :model-value="group.rating_amps"
-            class="col-6 col-sm-3"
+            :model-value="row.group.rating_amps"
+            class="col-6 col-sm-2"
             dense
             outlined
             type="number"
             :label="t('workspace.powerRating')"
             data-testid="venue-group-rating"
-            @change="(v) => saveGroup(group, { rating_amps: v === '' ? null : Number(v) })"
+            @change="(v) => saveGroup(row.group, { rating_amps: v === '' ? null : Number(v) })"
           />
           <q-select
-            :model-value="group.phases"
+            :model-value="row.group.phases"
             class="col-4 col-sm-2"
             dense
             outlined
             emit-value
             :options="[1, 3]"
             :label="t('workspace.venueGroupPhases')"
-            @update:model-value="(v) => saveGroup(group, { phases: v })"
+            @update:model-value="(v) => saveGroup(row.group, { phases: v })"
           />
           <q-select
-            v-if="group.phases === 1"
-            :model-value="group.phase || 'L1'"
+            v-if="row.group.phases === 1"
+            :model-value="row.group.phase || 'L1'"
             class="col-4 col-sm-2"
             dense
             outlined
@@ -77,7 +107,33 @@
             :options="['L1', 'L2', 'L3']"
             :label="t('workspace.outputPhase')"
             data-testid="venue-group-phase"
-            @update:model-value="(v) => saveGroup(group, { phase: v })"
+            @update:model-value="(v) => saveGroup(row.group, { phase: v })"
+          />
+          <q-select
+            :model-value="row.group.parent_id"
+            class="col-6 col-sm-3"
+            dense
+            outlined
+            clearable
+            emit-value
+            map-options
+            :options="parentOptions(row.group)"
+            :label="t('workspace.venueGroupParent')"
+            data-testid="venue-group-parent"
+            @update:model-value="(v) => saveGroup(row.group, { parent_id: v || null })"
+          />
+          <div class="col-12 col-sm-2 text-caption">
+            {{ formatAmps(groupLoad(row.group.id)) }} A
+            <span v-if="groupOver(row.group)"> · {{ t('workspace.venueGroupOver') }}</span>
+          </div>
+          <q-btn
+            flat
+            dense
+            round
+            color="primary"
+            icon="account_tree"
+            :aria-label="t('workspace.addVenueSubPanel')"
+            @click="addPanel(row.group.id)"
           />
           <q-btn
             flat
@@ -86,7 +142,7 @@
             color="negative"
             icon="delete"
             :aria-label="t('workspace.remove')"
-            @click="removeGroup(group)"
+            @click="removeGroup(row.group)"
           />
         </div>
 
@@ -219,7 +275,91 @@ const resolvedVenueId = ref(null);
 const groups = ref([]);
 const outlets = ref([]);
 
-const groupOptions = computed(() => groups.value.map((g) => ({ value: g.id, label: g.name || '—' })));
+const groupOptions = computed(() => {
+  const ids = new Set(groups.value.map((g) => g.id));
+  const depthOf = {};
+  const depth = (g, d) => {
+    depthOf[g.id] = d;
+    groups.value.filter((c) => c.parent_id === g.id).forEach((c) => depth(c, d + 1));
+  };
+  groups.value.filter((g) => !g.parent_id || !ids.has(g.parent_id)).forEach((g) => depth(g, 0));
+  return groups.value.map((g) => ({
+    value: g.id,
+    label: (g.is_incoming ? '⚡ ' : '    '.repeat(depthOf[g.id] || 0)) + (g.name || '—'),
+  }));
+});
+
+// The power tree, flattened with a depth so an arbitrarily nested hierarchy (incoming -> panel ->
+// sub-panel -> ...) renders without a recursive component. A group's load is its outlets' ratings
+// plus the loads of every panel nested beneath it.
+const groupRows = computed(() => {
+  const ids = new Set(groups.value.map((g) => g.id));
+  const rows = [];
+  const walk = (parentId, depth) => {
+    groups.value
+      .filter((g) => (g.parent_id || null) === (parentId || null))
+      .forEach((g) => {
+        rows.push({ group: g, depth });
+        walk(g.id, depth + 1);
+      });
+  };
+  groups.value
+    .filter((g) => !g.parent_id || !ids.has(g.parent_id))
+    .forEach((g) => walk(g.parent_id || null, 0));
+  return rows;
+});
+
+// Sum of every outlet's rating: this is what the incoming supply actually feeds, so it is what the
+// incoming limit is checked against (a venue can exceed the incoming supply even when each panel is
+// within its own breaker, e.g. 30 A on panel A + 25 A on panel B against a 50 A incoming supply).
+const totalLoad = computed(() =>
+  outlets.value.reduce((sum, o) => sum + (o.rating_amps || 0), 0),
+);
+const incomingGroup = computed(() => groups.value.find((g) => g.is_incoming) || null);
+const incomingOver = computed(
+  () =>
+    Boolean(incomingGroup.value) &&
+    incomingGroup.value.rating_amps != null &&
+    totalLoad.value > incomingGroup.value.rating_amps,
+);
+
+function groupLoad(id) {
+  const direct = outlets.value
+    .filter((o) => o.group_id === id && o.rating_amps != null)
+    .reduce((sum, o) => sum + (o.rating_amps || 0), 0);
+  const childSum = groups.value
+    .filter((g) => g.parent_id === id)
+    .reduce((sum, c) => sum + groupLoad(c.id), 0);
+  return direct + childSum;
+}
+// A panel is over when its own subtree draws more than the panel's breaker rating allows.
+function groupOver(group) {
+  return group.rating_amps != null && groupLoad(group.id) > group.rating_amps;
+}
+function formatAmps(v) {
+  if (v == null) return '—';
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+function descendantIds(groupId, acc = new Set()) {
+  groups.value
+    .filter((g) => g.parent_id === groupId)
+    .forEach((c) => {
+      acc.add(c.id);
+      descendantIds(c.id, acc);
+    });
+  return acc;
+}
+// A group's eligible parents are everything except itself and its own descendants (that would loop).
+function parentOptions(group) {
+  const excluded = new Set([group.id, ...descendantIds(group.id)]);
+  return [
+    { value: null, label: t('workspace.venueGroupTop') },
+    ...groups.value
+      .filter((g) => !excluded.has(g.id))
+      .map((g) => ({ value: g.id, label: (g.is_incoming ? '⚡ ' : '') + (g.name || '—') })),
+  ];
+}
+
 const caption = computed(() =>
   resolvedVenueId.value ? t('workspace.venuePowerCount', { groups: groups.value.length, outlets: outlets.value.length }) : '',
 );
@@ -259,8 +399,24 @@ async function run(call) {
   }
 }
 
-const addGroup = () =>
-  run(() => api.post(`/venues/${resolvedVenueId.value}/power-groups`, { name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`, rating_amps: 16, phases: 1 }));
+const addIncoming = () =>
+  run(() =>
+    api.post(`/venues/${resolvedVenueId.value}/power-groups`, {
+      name: t('workspace.venueIncoming'),
+      rating_amps: 63,
+      phases: 3,
+      is_incoming: true,
+    }),
+  );
+const addPanel = (parentId = null) =>
+  run(() =>
+    api.post(`/venues/${resolvedVenueId.value}/power-groups`, {
+      name: `${t('workspace.venueGroup')} ${groups.value.length + 1}`,
+      rating_amps: 16,
+      phases: 1,
+      parent_id: parentId,
+    }),
+  );
 const saveGroup = (group, changes) => run(() => api.patch(`/venues/${resolvedVenueId.value}/power-groups/${group.id}`, changes));
 // A group or outlet belongs to the venue, so deleting one changes every job held there: it is
 // confirmed first and says what it detaches.
