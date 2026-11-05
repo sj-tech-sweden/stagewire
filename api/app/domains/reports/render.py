@@ -1016,7 +1016,7 @@ def _compose_letterhead(pdf_content: bytes, letterhead: ReportLetterhead | None)
 async def render_report_pdf(
     db: AsyncSession,
     template: ReportTemplate,
-    job_id: UUID,
+    subject,
     patchpoint_id: UUID | None = None,
     stage_plot_overrides: dict[str, Any] | None = None,
 ) -> bytes:
@@ -1024,7 +1024,7 @@ async def render_report_pdf(
     definition = REPORT_DEFINITIONS_BY_KEY.get(definition_key)
     if definition is None:
         raise ReportRenderError(f"No report implementation is registered for '{definition_key}'")
-    context = await definition.context_builder(db, job_id)
+    context = await definition.context_builder(db, subject)
     if definition.requires_patchpoint:
         if patchpoint_id is None:
             raise ReportRenderError("Select a patchpoint to generate this report")

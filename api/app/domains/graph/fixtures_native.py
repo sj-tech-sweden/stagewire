@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.graph import dmx_native, power_native
 from app.domains.graph.backfill import Backfill
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 SETTING_KEYS = (
     "universe",
@@ -79,9 +79,13 @@ def _hosted(host: GraphDevice) -> bool:
     return bool(host.legacy_ref and host.legacy_ref.startswith("device:"))
 
 
-async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, GraphDevice]:
+async def host_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> dict[uuid.UUID, GraphDevice]:
     out: dict[uuid.UUID, GraphDevice] = {}
-    for node in (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all():
+    for node in (
+        await db.scalars(select(GraphDevice).where(scope_filter(GraphDevice, job_id, venue_id)))
+    ).all():
         fid = fixture_id_of(node)
         if fid is not None:
             out[fid] = node
@@ -114,26 +118,34 @@ def fixture_view(
     )
 
 
-async def _id_maps(db: AsyncSession, job_id: uuid.UUID) -> tuple[dict, dict]:
+async def _id_maps(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> tuple[dict, dict]:
     """Graph node id (as the attributes hold it) -> public id, for points and power nodes."""
     points = {
         str(n.id): public_id(n)
         for n in (
             await db.scalars(
                 select(GraphDevice).where(
-                    GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                    scope_filter(GraphDevice, job_id, venue_id),
+                    GraphDevice.kind == "rigging_point",
                 )
             )
         ).all()
     }
-    power = {str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id)).items()}
+    power = {
+        str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id, venue_id)).items()
+    }
     return points, power
 
 
-async def load_fixtures(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
-    points, power = await _id_maps(db, job_id)
+async def load_fixtures(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
+    points, power = await _id_maps(db, job_id, venue_id)
     views = [
-        fixture_view(fid, h, points, power) for fid, h in (await host_nodes(db, job_id)).items()
+        fixture_view(fid, h, points, power)
+        for fid, h in (await host_nodes(db, job_id, venue_id)).items()
     ]
     return sorted(views, key=lambda f: (f.position, f.created_at, str(f.id)))
 

@@ -59,9 +59,9 @@ def _scope(model, job_id, venue_id):
     raise ValueError("a fixture type requires a job_id or venue_id")
 
 
-async def list_fixtures(db: AsyncSession, job_id: UUID):
-    """The job's fixtures (graph-backed objects shaped like the old rows)."""
-    return await fixtures_native.load_fixtures(db, job_id)
+async def list_fixtures(db: AsyncSession, job_id: UUID | None = None, venue_id: UUID | None = None):
+    """The fixtures of a job or a venue base rig (graph-backed objects shaped like the old rows)."""
+    return await fixtures_native.load_fixtures(db, job_id, venue_id)
 
 
 async def list_types(

@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import Backfill
 from app.domains.graph.ids import power_id_of, public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 POWER_KINDS = ("source", "distro", "breakout", "extension")
 SETTINGS = ("rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id")
@@ -46,10 +46,14 @@ def _uuid(value) -> uuid.UUID | None:
         return None
 
 
-async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, GraphDevice]:
-    """Every power node of the job: public power id -> its host node."""
+async def host_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> dict[uuid.UUID, GraphDevice]:
+    """Every power node of the context: public power id -> its host node."""
     out: dict[uuid.UUID, GraphDevice] = {}
-    for node in (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all():
+    for node in (
+        await db.scalars(select(GraphDevice).where(scope_filter(GraphDevice, job_id, venue_id)))
+    ).all():
         power_id = power_id_of(node)
         if power_id is not None:
             out[power_id] = node

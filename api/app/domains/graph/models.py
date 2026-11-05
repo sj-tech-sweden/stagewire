@@ -90,3 +90,19 @@ class ConnectionEdge(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __mapper_args__ = {"version_id_col": revision}
+
+
+def scope_filter(model, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None):
+    """Narrow a graph row (device or edge) to exactly one context: a job or a venue.
+
+    Mirrors the lighting ``_scope`` helper. A row can never belong to both scopes at once
+    (the venue base rig sets ``venue_id`` and leaves ``job_id`` NULL), so passing both, or
+    neither, is a programming error. Existing callers that pass only ``job_id`` keep working.
+    """
+    if job_id is not None and venue_id is not None:
+        raise ValueError("a graph row cannot be scoped to both a job and a venue")
+    if job_id is not None:
+        return model.job_id == job_id
+    if venue_id is not None:
+        return model.venue_id == venue_id
+    raise ValueError("a graph row requires a job_id or venue_id")

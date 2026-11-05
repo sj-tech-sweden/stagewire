@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph import power_native
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 ELEMENT_FIELDS = (
     "element_type",
@@ -79,9 +79,13 @@ def _age(node: GraphDevice) -> tuple[float, str]:
     return (node.created_at.timestamp() if node.created_at else 0.0, str(node.id))
 
 
-async def element_nodes(db: AsyncSession, job_id: uuid.UUID) -> list[GraphDevice]:
+async def element_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[GraphDevice]:
     rows = await db.scalars(
-        select(GraphDevice).where(GraphDevice.job_id == job_id, GraphDevice.kind == "plot_element")
+        select(GraphDevice).where(
+            scope_filter(GraphDevice, job_id, venue_id), GraphDevice.kind == "plot_element"
+        )
     )
     return sorted(rows.all(), key=_age)
 
@@ -97,19 +101,24 @@ def _uuid(value) -> uuid.UUID | None:
         return None
 
 
-async def _id_maps(db: AsyncSession, job_id: uuid.UUID) -> tuple[dict, dict]:
+async def _id_maps(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> tuple[dict, dict]:
     """Graph node id (as the attributes hold it) -> public id, for rigging points and power."""
     points = {
         str(n.id): public_id(n)
         for n in (
             await db.scalars(
                 select(GraphDevice).where(
-                    GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                    scope_filter(GraphDevice, job_id, venue_id),
+                    GraphDevice.kind == "rigging_point",
                 )
             )
         ).all()
     }
-    power = {str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id)).items()}
+    power = {
+        str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id, venue_id)).items()
+    }
     return points, power
 
 
@@ -141,17 +150,19 @@ def view(node: GraphDevice, points: dict, power: dict, link_edges: dict) -> Simp
     )
 
 
-async def load_elements(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
-    nodes = await element_nodes(db, job_id)
+async def load_elements(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
+    nodes = await element_nodes(db, job_id, venue_id)
     if not nodes:
         return []
-    points, power = await _id_maps(db, job_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     ids = {n.id for n in nodes}
     link_edges: dict[uuid.UUID, dict[str, uuid.UUID]] = {}
     for edge in (
         await db.scalars(
             select(ConnectionEdge).where(
-                ConnectionEdge.job_id == job_id, ConnectionEdge.signal == "link"
+                scope_filter(ConnectionEdge, job_id, venue_id), ConnectionEdge.signal == "link"
             )
         )
     ).all():

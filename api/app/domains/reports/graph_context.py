@@ -5,7 +5,6 @@ Same rows as the legacy ``_channel_list_context`` / ``_patch_sheet_context`` in
 """
 
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -217,8 +216,14 @@ def patch_sheets(devices: list[Any], edges: list[Any]) -> list[dict]:
 
 
 async def load_graph(
-    db: AsyncSession, job_id: UUID
+    db: AsyncSession, context
 ) -> tuple[list[GraphDevice], list[ConnectionEdge], list]:
-    devices = (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all()
-    edges = (await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))).all()
-    return list(devices), list(edges), await plot_native.load_elements(db, job_id)
+    """The graph rows a report reads, scoped to a job or a venue (see ``reports.context``)."""
+    devices = (await db.scalars(select(GraphDevice).where(context.filter(GraphDevice)))).all()
+    edges = (await db.scalars(select(ConnectionEdge).where(context.filter(ConnectionEdge)))).all()
+    elements = await plot_native.load_elements(
+        db,
+        job_id=context.id if context.is_job else None,
+        venue_id=context.id if context.is_venue else None,
+    )
+    return list(devices), list(edges), elements

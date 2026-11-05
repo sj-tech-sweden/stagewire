@@ -409,3 +409,36 @@ async def put_venue_base_rig(
     """
     await _get_venue_or_404(db, venue_id)
     return await replace_base_rig(db, venue_id, payload)
+
+
+@router.get("/venues/{venue_id}/patch-sheets", response_model=list[audio_schemas.PatchSheetRead])
+async def venue_patch_sheets(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[audio_schemas.PatchSheetRead]:
+    """The venue base rig's patch points, derived from its graph (mirrors the job's patch-sheets).
+
+    The venue has no legacy audio tables, so its patch points come from the same graph the report
+    builder reads; the report itself recomputes the rows, so only the id (the patched device) and
+    name are needed to populate the picker.
+    """
+    await _get_venue_or_404(db, venue_id)
+    from app.domains.reports import graph_context
+    from app.domains.reports.context import JobOrVenue
+
+    devices, edges, _ = await graph_context.load_graph(db, JobOrVenue.venue(venue_id))
+    sheets = graph_context.patch_sheets(devices, edges)
+    out: list[audio_schemas.PatchSheetRead] = []
+    for sheet in sheets:
+        try:
+            device_id = UUID(str(sheet["id"]))
+        except (ValueError, TypeError):
+            continue
+        out.append(
+            audio_schemas.PatchSheetRead(
+                name=sheet["name"],
+                device_id=device_id,
+                point_type=sheet.get("type", "mixer"),
+                channels=[],
+            )
+        )
+    return out

@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph import power_native
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 REF = "device:"
 SPEC_FIELDS = (
@@ -172,28 +172,35 @@ def _name(name: str | None, device_type: str | None) -> str:
 # --- reads ----------------------------------------------------------------------------------
 
 
-async def device_nodes(db: AsyncSession, job_id: uuid.UUID) -> list[GraphDevice]:
+async def device_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[GraphDevice]:
     rows = await db.scalars(
         select(GraphDevice).where(
-            GraphDevice.job_id == job_id, GraphDevice.legacy_ref.like(f"{REF}%")
+            scope_filter(GraphDevice, job_id, venue_id), GraphDevice.legacy_ref.like(f"{REF}%")
         )
     )
     return sorted(rows.all(), key=lambda n: (n.position, *_age(n)))
 
 
-async def _id_maps(db: AsyncSession, job_id: uuid.UUID) -> tuple[dict, dict]:
+async def _id_maps(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> tuple[dict, dict]:
     """Graph node id (as the attributes hold it) -> public id, for rigging points and power."""
     points = {
         str(n.id): public_id(n)
         for n in (
             await db.scalars(
                 select(GraphDevice).where(
-                    GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                    scope_filter(GraphDevice, job_id, venue_id),
+                    GraphDevice.kind == "rigging_point",
                 )
             )
         ).all()
     }
-    power = {str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id)).items()}
+    power = {
+        str(h.id): pid for pid, h in (await power_native.host_nodes(db, job_id, venue_id)).items()
+    }
     return points, power
 
 
@@ -222,11 +229,13 @@ def device_row(node: GraphDevice, points: dict, power: dict) -> SimpleNamespace:
     )
 
 
-async def load_devices(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
-    nodes = await device_nodes(db, job_id)
+async def load_devices(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
+    nodes = await device_nodes(db, job_id, venue_id)
     if not nodes:
         return []
-    points, power = await _id_maps(db, job_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     return [device_row(n, points, power) for n in nodes]
 
 
