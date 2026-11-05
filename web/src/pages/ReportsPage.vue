@@ -942,7 +942,7 @@ async function previewTemplate() {
       ? { patchpoint_id: previewPatchpointId.value }
       : {}
     const blob = await store.fetchPreview(
-      previewJobId.value,
+      { kind: 'job', id: previewJobId.value },
       selectedTemplate.value,
       'blob',
       options,
@@ -1121,7 +1121,7 @@ watch(previewJobId, async (jobId) => {
   try {
     const [plotData, patchpointSheets] = await Promise.all([
       store.fetchStagePlotData(jobId, previewJob.value || {}),
-      store.fetchPatchSheets(jobId),
+      store.fetchPatchSheets({ kind: 'job', id: jobId }),
     ])
     if (previewJobId.value !== jobId) return
     stagePlotElements.value = plotData.elements

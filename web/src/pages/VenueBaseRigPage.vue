@@ -50,6 +50,12 @@
         :label="t('workspace.library')"
         @click="libraryOpen = true"
       />
+      <q-btn
+        outline
+        icon="summarize"
+        :label="t('reports.openReports')"
+        @click="reportsOpen = true"
+      />
     </div>
 
     <div
@@ -360,6 +366,11 @@
       :venue-id="venueId"
       class="col-grow"
     />
+
+    <ReportGenerationDialog
+      v-model="reportsOpen"
+      :venue-id="venueId"
+    />
   </q-page>
 </template>
 
@@ -377,6 +388,7 @@ import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -389,6 +401,7 @@ const venueId = computed(() => route.params.venueId);
 // (incremental, reuses the job's list/chain/Wireless Workbench UX for the venue's rig).
 const view = ref('stage');
 const libraryOpen = ref(false);
+const reportsOpen = ref(false);
 const venue = ref(null);
 const outlets = ref([]);
 const powerOutlets = ref([]);
