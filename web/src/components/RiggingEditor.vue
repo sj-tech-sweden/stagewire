@@ -1,6 +1,6 @@
 <template>
   <div data-testid="rigging-editor">
-    <VenuePowerPanel
+    <PowerPanel
       :job-id="jobId"
       @changed="loadOutlets"
     />
@@ -796,7 +796,7 @@ import { useGraphStore } from '@/stores/graph';
 import OutputsField from '@/components/OutputsField.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
-import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
+import PowerPanel from '@/components/PowerPanel.vue';
 import { cableFor, loadStatusColor, longFeeds, outputsLabel, powerInletLabel, powerTreeRows } from '@/utils/workspace';
 
 const props = defineProps({ jobId: { type: String, required: true } });

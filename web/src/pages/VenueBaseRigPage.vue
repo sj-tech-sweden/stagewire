@@ -348,7 +348,7 @@
           :delete-edge="(id) => venueGraph.removeEdge(id)"
         />
 
-        <VenuePowerPanel
+        <PowerPanel
           class="q-mt-md"
           :venue-id="venueId"
           @changed="reloadOutlets"
@@ -386,7 +386,7 @@ import { useVenueGraphStore } from '@/stores/venueGraph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
-import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
+import PowerPanel from '@/components/PowerPanel.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 
