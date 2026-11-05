@@ -1,3 +1,4 @@
+from collections import defaultdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,17 @@ from app.domains.rigging import connectors
 from app.domains.venues import schemas, service
 from app.domains.venues.base_rig import get_base_rig, replace_base_rig
 from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
+from app.domains.venues.power_load import summarize_venue_power
+
+
+def _uuid(value) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError):
+        return None
+
 
 router = APIRouter(
     tags=["venues"], dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)]
@@ -265,6 +277,61 @@ async def delete_power_outlet(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found")
     await db.delete(outlet)
     await db.commit()
+
+
+@router.get("/venues/{venue_id}/power-load", response_model=schemas.VenuePowerLoadRead)
+async def venue_power_load(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> schemas.VenuePowerLoadRead:
+    """Device-driven load for the venue's supply, used by the over-limit check.
+
+    The load is the watts of the venue's Standard Base Rig devices, each attributed to the outlet
+    or group it plugs into (``attributes.venue_outlet_id`` / ``attributes.venue_group_id`` on the
+    device). This is the actual draw, not the sum of each socket's capacity, so a panel with
+    several sockets is not marked overloaded just for existing.
+    """
+    await _get_venue_or_404(db, venue_id)
+    devices = (
+        await db.scalars(
+            select(GraphDevice).where(
+                GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None)
+            )
+        )
+    ).all()
+    outlet_watts: dict[UUID, float] = defaultdict(float)
+    group_direct_watts: dict[UUID, float] = defaultdict(float)
+    for device in devices:
+        attrs = device.attributes or {}
+        raw = attrs.get("power_w")
+        if raw is None:
+            continue
+        try:
+            watts = float(raw)
+        except (TypeError, ValueError):
+            continue
+        outlet_id = _uuid(attrs.get("venue_outlet_id"))
+        group_id = _uuid(attrs.get("venue_group_id"))
+        if outlet_id is not None:
+            outlet_watts[outlet_id] += watts
+        elif group_id is not None:
+            group_direct_watts[group_id] += watts
+
+    groups = (
+        await db.scalars(select(VenuePowerGroup).where(VenuePowerGroup.venue_id == venue_id))
+    ).all()
+    outlets = (
+        await db.scalars(select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == venue_id))
+    ).all()
+    summary = summarize_venue_power(groups, outlets, dict(outlet_watts), dict(group_direct_watts))
+    return schemas.VenuePowerLoadRead(
+        outlets=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.outlets],
+        groups=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.groups],
+        incoming=(
+            schemas.VenuePowerElementLoad(**vars(summary.incoming)) if summary.incoming else None
+        ),
+        total_watts=summary.total_watts,
+        total_amps=summary.total_amps,
+    )
 
 
 # --- Standard Base Rig -------------------------------------------------------------------------

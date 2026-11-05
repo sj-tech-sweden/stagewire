@@ -156,6 +156,26 @@ class VenuePowerOutletRead(VenuePowerOutletBase):
     venue_id: UUID
 
 
+class VenuePowerElementLoad(BaseModel):
+    """The load drawn through one supply element (outlet or group) and whether it is over limit."""
+
+    id: UUID
+    watts: float
+    amps: float
+    over: bool
+
+
+class VenuePowerLoadRead(BaseModel):
+    """Device-driven load for a venue's power supply, computed server-side and shared by the venue
+    Standard Base Rig and the job workspace so both show the same over-limit check."""
+
+    outlets: list[VenuePowerElementLoad] = Field(default_factory=list)
+    groups: list[VenuePowerElementLoad] = Field(default_factory=list)
+    incoming: VenuePowerElementLoad | None = None
+    total_watts: float = 0.0
+    total_amps: float = 0.0
+
+
 # --- Standard Base Rig -------------------------------------------------------------------------
 # A venue's Standard Base Rig is a graph (devices + connection edges) owned by the venue rather
 # than by a job. It is stored in the same unified `graph_*` tables and cloned onto a job when the

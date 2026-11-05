@@ -226,6 +226,7 @@ export default {
     extensionFrom: "Product (Stockwire)",
     venueOutlet: "Venue outlet",
     sourceFromOutlet: "Source from a venue outlet",
+    devicePowerConnection: "Connected to",
     longFeeds: "Long feeds on the plot",
     longFeedsHint:
       "Feeds longer than the threshold are suggested an extension cord.",
@@ -276,6 +277,7 @@ export default {
     powerParent: "Fed from",
     powerFeed: "Feed connector",
     powerRating: "Rating (A)",
+    powerWatts: "Power (W)",
     powerActive: "Active",
     addFeed: "Add feed",
     feedFrom: "Extra feed from",

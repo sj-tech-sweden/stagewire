@@ -204,6 +204,13 @@
             :label="t('workspace.powerRating')"
             @change="(v) => saveOutlet(outlet, { rating_amps: v === '' ? null : Number(v) })"
           />
+          <div
+            class="col-4 col-sm-2 self-center text-caption"
+            :class="outletOver(outlet.id) ? 'text-negative' : 'text-grey-7'"
+          >
+            {{ formatAmps(outletLoad(outlet.id)) }} A
+            <span v-if="outletOver(outlet.id)"> · {{ t('workspace.venueGroupOver') }}</span>
+          </div>
           <q-input
             :model-value="outlet.x_cm"
             class="col-4 col-sm-2"
@@ -290,8 +297,8 @@ const groupOptions = computed(() => {
 });
 
 // The power tree, flattened with a depth so an arbitrarily nested hierarchy (incoming -> panel ->
-// sub-panel -> ...) renders without a recursive component. A group's load is its outlets' ratings
-// plus the loads of every panel nested beneath it.
+// sub-panel -> ...) renders without a recursive component. Each group's actual load is looked up
+// from the server-side, device-driven summary (groupLoad/groupOver) rather than summed locally.
 const groupRows = computed(() => {
   const ids = new Set(groups.value.map((g) => g.id));
   const rows = [];
@@ -309,32 +316,43 @@ const groupRows = computed(() => {
   return rows;
 });
 
-// Sum of every outlet's rating: this is what the incoming supply actually feeds, so it is what the
-// incoming limit is checked against (a venue can exceed the incoming supply even when each panel is
-// within its own breaker, e.g. 30 A on panel A + 25 A on panel B against a 50 A incoming supply).
-const totalLoad = computed(() =>
-  outlets.value.reduce((sum, o) => sum + (o.rating_amps || 0), 0),
-);
+// The actual load (amps) on each supply element, computed server-side from the watts of the devices
+// plugged into the outlets/groups. This is the real draw, not the sum of each socket's capacity, so
+// a panel with several sockets is not flagged overloaded just for existing. `loadById` indexes the
+// per-outlet, per-group and incoming results by element id so the rows can look their own up.
+const powerLoad = ref(null);
+const loadById = computed(() => {
+  const map = {};
+  if (powerLoad.value) {
+    for (const el of [...powerLoad.value.outlets, ...powerLoad.value.groups]) {
+      map[el.id] = el;
+    }
+    if (powerLoad.value.incoming) map[powerLoad.value.incoming.id] = powerLoad.value.incoming;
+  }
+  return map;
+});
+const totalLoad = computed(() => (powerLoad.value ? powerLoad.value.total_amps : 0));
 const incomingGroup = computed(() => groups.value.find((g) => g.is_incoming) || null);
-const incomingOver = computed(
-  () =>
-    Boolean(incomingGroup.value) &&
-    incomingGroup.value.rating_amps != null &&
-    totalLoad.value > incomingGroup.value.rating_amps,
-);
+const incomingOver = computed(() => Boolean(powerLoad.value?.incoming?.over));
 
-function groupLoad(id) {
-  const direct = outlets.value
-    .filter((o) => o.group_id === id && o.rating_amps != null)
-    .reduce((sum, o) => sum + (o.rating_amps || 0), 0);
-  const childSum = groups.value
-    .filter((g) => g.parent_id === id)
-    .reduce((sum, c) => sum + groupLoad(c.id), 0);
-  return direct + childSum;
+function elementAmps(id) {
+  return loadById.value[id]?.amps ?? 0;
 }
-// A panel is over when its own subtree draws more than the panel's breaker rating allows.
+function elementOver(id) {
+  return Boolean(loadById.value[id]?.over);
+}
+// A panel's load is the real draw beneath it: this is what its breaker rating is checked against.
+function groupLoad(id) {
+  return elementAmps(id);
+}
 function groupOver(group) {
-  return group.rating_amps != null && groupLoad(group.id) > group.rating_amps;
+  return elementOver(group.id);
+}
+function outletLoad(id) {
+  return elementAmps(id);
+}
+function outletOver(id) {
+  return elementOver(id);
 }
 function formatAmps(v) {
   if (v == null) return '—';
@@ -377,12 +395,18 @@ async function load() {
       resolvedVenueId.value = job.venue_id || null;
     }
     if (!resolvedVenueId.value) return;
-    [groups.value, outlets.value] = (
-      await Promise.all([
-        api.get(`/venues/${resolvedVenueId.value}/power-groups`),
-        api.get(`/venues/${resolvedVenueId.value}/power-outlets`),
-      ])
-    ).map((res) => res.data);
+    const [groupsRes, outletsRes, loadRes] = await Promise.all([
+      api.get(`/venues/${resolvedVenueId.value}/power-groups`),
+      api.get(`/venues/${resolvedVenueId.value}/power-outlets`),
+      api.get(
+        props.jobId
+          ? `/jobs/${props.jobId}/power-load`
+          : `/venues/${resolvedVenueId.value}/power-load`,
+      ),
+    ]);
+    groups.value = groupsRes.data;
+    outlets.value = outletsRes.data;
+    powerLoad.value = loadRes.data;
   } catch (err) {
     failed(err);
   }

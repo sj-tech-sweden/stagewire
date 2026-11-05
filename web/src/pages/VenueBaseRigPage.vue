@@ -281,6 +281,25 @@
                 @update:model-value="(v) => updateDeviceSize('height_cm', v)"
               />
             </div>
+            <q-input
+              dense
+              type="number"
+              class="q-mt-sm"
+              :label="t('workspace.powerWatts')"
+              :model-value="venueGraph.selectedDevice.attributes?.power_w"
+              @update:model-value="(v) => updateDeviceAttr('power_w', v === '' ? null : Number(v))"
+            />
+            <q-select
+              dense
+              clearable
+              emit-value
+              map-options
+              class="q-mt-sm"
+              :label="t('workspace.devicePowerConnection')"
+              :options="powerTargets"
+              :model-value="powerTarget"
+              @update:model-value="setPowerTarget"
+            />
             <q-btn
               class="q-mt-sm"
               dense
@@ -337,6 +356,8 @@ const venueGraph = useVenueGraphStore();
 const venueId = computed(() => route.params.venueId);
 const venue = ref(null);
 const outlets = ref([]);
+const powerOutlets = ref([]);
+const powerGroups = ref([]);
 const zoom = ref(0.5);
 const deviceScale = ref(1);
 const connectMode = ref(false);
@@ -355,20 +376,29 @@ const objectLabel = (object) =>
   object.labelKey ? t(object.labelKey, object.label || object.type) : object.label;
 
 async function load() {
-  const [venueRes, outletRes] = await Promise.all([
+  const [venueRes, outletRes, powerRes] = await Promise.all([
     api.get(`/venues/${venueId.value}`),
     api.get(`/venues/${venueId.value}/power-outlets`),
+    api.get(`/venues/${venueId.value}/power-groups`),
   ]);
   venue.value = venueRes.data;
   outlets.value = (outletRes.data || []).filter((o) => o.x_cm != null && o.y_cm != null);
+  powerOutlets.value = outletRes.data || [];
+  powerGroups.value = powerRes.data || [];
   await venueGraph.fetchGraph(venueId.value);
 }
 
-// The power panel mutates the venue's circuits/outlets; refresh the canvas layer to match.
+// The power panel mutates the venue's circuits/outlets; refresh the canvas layer and the
+// inlet/outlet assignment pickers to match.
 async function reloadOutlets() {
   try {
-    const { data } = await api.get(`/venues/${venueId.value}/power-outlets`);
-    outlets.value = (data || []).filter((o) => o.x_cm != null && o.y_cm != null);
+    const [{ data: outletData }, { data: groupData }] = await Promise.all([
+      api.get(`/venues/${venueId.value}/power-outlets`),
+      api.get(`/venues/${venueId.value}/power-groups`),
+    ]);
+    outlets.value = (outletData || []).filter((o) => o.x_cm != null && o.y_cm != null);
+    powerOutlets.value = outletData || [];
+    powerGroups.value = groupData || [];
   } catch {
     /* leave the previous outlets in place */
   }
@@ -413,6 +443,61 @@ function updateDeviceSize(key, value) {
   const device = venueGraph.selectedDevice;
   if (!device) return;
   device.attributes = { ...(device.attributes || {}), [key]: Number(value) || 0 };
+  venueGraph.dirty = true;
+}
+
+// Assign a base-rig device the power rating (watts) it draws, into the device's attributes so it
+// drives the venue's server-side over-limit check just like a job device does.
+function updateDeviceAttr(key, value) {
+  const device = venueGraph.selectedDevice;
+  if (!device) return;
+  device.attributes = { ...(device.attributes || {}), [key]: value };
+  venueGraph.dirty = true;
+}
+
+// The outlet/group a device is plugged into. Stored in attributes so the device-driven load
+// (power_w) is attributed to the right supply element on the server.
+const powerTarget = computed(() => {
+  const device = venueGraph.selectedDevice;
+  if (!device) return null;
+  return (
+    device.attributes?.venue_outlet_id ||
+    device.attributes?.venue_group_id ||
+    null
+  );
+});
+
+// Outlets and groups as a single picker so a device can hang from either a socket or a panel.
+const powerTargets = computed(() => {
+  const outlets = powerOutlets.value.map((o) => ({
+    value: o.id,
+    label: `${t('workspace.venueOutlet')}: ${o.name || o.connector || o.id.slice(0, 8)}`,
+    type: 'outlet',
+  }));
+  const groups = powerGroups.value.map((g) => ({
+    value: g.id,
+    label: `${t('workspace.venueGroup')}: ${g.name || g.id.slice(0, 8)}${g.is_incoming ? ' ⚡' : ''}`,
+    type: 'group',
+  }));
+  return [...outlets, ...groups];
+});
+
+// Setting the inlet clears the other side: a device is on an outlet OR a group, never both.
+function setPowerTarget(targetId) {
+  const device = venueGraph.selectedDevice;
+  if (!device) return;
+  const attributes = { ...(device.attributes || {}) };
+  delete attributes.venue_outlet_id;
+  delete attributes.venue_group_id;
+  if (targetId) {
+    const target = powerTargets.value.find((t) => t.value === targetId);
+    if (target?.type === 'group') {
+      attributes.venue_group_id = targetId;
+    } else {
+      attributes.venue_outlet_id = targetId;
+    }
+  }
+  device.attributes = attributes;
   venueGraph.dirty = true;
 }
 

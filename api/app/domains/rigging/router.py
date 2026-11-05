@@ -1,8 +1,10 @@
+from collections import defaultdict
 from dataclasses import replace as dc_replace
 from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -13,6 +15,9 @@ from app.domains.graph import devices_native, fixtures_native, plot_native, powe
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting import service as lighting_service
 from app.domains.rigging import calc, connectors, power_tree, schemas, service
+from app.domains.venues import schemas as venue_schemas
+from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
+from app.domains.venues.power_load import summarize_venue_power
 from app.domains.venues.schemas import VenuePowerOutletRead
 
 router = APIRouter(
@@ -429,6 +434,87 @@ async def rigging_summary(job_id: UUID, db: AsyncSession = Depends(get_db)) -> d
         "unassigned_weight": [r.label for r in rows if r.weight_kg and not r.rigging_point_id],
         "unassigned_power": [r.label for r in rows if r.power_w and not r.power_node_id],
     }
+
+
+async def _venue_power_links(db: AsyncSession, job_id: UUID) -> tuple[dict, dict]:
+    """Attribute each job load's watts to the venue outlet/group it ultimately draws from.
+
+    A device hangs on a power node; walking up the node chain finds the first node that represents a
+    venue supply element (it carries ``venue_outlet_id`` / ``venue_group_id``). That is where the
+    device's draw counts against the venue's own breakers, so an overloaded device trips every
+    venue panel above it just as it would on site.
+    """
+    rows = await service.collect_loads(db, job_id)
+    nodes = await service.list_nodes(db, job_id)
+    feeds = await service.list_feeds(db, job_id)
+    node_by_id = {str(n.id): n for n in nodes}
+    parents: dict[str, list[str]] = defaultdict(list)
+    for feed in feeds:
+        parents[str(feed.node_id)].append(str(feed.parent_id))
+
+    outlet_watts: dict[UUID, float] = defaultdict(float)
+    group_direct_watts: dict[UUID, float] = defaultdict(float)
+
+    def supply_of(node_id: str | None) -> tuple[str, UUID] | None:
+        seen: set[str] = set()
+        current = node_id
+        while current and current not in seen:
+            seen.add(current)
+            node = node_by_id.get(current)
+            if node is None:
+                return None
+            if node.venue_outlet_id:
+                return ("outlet", node.venue_outlet_id)
+            if node.venue_group_id:
+                return ("group", node.venue_group_id)
+            current = parents.get(current, [None])[0]
+        return None
+
+    for row in rows:
+        watts = row.power_w or 0.0
+        if not watts:
+            continue
+        supply = supply_of(str(row.power_node_id) if row.power_node_id else None)
+        if supply is None:
+            continue
+        if supply[0] == "outlet":
+            outlet_watts[supply[1]] += watts
+        else:
+            group_direct_watts[supply[1]] += watts
+    return dict(outlet_watts), dict(group_direct_watts)
+
+
+@router.get("/jobs/{job_id}/power-load", response_model=venue_schemas.VenuePowerLoadRead)
+async def job_venue_power_load(
+    job_id: UUID, db: AsyncSession = Depends(get_db)
+) -> venue_schemas.VenuePowerLoadRead:
+    """Device-driven load for the job's venue supply, used by the over-limit check.
+
+    Reuses the venue supply summary but feeds it the job's actual device watts (each attributed to
+    the venue outlet/group it draws from) instead of the venue template's own base-rig devices.
+    """
+    job = await _job(db, job_id)
+    if not job.venue_id:
+        return venue_schemas.VenuePowerLoadRead()
+    groups = (
+        await db.scalars(select(VenuePowerGroup).where(VenuePowerGroup.venue_id == job.venue_id))
+    ).all()
+    outlets = (
+        await db.scalars(select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == job.venue_id))
+    ).all()
+    outlet_watts, group_direct_watts = await _venue_power_links(db, job_id)
+    summary = summarize_venue_power(groups, outlets, outlet_watts, group_direct_watts)
+    return venue_schemas.VenuePowerLoadRead(
+        outlets=[venue_schemas.VenuePowerElementLoad(**vars(e)) for e in summary.outlets],
+        groups=[venue_schemas.VenuePowerElementLoad(**vars(e)) for e in summary.groups],
+        incoming=(
+            venue_schemas.VenuePowerElementLoad(**vars(summary.incoming))
+            if summary.incoming
+            else None
+        ),
+        total_watts=summary.total_watts,
+        total_amps=summary.total_amps,
+    )
 
 
 @router.patch("/jobs/{job_id}/rigging/loads/{kind}/{load_id}", status_code=204)
