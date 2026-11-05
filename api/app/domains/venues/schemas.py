@@ -98,13 +98,17 @@ class VenuePowerGroupBase(BaseModel):
     phases: int = Field(1, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str = ""
-    # kind classifies the node in the supply tree: 'incoming' (mains) | 'panel' (board) |
-    # 'group' (fused circuit inside a panel that outlets plug into). Kept in sync with is_incoming.
-    kind: Literal["incoming", "panel", "group"] = "group"
-    # parent_id nests a panel under another panel (or the incoming supply); null = top level.
-    # For a 'group' the parent is the panel it belongs to.
+    # kind classifies the node in the supply tree: 'incoming' (mains) | 'generator' (temporary
+    # supply) | 'panel' (permanent board) | 'breakout' (temporary distro) | 'group' (fused circuit
+    # inside a panel/breakout that outlets plug into). Kept in sync with is_incoming for 'incoming'.
+    kind: Literal["incoming", "generator", "panel", "breakout", "group"] = "group"
+    # Temporary equipment (a hired generator, a breakout distro, ...) is not part of the venue's
+    # permanent install and is drawn distinctly in the UI.
+    temporary: bool = False
+    # parent_id nests a board/breakout under a supply root or another board; for a 'group' the
+    # parent is the panel/breakout it belongs to. null = top level.
     parent_id: UUID | None = None
-    # True for the single supply the venue draws from (its load is the sum of every outlet).
+    # True for the single mains supply the venue draws from (its load is the sum of every outlet).
     is_incoming: bool = False
 
 
@@ -118,7 +122,8 @@ class VenuePowerGroupUpdate(BaseModel):
     phases: int | None = Field(None, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str | None = None
-    kind: Literal["incoming", "panel", "group"] | None = None
+    kind: Literal["incoming", "generator", "panel", "breakout", "group"] | None = None
+    temporary: bool | None = None
     parent_id: UUID | None = None
     is_incoming: bool | None = None
 
@@ -176,7 +181,10 @@ class VenuePowerLoadRead(BaseModel):
 
     outlets: list[VenuePowerElementLoad] = Field(default_factory=list)
     groups: list[VenuePowerElementLoad] = Field(default_factory=list)
-    incoming: VenuePowerElementLoad | None = None
+    # One entry per supply root (the mains 'incoming' plus any 'generator'). Each carries the load
+    # of its whole subtree and is 'over' when that load exceeds the root's rating, so the UI can
+    # compare per-source: a job whose venue power is not enough can lean on a generator instead.
+    supplies: list[VenuePowerElementLoad] = Field(default_factory=list)
     total_watts: float = 0.0
     total_amps: float = 0.0
 

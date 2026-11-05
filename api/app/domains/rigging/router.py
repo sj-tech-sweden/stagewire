@@ -507,11 +507,7 @@ async def job_venue_power_load(
     return venue_schemas.VenuePowerLoadRead(
         outlets=[venue_schemas.VenuePowerElementLoad(**vars(e)) for e in summary.outlets],
         groups=[venue_schemas.VenuePowerElementLoad(**vars(e)) for e in summary.groups],
-        incoming=(
-            venue_schemas.VenuePowerElementLoad(**vars(summary.incoming))
-            if summary.incoming
-            else None
-        ),
+        supplies=[venue_schemas.VenuePowerElementLoad(**vars(e)) for e in summary.supplies],
         total_watts=summary.total_watts,
         total_amps=summary.total_amps,
     )

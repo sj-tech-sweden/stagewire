@@ -16,9 +16,13 @@ from app.main import app
 BASE = "/api/v1"
 
 
-def _group(id, rating_amps, parent_id=None, is_incoming=False):
+def _group(id, rating_amps, parent_id=None, is_incoming=False, kind=None):
+    # kind drives the supply-root detection; is_incoming is kept as a legacy fallback for tests that
+    # don't pass kind explicitly.
+    if kind is None:
+        kind = "incoming" if is_incoming else "group"
     return SimpleNamespace(
-        id=id, rating_amps=rating_amps, parent_id=parent_id, is_incoming=is_incoming
+        id=id, rating_amps=rating_amps, parent_id=parent_id, is_incoming=is_incoming, kind=kind
     )
 
 
@@ -48,7 +52,8 @@ async def test_summarize_uses_device_watts_not_outlet_capacity():
     assert round(by_outlet["o1"].amps, 1) == 8.7
     assert by_group["p"].over is False
     assert round(by_group["p"].amps, 1) == 21.7
-    assert summary.incoming.over is False
+    supply = next(s for s in summary.supplies if s.id == "in")
+    assert supply.over is False
     assert round(summary.total_amps, 1) == 21.7
 
 
@@ -83,7 +88,8 @@ async def test_summarize_aggregates_nested_groups_and_incoming():
     # incoming carry the same total and are over their 10 A breakers.
     assert by_group["b"].over is False
     assert by_group["a"].over is True
-    assert summary.incoming.over is True
+    supply = next(s for s in summary.supplies if s.id == "in")
+    assert supply.over is True
 
 
 @pytest.mark.asyncio
@@ -110,21 +116,36 @@ async def _venue_with_supply(client, h, venue_id):
     panel = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-groups",
-            json={"name": "Panel A", "rating_amps": 32, "kind": "panel", "parent_id": incoming["id"]},
+            json={
+                "name": "Panel A",
+                "rating_amps": 32,
+                "kind": "panel",
+                "parent_id": incoming["id"],
+            },
             headers=h,
         )
     ).json()
     circuit = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-groups",
-            json={"name": "Circuit 1", "rating_amps": 16, "kind": "group", "parent_id": panel["id"]},
+            json={
+                "name": "Circuit 1",
+                "rating_amps": 16,
+                "kind": "group",
+                "parent_id": panel["id"],
+            },
             headers=h,
         )
     ).json()
     outlet = (
         await client.post(
             f"{BASE}/venues/{venue_id}/power-outlets",
-            json={"name": "O1", "connector": "schuko", "group_id": circuit["id"], "rating_amps": 16},
+            json={
+                "name": "O1",
+                "connector": "schuko",
+                "group_id": circuit["id"],
+                "rating_amps": 16,
+            },
             headers=h,
         )
     ).json()
@@ -170,7 +191,7 @@ async def test_venue_power_load_uses_base_rig_device_watts(auth_headers):
         load = (await client.get(f"{BASE}/venues/{venue_id}/power-load", headers=h)).json()
         outlet_load = next(e for e in load["outlets"] if e["id"] == outlet["id"])
         panel_load = next(e for e in load["groups"] if e["id"] == panel["id"])
-        incoming_load = load["incoming"]
+        incoming_load = next(s for s in load["supplies"] if s["id"] == incoming["id"])
         # 5 kW across the two devices: 21.7 A on the 16 A outlet (over), within the 32 A panel and
         # 50 A incoming (both fine).
         assert round(outlet_load["watts"]) == 5000
@@ -213,7 +234,7 @@ async def test_venue_power_load_flags_over_limit_from_devices(auth_headers):
         # 4 kW on the 16 A outlet (17.4 A) is over; the 32 A panel and 50 A incoming absorb it.
         assert outlet_load["over"] is True
         assert next(e for e in load["groups"] if e["id"] == panel["id"])["over"] is False
-        assert load["incoming"]["over"] is False
+        assert next(s for s in load["supplies"] if s["id"] == incoming["id"])["over"] is False
 
 
 @pytest.mark.asyncio
@@ -253,8 +274,231 @@ async def test_job_power_load_attributes_device_watts_to_venue_outlet(auth_heade
         load = (await client.get(f"{BASE}/jobs/{job_id}/power-load", headers=h)).json()
         # The outlet is in Panel A, so rigging serves it through the group's source node: the 2.3 kW
         # draw is attributed to the group (not the individual socket), and 10 A is within its 32 A.
-        # draw is attributed to the group (not the individual socket), and 10 A is within its 32 A.
         panel_load = next(e for e in load["groups"] if e["id"] == panel["id"])
         assert round(panel_load["watts"]) == 2300
         assert panel_load["over"] is False
         assert round(load["total_amps"], 2) == 10.0
+
+
+@pytest.mark.asyncio
+async def test_summarize_computes_each_supply_root_independently():
+    # Mains and a generator are both roots; a device hung off the generator must not count against
+    # the mains, and vice versa.
+    incoming = _group("mains", 10.0, kind="incoming")
+    gen = _group("gen", 10.0, kind="generator")
+    mains_panel = _group("mp", 32.0, parent_id="mains")
+    gen_panel = _group("gp", 32.0, parent_id="gen")
+    mains_outlet = _outlet("mo", "mp", 16.0)
+    gen_outlet = _outlet("go", "gp", 16.0)
+    summary = summarize_venue_power(
+        [incoming, gen, mains_panel, gen_panel],
+        [mains_outlet, gen_outlet],
+        outlet_watts={"mo": 5000.0, "go": 2000.0},
+        group_direct_watts={},
+    )
+    by_supply = {s.id: s for s in summary.supplies}
+    # 5 kW on the mains outlet trips its 10 A root; 2 kW on the generator is fine on its 10 A root.
+    assert by_supply["mains"].over is True
+    assert by_supply["gen"].over is False
+    # The grand total is still both draws summed.
+    assert round(summary.total_watts) == 7000
+
+
+async def _venue_with_generator(client, h, venue_id):
+    """A venue with a mains supply and a temporary generator, each feeding its own panel/circuit."""
+    incoming = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={"name": "Mains", "rating_amps": 50, "kind": "incoming"},
+            headers=h,
+        )
+    ).json()
+    gen = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Gen 16A",
+                "rating_amps": 16,
+                "kind": "generator",
+                "temporary": True,
+            },
+            headers=h,
+        )
+    ).json()
+    mains_panel = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Panel A",
+                "rating_amps": 32,
+                "kind": "panel",
+                "parent_id": incoming["id"],
+            },
+            headers=h,
+        )
+    ).json()
+    # A breakout (temporary distro) hung off the generator, with a circuit + outlet.
+    breakout = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Breakout",
+                "rating_amps": 16,
+                "kind": "breakout",
+                "temporary": True,
+                "parent_id": gen["id"],
+            },
+            headers=h,
+        )
+    ).json()
+    circuit = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Gen Circuit",
+                "rating_amps": 16,
+                "kind": "group",
+                "parent_id": breakout["id"],
+            },
+            headers=h,
+        )
+    ).json()
+    outlet = (
+        await client.post(
+            f"{BASE}/venues/{venue_id}/power-outlets",
+            json={
+                "name": "GO1",
+                "connector": "schuko",
+                "group_id": circuit["id"],
+                "rating_amps": 16,
+            },
+            headers=h,
+        )
+    ).json()
+    return incoming, gen, mains_panel, breakout, circuit, outlet
+
+
+@pytest.mark.asyncio
+async def test_venue_generator_and_breakout_create_and_supply_listing(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        venue = (await client.post(f"{BASE}/venues", json={"name": "Festival"}, headers=h)).json()
+        venue_id = venue["id"]
+        incoming, gen, mains_panel, breakout, circuit, outlet = await _venue_with_generator(
+            client, h, venue_id
+        )
+        # The generator and breakout come back flagged temporary (kind + temporary in the response).
+        assert gen["kind"] == "generator"
+        assert gen["temporary"] is True
+        assert breakout["kind"] == "breakout"
+        assert breakout["temporary"] is True
+
+        # Both supply roots are listed independently.
+        load = (await client.get(f"{BASE}/venues/{venue_id}/power-load", headers=h)).json()
+        by_supply = {s["id"]: s for s in load["supplies"]}
+        assert incoming["id"] in by_supply
+        assert gen["id"] in by_supply
+
+
+@pytest.mark.asyncio
+async def test_topology_rejects_invalid_parent_for_kind(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        venue = (await client.post(f"{BASE}/venues", json={"name": "Hall"}, headers=h)).json()
+        venue_id = venue["id"]
+        incoming = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/power-groups",
+                json={"name": "Mains", "rating_amps": 50, "kind": "incoming"},
+                headers=h,
+            )
+        ).json()
+        panel = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/power-groups",
+                json={
+                    "name": "Panel",
+                    "rating_amps": 32,
+                    "kind": "panel",
+                    "parent_id": incoming["id"],
+                },
+                headers=h,
+            )
+        ).json()
+
+        # A generator (root) cannot have a parent.
+        r = await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Bad Gen",
+                "rating_amps": 16,
+                "kind": "generator",
+                "parent_id": incoming["id"],
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, r.text
+
+        # A circuit cannot sit directly under a generator (must be inside a board/breakout).
+        r = await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Bad Circuit",
+                "rating_amps": 16,
+                "kind": "group",
+                "parent_id": incoming["id"],
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, r.text
+
+        # A panel may hang off another panel (panel-to-panel feed) — valid.
+        r = await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Sub Panel",
+                "rating_amps": 32,
+                "kind": "panel",
+                "parent_id": panel["id"],
+            },
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+
+        # But a panel cannot hang off a circuit (group).
+        circuit = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/power-groups",
+                json={
+                    "name": "Circuit",
+                    "rating_amps": 16,
+                    "kind": "group",
+                    "parent_id": panel["id"],
+                },
+                headers=h,
+            )
+        ).json()
+        r = await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Bad Panel",
+                "rating_amps": 32,
+                "kind": "panel",
+                "parent_id": circuit["id"],
+            },
+            headers=h,
+        )
+        assert r.status_code == 422, r.text
+
+        # A breakout under the incoming supply is valid.
+        r = await client.post(
+            f"{BASE}/venues/{venue_id}/power-groups",
+            json={
+                "name": "Breakout",
+                "rating_amps": 16,
+                "kind": "breakout",
+                "parent_id": incoming["id"],
+            },
+            headers=h,
+        )
+        assert r.status_code == 201, r.text

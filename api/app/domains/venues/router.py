@@ -130,30 +130,37 @@ async def _validate_supply_topology(
 ) -> None:
     """Enforce how the supply tree may be wired.
 
-    incoming: the mains, no parent. panel: a board hung off the incoming supply or another panel.
-    group: a fused circuit that must live inside a panel. Matches ``kind`` on ``VenuePowerGroup``.
+    Roots (no parent): ``incoming`` (mains) and ``generator`` (temporary second supply).
+    Boards/distros (``panel`` / ``breakout``) hang off a root or another board/distro.
+    ``group`` is a fused circuit that must live inside a board or a breakout. Outlets attach to
+    groups (see ``_check_group``), never to a board. Matches ``kind`` on ``VenuePowerGroup``.
     """
-    if kind == "incoming" and parent_id is not None:
+    if kind in ("incoming", "generator") and parent_id is not None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "The incoming supply cannot have a parent",
+            f"A {kind} is a supply root and cannot have a parent",
         )
     if parent_id is None:
-        # A top-level panel or a single circuit without a named panel are both allowed (a small
-        # venue may feed circuits straight from the incoming supply); the UI steers toward panels.
+        # A top-level panel/breakout or a single circuit without a named board are allowed (a small
+        # venue may feed circuits straight from the supply); the UI steers toward boards.
         return
     parent = await db.get(VenuePowerGroup, parent_id)
     if parent is None or parent.venue_id != venue_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Parent power group not found")
-    if kind == "panel" and parent.kind not in ("incoming", "panel"):
+    if kind in ("panel", "breakout") and parent.kind not in (
+        "incoming",
+        "generator",
+        "panel",
+        "breakout",
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "A panel can only hang off the incoming supply or another panel",
+            "A board or breakout can only hang off a supply root, a board, or another breakout",
         )
-    if kind == "group" and parent.kind != "panel":
+    if kind == "group" and parent.kind not in ("panel", "breakout"):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "A circuit (group) must belong to a panel",
+            "A circuit (group) must belong to a panel or a breakout",
         )
 
 
@@ -374,9 +381,7 @@ async def venue_power_load(
     return schemas.VenuePowerLoadRead(
         outlets=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.outlets],
         groups=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.groups],
-        incoming=(
-            schemas.VenuePowerElementLoad(**vars(summary.incoming)) if summary.incoming else None
-        ),
+        supplies=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.supplies],
         total_watts=summary.total_watts,
         total_amps=summary.total_amps,
     )

@@ -1,9 +1,13 @@
-"""Device-driven load for a venue's power supply (incoming -> groups -> outlets).
+"""Device-driven load for a venue's power supply (supply roots -> panels -> groups -> outlets).
 
-The supply template the venue offers is a tree of ``VenuePowerGroup`` (panels, the incoming
-supply) and ``VenuePowerOutlet`` (sockets on the stage). Each group has a ``rating_amps`` that is
-its *capacity* — the most it can deliver — not the load on it. The actual load is the watts of the
-devices plugged into the outlets (or directly into a group), summed up the tree.
+The supply template the venue offers is a tree of ``VenuePowerGroup`` nodes and ``VenuePowerOutlet``
+sockets. A group has a ``rating_amps`` that is its *capacity* — the most it can deliver — not the
+load on it. The actual load is the watts of the devices plugged into the outlets (or directly into a
+group), summed up the tree.
+
+Supply roots are the nodes with no parent and a root kind: ``incoming`` (the mains) and
+``generator`` (a temporary second supply). Each root's load is its whole subtree, so a job whose
+venue power is not enough can lean on a generator and the over-limit check compares per-source.
 
 This module is the single source of truth for that computation so the venue Standard Base Rig and
 the job workspace show the same over-limit check: a group is "over" when the devices beneath it
@@ -23,6 +27,9 @@ from uuid import UUID
 # own power tree.
 VOLTS = 230.0
 
+# Node kinds that act as supply roots: the mains and any temporary generator.
+SUPPLY_ROOT_KINDS = ("incoming", "generator")
+
 
 @dataclass(frozen=True)
 class VenuePowerElement:
@@ -38,7 +45,9 @@ class VenuePowerElement:
 class VenuePowerSummary:
     outlets: list[VenuePowerElement]
     groups: list[VenuePowerElement]
-    incoming: VenuePowerElement | None
+    # One element per supply root (mains 'incoming' plus any 'generator'), each carrying the load
+    # of its whole subtree and 'over' when that load exceeds the root's rating.
+    supplies: list[VenuePowerElement]
     total_watts: float
     total_amps: float
 
@@ -63,8 +72,9 @@ def summarize_venue_power(
     group id to the watts drawn directly on the group junction (devices plugged into the group
     rather than one of its outlets). A group's load is its direct draw plus every outlet and nested
     subgroup beneath it, so a single overloaded device trips every breaker above it — matching how
-    real distribution works. The incoming supply's load is the sum of all device watts (everything
-    the venue draws).
+    real distribution works. Each supply root's load is the sum of the whole subtree beneath it, so
+    a generator is only over when the gear hung off it exceeds its rating, independently of the
+    mains.
     """
     groups = list(groups)
     outlets = list(outlets)
@@ -113,28 +123,23 @@ def summarize_venue_power(
     # two attribution maps (no double counting across the tree).
     total_watts = sum(clean_outlet.values()) + sum(clean_group.values())
 
-    # The supply root is the incoming node: prefer an explicit kind, fall back to is_incoming.
-    incoming_group = next(
-        (
-            g
-            for g in groups
-            if getattr(g, "kind", None) == "incoming" or getattr(g, "is_incoming", False)
-        ),
-        None,
-    )
-    incoming = None
-    if incoming_group is not None:
-        incoming = VenuePowerElement(
-            id=incoming_group.id,
-            watts=total_watts,
-            amps=_amps(total_watts),
-            over=_over(incoming_group.rating_amps, _amps(total_watts)),
+    # Supply roots are the top-level nodes whose kind is 'incoming' (mains) or 'generator'. Their
+    # load is the whole subtree beneath them (group_total rolls outlets and nested groups up).
+    supplies = [
+        VenuePowerElement(
+            id=g.id,
+            watts=group_total(g.id),
+            amps=_amps(group_total(g.id)),
+            over=_over(g.rating_amps, _amps(group_total(g.id))),
         )
+        for g in groups
+        if g.parent_id is None and getattr(g, "kind", None) in SUPPLY_ROOT_KINDS
+    ]
 
     return VenuePowerSummary(
         outlets=outlet_elems,
         groups=group_elems,
-        incoming=incoming,
+        supplies=supplies,
         total_watts=total_watts,
         total_amps=_amps(total_watts),
     )
