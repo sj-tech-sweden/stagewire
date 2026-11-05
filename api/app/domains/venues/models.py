@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -59,6 +59,13 @@ class VenuePowerGroup(Base):
     # Which phase a one-phase group is on (L1 when not set); a three-phase group spreads its load.
     phase: Mapped[str | None] = mapped_column(String(2), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # The power tree is nested: a panel may hang under another panel (or the incoming supply).
+    # parent_id is self-referential and set NULL if the parent is removed. is_incoming marks the
+    # single supply the venue draws from; its load is every outlet rating summed across the tree.
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venue_power_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_incoming: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class VenuePowerOutlet(Base):

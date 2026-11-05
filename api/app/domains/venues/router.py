@@ -147,6 +147,23 @@ async def update_power_group(
     group = await db.get(VenuePowerGroup, group_id)
     if group is None or group.venue_id != venue_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Power group not found")
+    # A group cannot be nested under itself or under one of its own descendants, otherwise the
+    # recursive load sum would loop. Walk up from the proposed parent and stop at a cycle.
+    if payload.parent_id is not None:
+        if payload.parent_id == group_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "A power group cannot be its own parent"
+            )
+        ancestor = await db.get(VenuePowerGroup, payload.parent_id)
+        while ancestor is not None:
+            if ancestor.id == group_id:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "A power group cannot be nested under one of its own descendants",
+                )
+            ancestor = (
+                await db.get(VenuePowerGroup, ancestor.parent_id) if ancestor.parent_id else None
+            )
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(group, key, value)
     await db.commit()
@@ -166,6 +183,11 @@ async def delete_power_group(
         select(VenuePowerOutlet).where(VenuePowerOutlet.group_id == group_id)
     ):
         outlet.group_id = None
+    # child panels are detached (they become top-level) rather than deleted with the parent
+    for sub in await db.scalars(
+        select(VenuePowerGroup).where(VenuePowerGroup.parent_id == group_id)
+    ):
+        sub.parent_id = None
     # power nodes made from the group (on the graph) forget it
     for node in await db.scalars(
         select(GraphDevice).where(

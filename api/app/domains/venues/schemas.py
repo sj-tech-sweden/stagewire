@@ -98,6 +98,10 @@ class VenuePowerGroupBase(BaseModel):
     phases: int = Field(1, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str = ""
+    # parent_id nests a panel under another group (or the incoming supply); null = top level.
+    parent_id: UUID | None = None
+    # True for the single supply the venue draws from (its load is the sum of every outlet).
+    is_incoming: bool = False
 
 
 class VenuePowerGroupCreate(VenuePowerGroupBase):
@@ -110,6 +114,8 @@ class VenuePowerGroupUpdate(BaseModel):
     phases: int | None = Field(None, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str | None = None
+    parent_id: UUID | None = None
+    is_incoming: bool | None = None
 
 
 class VenuePowerGroupRead(VenuePowerGroupBase):
