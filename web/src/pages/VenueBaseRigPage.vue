@@ -26,7 +26,18 @@
       >
         {{ t('venues.baseRig.unsaved') }}
       </q-badge>
+      <q-btn-toggle
+        v-model="view"
+        dense
+        no-caps
+        spread
+        :options="[
+          { label: t('venues.baseRig.stage'), value: 'stage' },
+          { label: t('channels.lists'), value: 'lists' },
+        ]"
+      />
       <q-btn
+        v-if="view === 'stage'"
         color="primary"
         icon="save"
         :label="t('venues.baseRig.save')"
@@ -42,6 +53,7 @@
     </div>
 
     <div
+      v-if="view === 'stage'"
       class="row q-col-gutter-md col-grow"
       :class="$q.screen.lt.sm ? 'column' : ''"
     >
@@ -342,6 +354,12 @@
         />
       </div>
     </div>
+
+    <ChannelListEditor
+      v-else-if="view === 'lists'"
+      :venue-id="venueId"
+      class="col-grow"
+    />
   </q-page>
 </template>
 
@@ -355,6 +373,7 @@ import { frameFromVenue, stageCentre } from '@/utils/plotFrame';
 import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { useVenueGraphStore } from '@/stores/venueGraph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
+import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
@@ -366,6 +385,9 @@ const router = useRouter();
 const venueGraph = useVenueGraphStore();
 
 const venueId = computed(() => route.params.venueId);
+// The base rig is edited two ways: the stage canvas (whole-graph save) and the channel-list editor
+// (incremental, reuses the job's list/chain/Wireless Workbench UX for the venue's rig).
+const view = ref('stage');
 const libraryOpen = ref(false);
 const venue = ref(null);
 const outlets = ref([]);

@@ -1,5 +1,6 @@
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { ensureAdmin, login, API_BASE } from './helpers';
+import { resolve } from 'path';
 
 test.beforeEach(async ({ request }) => {
   await ensureAdmin(request);
@@ -135,4 +136,61 @@ test('venue fixture library is managed through the base rig and stays venue-scop
     await request.get(`${API_BASE}/api/v1/jobs/${jobId}/fixture-types`, { headers })
   ).json();
   expect(jobTypes).toHaveLength(0);
+});
+
+test('venue channel list reuses the editor and imports a Wireless Workbench file', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+
+  // A venue owns its own channel list (and its wireless channels) via the venue graph routes.
+  const venueRes = await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: { name: `E2E Venue Lists ${Date.now()}`, venue_width_cm: 800, venue_height_cm: 600 },
+  });
+  expect(venueRes.status()).toBe(201);
+  const venue = await venueRes.json();
+
+  const list = await (
+    await request.post(`${API_BASE}/api/v1/venues/${venue.id}/graph/lists`, {
+      headers,
+      data: { name: 'House RF' },
+    })
+  ).json();
+  await request.post(`${API_BASE}/api/v1/venues/${venue.id}/graph/lists/${list.id}/channels/batch`, {
+    headers,
+    data: [{ channel_number: 1, source_label: 'Vox', input_type: 'wireless' }],
+  });
+
+  // The list is stored venue-owned (job_id null, venue_id set).
+  const rig = await (
+    await request.get(`${API_BASE}/api/v1/venues/${venue.id}/graph`, { headers })
+  ).json();
+  const cl = rig.devices.find((d: { kind: string }) => d.kind === 'channel_list');
+  expect(cl).toBeTruthy();
+  expect(cl.job_id).toBeNull();
+  expect(cl.venue_id).toBe(venue.id);
+
+  // The same editor the jobs use drives the venue rig; the Wireless Workbench import lands the
+  // coordinated frequency onto the venue's wireless channel.
+  await page.goto(`/venues/${venue.id}/base-rig`);
+  await page.getByRole('button', { name: 'Channel lists' }).click();
+  await page.getByTestId('channel-list-editor').waitFor();
+
+  await page.getByTestId('import-wwb').click();
+  await page.getByTestId('wwb-file').setInputFiles(resolve(__dirname, 'fixtures/wwb_vox.shw'));
+  const row = page.getByTestId('wwb-map-row').first();
+  await row.waitFor();
+  await page.getByTestId('wwb-map-confirm').click();
+  await expect(page.getByTestId('wwb-map-confirm')).toBeHidden();
+
+  const after = await (
+    await request.get(`${API_BASE}/api/v1/venues/${venue.id}/graph`, { headers })
+  ).json();
+  const channel = after.devices.find(
+    (d: { kind: string; source_label?: string }) => d.kind === 'channel' && d.source_label === 'Vox',
+  );
+  expect(channel?.attributes?.wireless_frequency_mhz).toBe(559.825);
 });

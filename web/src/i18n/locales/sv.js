@@ -1264,6 +1264,7 @@ export default {
     openBaseRig: "Grundscensättning",
     baseRig: {
       title: "Grundscensättning",
+      stage: "Scen",
       subtitle: "Utrustningen som lokalen förser varje jobb med",
       save: "Spara scenättning",
       saved: "Grundscensättning sparad",

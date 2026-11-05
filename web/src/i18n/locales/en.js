@@ -1289,6 +1289,7 @@ export default {
     openBaseRig: "Base rig",
     baseRig: {
       title: "Standard Base Rig",
+      stage: "Stage",
       subtitle: "The gear this venue seeds every job with",
       save: "Save rig",
       saved: "Base rig saved",

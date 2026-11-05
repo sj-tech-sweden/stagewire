@@ -135,7 +135,33 @@ export const useVenueGraphStore = defineStore('venueGraph', {
       this.dirty = true;
     },
     async save() {
-      const payload = { devices: this.devices, edges: this.edges };
+      // The Channel List editor commits its changes straight to the DB through the incremental
+      // graph routes (it uses the `graph` store, not this whole-graph store). A whole-graph
+      // replace would otherwise delete those lists, so re-fetch the server rig first and carry
+      // forward any list/channel/output devices this store doesn't already hold locally.
+      const { data: server } = await api.get(base(this.venueId));
+      const localIds = new Set(this.devices.map((d) => d.id));
+      const listKinds = new Set([
+        'channel_list',
+        'channel',
+        'output',
+        'video_list',
+        'video_input',
+        'video_output',
+      ]);
+      const preserved = (server.devices || []).filter(
+        (d) => !localIds.has(d.id) && listKinds.has(d.kind),
+      );
+      const preservedIds = new Set(preserved.map((d) => d.id));
+      const preservedEdges = (server.edges || []).filter(
+        (e) =>
+          !this.edges.some((le) => le.id === e.id) &&
+          preserved.some((p) => p.id === e.src_device_id || p.id === e.dst_device_id),
+      );
+      const payload = {
+        devices: [...this.devices, ...preserved],
+        edges: [...this.edges, ...preservedEdges],
+      };
       const { data } = await api.put(base(this.venueId), payload);
       this.devices = data.devices || [];
       this.edges = data.edges || [];
