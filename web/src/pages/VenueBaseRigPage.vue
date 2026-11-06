@@ -481,7 +481,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { useQuasar, Notify } from 'quasar';
+import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import { apiErrorText } from '@/utils/errors';
 import { frameFromVenue, stageCentre } from '@/utils/plotFrame';
@@ -503,6 +503,7 @@ import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
 const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 // The venue Standard Base Rig reuses the job graph editing store, scoped to the venue: the same
 // components (canvas, editors, power panel, patch drawer, cable routing) serve both, so a venue gets
 // the identical rigging/power/lighting/video treatment a job does. Edits commit immediately through
