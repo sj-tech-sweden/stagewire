@@ -1,5 +1,8 @@
 <template>
+  <!-- The whole picker is the mechanism behind every "from Stockwire" control; hide it entirely when
+       the integration is disabled so none of those controls can be reached. -->
   <q-select
+    v-if="store.isEnabled"
     :model-value="modelValue"
     :options="options"
     :label="label"

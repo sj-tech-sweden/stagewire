@@ -55,6 +55,7 @@
           :label="t('jobs.fieldNotes')"
         />
 
+        <template v-if="stockwire.isEnabled">
         <q-separator class="q-my-md" />
         <div class="text-subtitle2">
           {{ t('stockwire.linkedJob') }}
@@ -163,6 +164,7 @@
             </q-item>
           </q-list>
         </div>
+        </template>
       </q-card-section>
       <q-card-actions align="right">
         <q-btn

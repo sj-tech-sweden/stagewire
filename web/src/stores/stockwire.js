@@ -11,6 +11,12 @@ export const useStockwireStore = defineStore('stockwire', {
     // and reused inline by the device dialog so the Stockwire call happens once per job.
     jobAvailability: {},
   }),
+  getters: {
+    // Whether the stockwire-rental integration is enabled. Drives hiding of every
+    // integration-dependent control across the app (see AGENTS.md: "when disabled, hide
+    // all stockwire-connected UI"). The Settings stockwire tab stays visible so it can be re-enabled.
+    isEnabled: (state) => !!state.integration.enabled,
+  },
   actions: {
     async loadCategoryMap() {
       const { data } = await api.get('/settings/stockwire/category-map');

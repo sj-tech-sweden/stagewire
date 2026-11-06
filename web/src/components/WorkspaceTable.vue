@@ -25,13 +25,13 @@
         </q-item-section>
         <q-item-section side>
           <q-badge
-            v-if="needsBookingRequest(device)"
+            v-if="needsBookingRequest(device) && stockwire.isEnabled"
             color="warning"
             text-color="black"
             :label="t('workspace.unbooked')"
           />
           <q-badge
-            v-else-if="device.stockwire_booked"
+            v-else-if="device.stockwire_booked && stockwire.isEnabled"
             color="positive"
             :label="t('workspace.booked')"
           />
@@ -80,7 +80,10 @@
           />
         </q-td>
       </template>
-      <template #body-cell-stockwire="slot">
+      <template
+        v-if="stockwire.isEnabled"
+        #body-cell-stockwire="slot"
+      >
         <q-td :props="slot">
           <q-btn
             v-if="needsBookingRequest(slot.row)"
@@ -114,6 +117,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
+import { useStockwireStore } from '@/stores/stockwire';
 import { isPowerNode, needsBookingRequest, powerInletLabel } from '@/utils/workspace';
 
 // A venue's Standard Base Rig reuses this table, so it accepts an optional `venueId`; store calls
@@ -129,16 +133,22 @@ const emit = defineEmits(['select', 'request-booking']);
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const stockwire = useStockwireStore();
 const scopeId = computed(() => props.venueId || props.jobId);
 
-const columns = computed(() => [
-  { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
-  { name: 'domain', label: t('workspace.colDomain'), field: 'domain', align: 'left' },
-  { name: 'kind', label: t('workspace.colKind'), field: 'kind', align: 'left' },
-  { name: 'inlet', label: t('workspace.colInlet'), field: (row) => (isPowerNode(row) ? '' : powerInletLabel(row.attributes?.power_inlet)), align: 'left' },
-  { name: 'stockwire', label: t('workspace.colStockwire'), field: 'stockwire_product_name', align: 'left' },
-  { name: 'notes', label: t('workspace.colNotes'), field: 'notes', align: 'left' },
-]);
+const columns = computed(() => {
+  const cols = [
+    { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
+    { name: 'domain', label: t('workspace.colDomain'), field: 'domain', align: 'left' },
+    { name: 'kind', label: t('workspace.colKind'), field: 'kind', align: 'left' },
+    { name: 'inlet', label: t('workspace.colInlet'), field: (row) => (isPowerNode(row) ? '' : powerInletLabel(row.attributes?.power_inlet)), align: 'left' },
+    { name: 'stockwire', label: t('workspace.colStockwire'), field: 'stockwire_product_name', align: 'left' },
+    { name: 'notes', label: t('workspace.colNotes'), field: 'notes', align: 'left' },
+  ];
+  // The stockwire column (booking status / linked product) is an integration concern; drop it when
+  // the integration is disabled so no stockwire data is surfaced.
+  return stockwire.isEnabled ? cols : cols.filter((c) => c.name !== 'stockwire');
+});
 
 async function save(row, changes) {
   try {

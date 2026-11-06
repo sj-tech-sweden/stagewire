@@ -32,6 +32,7 @@
         <q-tab
           name="stockwire"
           :label="t('settings.stockwire.title')"
+          data-testid="settings-tab-stockwire"
         />
       </q-tabs>
       <q-separator />
@@ -807,6 +808,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/boot/api'
 import { useAuthStore } from '@/stores/auth'
+import { useStockwireStore } from '@/stores/stockwire'
 import { SUPPORTED_LOCALES } from '../i18n'
 
 const { t } = useI18n({ useScope: "global" })
@@ -848,6 +850,7 @@ async function saveCompany() {
 }
 
 /* ---------------- Stockwire integration ---------------- */
+const stockwire = useStockwireStore()
 const stockwireBaseUrl = ref('')
 const stockwireApiKey = ref('')
 const stockwireEnabled = ref(false)
@@ -889,6 +892,9 @@ async function saveStockwire() {
       public_url: stockwirePublicUrl.value,
       api_key: stockwireApiKey.value || null,
     })
+    // Keep the global integration flag in sync so every dependent component reacts immediately
+    // (the Settings tab itself stays visible so the integration can be re-enabled).
+    stockwire.integration = { ...stockwire.integration, enabled: stockwireEnabled.value }
     if (stockwireApiKey.value) stockwireHasKey.value = true
     stockwireApiKey.value = ''
     stockwireShowKey.value = false

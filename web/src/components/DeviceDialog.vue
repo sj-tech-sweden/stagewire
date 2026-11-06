@@ -19,7 +19,7 @@
           @update:model-value="importProduct"
         />
         <div
-          v-if="canShowAvailability"
+          v-if="canShowAvailability && stockwire.isEnabled"
           class="q-mt-xs"
           data-testid="device-availability"
         >

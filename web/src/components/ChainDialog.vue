@@ -50,7 +50,7 @@
             <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
           </q-btn>
           <StockwireProductPicker
-            v-if="contextKind === 'job'"
+            v-if="contextKind === 'job' && stockwire.isEnabled"
             class="col-12 col-sm-4"
             :model-value="null"
             own
@@ -183,6 +183,7 @@ import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import { useGraphStore } from '@/stores/graph';
+import { useStockwireStore } from '@/stores/stockwire';
 import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 
@@ -207,6 +208,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const graph = useGraphStore();
+const stockwire = useStockwireStore();
 // A chain can live on a job or a venue base rig; scope graph writes to the right context.
 const contextId = computed(() => props.venueId || props.jobId);
 const contextKind = computed(() => (props.venueId ? 'venue' : 'job'));

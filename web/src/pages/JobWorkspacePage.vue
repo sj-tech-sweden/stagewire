@@ -11,6 +11,7 @@
       @saved="reloadJob"
     />
     <StockwireAvailabilityPanel
+      v-if="stockwireStore.isEnabled"
       v-model="availabilityOpen"
       :job-id="jobId"
       :job="job"
@@ -49,6 +50,7 @@
           <span v-if="job.venue_name">· {{ job.venue_name }}</span>
           <span v-if="job.event_date">· {{ new Date(job.event_date).toLocaleDateString() }}</span>
           <q-chip
+            v-if="stockwireStore.isEnabled"
             dense
             square
             :color="job.stockwire_job_id ? 'positive' : 'grey-7'"
@@ -68,7 +70,7 @@
         @click="jobDialog = true"
       />
       <q-btn
-        v-if="job?.stockwire_job_id"
+        v-if="job?.stockwire_job_id && stockwireStore.isEnabled"
         flat
         no-caps
         icon="open_in_new"
@@ -77,6 +79,7 @@
         @click="openInStockwire"
       />
       <q-btn
+        v-if="stockwireStore.isEnabled"
         color="primary"
         no-caps
         icon="inventory_2"
@@ -85,6 +88,7 @@
         @click="catalogOpen = true"
       />
       <q-btn
+        v-if="stockwireStore.isEnabled"
         flat
         no-caps
         icon="inventory"
@@ -743,6 +747,7 @@
     </q-dialog>
 
     <StockwireCatalogDrawer
+      v-if="stockwireStore.isEnabled"
       v-model="catalogOpen"
       :job-id="jobId"
       :stockwire-job-id="job?.stockwire_job_id || null"

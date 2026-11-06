@@ -88,7 +88,7 @@
         <q-td :props="slot">
           {{ effective(slot.row)?.weight_kg_effective ?? '' }}
           <q-badge
-            v-if="effective(slot.row)?.weight_source === 'stockwire'"
+            v-if="effective(slot.row)?.weight_source === 'stockwire' && stockwire.isEnabled"
             color="teal"
             label="SW"
           />
@@ -98,7 +98,7 @@
         <q-td :props="slot">
           {{ effective(slot.row)?.power_watts_effective ?? '' }}
           <q-badge
-            v-if="effective(slot.row)?.power_source === 'stockwire'"
+            v-if="effective(slot.row)?.power_source === 'stockwire' && stockwire.isEnabled"
             color="teal"
             label="SW"
           />
@@ -170,6 +170,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
+import { useStockwireStore } from '@/stores/stockwire';
 import DeviceDialog from '@/components/DeviceDialog.vue';
 import { POWER_INLETS, connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
 
@@ -183,6 +184,7 @@ const scopeId = computed(() => props.venueId || props.jobId);
 const { t, te } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const stockwire = useStockwireStore();
 const dialogOpen = ref(false);
 const editing = ref(null);
 
