@@ -1275,11 +1275,11 @@ export default {
     removeFloorPlan: "Remove floor plan",
     propagateTitle: "Update jobs using this venue",
     propagateHint:
-      "Copies the current size and stage position into jobs that use this venue.",
+      "Copies the venue size, stage position and Standard Base Rig into jobs that use this venue. Jobs that already have gear keep their layout; only new rig items are added.",
     propagateAll: "All jobs",
     propagateNewer: "Jobs created since last update",
     propagateConfirm:
-      "Copy this venue size and stage position into the selected jobs?",
+      "Push this venue's size, stage position and Standard Base Rig into the selected jobs?",
     propagated: "Updated {count} job(s)",
     lastPropagated: "Last pushed to jobs: {date}",
     neverPropagated: "Not yet pushed to any jobs",

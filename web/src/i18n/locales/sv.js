@@ -1304,11 +1304,11 @@ export default {
     removeFloorPlan: "Ta bort planritning",
     propagateTitle: "Uppdatera jobb som använder lokalen",
     propagateHint:
-      "Kopierar aktuell storlek och scenposition till jobb som använder lokalen.",
+      "Kopierar lokalens storlek, scenposition och grundscensättning till jobb som använder lokalen. Jobb som redan har utrustning behåller sin layout; bara nya riggdetaljer läggs till.",
     propagateAll: "Alla jobb",
     propagateNewer: "Jobb skapade sedan senaste uppdatering",
     propagateConfirm:
-      "Kopiera lokalens storlek och scenposition till de valda jobben?",
+      "Skicka lokalens storlek, scenposition och grundscensättning till de valda jobben?",
     propagated: "Uppdaterade {count} jobb",
     lastPropagated: "Senast kopierad till jobb: {date}",
     neverPropagated: "Ännu inte kopierad till några jobb",
