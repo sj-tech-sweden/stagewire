@@ -28,6 +28,10 @@ class VenueBase(BaseModel):
     # stage-relative cm for the stage) when the matching *_shape is "custom_polygon".
     footprint_polygon: list[list[float]] = Field(default_factory=list)
     stage_polygon: list[list[float]] = Field(default_factory=list)
+    # Cable raceways and routing settings for the venue's Standard Base Rig, mirroring a job's
+    # cable_plan (a `cableways` array plus routing `settings`). Jobs start from these cableways and
+    # add their own runs, so the venue owns the fixed infrastructure (trays, conduits).
+    cable_plan: dict = Field(default_factory=dict)
 
     @field_validator("audience_polygon")
     @classmethod
@@ -59,11 +63,21 @@ class VenueUpdate(BaseModel):
     audience_polygon: list[list[float]] | None = None
     footprint_polygon: list[list[float]] | None = None
     stage_polygon: list[list[float]] | None = None
+    # Cable raceways + routing settings for the venue's Standard Base Rig. Mirrors the job's
+    # `cable_plan`. An explicit `null` resets to the empty plan ({}) rather than writing NULL,
+    # because the column is NOT NULL.
+    cable_plan: dict | None = None
 
     @field_validator("audience_polygon")
     @classmethod
     def _check_audience_polygon(cls, value):
         return check_polygon(value)
+
+    @field_validator("cable_plan")
+    @classmethod
+    def _check_cable_plan(cls, value):
+        # Explicit null means "reset"; a missing field is handled by exclude_unset upstream.
+        return value if value is not None else {}
 
     @field_validator("footprint_polygon", "stage_polygon")
     @classmethod

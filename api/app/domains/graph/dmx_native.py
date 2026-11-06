@@ -21,17 +21,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import FAN_OUT, Backfill
-from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
+from app.domains.graph.models import ConnectionEdge, GraphDevice, belongs_to, scope_filter
 
 STEP_KEYS = ("in_port", "out_port", "connector", "notes")
 
 
 def universe_node(
-    job_id: uuid.UUID, number: int, name: str = "", notes: str = "", source: dict | None = None
+    job_id: uuid.UUID | None,
+    number: int,
+    name: str = "",
+    notes: str = "",
+    source: dict | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> GraphDevice:
+    # A universe inherits the scope (job or venue) it is created in. Venues set `venue_id` and
+    # leave `job_id` NULL, so the node and its rebuilt edges never collide with a job's universes.
     return GraphDevice(
         id=uuid.uuid4(),
-        job_id=job_id,
+        job_id=job_id if venue_id is None else None,
+        venue_id=venue_id,
         domain="lighting",
         kind="dmx_universe",
         name=name or f"Universe {number}",
@@ -70,7 +78,8 @@ async def rebuild(db: AsyncSession, node: GraphDevice, steps: list[dict] | None 
     for edge in (
         await db.scalars(
             select(ConnectionEdge).where(
-                ConnectionEdge.job_id == node.job_id, ConnectionEdge.signal == "dmx"
+                scope_filter(ConnectionEdge, node.job_id, node.venue_id),
+                ConnectionEdge.signal == "dmx",
             )
         )
     ).all():
@@ -86,7 +95,7 @@ async def rebuild(db: AsyncSession, node: GraphDevice, steps: list[dict] | None 
         for d in (
             await db.scalars(select(GraphDevice).where(GraphDevice.id.in_(wanted or {node.id})))
         ).all()
-        if d.job_id == node.job_id
+        if belongs_to(d, node.job_id, node.venue_id)
     }
     number = attributes.get("number")
     new_edges: list[ConnectionEdge] = []
@@ -96,6 +105,7 @@ async def rebuild(db: AsyncSession, node: GraphDevice, steps: list[dict] | None 
             ConnectionEdge(
                 id=uuid.uuid4(),
                 job_id=node.job_id,
+                venue_id=node.venue_id,
                 signal="dmx",
                 src_device_id=src.id,
                 src_port=sport,
@@ -160,7 +170,9 @@ def translate_patch(node: GraphDevice, data: dict) -> dict:
     return {**data, "attributes": attrs} if attrs else data
 
 
-async def after_patch(db: AsyncSession, node: GraphDevice, data: dict) -> None:
+async def after_patch(
+    db: AsyncSession, node: GraphDevice, data: dict, venue_id: uuid.UUID | None = None
+) -> None:
     """The universe number and source port are on its edges too: rebuild them."""
     sent = data.get("attributes") or {}
     if node.kind != "dmx_universe":
@@ -168,7 +180,7 @@ async def after_patch(db: AsyncSession, node: GraphDevice, data: dict) -> None:
     if "number" in sent:
         others = await db.scalars(
             select(GraphDevice).where(
-                GraphDevice.job_id == node.job_id,
+                scope_filter(GraphDevice, node.job_id, node.venue_id),
                 GraphDevice.kind == "dmx_universe",
                 GraphDevice.id != node.id,
             )
@@ -279,10 +291,19 @@ async def drop_node(
         await rebuild(db, universe, kept)
 
 
-async def require_step_nodes(db: AsyncSession, job_id: uuid.UUID, ids: list[uuid.UUID]) -> None:
+async def require_step_nodes(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    ids: list[uuid.UUID],
+    venue_id: uuid.UUID | None = None,
+) -> None:
     for node_id in ids:
         node = await db.get(GraphDevice, node_id)
-        if node is None or node.job_id != job_id or node.kind in ("dmx_universe", "channel_list"):
+        if (
+            node is None
+            or not belongs_to(node, job_id, venue_id)
+            or node.kind in ("dmx_universe", "channel_list")
+        ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job"
             )

@@ -777,7 +777,7 @@ async def update_device_venue(
         for key, value in mirror.merged_attributes(device, data).items():
             setattr(device, key, value)
         await db.flush()
-        await dmx_native.after_patch(db, device, data)
+        await dmx_native.after_patch(db, device, data, venue_id=venue_id)
         await power_native.after_patch(db, None, device, data, venue_id=venue_id)
         await fixtures_native.after_patch(db, None, device, data, venue_id=venue_id)
         await plot_native.after_patch(db, None, device, data, venue_id=venue_id)
@@ -933,4 +933,114 @@ async def delete_edge_venue(
         schemas.ConnectionEdgeRead,
         remove,
         lambda: db.get(ConnectionEdge, edge_id),
+    )
+
+
+async def _require_venue(db: AsyncSession, venue_id: UUID) -> None:
+    """404 if the venue the editor targets does not exist (a venue graph edit is meaningless then).
+
+    Model import path: ``app.domains.venues.models.Venue``.
+    """
+    from app.domains.venues.models import Venue
+
+    if await db.get(Venue, venue_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
+
+
+async def _venue_all_devices(db: AsyncSession, venue_id: UUID) -> list[GraphDevice]:
+    return list(
+        (
+            await db.scalars(
+                select(GraphDevice)
+                .where(scope_filter(GraphDevice, None, venue_id))
+                .order_by(GraphDevice.position, GraphDevice.created_at)
+            )
+        ).all()
+    )
+
+
+@venue_router.get("/validate", response_model=list[schemas.IssueRead])
+async def validate_graph_venue(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.IssueRead]:
+    """Validate every edge in a venue's base-rig graph (same checks as the job graph)."""
+    await _require_venue(db, venue_id)
+    edges = await _venue_all_edges(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    rows = [_as_dict(e) for e in edges]
+    return [
+        schemas.IssueRead(**vars(issue))
+        for row in rows
+        for issue in topology.validate_edge(
+            row,
+            devices.get(str(row["src_device_id"])),
+            devices.get(str(row["dst_device_id"])),
+            rows,
+        )
+    ]
+
+
+@venue_router.get("/power-load", response_model=schemas.PhaseLoadRead)
+async def power_load_venue(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> schemas.PhaseLoadRead:
+    """Phase loads for a venue's base rig (same as the job route, scoped by venue)."""
+    await _require_venue(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    edges = [_as_dict(e) for e in await _venue_all_edges(db, venue_id)]
+    loads = topology.phase_loads(devices, edges)
+    # With a power tree the load is what the tree evaluates (everything plugged in, spread over the
+    # phases as the outputs say), summed over the sources; the per-edge figure above only knows
+    # edges that carry a phase and so reads 0 for gear plugged into a node.
+    from app.domains.rigging import router as rigging_router
+
+    tree = await rigging_router.rigging_summary(job_id=None, venue_id=venue_id, db=db)
+    sources = [n for n in tree["nodes"] if n["kind"] == "source"]
+    if sources:
+        loads = {p: round(sum(n["watts"].get(p, 0.0) for n in sources), 1) for p in topology.PHASES}
+    peak, low = max(loads.values()), min(loads.values())
+    return schemas.PhaseLoadRead(
+        **loads,
+        imbalance_pct=round((peak - low) / peak * 100, 1) if peak else 0.0,
+        limit_w=topology.phase_limit_w(devices),
+    )
+
+
+@venue_router.get("/devices/{device_id}/trace", response_model=schemas.TraceRead)
+async def trace_device_venue(
+    venue_id: UUID,
+    device_id: UUID,
+    direction: str = Query(pattern="^(upstream|downstream)$"),
+    signal: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> schemas.TraceRead:
+    """Trace a device in a venue's base rig (same as the job route, scoped by venue)."""
+    await _venue_device(db, venue_id, device_id)
+    edges = await _venue_all_edges(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    result = topology.trace([_as_dict(e) for e in edges], str(device_id), direction, signal=signal)
+    by_id = {str(e.id): e for e in edges}
+    issues = [
+        i
+        for hop in result.hops
+        for i in topology.validate_edge(
+            _as_dict(by_id[str(hop.edge["id"])]),
+            devices.get(str(hop.edge["src_device_id"])),
+            devices.get(str(hop.edge["dst_device_id"])),
+            [_as_dict(e) for e in edges],
+        )
+    ]
+    return schemas.TraceRead(
+        root=result.root,
+        direction=direction,
+        truncated=result.truncated,
+        hops=[
+            schemas.HopRead(
+                depth=h.depth,
+                device_id=h.device_id,
+                edge=schemas.ConnectionEdgeRead.model_validate(by_id[str(h.edge["id"])]),
+            )
+            for h in result.hops
+        ],
+        issues=[schemas.IssueRead(**vars(i)) for i in issues],
     )

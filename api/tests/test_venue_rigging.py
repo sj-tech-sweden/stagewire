@@ -91,7 +91,6 @@ async def test_venue_rigging_and_power_use_the_graph_api_and_are_isolated_from_j
         nodes = (await client.get(f"{BASE}/venues/{venue_id}/power-nodes", headers=h)).json()
         source_row = next(n for n in nodes if n["name"] == "Stage left")
         distro_row = next(n for n in nodes if n["name"] == "Distro")
-        distro_power_id = distro_row["id"]
         assert distro_row["parent_id"] == source_row["id"]
 
         # --- an extra (merged) feed onto the distro ------------------------
@@ -135,8 +134,8 @@ async def test_venue_rigging_and_power_use_the_graph_api_and_are_isolated_from_j
             headers=h,
         )
         assert loaded.status_code == 200, loaded.text
-        # Both ids are stored as their graph host id (the `GraphDevice` id), not the legacy power id;
-        # the summary remaps node ids and load power_node_id onto the same graph host ids so the
+        # Both ids are stored as their graph host id (the `GraphDevice` id), not the legacy power
+        # id; the summary remaps node ids and load power_node_id onto the same graph host ids so the
         # frontend sees one consistent scheme. The job path stores the identical form.
         assert loaded.json()["attributes"]["rigging_point_id"] == point["id"]
         assert loaded.json()["attributes"]["power_node_id"] == distro["id"]
@@ -145,7 +144,7 @@ async def test_venue_rigging_and_power_use_the_graph_api_and_are_isolated_from_j
         summary = (await client.get(f"{g}/rigging/summary", headers=h)).json()
         assert any(p["name"] == "FOH truss" for p in summary["points"])
         assert any(n["name"] == "Distro" for n in summary["nodes"])
-        assert any(l["kind"] == "device" for l in summary["loads"])
+        assert any(load["kind"] == "device" for load in summary["loads"])
 
         # --- isolation from the separate job -------------------------------
         assert (await client.get(f"{BASE}/jobs/{job_id}/power-nodes", headers=h)).json() == []
@@ -297,7 +296,11 @@ async def test_venue_graph_device_and_edge_crud_and_isolation(auth_headers):
         # --- PATCH a device: rename and set a power drawing attribute ---------------------
         patched_resp = await client.patch(
             f"{g}/devices/{left['id']}",
-            json={"name": "Left", "attributes": {"power_w": 300}, "expected_revision": left["revision"]},
+            json={
+                "name": "Left",
+                "attributes": {"power_w": 300},
+                "expected_revision": left["revision"],
+            },
             headers=h,
         )
         patched = patched_resp.json()
@@ -329,7 +332,9 @@ async def test_venue_graph_device_and_edge_crud_and_isolation(auth_headers):
         ).json()
         assert edge_patched["cable_label"] == "XLR"
         del_edge = await client.delete(
-            f"{g}/edges/{edge['id']}", params={"expected_revision": edge_patched["revision"]}, headers=h
+            f"{g}/edges/{edge['id']}",
+            params={"expected_revision": edge_patched["revision"]},
+            headers=h,
         )
         assert del_edge.status_code == 204
 
@@ -346,6 +351,8 @@ async def test_venue_graph_device_and_edge_crud_and_isolation(auth_headers):
         assert all(e["id"] != edge["id"] for e in graph["edges"])
 
         # --- isolation: a job shares none of the venue's graph rows -----------------------
-        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Other"}, headers=h)).json()["id"]
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Other"}, headers=h)).json()[
+            "id"
+        ]
         job_graph = (await client.get(f"{BASE}/jobs/{job_id}/graph", headers=h)).json()
         assert job_graph["devices"] == [] and job_graph["edges"] == []

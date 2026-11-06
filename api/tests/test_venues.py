@@ -539,3 +539,57 @@ async def test_venue_base_rig_crud(auth_headers):
             assert row is not None
             assert row.venue_id == UUID(venue_id)
             assert row.job_id is None
+
+
+async def test_venue_cable_plan_round_trip(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue = (
+            await client.post(
+                f"{BASE}/venues", json={**VENUE, "name": "Cable Plan Venue"}, headers=auth_headers
+            )
+        ).json()
+        venue_id = venue["id"]
+
+        # A new venue starts with an empty (default {}) cable plan.
+        fresh = await client.get(f"{BASE}/venues/{venue_id}", headers=auth_headers)
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["cable_plan"] == {}
+
+        # PATCH a realistic plan: fixed cableways (raceways) plus routing settings and overrides.
+        plan = {
+            "cableways": [
+                {"id": str(uuid4()), "points": [[0, 0], [100, 0], [100, 50]]},
+            ],
+            "settings": {"default_route_mode": "auto", "bundle_threshold_cm": 30},
+            "routes": {
+                "audio:1->2": {"mode": "manual", "waypoints": [[10, 10]], "hidden": False},
+            },
+        }
+        patched = await client.patch(
+            f"{BASE}/venues/{venue_id}", json={"cable_plan": plan}, headers=auth_headers
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["cable_plan"] == plan
+
+        # The value is persisted and returned on a subsequent GET (round-trip).
+        again = await client.get(f"{BASE}/venues/{venue_id}", headers=auth_headers)
+        assert again.status_code == 200, again.text
+        assert again.json()["cable_plan"] == plan
+
+        # PATCHing other fields leaves cable_plan untouched.
+        updated = await client.patch(
+            f"{BASE}/venues/{venue_id}",
+            json={"notes": "Re-racked the trays"},
+            headers=auth_headers,
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["cable_plan"] == plan
+        assert updated.json()["notes"] == "Re-racked the trays"
+
+        # A null plan resets to the default.
+        cleared = await client.patch(
+            f"{BASE}/venues/{venue_id}", json={"cable_plan": None}, headers=auth_headers
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["cable_plan"] == {}

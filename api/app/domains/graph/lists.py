@@ -302,8 +302,13 @@ async def create_outputs(
     return await _create_outputs(db, job_id, list_id, payload)
 
 
-async def _chain_edges(db: AsyncSession, job_id: UUID, node: GraphDevice) -> ChainRead:
-    edges = (await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))).all()
+async def _chain_edges(db: AsyncSession, job_id: UUID | None, node: GraphDevice) -> ChainRead:
+    # Scope by the node's own scope (job or venue) so a venue chain only sees the venue's edges.
+    edges = (
+        await db.scalars(
+            select(ConnectionEdge).where(scope_filter(ConnectionEdge, job_id, node.venue_id))
+        )
+    ).all()
     mine = [e for e in edges if (e.attributes or {}).get("chain") == str(node.id)]
     mine.sort(key=lambda e: (e.attributes or {}).get("position") or 0)
     return ChainRead(edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in mine])
@@ -834,14 +839,16 @@ async def _universe_nodes(db: AsyncSession, job_id: UUID) -> list[GraphDevice]:
     )
 
 
-async def _step_node(db: AsyncSession, job_id: UUID, node_id: UUID) -> GraphDevice:
+async def _step_node(
+    db: AsyncSession, job_id: UUID | None, node_id: UUID, venue_id: UUID | None = None
+) -> GraphDevice:
     """A step's node: a fixture as it is, any other gear made into a real device first."""
     node = await db.get(GraphDevice, node_id)
-    if node is None or node.job_id != job_id:
+    if node is None or not belongs_to(node, job_id, venue_id):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
     own_fixture = fixtures_native.fixture_id_of(node) is not None and not node.legacy_ref
     if not own_fixture:  # a fixture node of its own is a step as it is; any other gear is a device
-        await _device_twin(db, job_id, node_id)
+        await _device_twin(db, job_id, node_id, venue_id)
     return node
 
 
@@ -911,3 +918,414 @@ async def replace_universe_chain(
     await dmx_native.rebuild(db, node, steps)
     await db.commit()
     return await _chain_edges(db, job_id, node)
+
+
+# --- venue (Standard Base Rig) variants -----------------------------------------------------------
+# The venue editors reuse the same list/video/fixture/universe UX as a job, so these mirror the job
+# handlers above but scope every query and graph row by `venue_id`, skip the job-only machinery
+# (job_lock, backfill, publish_job_event, the legacy mirror) and never touch the job router.
+
+
+async def _require_venue_lists(db: AsyncSession, venue_id: UUID) -> None:
+    from app.domains.venues import service as venue_service
+
+    if await venue_service.get_venue(db, venue_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
+
+
+async def _venue_node(db: AsyncSession, venue_id: UUID, node_id: UUID, kind: str) -> GraphDevice:
+    node = await db.get(GraphDevice, node_id)
+    if node is None or node.venue_id != venue_id or node.kind != kind:
+        label = kind.replace("_", " ").title()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"{label} not found")
+    return node
+
+
+async def _venue_video_list_node(db: AsyncSession, venue_id: UUID, node_id: UUID) -> GraphDevice:
+    return await _venue_node(db, venue_id, node_id, "video_list")
+
+
+async def _venue_universe_nodes(db: AsyncSession, venue_id: UUID) -> list[GraphDevice]:
+    return list(
+        (
+            await db.scalars(
+                select(GraphDevice).where(
+                    GraphDevice.venue_id == venue_id, GraphDevice.kind == "dmx_universe"
+                )
+            )
+        ).all()
+    )
+
+
+async def _venue_find_with(
+    db: AsyncSession, venue_id: UUID, key: str, value: str
+) -> GraphDevice | None:
+    """The first venue graph node whose list link ``key`` (a sound/video list id) is ``value``."""
+    nodes = (await db.scalars(select(GraphDevice).where(GraphDevice.venue_id == venue_id))).all()
+    for n in nodes:
+        if (n.attributes or {}).get(key) == str(value):
+            return n
+    return None
+
+
+async def _venue_create_video_rows(
+    db: AsyncSession, venue_id: UUID, list_id: UUID, items: list, *, outputs: bool
+) -> list[schemas.GraphDeviceRead]:
+    list_node = await _venue_video_list_node(db, venue_id, list_id)
+    kind, key = (
+        ("video_destination", "output_number") if outputs else ("video_input", "input_number")
+    )
+    make = video_native.video_output_node if outputs else video_native.video_input_node
+    members = await _list_members(db, list_node, kind)
+    number = max([m.position for m in members] or [0]) + 1
+    rows: list[GraphDevice] = []
+    for item in items:
+        data = item.model_dump(exclude_unset=True)
+        if data.get(key) is None:
+            data[key] = number
+        number = max(number, data[key]) + 1
+        # The row inherits the venue scope from the list node (video_native derives venue_id).
+        rows.append(make(None, list_node, data))
+    db.add_all(rows)
+    await db.commit()
+    return [schemas.GraphDeviceRead.model_validate(r) for r in rows]
+
+
+@venue_router.post("/video-lists", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_video_list_venue(
+    venue_id: UUID, payload: VideoListCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    await _require_venue_lists(db, venue_id)
+    data = payload.model_dump(exclude_unset=True)
+    position = len(
+        (
+            await db.scalars(
+                select(GraphDevice.id).where(
+                    GraphDevice.venue_id == venue_id, GraphDevice.kind == "video_list"
+                )
+            )
+        ).all()
+    )
+    node = GraphDevice(
+        id=uuid4(),
+        job_id=None,
+        venue_id=venue_id,
+        domain="video",
+        kind="video_list",
+        name=data.get("name") or "Camera inputs",
+        position=position,
+        stockwire_product_id=data.get("switcher_product_id"),
+        stockwire_product_name=data.get("switcher_product_name"),
+        attributes={
+            key: data.get(key)
+            for key in (
+                "switcher_product_id",
+                "switcher_product_name",
+                "switcher_inputs",
+                "switcher_outputs",
+            )
+        },
+    )
+    db.add(node)
+    await db.commit()
+    await db.refresh(node)
+    return schemas.GraphDeviceRead.model_validate(node)
+
+
+@venue_router.post(
+    "/video-lists/{list_id}/inputs", response_model=schemas.GraphDeviceRead, status_code=201
+)
+async def create_video_input_venue(
+    venue_id: UUID,
+    list_id: UUID,
+    payload: VideoInputCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.GraphDeviceRead:
+    return (await _venue_create_video_rows(db, venue_id, list_id, [payload], outputs=False))[0]
+
+
+@venue_router.post(
+    "/video-lists/{list_id}/inputs/batch",
+    response_model=list[schemas.GraphDeviceRead],
+    status_code=201,
+)
+async def create_video_inputs_venue(
+    venue_id: UUID,
+    list_id: UUID,
+    payload: list[VideoInputCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} inputs")
+    return await _venue_create_video_rows(db, venue_id, list_id, payload, outputs=False)
+
+
+@venue_router.post(
+    "/video-lists/{list_id}/outputs", response_model=schemas.GraphDeviceRead, status_code=201
+)
+async def create_video_output_venue(
+    venue_id: UUID,
+    list_id: UUID,
+    payload: VideoOutputCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.GraphDeviceRead:
+    return (await _venue_create_video_rows(db, venue_id, list_id, [payload], outputs=True))[0]
+
+
+@venue_router.post(
+    "/video-lists/{list_id}/outputs/batch",
+    response_model=list[schemas.GraphDeviceRead],
+    status_code=201,
+)
+async def create_video_outputs_venue(
+    venue_id: UUID,
+    list_id: UUID,
+    payload: list[VideoOutputCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} outputs")
+    return await _venue_create_video_rows(db, venue_id, list_id, payload, outputs=True)
+
+
+@venue_router.post("/video-lists/{list_id}/fill-from-switcher")
+async def fill_video_list_from_switcher_venue(
+    venue_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Make a venue video list match its switcher (mirrors the job route, venue-scoped).
+
+    A venue has no legacy mirror, so the switcher is kept as a graph node directly (tagged with the
+    list) and the rows are rebuilt against it; no backfill_job runs.
+    """
+    await _require_venue_lists(db, venue_id)
+    list_node = await _venue_video_list_node(db, venue_id, list_id)
+    ref = public_id(list_node)
+    attrs = list_node.attributes or {}
+    switcher = await _venue_find_with(db, venue_id, "video_list_id", str(ref))
+    if switcher is None:
+        product = attrs.get("switcher_product_name") or "Switcher"
+        await service.create_device(
+            db,
+            None,
+            {
+                "name": f"{list_node.name} · {product}",
+                "device_type": "switcher",
+                "video_list_id": ref,
+                "stockwire_product_id": attrs.get("switcher_product_id"),
+                "stockwire_product_name": attrs.get("switcher_product_name"),
+            },
+            venue_id=venue_id,
+        )
+        switcher = await _venue_find_with(db, venue_id, "video_list_id", str(ref))
+    counts = {"inputs_added": 0, "inputs_patched": 0, "outputs_added": 0, "outputs_patched": 0}
+    for kind, wanted_key, make, noun in (
+        ("video_input", "switcher_inputs", video_native.video_input_node, "inputs"),
+        ("video_destination", "switcher_outputs", video_native.video_output_node, "outputs"),
+    ):
+        members = await _list_members(db, list_node, kind)
+        for member in members:
+            if not (member.attributes or {}).get("points"):
+                await video_native.rebuild(db, member, [video_native.new_point(0, switcher.id)])
+                counts[f"{noun}_patched"] += 1
+        number = max([m.position for m in members] or [0]) + 1
+        key = "input_number" if kind == "video_input" else "output_number"
+        for offset in range(max(0, int(attrs.get(wanted_key) or 0) - len(members))):
+            row = make(None, list_node, {key: number + offset})
+            db.add(row)
+            await db.flush()
+            await video_native.rebuild(db, row, [video_native.new_point(0, switcher.id)])
+            counts[f"{noun}_added"] += 1
+    await db.commit()
+    return {"device_id": str(switcher.id), **counts}
+
+
+@venue_router.post("/fixtures", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_fixture_venue(
+    venue_id: UUID,
+    payload: lighting_schemas.FixtureCreate,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.GraphDeviceRead:
+    """Create a fixture on a venue's base rig (mirrors the job route, venue-scoped)."""
+    await _require_venue_lists(db, venue_id)
+    fixture = await lighting_service.create_fixture(
+        db, None, payload.model_dump(exclude_unset=True), venue_id=venue_id
+    )
+    host = await fixtures_native.host_of(db, None, fixture.id, venue_id)
+    return schemas.GraphDeviceRead.model_validate(host)
+
+
+@venue_router.post("/fixtures/bulk", response_model=list[schemas.GraphDeviceRead], status_code=201)
+async def create_fixtures_bulk_venue(
+    venue_id: UUID,
+    payload: FixtureBulk,
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.GraphDeviceRead]:
+    """Add several kinds of fixture at once to a venue's base rig (mirrors the job route)."""
+    await _require_venue_lists(db, venue_id)
+    if sum(item.quantity for item in payload.items) > MAX_BULK_FIXTURES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BULK_FIXTURES} fixtures at once"
+        )
+    universe, cursor = payload.universe, payload.start_address
+    fixture_ids: list[UUID] = []
+    for item in payload.items:
+        base = item.model_dump(exclude={"quantity", "label"}, exclude_none=True)
+        resolved = await lighting_service.apply_type(db, None, dict(base), venue_id=venue_id)
+        footprint = resolved.get("footprint") or 1
+        for number in range(1, item.quantity + 1):
+            data = dict(base)
+            label = item.label or item.fixture_type
+            if label:
+                data["purpose"] = f"{label} {number}" if item.quantity > 1 else label
+            data["universe"] = universe
+            if cursor is not None:
+                if cursor + footprint - 1 > lighting_service.DMX_CHANNELS_PER_UNIVERSE:
+                    universe, cursor = universe + 1, 1
+                    data["universe"] = universe
+                data["dmx_address"] = cursor
+                cursor += footprint + payload.spacing
+            else:
+                free = lighting_service.first_free_address(
+                    await lighting_service.list_fixtures(db, None, venue_id=venue_id),
+                    universe,
+                    footprint,
+                )
+                if free is None:
+                    universe += 1
+                    data["universe"] = universe
+            fixture = await lighting_service.create_fixture(db, None, data, venue_id=venue_id)
+            universe = fixture.universe or universe
+            fixture_ids.append(fixture.id)
+    hosts = await fixtures_native.host_nodes(db, None, venue_id=venue_id)
+    unique = {hosts[fid].id: hosts[fid] for fid in fixture_ids}
+    return [schemas.GraphDeviceRead.model_validate(host) for host in unique.values()]
+
+
+@venue_router.post("/universes", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_universe_venue(
+    venue_id: UUID, payload: UniverseCreate, db: AsyncSession = Depends(get_db)
+) -> schemas.GraphDeviceRead:
+    """Create a DMX universe on a venue's base rig (mirrors the job route, venue-scoped)."""
+    await _require_venue_lists(db, venue_id)
+    if payload.source_device_id:
+        await _step_node(db, None, payload.source_device_id, venue_id=venue_id)
+    existing = await _venue_universe_nodes(db, venue_id)
+    number = payload.number or max((u.attributes["number"] for u in existing), default=0) + 1
+    if any(u.attributes["number"] == number for u in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Universe {number} already exists")
+    source = (
+        {
+            "device_id": str(payload.source_device_id),
+            "port": payload.source_port,
+        }
+        if payload.source_device_id
+        else None
+    )
+    node = dmx_native.universe_node(
+        None, number, payload.name, payload.notes, source, venue_id=venue_id
+    )
+    db.add(node)
+    await db.flush()
+    await dmx_native.rebuild(db, node)
+    await db.commit()
+    await db.refresh(node)
+    return schemas.GraphDeviceRead.model_validate(node)
+
+
+@venue_router.put("/universes/{universe_id}/source", response_model=schemas.GraphDeviceRead)
+async def set_universe_source_venue(
+    venue_id: UUID,
+    universe_id: UUID,
+    payload: UniverseSource,
+    db: AsyncSession = Depends(get_db),
+) -> schemas.GraphDeviceRead:
+    node = await _venue_node(db, venue_id, universe_id, "dmx_universe")
+    if payload.device_id:
+        await _step_node(db, None, payload.device_id, venue_id=venue_id)
+    node.attributes = {
+        **node.attributes,
+        "source_device_id": str(payload.device_id) if payload.device_id else None,
+        "source_port": payload.port if payload.device_id else "",
+    }
+    await dmx_native.rebuild(db, node)
+    await db.commit()
+    await db.refresh(node)
+    return schemas.GraphDeviceRead.model_validate(node)
+
+
+@venue_router.put("/universes/{universe_id}/chain", response_model=ChainRead)
+async def replace_universe_chain_venue(
+    venue_id: UUID, universe_id: UUID, payload: DmxChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _venue_node(db, venue_id, universe_id, "dmx_universe")
+    for position, step in enumerate(payload.steps):
+        if step.parent_index is not None and not 0 <= step.parent_index < position:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A step can only take its signal from an earlier step",
+            )
+    await dmx_native.require_step_nodes(
+        db, None, [s.device_id for s in payload.steps], venue_id=venue_id
+    )
+    for step in payload.steps:
+        await _step_node(db, None, step.device_id, venue_id=venue_id)
+    steps: list[dict] = []
+    for position, step in enumerate(payload.steps):
+        parent = steps[step.parent_index]["step_id"] if step.parent_index is not None else None
+        steps.append(dmx_native.new_step(position, step.device_id, step, parent))
+    await dmx_native.rebuild(db, node, steps)
+    await db.commit()
+    return await _chain_edges(db, None, node)
+
+
+@venue_router.put("/video-inputs/{input_id}/chain", response_model=ChainRead)
+async def replace_video_input_chain_venue(
+    venue_id: UUID, input_id: UUID, payload: VideoChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _venue_node(db, venue_id, input_id, "video_input")
+    await video_native.require_step_devices(
+        db, None, [s.device_id for s in payload.steps], venue_id=venue_id
+    )
+    for step in payload.steps:
+        if (await db.get(GraphDevice, step.device_id)).kind == "projector":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A projector takes its signal from a video output, not a video input",
+            )
+    for step in payload.steps:
+        await _device_twin(db, None, step.device_id, venue_id=venue_id)
+    await video_native.rebuild(
+        db,
+        node,
+        [
+            video_native.new_point(position, step.device_id, step)
+            for position, step in enumerate(payload.steps)
+        ],
+    )
+    await db.commit()
+    return await _chain_edges(db, None, node)
+
+
+@venue_router.put("/video-outputs/{output_id}/chain", response_model=ChainRead)
+async def replace_video_output_chain_venue(
+    venue_id: UUID, output_id: UUID, payload: VideoChain, db: AsyncSession = Depends(get_db)
+) -> ChainRead:
+    node = await _venue_node(db, venue_id, output_id, "video_destination")
+    for position, step in enumerate(payload.steps):
+        if step.parent_index is not None and not 0 <= step.parent_index < position:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A step can only take its signal from an earlier step",
+            )
+    await video_native.require_step_devices(
+        db, None, [s.device_id for s in payload.steps], venue_id=venue_id
+    )
+    for step in payload.steps:
+        await _device_twin(db, None, step.device_id, venue_id=venue_id)
+    points: list[dict] = []
+    for position, step in enumerate(payload.steps):
+        parent = points[step.parent_index]["point_id"] if step.parent_index is not None else None
+        points.append(video_native.new_point(position, step.device_id, step, parent))
+    await video_native.rebuild(db, node, points)
+    await db.commit()
+    return await _chain_edges(db, None, node)

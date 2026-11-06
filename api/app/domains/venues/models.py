@@ -31,6 +31,11 @@ class Venue(Base):
     audience_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     footprint_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     stage_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Cable raceways and routing settings for the venue's Standard Base Rig, stored the same way as
+    # a job's cable_plan (a `cableways` array plus routing `settings`). Jobs clone the venue's
+    # cableways as a starting point and add their own runs on top, so the venue defines the fixed
+    # infrastructure (trays, conduits) and each job extends it.
+    cable_plan: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     propagated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
