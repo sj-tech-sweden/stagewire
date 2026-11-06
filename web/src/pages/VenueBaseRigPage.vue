@@ -19,13 +19,6 @@
           {{ t('venues.baseRig.title') }}
         </div>
       </div>
-      <q-badge
-        v-if="venueGraph.dirty"
-        color="amber"
-        text-color="black"
-      >
-        {{ t('venues.baseRig.unsaved') }}
-      </q-badge>
       <q-btn-toggle
         v-model="view"
         dense
@@ -35,14 +28,6 @@
           { label: t('venues.baseRig.stage'), value: 'stage' },
           { label: t('channels.lists'), value: 'lists' },
         ]"
-      />
-      <q-btn
-        v-if="view === 'stage'"
-        color="primary"
-        icon="save"
-        :label="t('venues.baseRig.save')"
-        :disable="!venueGraph.dirty || venueGraph.loading"
-        @click="save"
       />
       <q-btn
         outline
@@ -229,7 +214,7 @@
             outline
             color="negative"
             icon="delete"
-            :disable="!venueGraph.selectedId"
+            :disable="!graph.selectedDeviceId"
             :label="t('venues.baseRig.deleteSelected')"
             @click="deleteSelected"
           />
@@ -237,10 +222,10 @@
 
         <WorkspaceCanvas
           :frame="frame"
-          :devices="venueGraph.devices"
-          :edges="venueGraph.edges"
+          :devices="graph.devices"
+          :edges="graph.edges"
           :outlets="outlets"
-          :selected-id="venueGraph.selectedId"
+          :selected-id="graph.selectedDeviceId"
           :zoom="zoom"
           :device-scale="deviceScale"
           :connect-mode="connectMode"
@@ -275,17 +260,17 @@
           flat
           bordered
         >
-          <q-card-section v-if="venueGraph.selectedDevice">
+          <q-card-section v-if="graph.selectedDevice">
             <div class="text-subtitle2">
               {{ t('venues.baseRig.name') }}
             </div>
             <q-input
               dense
-              :model-value="venueGraph.selectedDevice.name"
-              @update:model-value="(v) => venueGraph.updateDevice(venueGraph.selectedDevice.id, { name: v })"
+              :model-value="graph.selectedDevice.name"
+              @update:model-value="(v) => graph.updateDevice(venueId, graph.selectedDeviceId, { name: v })"
             />
             <div class="text-caption q-mt-sm text-grey-7">
-              {{ venueGraph.selectedDevice.domain }} / {{ venueGraph.selectedDevice.kind || '—' }}
+              {{ graph.selectedDevice.domain }} / {{ graph.selectedDevice.kind || '—' }}
             </div>
             <div class="row q-gutter-xs q-mt-sm">
               <q-input
@@ -293,7 +278,7 @@
                 type="number"
                 class="col"
                 :label="t('venues.geometry.xCm')"
-                :model-value="venueGraph.selectedDevice.attributes?.width_cm"
+                :model-value="graph.selectedDevice.attributes?.width_cm"
                 @update:model-value="(v) => updateDeviceSize('width_cm', v)"
               />
               <q-input
@@ -301,7 +286,7 @@
                 type="number"
                 class="col"
                 :label="t('venues.geometry.yCm')"
-                :model-value="venueGraph.selectedDevice.attributes?.height_cm"
+                :model-value="graph.selectedDevice.attributes?.height_cm"
                 @update:model-value="(v) => updateDeviceSize('height_cm', v)"
               />
             </div>
@@ -310,7 +295,7 @@
               type="number"
               class="q-mt-sm"
               :label="t('workspace.powerWatts')"
-              :model-value="venueGraph.selectedDevice.attributes?.power_w"
+              :model-value="graph.selectedDevice.attributes?.power_w"
               @update:model-value="(v) => updateDeviceAttr('power_w', v === '' ? null : Number(v))"
             />
             <q-select
@@ -343,15 +328,20 @@
 
         <MultiDomainPatchDrawer
           class="q-mt-md"
-          :graph="venueGraph"
-          :update-edge="(id, changes) => venueGraph.updateEdge(id, changes)"
-          :delete-edge="(id) => venueGraph.removeEdge(id)"
+          :graph="graph"
+          :update-edge="(id, changes) => graph.updateEdge(venueId, id, changes)"
+          :delete-edge="(id) => graph.deleteEdge(venueId, id)"
         />
 
         <PowerPanel
           class="q-mt-md"
           :venue-id="venueId"
           @changed="reloadOutlets"
+        />
+
+        <RiggingEditor
+          class="q-mt-md"
+          :venue-id="venueId"
         />
 
         <FixtureLibraryDialog
@@ -382,23 +372,25 @@ import { useQuasar, Notify } from 'quasar';
 import { api } from '@/boot/api';
 import { frameFromVenue, stageCentre } from '@/utils/plotFrame';
 import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
-import { useVenueGraphStore } from '@/stores/venueGraph';
+import { useGraphStore } from '@/stores/graph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import PowerPanel from '@/components/PowerPanel.vue';
+import RiggingEditor from '@/components/RiggingEditor.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
-import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 
 const { t } = useI18n();
 const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();
-const venueGraph = useVenueGraphStore();
+// The venue Standard Base Rig reuses the job graph editing store, scoped to the venue: the same
+// components (canvas, rigging editor, power panel, patch drawer) serve both, so a venue gets the
+// identical rigging/power treatment a job does. Edits commit immediately through the incremental
+// graph routes — there is no separate "save" step.
+const graph = useGraphStore();
 
 const venueId = computed(() => route.params.venueId);
-// The base rig is edited two ways: the stage canvas (whole-graph save) and the channel-list editor
-// (incremental, reuses the job's list/chain/Wireless Workbench UX for the venue's rig).
 const view = ref('stage');
 const libraryOpen = ref(false);
 const reportsOpen = ref(false);
@@ -415,6 +407,9 @@ const showAudience = ref(true);
 // the area is finished and saved onto the venue's audience_polygon.
 const audienceDrawing = ref(false);
 const audienceDraft = ref([]);
+
+// The signal an edge gets so the patch table groups it under the right tab (as the job canvas does).
+const DOMAIN_SIGNAL = { audio: 'audio', lighting: 'dmx', video: 'video', power: 'power' };
 
 const frame = computed(() => (venue.value ? frameFromVenue(venue.value) : null));
 
@@ -433,7 +428,9 @@ async function load() {
   outlets.value = (outletRes.data || []).filter((o) => o.x_cm != null && o.y_cm != null);
   powerOutlets.value = outletRes.data || [];
   powerGroups.value = powerRes.data || [];
-  await venueGraph.fetchGraph(venueId.value);
+  // Scope the graph store to this venue so every incremental graph call (devices, edges, rigging,
+  // power) routes to /venues/{venueId}/graph and edits commit straight to the venue's rig.
+  await graph.fetchGraph(venueId.value, 'venue');
 }
 
 // The power panel mutates the venue's circuits/outlets; refresh the canvas layer and the
@@ -452,25 +449,25 @@ async function reloadOutlets() {
   }
 }
 
-// Add a real piece of equipment from the shared catalog rather than a generic 60x30 box.
-// The catalog carries the domain, an icon/colour and true dimensions, so the rig shows
-// correctly-sized, colour-coded gear just like the job workspace plot.
-function venueAddCatalog(item) {
+// Add a real piece of equipment from the shared catalog rather than a generic box. The catalog
+// carries the domain, an icon/colour and true dimensions, so the rig shows correctly-sized,
+// colour-coded gear just like the job workspace plot.
+async function venueAddCatalog(item) {
   const centre = frame.value ? stageCentre(frame.value) : { x: 0, y: 0 };
-  const device = venueGraph.addDevice({
-    domain: item.group || 'other',
-    kind: item.type,
-    name: objectLabel(item),
-    x: Math.round(centre.x + (Math.random() - 0.5) * 80),
-    y: Math.round(centre.y + (Math.random() - 0.5) * 80),
-  });
-  device.attributes = {
-    ...(device.attributes || {}),
-    element_type: item.type,
-    width_cm: item.w,
-    height_cm: item.h,
-  };
-  venueGraph.dirty = true;
+  await graph.createDevices(venueId.value, [
+    {
+      domain: item.group || 'other',
+      kind: item.type,
+      name: objectLabel(item),
+      canvas_x_cm: Math.round(centre.x + (Math.random() - 0.5) * 80),
+      canvas_y_cm: Math.round(centre.y + (Math.random() - 0.5) * 80),
+      attributes: {
+        element_type: item.type,
+        width_cm: item.w,
+        height_cm: item.h,
+      },
+    },
+  ]);
   connectMode.value = false;
 }
 
@@ -485,28 +482,28 @@ function fitCanvas() {
   zoom.value = Math.min(2, Math.max(0.05, 700 / Math.max(1, frame.value.width)));
 }
 
-// Per-device dimensions can be overridden precisely (e.g. an unusual box) without
-// losing the catalog colour/type carried in the rest of the attributes object.
+// Per-device dimensions can be overridden precisely (e.g. an unusual box) without losing the
+// catalog colour/type carried in the rest of the attributes object.
 function updateDeviceSize(key, value) {
-  const device = venueGraph.selectedDevice;
-  if (!device) return;
-  device.attributes = { ...(device.attributes || {}), [key]: Number(value) || 0 };
-  venueGraph.dirty = true;
+  if (!graph.selectedDeviceId) return;
+  graph.updateDevice(venueId.value, graph.selectedDeviceId, {
+    attributes: { [key]: Number(value) || 0 },
+  });
 }
 
 // Assign a base-rig device the power rating (watts) it draws, into the device's attributes so it
 // drives the venue's server-side over-limit check just like a job device does.
 function updateDeviceAttr(key, value) {
-  const device = venueGraph.selectedDevice;
-  if (!device) return;
-  device.attributes = { ...(device.attributes || {}), [key]: value };
-  venueGraph.dirty = true;
+  if (!graph.selectedDeviceId) return;
+  graph.updateDevice(venueId.value, graph.selectedDeviceId, {
+    attributes: { [key]: value },
+  });
 }
 
 // The outlet/group a device is plugged into. Stored in attributes so the device-driven load
 // (power_w) is attributed to the right supply element on the server.
 const powerTarget = computed(() => {
-  const device = venueGraph.selectedDevice;
+  const device = graph.selectedDevice;
   if (!device) return null;
   return (
     device.attributes?.venue_outlet_id ||
@@ -517,24 +514,23 @@ const powerTarget = computed(() => {
 
 // Outlets and groups as a single picker so a device can hang from either a socket or a panel.
 const powerTargets = computed(() => {
-  const outlets = powerOutlets.value.map((o) => ({
+  const outletOpts = powerOutlets.value.map((o) => ({
     value: o.id,
     label: `${t('workspace.venueOutlet')}: ${o.name || o.connector || o.id.slice(0, 8)}`,
     type: 'outlet',
   }));
-  const groups = powerGroups.value.map((g) => ({
+  const groupOpts = powerGroups.value.map((g) => ({
     value: g.id,
     label: `${t('workspace.venueGroup')}: ${g.name || g.id.slice(0, 8)}${g.kind === 'incoming' ? ' ⚡' : ''}`,
     type: 'group',
   }));
-  return [...outlets, ...groups];
+  return [...outletOpts, ...groupOpts];
 });
 
 // Setting the inlet clears the other side: a device is on an outlet OR a group, never both.
 function setPowerTarget(targetId) {
-  const device = venueGraph.selectedDevice;
-  if (!device) return;
-  const attributes = { ...(device.attributes || {}) };
+  if (!graph.selectedDeviceId) return;
+  const attributes = { ...(graph.selectedDevice.attributes || {}) };
   delete attributes.venue_outlet_id;
   delete attributes.venue_group_id;
   if (targetId) {
@@ -545,18 +541,27 @@ function setPowerTarget(targetId) {
       attributes.venue_outlet_id = targetId;
     }
   }
-  device.attributes = attributes;
-  venueGraph.dirty = true;
+  graph.updateDevice(venueId.value, graph.selectedDeviceId, { attributes });
 }
 
 function onSelect(id) {
-  venueGraph.selectedId = id;
+  graph.selectedDeviceId = id;
 }
 function onMove({ id, x, y }) {
-  venueGraph.moveDevice(id, x, y);
+  graph.updateDevice(venueId.value, id, { canvas_x_cm: x, canvas_y_cm: y });
 }
 function onConnect({ srcId, dstId }) {
-  venueGraph.connect(srcId, dstId);
+  if (srcId === dstId) return;
+  const src = graph.devices.find((d) => d.id === srcId);
+  graph.createEdge(venueId.value, {
+    signal: DOMAIN_SIGNAL[src?.domain] || 'audio',
+    src_device_id: srcId,
+    src_port: '',
+    dst_device_id: dstId,
+    dst_port: '',
+    channels: 1,
+    phase: null,
+  });
   connectMode.value = false;
 }
 
@@ -588,18 +593,7 @@ async function clearAudienceDraft() {
   audienceDrawing.value = false;
 }
 function deleteSelected() {
-  if (venueGraph.selectedId) venueGraph.removeDevice(venueGraph.selectedId);
-}
-async function save() {
-  try {
-    await venueGraph.save();
-    Notify.create({ type: 'positive', message: t('venues.baseRig.saved') });
-  } catch (err) {
-    Notify.create({
-      type: 'negative',
-      message: `${t('venues.baseRig.save')}: ${err?.response?.data?.detail || err.message}`,
-    });
-  }
+  if (graph.selectedDeviceId) graph.deleteDevice(venueId.value, graph.selectedDeviceId);
 }
 function goBack() {
   router.push({ path: '/venues' });
