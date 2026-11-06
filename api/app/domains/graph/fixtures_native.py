@@ -151,16 +151,23 @@ async def load_fixtures(
 
 
 async def get_fixture(
-    db: AsyncSession, job_id: uuid.UUID, fixture_id: uuid.UUID
+    db: AsyncSession, job_id: uuid.UUID, fixture_id: uuid.UUID, venue_id: uuid.UUID | None = None
 ) -> SimpleNamespace | None:
-    return next((f for f in await load_fixtures(db, job_id) if f.id == fixture_id), None)
+    return next((f for f in await load_fixtures(db, job_id, venue_id) if f.id == fixture_id), None)
 
 
-async def host_of(db: AsyncSession, job_id: uuid.UUID, fixture_id: uuid.UUID) -> GraphDevice | None:
-    return (await host_nodes(db, job_id)).get(fixture_id)
+async def host_of(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    fixture_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> GraphDevice | None:
+    return (await host_nodes(db, job_id, venue_id)).get(fixture_id)
 
 
-async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
+async def _graph_ids(
+    db: AsyncSession, job_id: uuid.UUID | None, data: dict, venue_id: uuid.UUID | None = None
+) -> dict:
     """The point and power node a caller names by public id, as the host's graph node ids."""
     out: dict = {}
     if "rigging_point_id" in data:
@@ -171,7 +178,8 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
                 for n in (
                     await db.scalars(
                         select(GraphDevice).where(
-                            GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                            scope_filter(GraphDevice, job_id, venue_id),
+                            GraphDevice.kind == "rigging_point",
                         )
                     )
                 ).all()
@@ -182,7 +190,7 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
         out["rigging_point_id"] = str(node.id) if node and point else None
     if "power_node_id" in data:
         host = (
-            await power_native.host_of(db, job_id, data["power_node_id"])
+            await power_native.host_of(db, job_id, data["power_node_id"], venue_id)
             if data["power_node_id"]
             else None
         )
@@ -221,13 +229,15 @@ def _apply(attributes: dict, data: dict, graph_ids: dict) -> dict:
     return attributes
 
 
-async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> SimpleNamespace:
+async def create_fixture(
+    db: AsyncSession, job_id: uuid.UUID | None, data: dict, venue_id: uuid.UUID | None = None
+) -> SimpleNamespace:
     """Make a fixture from cleaned data (``device_id`` = a device's public id or None)."""
     fid = uuid.uuid4()
-    graph_ids = await _graph_ids(db, job_id, data)
+    graph_ids = await _graph_ids(db, job_id, data, venue_id)
     position = data.pop("position", None)
     if position is None:
-        position = len(await host_nodes(db, job_id))
+        position = len(await host_nodes(db, job_id, venue_id))
     device_id = data.get("device_id")
     attributes = _apply({"fixture_id": str(fid), "fixture_position": position}, data, graph_ids)
     host = None
@@ -236,7 +246,9 @@ async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
             (
                 n
                 for n in (
-                    await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
+                    await db.scalars(
+                        select(GraphDevice).where(scope_filter(GraphDevice, job_id, venue_id))
+                    )
                 ).all()
                 if (n.legacy_ref or "").startswith("device:") and public_id(n) == device_id
             ),
@@ -252,6 +264,7 @@ async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
         host = GraphDevice(
             id=uuid.uuid4(),
             job_id=job_id,
+            venue_id=venue_id,
             domain="lighting",
             kind="fixture",
             name=data.get("purpose") or data.get("fixture_type") or "Fixture",
@@ -262,52 +275,67 @@ async def create_fixture(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
         )
         db.add(host)
     await db.flush()
-    await sync_power_edges(db, job_id)
-    points, power = await _id_maps(db, job_id)
+    await sync_power_edges(db, job_id, venue_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     return fixture_view(fid, host, points, power)
 
 
 async def update_fixture(
-    db: AsyncSession, job_id: uuid.UUID, fixture_id: uuid.UUID, data: dict
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    fixture_id: uuid.UUID,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace:
-    host = await host_of(db, job_id, fixture_id)
+    host = await host_of(db, job_id, fixture_id, venue_id)
     if host is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Fixture not found")
-    graph_ids = await _graph_ids(db, job_id, data)
+    graph_ids = await _graph_ids(db, job_id, data, venue_id)
     host.attributes = _apply(host.attributes or {}, data, graph_ids)
     if not _hosted(host):
         host.name = data.get("purpose") or host.attributes.get("fixture_type") or host.name
         if "notes" in data:
             host.notes = data["notes"] or ""
     await db.flush()
-    await sync_power_edges(db, job_id)
-    points, power = await _id_maps(db, job_id)
+    await sync_power_edges(db, job_id, venue_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     return fixture_view(fixture_id, host, points, power)
 
 
-async def delete_fixture(db: AsyncSession, job_id: uuid.UUID, fixture_id: uuid.UUID) -> None:
-    host = await host_of(db, job_id, fixture_id)
+async def delete_fixture(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    fixture_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> None:
+    host = await host_of(db, job_id, fixture_id, venue_id)
     if host is None:
         return
-    await dmx_native.drop_node(db, job_id, host.id)  # its steps go (the fixture cascade)
+    await dmx_native.drop_node(db, job_id, host.id, venue_id)  # its steps go (the fixture cascade)
     if _hosted(host):  # the device stays; only its fixture side goes
         host.attributes = {k: v for k, v in (host.attributes or {}).items() if k not in ALL_ATTRS}
     else:
         for edge in (
-            await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
+            await db.scalars(
+                select(ConnectionEdge).where(scope_filter(ConnectionEdge, job_id, venue_id))
+            )
         ).all():
             if host.id in (edge.src_device_id, edge.dst_device_id):
                 await db.delete(edge)
         await db.delete(host)
     await db.flush()
-    await sync_power_edges(db, job_id)
+    await sync_power_edges(db, job_id, venue_id)
 
 
-async def sync_power_edges(db: AsyncSession, job_id: uuid.UUID) -> None:
+async def sync_power_edges(
+    db: AsyncSession, job_id: uuid.UUID | None, venue_id: uuid.UUID | None = None
+) -> None:
     """Keep one power edge from the fed power node to each plugged fixture (diff, no churn)."""
-    hosts = await host_nodes(db, job_id)
+    hosts = await host_nodes(db, job_id, venue_id)
     nodes = {str(n.id): n for n in hosts.values()}
-    power_hosts = {str(h.id): h for h in (await power_native.host_nodes(db, job_id)).values()}
+    power_hosts = {
+        str(h.id): h for h in (await power_native.host_nodes(db, job_id, venue_id)).values()
+    }
     wanted = {}
     for fid, host in hosts.items():
         feeder = power_hosts.get((host.attributes or {}).get("power_node_id"))
@@ -317,7 +345,7 @@ async def sync_power_edges(db: AsyncSession, job_id: uuid.UUID) -> None:
     for edge in (
         await db.scalars(
             select(ConnectionEdge).where(
-                ConnectionEdge.job_id == job_id, ConnectionEdge.signal == "power"
+                scope_filter(ConnectionEdge, job_id, venue_id), ConnectionEdge.signal == "power"
             )
         )
     ).all():
@@ -340,6 +368,7 @@ async def sync_power_edges(db: AsyncSession, job_id: uuid.UUID) -> None:
                 ConnectionEdge(
                     id=uuid.uuid4(),
                     job_id=job_id,
+                    venue_id=venue_id,
                     signal="power",
                     src_device_id=feeder.id,
                     src_port=src_port,
@@ -359,7 +388,13 @@ async def sync_power_edges(db: AsyncSession, job_id: uuid.UUID) -> None:
     await db.flush()
 
 
-async def edge_patch(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge, data: dict) -> bool:
+async def edge_patch(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    edge: ConnectionEdge,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
     """A PATCH of a fixture's power edge connector is the fixture's power connector."""
     from app.domains.rigging import router as rigging_router
     from app.domains.rigging import schemas as rigging_schemas
@@ -370,7 +405,12 @@ async def edge_patch(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge, 
         return False
     try:
         await rigging_router.assign_load(
-            job_id, "fixture", fid, rigging_schemas.LoadAssign(power_connector=connector), db
+            job_id=job_id,
+            kind="fixture",
+            load_id=fid,
+            payload=rigging_schemas.LoadAssign(power_connector=connector),
+            db=db,
+            venue_id=venue_id,
         )
     except HTTPException:
         await db.rollback()
@@ -378,7 +418,12 @@ async def edge_patch(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge, 
     return True
 
 
-async def edge_delete(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge) -> bool:
+async def edge_delete(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    edge: ConnectionEdge,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
     """Deleting a fixture's power edge unplugs it."""
     from app.domains.rigging import router as rigging_router
     from app.domains.rigging import schemas as rigging_schemas
@@ -387,12 +432,23 @@ async def edge_delete(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge)
     if edge.signal != "power" or fid is None:
         return False
     await rigging_router.assign_load(
-        job_id, "fixture", fid, rigging_schemas.LoadAssign(power_node_id=None), db
+        job_id=job_id,
+        kind="fixture",
+        load_id=fid,
+        payload=rigging_schemas.LoadAssign(power_node_id=None),
+        db=db,
+        venue_id=venue_id,
     )
     return True
 
 
-async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, data: dict) -> None:
+async def after_patch(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    node: GraphDevice,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> None:
     """A PATCH of a node that hosts a fixture: apply the library rules to what it changed.
 
     The PATCH is already on the node; the fixture service re-applies it through the type/mode rules
@@ -407,9 +463,9 @@ async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, da
     changes = _fixture_changes(data)
     if not changes:
         return
-    fixture = await get_fixture(db, job_id, fid)
+    fixture = await get_fixture(db, job_id, fid, venue_id)
     try:
-        await lighting_service.update_fixture(db, job_id, fixture, changes)
+        await lighting_service.update_fixture(db, job_id, fixture, changes, venue_id)
     except HTTPException:
         await db.rollback()
         raise

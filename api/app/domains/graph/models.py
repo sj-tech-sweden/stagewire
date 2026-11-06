@@ -106,3 +106,20 @@ def scope_filter(model, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | N
     if venue_id is not None:
         return model.venue_id == venue_id
     raise ValueError("a graph row requires a job_id or venue_id")
+
+
+def belongs_to(
+    row: "GraphDevice | ConnectionEdge",
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
+    """Whether a *loaded* graph row sits in the given scope (exactly one of job/venue).
+
+    ``scope_filter`` scopes a query; this scopes an already-fetched row the same way, used by the
+    ownership checks that reject cross-scope ids. A row can never belong to both scopes at once.
+    """
+    if job_id is not None:
+        return row.job_id == job_id
+    if venue_id is not None:
+        return row.venue_id == venue_id
+    raise ValueError("a graph row requires a job_id or venue_id")

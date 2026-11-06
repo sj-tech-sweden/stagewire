@@ -90,8 +90,15 @@ async def element_nodes(
     return sorted(rows.all(), key=_age)
 
 
-async def host_of(db: AsyncSession, job_id: uuid.UUID, element_id: uuid.UUID) -> GraphDevice | None:
-    return next((n for n in await element_nodes(db, job_id) if public_id(n) == element_id), None)
+async def host_of(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    element_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> GraphDevice | None:
+    return next(
+        (n for n in await element_nodes(db, job_id, venue_id) if public_id(n) == element_id), None
+    )
 
 
 def _uuid(value) -> uuid.UUID | None:
@@ -172,12 +179,14 @@ async def load_elements(
 
 
 async def get_element(
-    db: AsyncSession, job_id: uuid.UUID, element_id: uuid.UUID
+    db: AsyncSession, job_id: uuid.UUID, element_id: uuid.UUID, venue_id: uuid.UUID | None = None
 ) -> SimpleNamespace | None:
-    return next((e for e in await load_elements(db, job_id) if e.id == element_id), None)
+    return next((e for e in await load_elements(db, job_id, venue_id) if e.id == element_id), None)
 
 
-async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
+async def _graph_ids(
+    db: AsyncSession, job_id: uuid.UUID | None, data: dict, venue_id: uuid.UUID | None = None
+) -> dict:
     """The point and power node a caller names by public id, as graph node ids (or None)."""
     out: dict = {}
     if "rigging_point_id" in data:
@@ -188,7 +197,8 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
                 for n in (
                     await db.scalars(
                         select(GraphDevice).where(
-                            GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                            scope_filter(GraphDevice, job_id, venue_id),
+                            GraphDevice.kind == "rigging_point",
                         )
                     )
                 ).all()
@@ -199,7 +209,7 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
         out["rigging_point_id"] = str(node.id) if node and wanted else None
     if "power_node_id" in data:
         host = (
-            await power_native.host_of(db, job_id, data["power_node_id"])
+            await power_native.host_of(db, job_id, data["power_node_id"], venue_id)
             if data["power_node_id"]
             else None
         )
@@ -264,11 +274,14 @@ def normalize_new(fields: dict) -> dict:
     }
 
 
-async def create_element(db: AsyncSession, job_id: uuid.UUID, data: dict) -> SimpleNamespace:
+async def create_element(
+    db: AsyncSession, job_id: uuid.UUID | None, data: dict, venue_id: uuid.UUID | None = None
+) -> SimpleNamespace:
     """Make an element from column-named data (the body of ``POST plot-elements``)."""
     node = GraphDevice(
         id=uuid.uuid4(),
         job_id=job_id,
+        venue_id=venue_id,
         domain="other",
         kind="plot_element",
         name="element",
@@ -279,36 +292,45 @@ async def create_element(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Sim
         canvas_y_cm=0.0,
         canvas_rotation=0.0,
     )
-    _apply(node, data, await _graph_ids(db, job_id, data))
+    _apply(node, data, await _graph_ids(db, job_id, data, venue_id))
     db.add(node)
     await db.flush()
-    await performer_to_channel(db, job_id, node)
-    points, power = await _id_maps(db, job_id)
+    await performer_to_channel(db, job_id, node, venue_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     return view(node, points, power, {})
 
 
 async def update_element(
-    db: AsyncSession, job_id: uuid.UUID, element_id: uuid.UUID, data: dict
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    element_id: uuid.UUID,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    node = await host_of(db, job_id, element_id)
+    node = await host_of(db, job_id, element_id, venue_id)
     if node is None:
         return None
-    _apply(node, data, await _graph_ids(db, job_id, data))
+    _apply(node, data, await _graph_ids(db, job_id, data, venue_id))
     await db.flush()
-    await performer_to_channel(db, job_id, node)
-    return await get_element(db, job_id, element_id)
+    await performer_to_channel(db, job_id, node, venue_id)
+    return await get_element(db, job_id, element_id, venue_id)
 
 
 async def delete_element(
-    db: AsyncSession, job_id: uuid.UUID, element_id: uuid.UUID
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    element_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, list[uuid.UUID]] | None:
     """Delete an element and its edges; returns its node id and the edge ids (None: no such)."""
-    node = await host_of(db, job_id, element_id)
+    node = await host_of(db, job_id, element_id, venue_id)
     if node is None:
         return None
     edge_ids = []
     for edge in (
-        await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
+        await db.scalars(
+            select(ConnectionEdge).where(scope_filter(ConnectionEdge, job_id, venue_id))
+        )
     ).all():
         if node.id in (edge.src_device_id, edge.dst_device_id):
             edge_ids.append(edge.id)
@@ -347,7 +369,9 @@ async def clear_links(db: AsyncSession, job_id: uuid.UUID, column: str, value: u
             node.attributes = {k: v for k, v in node.attributes.items() if k != column}
 
 
-async def performer_to_channel(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice) -> None:
+async def performer_to_channel(
+    db: AsyncSession, job_id: uuid.UUID | None, node: GraphDevice, venue_id: uuid.UUID | None = None
+) -> None:
     """A performer element's label is the performer name of the channel it is linked to."""
     a = node.attributes or {}
     channel_id = _uuid(a.get("linked_channel_id"))
@@ -355,23 +379,33 @@ async def performer_to_channel(db: AsyncSession, job_id: uuid.UUID, node: GraphD
         return
     from app.domains.graph import audio_native
 
-    channel = await audio_native.find_node(db, audio_native.CHANNEL, channel_id, job_id)
+    channel = await audio_native.find_node(db, audio_native.CHANNEL, channel_id, job_id, venue_id)
     if channel is not None:
         channel.attributes = {**channel.attributes, "performer_name": a.get("label") or ""}
 
 
 async def performer_from_channel(
-    db: AsyncSession, job_id: uuid.UUID, channel_id: uuid.UUID, name: str
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    channel_id: uuid.UUID,
+    name: str,
+    venue_id: uuid.UUID | None = None,
 ) -> None:
     """The reverse: a channel's performer name becomes the label of its performer elements."""
-    for node in await element_nodes(db, job_id):
+    for node in await element_nodes(db, job_id, venue_id):
         a = node.attributes or {}
         if a.get("element_type") == "performer" and a.get("linked_channel_id") == str(channel_id):
             node.attributes = {**a, "label": name}
             node.name = _name(node.attributes)
 
 
-async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, data: dict) -> None:
+async def after_patch(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    node: GraphDevice,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> None:
     """A PATCH of a ``plot_element`` node: keep the label and the node name in step.
 
     The PATCH is already on the node. A new ``name`` is the new label (as the plot always
@@ -396,7 +430,7 @@ async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, da
         if getattr(node, column) is None:
             setattr(node, column, 0.0)
     await db.flush()
-    await performer_to_channel(db, job_id, node)
+    await performer_to_channel(db, job_id, node, venue_id)
 
 
 # --- the sync -------------------------------------------------------------------------------

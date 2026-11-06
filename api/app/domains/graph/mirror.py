@@ -103,8 +103,14 @@ def _fixture_changes(data: dict) -> dict:
     }
 
 
-async def _fixtures_on_device(db: AsyncSession, job_id: UUID, device_id: UUID) -> list:
-    return [f for f in await lighting_service.list_fixtures(db, job_id) if f.device_id == device_id]
+async def _fixtures_on_device(
+    db: AsyncSession, job_id: UUID | None, device_id: UUID, venue_id: UUID | None = None
+) -> list:
+    return [
+        f
+        for f in await lighting_service.list_fixtures(db, job_id, venue_id)
+        if f.device_id == device_id
+    ]
 
 
 async def device_to_legacy(db: AsyncSession, job_id: UUID, device: GraphDevice, data: dict) -> bool:
@@ -206,7 +212,12 @@ async def _assign_fixture_load(
     assign = {"power_connector": changes["feed_connector"]} if "feed_connector" in changes else {}
     if assign:
         await rigging_router.assign_load(
-            job_id, kind, fixture_id, rigging_schemas.LoadAssign(**assign), db
+            job_id=job_id,
+            kind=kind,
+            load_id=fixture_id,
+            payload=rigging_schemas.LoadAssign(**assign),
+            db=db,
+            venue_id=None,
         )
 
 
@@ -260,11 +271,12 @@ async def delete_edge_twin(db: AsyncSession, job_id: UUID, edge: ConnectionEdge)
         from app.domains.rigging import schemas as rigging_schemas
 
         await rigging_router.assign_load(
-            job_id,
-            "device" if table == "device.power" else "fixture",
-            legacy_id,
-            rigging_schemas.LoadAssign(power_node_id=None),
-            db,
+            job_id=job_id,
+            kind="device" if table == "device.power" else "fixture",
+            load_id=legacy_id,
+            payload=rigging_schemas.LoadAssign(power_node_id=None),
+            db=db,
+            venue_id=None,
         )
         return True
     return False

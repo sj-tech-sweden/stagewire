@@ -211,6 +211,7 @@ def device_row(node: GraphDevice, points: dict, power: dict) -> SimpleNamespace:
         id=public_id(node),
         node_id=node.id,
         job_id=node.job_id,
+        venue_id=node.venue_id,
         name=node.name,
         device_type=a.get("device_type") or node.kind or "other",
         position=node.position,
@@ -240,21 +241,29 @@ async def load_devices(
 
 
 async def node_of(
-    db: AsyncSession, device_id: uuid.UUID, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    device_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> GraphDevice | None:
     query = select(GraphDevice).where(GraphDevice.legacy_ref == f"{REF}{device_id}")
     if job_id is not None:
         query = query.where(GraphDevice.job_id == job_id)
+    if venue_id is not None:
+        query = query.where(GraphDevice.venue_id == venue_id)
     return (await db.scalars(query)).first()
 
 
 async def get_device(
-    db: AsyncSession, device_id: uuid.UUID, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    device_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    node = await node_of(db, device_id, job_id)
+    node = await node_of(db, device_id, job_id, venue_id)
     if node is None:
         return None
-    points, power = await _id_maps(db, node.job_id)
+    points, power = await _id_maps(db, node.job_id, node.venue_id)
     return device_row(node, points, power)
 
 
@@ -271,7 +280,12 @@ async def find_with(
 # --- writes ---------------------------------------------------------------------------------
 
 
-async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
+async def _graph_ids(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> dict:
     """The rigging point and power node a caller names by public id, as graph node ids."""
     out: dict = {}
     if data.get("rigging_point_id") is not None or "rigging_point_id" in data:
@@ -282,7 +296,8 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
                 for n in (
                     await db.scalars(
                         select(GraphDevice).where(
-                            GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                            scope_filter(GraphDevice, job_id, venue_id),
+                            GraphDevice.kind == "rigging_point",
                         )
                     )
                 ).all()
@@ -293,7 +308,7 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
         out["rigging_point_id"] = str(node.id) if node else None
     if "power_node_id" in data:
         wanted = data["power_node_id"]
-        host = await power_native.host_of(db, job_id, wanted) if wanted else None
+        host = await power_native.host_of(db, job_id, wanted, venue_id) if wanted else None
         out["power_node_id"] = str(host.id) if host else None
     return out
 
@@ -301,7 +316,7 @@ async def _graph_ids(db: AsyncSession, job_id: uuid.UUID, data: dict) -> dict:
 async def apply(db: AsyncSession, node: GraphDevice, data: dict) -> None:
     """Write column-named data (what the old create and update took) onto the node."""
     attributes = dict(node.attributes or {})
-    graph_ids = await _graph_ids(db, node.job_id, data)
+    graph_ids = await _graph_ids(db, node.job_id, data, node.venue_id)
     groups = None
     for key, value in data.items():
         if value is None and key not in CLEARABLE:
@@ -348,11 +363,17 @@ async def apply(db: AsyncSession, node: GraphDevice, data: dict) -> None:
         rebuild_ports(node, groups)
 
 
-async def create_device(db: AsyncSession, job_id: uuid.UUID, data: dict) -> SimpleNamespace:
+async def create_device(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> SimpleNamespace:
     device_id = uuid.uuid4()
     node = GraphDevice(
         id=device_id,
         job_id=job_id,
+        venue_id=venue_id,
         domain="audio",
         kind=data.get("device_type") or "other",
         name="",
@@ -365,32 +386,41 @@ async def create_device(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simp
     await apply(db, node, {k: v for k, v in data.items() if v is not None or k in CLEARABLE})
     node.ports = group_ports(node.attributes.get("port_groups", []), _signal(node.domain))
     await db.flush()
-    points, power = await _id_maps(db, job_id)
+    points, power = await _id_maps(db, job_id, venue_id)
     return device_row(node, points, power)
 
 
 async def update_device(
-    db: AsyncSession, device_id: uuid.UUID, data: dict, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    device_id: uuid.UUID,
+    data: dict,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    node = await node_of(db, device_id, job_id)
+    node = await node_of(db, device_id, job_id, venue_id)
     if node is None:
         return None
     await apply(db, node, data)
     await db.flush()
-    points, power = await _id_maps(db, node.job_id)
+    points, power = await _id_maps(db, node.job_id, node.venue_id)
     return device_row(node, points, power)
 
 
 async def delete_device(
-    db: AsyncSession, device_id: uuid.UUID, job_id: uuid.UUID | None = None
+    db: AsyncSession,
+    device_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
 ) -> tuple[list[str], list[str]] | None:
     """Delete the node with its edges; returns the node and edge ids for the caller to publish."""
-    node = await node_of(db, device_id, job_id)
+    node = await node_of(db, device_id, job_id, venue_id)
     if node is None:
         return None
     edges = []
     for edge in (
-        await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == node.job_id))
+        await db.scalars(
+            select(ConnectionEdge).where(scope_filter(ConnectionEdge, node.job_id, node.venue_id))
+        )
     ).all():
         if node.id in (edge.src_device_id, edge.dst_device_id):
             edges.append(str(edge.id))

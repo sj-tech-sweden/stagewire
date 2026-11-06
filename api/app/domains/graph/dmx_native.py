@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import FAN_OUT, Backfill
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 STEP_KEYS = ("in_port", "out_port", "connector", "notes")
 
@@ -245,12 +245,17 @@ async def rebuild_without_source(db: AsyncSession, node: GraphDevice) -> None:
     await rebuild(db, node)
 
 
-async def drop_node(db: AsyncSession, job_id: uuid.UUID, node_id: uuid.UUID) -> None:
+async def drop_node(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    node_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> None:
     """A device or fixture node is going away: it leaves every universe's chain (and source)."""
     for universe in (
         await db.scalars(
             select(GraphDevice).where(
-                GraphDevice.job_id == job_id, GraphDevice.kind == "dmx_universe"
+                scope_filter(GraphDevice, job_id, venue_id), GraphDevice.kind == "dmx_universe"
             )
         )
     ).all():

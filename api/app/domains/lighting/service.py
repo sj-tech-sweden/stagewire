@@ -210,8 +210,10 @@ async def apply_type(
     return data
 
 
-async def get_fixture(db: AsyncSession, job_id: UUID, fixture_id: UUID):
-    return await fixtures_native.get_fixture(db, job_id, fixture_id)
+async def get_fixture(
+    db: AsyncSession, job_id: UUID | None, fixture_id: UUID, venue_id: UUID | None = None
+):
+    return await fixtures_native.get_fixture(db, job_id, fixture_id, venue_id)
 
 
 def dmx_flags(fixtures: list) -> dict[UUID, tuple[bool, bool]]:
@@ -235,9 +237,9 @@ def dmx_flags(fixtures: list) -> dict[UUID, tuple[bool, bool]]:
 
 
 async def find_or_create_device(
-    db: AsyncSession, job_id: UUID, name: str, defaults: dict
+    db: AsyncSession, job_id: UUID | None, name: str, defaults: dict, venue_id: UUID | None = None
 ) -> tuple[SimpleNamespace, bool]:
-    for device in await devices_native.load_devices(db, job_id):
+    for device in await devices_native.load_devices(db, job_id, venue_id):
         if (
             device.device_type == FIXTURE_DEVICE_TYPE
             and (device.name or "").lower() == name.lower()
@@ -254,11 +256,14 @@ async def find_or_create_device(
             "footprint_channels": defaults.get("footprint"),
             "default_gel": defaults.get("gel") or None,
         },
+        venue_id,
     )
     return device, True
 
 
-async def apply_device(db: AsyncSession, job_id: UUID, data: dict) -> tuple[dict, bool]:
+async def apply_device(
+    db: AsyncSession, job_id: UUID | None, data: dict, venue_id: UUID | None = None
+) -> tuple[dict, bool]:
     """Turn ``device_name`` into ``device_id``; empty profile fields come from the device.
 
     Returns the cleaned data and whether a new fixture device was created.
@@ -269,7 +274,7 @@ async def apply_device(db: AsyncSession, job_id: UUID, data: dict) -> tuple[dict
     if not name:
         data["device_id"] = None
         return data, False
-    device, created = await find_or_create_device(db, job_id, name, data)
+    device, created = await find_or_create_device(db, job_id, name, data, venue_id)
     data["device_id"] = device.id
     for key, attr in DEVICE_DEFAULT_KEYS.items():
         if data.get(key) in (None, "") and getattr(device, attr) not in (None, ""):
@@ -303,34 +308,40 @@ def first_free_address(
     return None
 
 
-async def _device_node_ready(db: AsyncSession, job_id: UUID, data: dict) -> None:
+async def _device_node_ready(
+    db: AsyncSession, job_id: UUID | None, data: dict, venue_id: UUID | None = None
+) -> None:
     """A fixture on a device lives on the device's graph node, which the sync makes: sync first
     when the device is new (the sync runs inside the job lock when the caller already holds it)."""
-    if data.get("device_id"):
+    if data.get("device_id") and job_id is not None:
         from app.domains.graph.backfill import backfill_job
 
         await db.flush()
         await backfill_job(db, job_id)
 
 
-async def create_fixture(db: AsyncSession, job_id: UUID, data: dict):
-    data = await apply_type(db, job_id, dict(data))
-    data, _ = await apply_device(db, job_id, data)
+async def create_fixture(
+    db: AsyncSession, job_id: UUID | None, data: dict, venue_id: UUID | None = None
+):
+    data = await apply_type(db, job_id, dict(data), venue_id=venue_id)
+    data, _ = await apply_device(db, job_id, data, venue_id)
     if data.get("dmx_address") is None:
         universe = data.get("universe") or 1
         data["universe"] = universe
         data["dmx_address"] = first_free_address(
-            await list_fixtures(db, job_id), universe, data.get("footprint") or 1
+            await list_fixtures(db, job_id, venue_id), universe, data.get("footprint") or 1
         )
-    await _device_node_ready(db, job_id, data)
-    fixture = await fixtures_native.create_fixture(db, job_id, _clean(data))
+    await _device_node_ready(db, job_id, data, venue_id)
+    fixture = await fixtures_native.create_fixture(db, job_id, _clean(data), venue_id)
     await db.commit()
     return fixture
 
 
-async def update_fixture(db: AsyncSession, job_id: UUID, fixture, data: dict):
-    data = await apply_type(db, job_id, dict(data))
-    data, _ = await apply_device(db, job_id, data)
+async def update_fixture(
+    db: AsyncSession, job_id: UUID | None, fixture, data: dict, venue_id: UUID | None = None
+):
+    data = await apply_type(db, job_id, dict(data), venue_id=venue_id)
+    data, _ = await apply_device(db, job_id, data, venue_id)
     cleaned = _clean(data)
     if "device_id" in cleaned and cleaned["device_id"] != fixture.device_id:
         raise HTTPException(
@@ -338,13 +349,13 @@ async def update_fixture(db: AsyncSession, job_id: UUID, fixture, data: dict):
             "A fixture's device cannot be changed; make a new fixture",
         )
     cleaned.pop("device_id", None)
-    updated = await fixtures_native.update_fixture(db, job_id, fixture.id, cleaned)
+    updated = await fixtures_native.update_fixture(db, job_id, fixture.id, cleaned, venue_id)
     await db.commit()
     return updated
 
 
-async def delete_fixture(db: AsyncSession, fixture) -> None:
-    await fixtures_native.delete_fixture(db, fixture.job_id, fixture.id)
+async def delete_fixture(db: AsyncSession, fixture, venue_id: UUID | None = None) -> None:
+    await fixtures_native.delete_fixture(db, fixture.job_id, fixture.id, venue_id)
     await db.commit()
 
 

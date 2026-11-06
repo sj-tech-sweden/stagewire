@@ -128,7 +128,7 @@ async def _job_power_sheet_context(db: AsyncSession, job_id: UUID) -> dict[str, 
 
     await backfill_job(db, job_id)
     job = await _load_job(db, job_id)
-    summary = await rigging_router.rigging_summary(job_id, db)
+    summary = await rigging_router.rigging_summary(job_id=job_id, venue_id=None, db=db)
     graph = {
         str(row.legacy_ref): row
         for row in await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))

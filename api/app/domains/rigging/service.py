@@ -32,13 +32,15 @@ async def _fetcher(db: AsyncSession):
     return await stockwire_product_fetcher(db)
 
 
-async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
-    devices = await audio_service.list_devices(db, job_id)
+async def collect_loads(
+    db: AsyncSession, job_id: UUID | None = None, venue_id: UUID | None = None
+) -> list[LoadRow]:
+    devices = await audio_service.list_devices(db, job_id, venue_id)
     by_id = {str(device.id): device for device in devices}
     device_product = {str(d.id): d.stockwire_product_id for d in devices if d.stockwire_product_id}
     fetch = await _fetcher(db) if device_product else None
     physical = await resolve_device_physical(device_product, fetch)
-    types = {str(t.id): t for t in await lighting_service.list_types(db, job_id)}
+    types = {str(t.id): t for t in await lighting_service.list_types(db, job_id, venue_id)}
 
     def values(device_id) -> tuple[str, float | None, float | None]:
         device = by_id.get(str(device_id)) if device_id else None
@@ -50,7 +52,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
         return device.name, weight, power
 
     rows: list[LoadRow] = []
-    for fixture in await lighting_service.list_fixtures(db, job_id):
+    for fixture in await lighting_service.list_fixtures(db, job_id, venue_id):
         name, weight, power = values(fixture.device_id)
         fixture_type = types.get(str(fixture.fixture_type_id)) if fixture.fixture_type_id else None
         if fixture_type is not None:
@@ -71,7 +73,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
                 device_id=str(fixture.device_id) if fixture.device_id else None,
             )
         )
-    for element in await audio_service.list_plot_elements(db, job_id):
+    for element in await audio_service.list_plot_elements(db, job_id, venue_id):
         if not element.linked_device_id:
             continue
         name, weight, power = values(element.linked_device_id)
@@ -95,7 +97,7 @@ async def collect_loads(db: AsyncSession, job_id: UUID) -> list[LoadRow]:
     # be plugged into a node. Devices that already count through a fixture or an element are left
     # out so their watts are not counted twice. Only devices that draw power or are plugged show.
     covered = {r.device_id for r in rows if r.device_id}
-    powered_by_node = {n.device_id for n in await list_nodes(db, job_id) if n.device_id}
+    powered_by_node = {n.device_id for n in await list_nodes(db, job_id, venue_id) if n.device_id}
     for device in devices:
         if str(device.id) in covered or device.id in powered_by_node:
             continue
@@ -176,24 +178,28 @@ def to_tree_loads(rows: list[LoadRow]) -> list[power_tree.Load]:
     ]
 
 
-async def list_points(db: AsyncSession, job_id: UUID):
-    return await rigging_native.load_points(db, job_id)
+async def list_points(db: AsyncSession, job_id: UUID | None, venue_id: UUID | None = None):
+    return await rigging_native.load_points(db, job_id, venue_id)
 
 
-async def list_nodes(db: AsyncSession, job_id: UUID):
-    return await power_native.load_nodes(db, job_id)
+async def list_nodes(db: AsyncSession, job_id: UUID | None, venue_id: UUID | None = None):
+    return await power_native.load_nodes(db, job_id, venue_id)
 
 
-async def get_point(db: AsyncSession, job_id: UUID, point_id: UUID):
-    return await rigging_native.get_point(db, job_id, point_id)
+async def get_point(
+    db: AsyncSession, job_id: UUID | None, point_id: UUID, venue_id: UUID | None = None
+):
+    return await rigging_native.get_point(db, job_id, point_id, venue_id)
 
 
-async def get_node(db: AsyncSession, job_id: UUID, node_id: UUID):
-    return await power_native.get_node(db, job_id, node_id)
+async def get_node(
+    db: AsyncSession, job_id: UUID | None, node_id: UUID, venue_id: UUID | None = None
+):
+    return await power_native.get_node(db, job_id, node_id, venue_id)
 
 
-async def list_feeds(db: AsyncSession, job_id: UUID):
-    return await power_native.load_feeds(db, job_id)
+async def list_feeds(db: AsyncSession, job_id: UUID | None, venue_id: UUID | None = None):
+    return await power_native.load_feeds(db, job_id, venue_id)
 
 
 async def get_outlet(db: AsyncSession, venue_id: UUID | None, outlet_id: UUID):

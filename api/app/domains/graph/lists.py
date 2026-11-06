@@ -32,7 +32,7 @@ from app.domains.graph.mirror import (
     _publish_list,
     legacy_target,
 )
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, belongs_to, scope_filter
 from app.domains.lighting import schemas as lighting_schemas
 from app.domains.lighting import service as lighting_service
 
@@ -40,6 +40,16 @@ router = APIRouter(
     prefix="/jobs/{job_id}/graph",
     tags=["graph:lists"],
     dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)],
+)
+
+# A venue Standard Base Rig reuses the incremental graph edits but has no legacy rows and no
+# per-job websocket, so its routes use `dependencies=[Depends(get_current_user)]` only (no
+# refresh_power_connectors, no backfill, no publish_job_event). The job-only parts of list/channel
+# editing are not reused for venues yet; only audio-device creation is mirrored here.
+venue_router = APIRouter(
+    prefix="/venues/{venue_id}/graph",
+    tags=["graph:lists:venue"],
+    dependencies=[Depends(get_current_user)],
 )
 
 MAX_BATCH = 200
@@ -122,10 +132,14 @@ async def _node(db: AsyncSession, job_id: UUID, node_id: UUID, kind: str) -> Gra
     return node
 
 
-async def _by_ref(db: AsyncSession, job_id: UUID, ref: str) -> GraphDevice:
+async def _by_ref(
+    db: AsyncSession, job_id: UUID | None, ref: str, venue_id: UUID | None = None
+) -> GraphDevice:
     node = (
         await db.scalars(
-            select(GraphDevice).where(GraphDevice.job_id == job_id, GraphDevice.legacy_ref == ref)
+            select(GraphDevice).where(
+                scope_filter(GraphDevice, job_id, venue_id), GraphDevice.legacy_ref == ref
+            )
         )
     ).first()
     if node is None:
@@ -133,15 +147,20 @@ async def _by_ref(db: AsyncSession, job_id: UUID, ref: str) -> GraphDevice:
     return node
 
 
-async def _read(db: AsyncSession, job_id: UUID, ref: str) -> schemas.GraphDeviceRead:
-    await backfill_job(db, job_id)
-    return schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref))
+async def _read(
+    db: AsyncSession, job_id: UUID | None, ref: str, venue_id: UUID | None = None
+) -> schemas.GraphDeviceRead:
+    if job_id is not None:
+        await backfill_job(db, job_id)
+    return schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref, venue_id))
 
 
-async def _device_twin(db: AsyncSession, job_id: UUID, node_id: UUID) -> UUID:
+async def _device_twin(
+    db: AsyncSession, job_id: UUID | None, node_id: UUID, venue_id: UUID | None = None
+) -> UUID:
     """The device id of a graph node; a catalog item is made a device on demand."""
     node = await db.get(GraphDevice, node_id)
-    if node is None or node.job_id != job_id:
+    if node is None or not belongs_to(node, job_id, venue_id):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job")
     target = legacy_target(node)
     if target is not None and target[0] == "device":
@@ -633,14 +652,29 @@ EFFECTIVE_KEYS = {
 
 
 @router.post("/audio-devices", response_model=schemas.GraphDeviceRead, status_code=201)
+@venue_router.post("/audio-devices", response_model=schemas.GraphDeviceRead, status_code=201)
 async def create_audio_device(
-    job_id: UUID, payload: audio_schemas.AudioDeviceCreate, db: AsyncSession = Depends(get_db)
+    job_id: UUID | None = None,
+    venue_id: UUID | None = None,
+    payload: audio_schemas.AudioDeviceCreate = None,
+    db: AsyncSession = Depends(get_db),
 ) -> schemas.GraphDeviceRead:
     """Create a piece of gear (stagebox, mixer, camera, fixture, ...) with its ports and specs."""
-    if await service.get_job(db, job_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-    device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
-    return await _read(db, job_id, f"device:{device.id}")
+    if job_id is not None:
+        if await service.get_job(db, job_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+        device = await service.create_device(db, job_id, payload.model_dump(exclude_unset=True))
+        return await _read(db, job_id, f"device:{device.id}")
+    if venue_id is not None:
+        from app.domains.venues import service as venue_service
+
+        if await venue_service.get_venue(db, venue_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
+        device = await service.create_device(
+            db, None, payload.model_dump(exclude_unset=True), venue_id=venue_id
+        )
+        return await _read(db, None, f"device:{device.id}", venue_id=venue_id)
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "A job or a venue is required")
 
 
 @router.get("/effective")
