@@ -407,7 +407,13 @@ import {
   videoRowsOf,
 } from '@/utils/workspace';
 
-const props = defineProps({ jobId: { type: String, required: true } });
+// A venue's Standard Base Rig reuses this editor, so it accepts an optional `venueId`; store calls
+// route by the active graph scope, so passing the right id (venue when present, else job) is enough.
+const props = defineProps({
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
+});
+const scopeId = computed(() => props.venueId || props.jobId);
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
@@ -511,7 +517,7 @@ const failed = (err) =>
 
 async function save(node, changes) {
   try {
-    await graph.updateDevice(props.jobId, node.id, changes);
+    await graph.updateDevice(scopeId.value, node.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -525,7 +531,7 @@ const setNumber = (node, kind, value) =>
 
 async function addList() {
   try {
-    const created = await graph.createVideoList(props.jobId, { name: t('workspace.newVideoList') });
+    const created = await graph.createVideoList(scopeId.value, { name: t('workspace.newVideoList') });
     listId.value = created.id;
   } catch (err) {
     failed(err);
@@ -535,7 +541,7 @@ async function addList() {
 async function addRows(kind, count) {
   try {
     await graph.createVideoRows(
-      props.jobId,
+      scopeId.value,
       list.value.id,
       kind,
       Array.from({ length: count }, () => ({})),
@@ -547,7 +553,7 @@ async function addRows(kind, count) {
 
 async function fill() {
   try {
-    await graph.fillVideoFromSwitcher(props.jobId, list.value.id);
+    await graph.fillVideoFromSwitcher(scopeId.value, list.value.id);
   } catch (err) {
     failed(err);
   }
@@ -600,7 +606,7 @@ function openChain(node, kind) {
 
 async function saveChain(steps) {
   try {
-    await graph.replaceChain(props.jobId, chainKind.value, chainNode.value.id, steps);
+    await graph.replaceChain(scopeId.value, chainKind.value, chainNode.value.id, steps);
     chainOpen.value = false;
   } catch (err) {
     failed(err);
@@ -611,7 +617,7 @@ function removeNode(node) {
   $q.dialog({ title: t('workspace.remove'), message: node.name, cancel: true, persistent: true }).onOk(
     async () => {
       try {
-        await graph.deleteDevice(props.jobId, node.id);
+        await graph.deleteDevice(scopeId.value, node.id);
       } catch (err) {
         if (!isRevisionConflict(err)) failed(err);
       }

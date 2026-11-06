@@ -35,8 +35,12 @@
       />
     </div>
 
+    <!-- The venue Standard Base Rig mirrors the job workspace's discipline tabs so a venue is set up
+         exactly like a job: canvas (stage plot + cable raceways), channel lists, lights, video, power
+         (rigging), devices and the flat table. The store scope is owned by this page (set in setup),
+         so every editor drives the venue's graph. -->
     <q-tabs
-      :model-value="view"
+      :model-value="graph.mode"
       dense
       no-caps
       align="left"
@@ -44,10 +48,10 @@
       active-color="primary"
       indicator-color="primary"
       class="q-mb-md workspace-tabs"
-      @update:model-value="view = $event"
+      @update:model-value="graph.setMode"
     >
       <q-tab
-        name="stage"
+        name="canvas"
         icon="map"
         :label="t('venues.baseRig.stage')"
       />
@@ -56,10 +60,35 @@
         icon="queue_music"
         :label="t('channels.lists')"
       />
+      <q-tab
+        name="lights"
+        icon="lightbulb"
+        :label="t('workspace.modeLights')"
+      />
+      <q-tab
+        name="video"
+        icon="videocam"
+        :label="t('workspace.modeVideo')"
+      />
+      <q-tab
+        name="power"
+        icon="bolt"
+        :label="t('workspace.modePower')"
+      />
+      <q-tab
+        name="devices"
+        icon="developer_board"
+        :label="t('workspace.modeDevices')"
+      />
+      <q-tab
+        name="list"
+        icon="table_rows"
+        :label="t('workspace.modeList')"
+      />
     </q-tabs>
 
     <div
-      v-if="view === 'stage'"
+      v-if="graph.mode === 'canvas'"
       class="row q-col-gutter-md col-grow"
       :class="$q.screen.lt.sm ? 'column' : ''"
     >
@@ -200,6 +229,22 @@
           <q-btn
             dense
             no-caps
+            icon="cable"
+            :color="showCables ? 'primary' : undefined"
+            :label="t('workspace.layerCables')"
+            @click="showCables = !showCables"
+          />
+          <q-btn
+            dense
+            no-caps
+            icon="timeline"
+            :color="drawingWay ? 'primary' : undefined"
+            :label="t('cables.drawWay')"
+            @click="drawingWay ? cancelDrawWay() : startDrawWay()"
+          />
+          <q-btn
+            dense
+            no-caps
             icon="edit"
             :color="audienceDrawing ? 'primary' : undefined"
             :label="t('stagePlot.audienceDraw')"
@@ -246,18 +291,33 @@
           :connect-mode="connectMode"
           :show-outlets="showOutlets"
           :show-audience="showAudience"
-          :audience-drawing="audienceDrawing"
+          :cables="showCables ? cableRows : []"
+          :cableways="cablePlan.cableways"
+          :draw-points="drawPoints"
+          :drawing="drawingWay"
+          :rerouting="!!rerouteKey"
+          :reroute-waypoints="rerouteWaypoints"
+          :active-cable-key="rerouteKey"
           :audience-draft="audienceDraft"
+          :audience-drawing="audienceDrawing"
           @select="onSelect"
           @move="onMove"
           @connect="onConnect"
           @audience-point="onAudiencePoint"
+          @draw-point="(p) => drawPoints.push(p)"
+          @reroute-point="addWaypoint"
         />
         <div
           v-if="connectMode"
           class="text-caption q-mt-xs text-grey-7"
         >
           {{ t('venues.baseRig.connecting') }}
+        </div>
+        <div
+          v-else-if="drawingWay"
+          class="text-caption q-mt-xs text-grey-7"
+        >
+          {{ t('cables.drawHint') }}
         </div>
         <div
           v-else-if="audienceDrawing"
@@ -354,19 +414,62 @@
           @changed="reloadOutlets"
         />
 
-        <FixtureLibraryDialog
-          v-model="libraryOpen"
-          :venue-id="venueId"
+        <CableRoutingPanel
+          class="q-mt-md"
+          :rows="cableRows"
+          :settings="cablePlan.settings"
+          :cableways="cablePlan.cableways"
+          :drawing="drawingWay"
+          :draw-points="drawPoints"
+          :reroute-key="rerouteKey"
+          @toggle-hidden="toggleCableHidden"
+          @reroute="startReroute"
+          @reset-route="resetRoute"
+          @settings="saveCableSettings"
+          @draw-start="startDrawWay"
+          @draw-finish="finishDrawWay"
+          @draw-undo="drawPoints.pop()"
+          @draw-cancel="cancelDrawWay"
+          @delete-way="removeCableway"
         />
       </div>
     </div>
 
     <ChannelListEditor
-      v-else-if="view === 'lists'"
+      v-else-if="graph.mode === 'lists'"
       :venue-id="venueId"
       class="col-grow"
     />
+    <LightsEditor
+      v-else-if="graph.mode === 'lights'"
+      :venue-id="venueId"
+    />
+    <VideoEditor
+      v-else-if="graph.mode === 'video'"
+      :venue-id="venueId"
+    />
+    <RiggingEditor
+      v-else-if="graph.mode === 'power'"
+      :venue-id="venueId"
+      @changed="reloadOutlets"
+    />
+    <DeviceEditor
+      v-else-if="graph.mode === 'devices'"
+      :venue-id="venueId"
+    />
+    <WorkspaceTable
+      v-else
+      :venue-id="venueId"
+      :devices="listDevices"
+      :selected-id="graph.selectedDeviceId"
+      @select="onSelect"
+      @request-booking="requestBooking"
+    />
 
+    <FixtureLibraryDialog
+      v-model="libraryOpen"
+      :venue-id="venueId"
+    />
     <ReportGenerationDialog
       v-model="reportsOpen"
       :venue-id="venueId"
@@ -380,8 +483,11 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useQuasar, Notify } from 'quasar';
 import { api } from '@/boot/api';
+import { apiErrorText } from '@/utils/errors';
 import { frameFromVenue, stageCentre } from '@/utils/plotFrame';
 import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
+import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
+import { emptyCablePlan } from '@/utils/cables';
 import { useGraphStore } from '@/stores/graph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
@@ -389,13 +495,18 @@ import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import RiggingEditor from '@/components/RiggingEditor.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
 import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
+import LightsEditor from '@/components/LightsEditor.vue';
+import VideoEditor from '@/components/VideoEditor.vue';
+import DeviceEditor from '@/components/DeviceEditor.vue';
+import WorkspaceTable from '@/components/WorkspaceTable.vue';
+import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
 const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();
 // The venue Standard Base Rig reuses the job graph editing store, scoped to the venue: the same
-// components (canvas, rigging editor, power panel, patch drawer) serve both, so a venue gets the
-// identical rigging/power treatment a job does. Edits commit immediately through the incremental
-// graph routes — there is no separate "save" step.
+// components (canvas, editors, power panel, patch drawer, cable routing) serve both, so a venue gets
+// the identical rigging/power/lighting/video treatment a job does. Edits commit immediately through
+// the incremental graph routes — there is no separate "save" step.
 const graph = useGraphStore();
 
 const venueId = computed(() => route.params.venueId);
@@ -404,7 +515,6 @@ const venueId = computed(() => route.params.venueId);
 // store's default job/null scope would send those requests to /jobs/null/... and fail UUID validation.
 // This mirrors how the job workspace owns the store scope while it is mounted.
 graph.setScope('venue', venueId.value);
-const view = ref('stage');
 const libraryOpen = ref(false);
 const reportsOpen = ref(false);
 const venue = ref(null);
@@ -416,17 +526,94 @@ const deviceScale = ref(1);
 const connectMode = ref(false);
 const showOutlets = ref(true);
 const showAudience = ref(true);
+const showCables = ref(false);
 // Drawing an audience area: clicks on the canvas (in venue cm) accumulate in audienceDraft until
 // the area is finished and saved onto the venue's audience_polygon.
 const audienceDrawing = ref(false);
 const audienceDraft = ref([]);
 
-// The signal an edge gets so the patch table groups it under the right tab (as the job canvas does).
-const DOMAIN_SIGNAL = { audio: 'audio', lighting: 'dmx', video: 'video', power: 'power' };
+// --- Cable raceways & routing ----------------------------------------------------------------
+// Cableways and routing settings live on the venue (cable_plan), the same shape a job uses. A job
+// clones these as its starting point and adds its own runs, so the venue owns the fixed infrastructure
+// (trays, conduits). Cables are derived from the signal chains and routed along the cableways.
+const drawingWay = ref(false);
+const drawPoints = ref([]);
+const rerouteKey = ref(null);
+const cablePlan = computed(() => emptyCablePlan(venue.value?.cable_plan));
+const cableRows = computed(() => {
+  if (!graph.devices.length) return [];
+  const f = frame.value;
+  return buildCableRowsFromGraph({
+    devices: graph.devices,
+    edges: graph.edges,
+    plan: venue.value?.cable_plan,
+    audience: f.audience,
+    stageOffset: [f.stageX, f.stageY],
+  });
+});
+const rerouteWaypoints = computed(() => cablePlan.value.routes[rerouteKey.value]?.waypoints || []);
+async function savePlan(next) {
+  try {
+    const { data } = await api.patch(`/venues/${venueId.value}`, { cable_plan: next });
+    venue.value = { ...venue.value, cable_plan: data.cable_plan };
+  } catch (err) {
+    $q.notify({ type: 'negative', message: `${t('cables.saveFailed')}: ${apiErrorText(err)}` });
+  }
+}
+function startDrawWay() {
+  rerouteKey.value = null;
+  drawPoints.value = [];
+  drawingWay.value = true;
+}
+function cancelDrawWay() {
+  drawingWay.value = false;
+  drawPoints.value = [];
+}
+function finishDrawWay() {
+  if (drawPoints.value.length < 2) return;
+  const plan = cablePlan.value;
+  savePlan({ ...plan, cableways: [...plan.cableways, { id: crypto.randomUUID(), points: drawPoints.value }] });
+  cancelDrawWay();
+}
+function removeCableway(id) {
+  const plan = cablePlan.value;
+  savePlan({ ...plan, cableways: plan.cableways.filter((w) => w.id !== id) });
+}
+// A cable's route is stored per cable key in cable_plan.routes: { mode: 'auto'|'manual', waypoints,
+// hidden }. The key is derived from the chain (utils/cables.js), so it survives a reload.
+function updateRoute(key, patch) {
+  const plan = cablePlan.value;
+  const current = plan.routes[key] || { mode: 'auto', waypoints: [], hidden: false };
+  savePlan({ ...plan, routes: { ...plan.routes, [key]: { ...current, ...patch } } });
+}
+const toggleCableHidden = (row) => updateRoute(row.key, { hidden: !row.hidden });
+function startReroute(row) {
+  cancelDrawWay();
+  rerouteKey.value = row.key;
+  updateRoute(row.key, { mode: 'manual', waypoints: row.requestedMode === 'manual' ? row.waypoints : [] });
+}
+function resetRoute(row) {
+  updateRoute(row.key, { mode: 'auto', waypoints: [] });
+  if (rerouteKey.value === row.key) rerouteKey.value = null;
+}
+function addWaypoint(cm) {
+  if (!rerouteKey.value) return;
+  updateRoute(rerouteKey.value, { mode: 'manual', waypoints: [...rerouteWaypoints.value, cm] });
+}
+const saveCableSettings = (patch) => {
+  const plan = cablePlan.value;
+  savePlan({ ...plan, settings: { ...plan.settings, ...patch } });
+};
 
 const frame = computed(() => (venue.value ? frameFromVenue(venue.value) : null));
 
 const gearGroups = ['audio', 'video', 'lighting'];
+
+// The signal a new canvas connection carries, derived from the source device's domain (matches the
+// job workspace so power/audio/lighting/video links are typed the same way).
+const DOMAIN_SIGNAL = { audio: 'audio', lighting: 'dmx', video: 'video', power: 'power' };
+
+const listDevices = computed(() => graph.devices);
 
 const objectLabel = (object) =>
   object.labelKey ? t(object.labelKey, object.label || object.type) : object.label;
@@ -582,6 +769,7 @@ function onConnect({ srcId, dstId }) {
 function startAudience() {
   audienceDrawing.value = true;
   connectMode.value = false;
+  drawingWay.value = false;
   audienceDraft.value = [];
 }
 function onAudiencePoint(point) {
@@ -607,6 +795,10 @@ async function clearAudienceDraft() {
 }
 function deleteSelected() {
   if (graph.selectedDeviceId) graph.deleteDevice(venueId.value, graph.selectedDeviceId);
+}
+// Venues have no Stockwire integration, so requesting gear from Stockwire is unavailable here.
+function requestBooking() {
+  $q.notify({ type: 'info', message: t('venues.baseRig.noStockwire') });
 }
 function goBack() {
   router.push({ path: '/venues' });

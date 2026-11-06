@@ -287,6 +287,7 @@ export default {
     connectorAdded: "Lade till kontakttypen {name}",
     layerOutlets: "Uttag",
     layerAudience: "Publik",
+    layerCables: "Kablar",
     layerCoverage: "Täckning",
     notOnPlot: "Inte på planen:",
     addTruss: "Lägg till riggpunkt",
@@ -1283,6 +1284,7 @@ export default {
       power: "Ström",
       name: "Namn",
       deviceType: "Typ",
+      noStockwire: "Lokalen har ingen Stockwire-koppling; utrustning kan inte beställas härifrån.",
     },
     empty:
       "Inga sparade lokaler ännu. Skapa en för att återanvända den i jobb.",
