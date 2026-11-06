@@ -20,7 +20,9 @@ test('create a production job from the UI', async ({ page }) => {
   await dialog.getByRole('button', { name: /create new venue/i }).click();
   await expect(dialog.getByText(venue)).toBeVisible();
 
-  await dialog.getByRole('button', { name: /create/i }).click();
+  // The dialog also holds an inline "Create new venue …" button; match the job's own "Create"
+  // exactly so the inline venue action isn't picked up by the same selector.
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click();
 
   await expect(page.getByText(title)).toBeVisible();
   await expect(page.getByText(venue)).toBeVisible();
