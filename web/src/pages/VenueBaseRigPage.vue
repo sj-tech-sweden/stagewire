@@ -388,6 +388,7 @@ import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import RiggingEditor from '@/components/RiggingEditor.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
+import ReportGenerationDialog from '@/components/ReportGenerationDialog.vue';
 const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();
