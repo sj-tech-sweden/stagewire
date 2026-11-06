@@ -5,6 +5,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.audio.polygon import check_polygon
+from app.domains.graph.schemas import Domain, Port, Signal
+
+FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
+StageShape = Literal["proscenium", "thrust", "arena_center", "runway", "custom_polygon"]
 
 
 class VenueBase(BaseModel):
@@ -16,12 +20,27 @@ class VenueBase(BaseModel):
     stage_y_cm: float = Field(0.0, ge=0)
     stage_width_cm: float = Field(0.0, ge=0)
     stage_height_cm: float = Field(0.0, ge=0)
+    footprint_shape: FootprintShape = "rectangular"
+    stage_shape: StageShape = "proscenium"
     background_image_url: str = Field("", max_length=1024)
     audience_polygon: list[list[float]] = Field(default_factory=list)
+    # Custom footprints/stages are drawn as polygons (venue cm for the footprint,
+    # stage-relative cm for the stage) when the matching *_shape is "custom_polygon".
+    footprint_polygon: list[list[float]] = Field(default_factory=list)
+    stage_polygon: list[list[float]] = Field(default_factory=list)
+    # Cable raceways and routing settings for the venue's Standard Base Rig, mirroring a job's
+    # cable_plan (a `cableways` array plus routing `settings`). Jobs start from these cableways and
+    # add their own runs, so the venue owns the fixed infrastructure (trays, conduits).
+    cable_plan: dict = Field(default_factory=dict)
 
     @field_validator("audience_polygon")
     @classmethod
     def _check_audience_polygon(cls, value):
+        return check_polygon(value)
+
+    @field_validator("footprint_polygon", "stage_polygon")
+    @classmethod
+    def _check_custom_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -38,12 +57,31 @@ class VenueUpdate(BaseModel):
     stage_y_cm: float | None = Field(None, ge=0)
     stage_width_cm: float | None = Field(None, ge=0)
     stage_height_cm: float | None = Field(None, ge=0)
+    footprint_shape: FootprintShape | None = None
+    stage_shape: StageShape | None = None
     background_image_url: str | None = Field(None, max_length=1024)
     audience_polygon: list[list[float]] | None = None
+    footprint_polygon: list[list[float]] | None = None
+    stage_polygon: list[list[float]] | None = None
+    # Cable raceways + routing settings for the venue's Standard Base Rig. Mirrors the job's
+    # `cable_plan`. An explicit `null` resets to the empty plan ({}) rather than writing NULL,
+    # because the column is NOT NULL.
+    cable_plan: dict | None = None
 
     @field_validator("audience_polygon")
     @classmethod
     def _check_audience_polygon(cls, value):
+        return check_polygon(value)
+
+    @field_validator("cable_plan")
+    @classmethod
+    def _check_cable_plan(cls, value):
+        # Explicit null means "reset"; a missing field is handled by exclude_unset upstream.
+        return value if value is not None else {}
+
+    @field_validator("footprint_polygon", "stage_polygon")
+    @classmethod
+    def _check_custom_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -74,6 +112,18 @@ class VenuePowerGroupBase(BaseModel):
     phases: int = Field(1, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str = ""
+    # kind classifies the node in the supply tree: 'incoming' (mains) | 'generator' (temporary
+    # supply) | 'panel' (permanent board) | 'breakout' (temporary distro) | 'group' (fused circuit
+    # inside a panel/breakout that outlets plug into). Kept in sync with is_incoming for 'incoming'.
+    kind: Literal["incoming", "generator", "panel", "breakout", "group"] = "group"
+    # Temporary equipment (a hired generator, a breakout distro, ...) is not part of the venue's
+    # permanent install and is drawn distinctly in the UI.
+    temporary: bool = False
+    # parent_id nests a board/breakout under a supply root or another board; for a 'group' the
+    # parent is the panel/breakout it belongs to. null = top level.
+    parent_id: UUID | None = None
+    # True for the single mains supply the venue draws from (its load is the sum of every outlet).
+    is_incoming: bool = False
 
 
 class VenuePowerGroupCreate(VenuePowerGroupBase):
@@ -86,6 +136,10 @@ class VenuePowerGroupUpdate(BaseModel):
     phases: int | None = Field(None, ge=1, le=3)
     phase: Literal["L1", "L2", "L3"] | None = None
     notes: str | None = None
+    kind: Literal["incoming", "generator", "panel", "breakout", "group"] | None = None
+    temporary: bool | None = None
+    parent_id: UUID | None = None
+    is_incoming: bool | None = None
 
 
 class VenuePowerGroupRead(VenuePowerGroupBase):
@@ -124,3 +178,72 @@ class VenuePowerOutletRead(VenuePowerOutletBase):
 
     id: UUID
     venue_id: UUID
+
+
+class VenuePowerElementLoad(BaseModel):
+    """The load drawn through one supply element (outlet or group) and whether it is over limit."""
+
+    id: UUID
+    watts: float
+    amps: float
+    over: bool
+
+
+class VenuePowerLoadRead(BaseModel):
+    """Device-driven load for a venue's power supply, computed server-side and shared by the venue
+    Standard Base Rig and the job workspace so both show the same over-limit check."""
+
+    outlets: list[VenuePowerElementLoad] = Field(default_factory=list)
+    groups: list[VenuePowerElementLoad] = Field(default_factory=list)
+    # One entry per supply root (the mains 'incoming' plus any 'generator'). Each carries the load
+    # of its whole subtree and is 'over' when that load exceeds the root's rating, so the UI can
+    # compare per-source: a job whose venue power is not enough can lean on a generator instead.
+    supplies: list[VenuePowerElementLoad] = Field(default_factory=list)
+    total_watts: float = 0.0
+    total_amps: float = 0.0
+
+
+# --- Standard Base Rig -------------------------------------------------------------------------
+# A venue's Standard Base Rig is a graph (devices + connection edges) owned by the venue rather
+# than by a job. It is stored in the same unified `graph_*` tables and cloned onto a job when the
+# venue is assigned. The write schemas mirror the job graph's device/edge shapes so the same
+# editor can drive both; the client keeps device/edge ids stable across a GET -> edit -> PUT round
+# trip, which avoids any id remapping on the server.
+
+
+class VenueBaseRigDeviceWrite(BaseModel):
+    id: UUID
+    domain: Domain
+    kind: str = ""
+    name: str
+    notes: str = ""
+    position: int = 0
+    attributes: dict = Field(default_factory=dict)
+    ports: list[Port] = Field(default_factory=list)
+    canvas_x_cm: float | None = None
+    canvas_y_cm: float | None = None
+    canvas_rotation: float = 0.0
+    case_parent_id: UUID | None = None
+    stockwire_product_id: str | None = None
+    stockwire_product_name: str | None = None
+    stockwire_device_id: str | None = None
+    stockwire_booked: bool | None = None
+
+
+class VenueBaseRigEdgeWrite(BaseModel):
+    id: UUID
+    signal: Signal
+    src_device_id: UUID
+    src_port: str
+    dst_device_id: UUID
+    dst_port: str
+    channels: int = 1
+    phase: Literal["L1", "L2", "L3"] | None = None
+    cable_label: str = ""
+    notes: str = ""
+    attributes: dict = Field(default_factory=dict)
+
+
+class VenueBaseRigWrite(BaseModel):
+    devices: list[VenueBaseRigDeviceWrite] = Field(default_factory=list)
+    edges: list[VenueBaseRigEdgeWrite] = Field(default_factory=list)

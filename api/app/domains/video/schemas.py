@@ -159,7 +159,7 @@ class VideoInputListRead(VideoInputListBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     position: int
     switcher_product_id: str | None = None
     switcher_product_name: str | None = None

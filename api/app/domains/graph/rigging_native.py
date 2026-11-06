@@ -15,13 +15,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import GraphDevice
+from app.domains.graph.models import GraphDevice, scope_filter
 
 
-def point_node(job_id: uuid.UUID, position: int, data: dict, legacy_id=None) -> GraphDevice:
+def point_node(
+    job_id: uuid.UUID | None, position: int, data: dict, legacy_id=None, venue_id=None
+) -> GraphDevice:
+    """A ``rigging_point`` graph node. Pass ``venue_id`` (and ``job_id=None``) to scope it to a
+    venue's Standard Base Rig; with ``venue_id=None`` the job path is unchanged.
+    """
     return GraphDevice(
         id=uuid.uuid4(),
         job_id=job_id,
+        venue_id=venue_id,
         domain="rigging",
         kind="rigging_point",
         name=data.get("name") or "Rigging point",
@@ -53,11 +59,14 @@ def point_view(node: GraphDevice) -> SimpleNamespace:
     )
 
 
-async def load_points(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
+async def load_points(
+    db: AsyncSession, job_id: uuid.UUID | None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
     rows = (
         await db.scalars(
             select(GraphDevice).where(
-                GraphDevice.job_id == job_id, GraphDevice.kind == "rigging_point"
+                scope_filter(GraphDevice, job_id, venue_id),
+                GraphDevice.kind == "rigging_point",
             )
         )
     ).all()
@@ -65,15 +74,26 @@ async def load_points(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespa
 
 
 async def get_point(
-    db: AsyncSession, job_id: uuid.UUID, point_id: uuid.UUID
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    point_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    return next((p for p in await load_points(db, job_id) if p.id == point_id), None)
+    return next((p for p in await load_points(db, job_id, venue_id) if p.id == point_id), None)
 
 
-async def clear_references(db: AsyncSession, node: GraphDevice) -> None:
-    # devices, fixtures and plot elements live on the graph: their link holds the point's node id
+async def clear_references(
+    db: AsyncSession, node: GraphDevice, venue_id: uuid.UUID | None = None
+) -> None:
+    # devices, fixtures and plot elements live on the graph: their link holds the point's node id.
+    # Scope the scan to the node's own context so a job and a venue never cross-clear each other.
     for host in (
-        await db.scalars(select(GraphDevice).where(GraphDevice.job_id == node.job_id))
+        await db.scalars(
+            select(GraphDevice).where(
+                scope_filter(GraphDevice, node.job_id, venue_id),
+                GraphDevice.id != node.id,
+            )
+        )
     ).all():
         if (host.attributes or {}).get("rigging_point_id") == str(node.id):
             host.attributes = {k: v for k, v in host.attributes.items() if k != "rigging_point_id"}

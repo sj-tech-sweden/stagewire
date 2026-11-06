@@ -24,6 +24,10 @@ const routes = [
       })),
       { path: 'reports', component: () => import('@/pages/ReportsPage.vue') },
       { path: 'venues', component: () => import('@/pages/VenuesPage.vue') },
+      {
+        path: 'venues/:venueId/base-rig',
+        component: () => import('@/pages/VenueBaseRigPage.vue'),
+      },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     ],
   },

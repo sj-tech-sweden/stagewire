@@ -1,8 +1,9 @@
 <template>
   <div data-testid="rigging-editor">
-    <VenuePowerPanel
+    <PowerPanel
       :job-id="jobId"
-      @changed="loadOutlets"
+      :venue-id="venueId"
+      @changed="onPowerChanged"
     />
     <div
       v-if="summary?.errors?.length"
@@ -796,13 +797,29 @@ import { useGraphStore } from '@/stores/graph';
 import OutputsField from '@/components/OutputsField.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
-import VenuePowerPanel from '@/components/VenuePowerPanel.vue';
+import PowerPanel from '@/components/PowerPanel.vue';
 import { cableFor, loadStatusColor, longFeeds, outputsLabel, powerInletLabel, powerTreeRows } from '@/utils/workspace';
 
-const props = defineProps({ jobId: { type: String, required: true } });
+// A rigging editor serves both a job and a venue's Standard Base Rig: pass `venueId` (and omit
+// `jobId`) for a venue. The shared graph store is scoped to the venue by the parent page, so the
+// store calls below route to `/venues/{id}/graph/...`; the id passed is only used for the few
+// direct API reads that are not yet store-backed.
+const props = defineProps({
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
+});
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const scopeId = computed(() => props.venueId || props.jobId);
+// The shared power panel fires `changed` when the supply tree is edited. On the job page it is the
+// only power panel; on the venue page the parent also needs that event to refresh the canvas outlet
+// layer, so forward it alongside this editor's own outlet reload.
+const emit = defineEmits(['changed']);
+function onPowerChanged() {
+  loadOutlets();
+  emit('changed');
+}
 const summary = ref(null);
 const catalog = ref([]);
 const createOpen = ref(false);
@@ -899,7 +916,7 @@ const outletOf = (value) =>
 async function resolveSource(value, connector) {
   const outlet = outletOf(value);
   if (!outlet) return { id: value, connector };
-  const { node } = await graph.outletSource(props.jobId, outlet.id);
+  const { node } = await graph.outletSource(scopeId.value, outlet.id);
   return { id: node.id, connector: outlet.connector };
 }
 const graphNode = (id) => graph.devices.find((d) => d.id === id);
@@ -925,7 +942,7 @@ const failed = (err) =>
 
 async function refresh() {
   try {
-    summary.value = await graph.fetchRiggingSummary(props.jobId);
+    summary.value = await graph.fetchRiggingSummary(scopeId.value);
   } catch (err) {
     failed(err);
   }
@@ -933,12 +950,20 @@ async function refresh() {
 
 async function loadOutlets() {
   try {
-    outlets.value = (await api.get(`/jobs/${props.jobId}/power-outlets`)).data;
-    const job = (await api.get(`/jobs/${props.jobId}`)).data;
-    if (job.venue_id) {
+    // A venue's outlets live on the venue; a job resolves them through its assigned venue.
+    if (props.venueId) {
+      outlets.value = (await api.get(`/venues/${props.venueId}/power-outlets`)).data;
       groupNames.value = Object.fromEntries(
-        (await api.get(`/venues/${job.venue_id}/power-groups`)).data.map((g) => [g.id, g.name]),
+        (await api.get(`/venues/${props.venueId}/power-groups`)).data.map((g) => [g.id, g.name]),
       );
+    } else {
+      outlets.value = (await api.get(`/jobs/${props.jobId}/power-outlets`)).data;
+      const job = (await api.get(`/jobs/${props.jobId}`)).data;
+      if (job.venue_id) {
+        groupNames.value = Object.fromEntries(
+          (await api.get(`/venues/${job.venue_id}/power-groups`)).data.map((g) => [g.id, g.name]),
+        );
+      }
     }
   } catch (err) {
     failed(err);
@@ -960,7 +985,7 @@ watch(() => [graph.devices.length, graph.edges.length], refresh);
 // dialog) and the caller can keep its form open.
 async function save(node, changes) {
   try {
-    await graph.updateDevice(props.jobId, node.id, changes);
+    await graph.updateDevice(scopeId.value, node.id, changes);
     await refresh();
     return true;
   } catch (err) {
@@ -973,7 +998,7 @@ const saveByNodeId = (id, changes) => save(graphNode(id) || { id }, changes);
 
 async function addPoint() {
   try {
-    await graph.createRiggingPoint(props.jobId, { name: `${t('rigging.trusses')} ${points.value.length + 1}` });
+    await graph.createRiggingPoint(scopeId.value, { name: `${t('rigging.trusses')} ${points.value.length + 1}` });
     await refresh();
   } catch (err) {
     failed(err);
@@ -1001,7 +1026,7 @@ async function createNode() {
   try {
     const parent =
       form.kind === 'source' ? { id: null, connector: form.feed_connector } : await resolveSource(form.parent_id, form.feed_connector);
-    await graph.createPowerNode(props.jobId, {
+    await graph.createPowerNode(scopeId.value, {
       name: form.name,
       kind: form.kind,
       parent_id: parent.id,
@@ -1053,9 +1078,9 @@ const nodeName = (id) => graphNode(id)?.name || '?';
 async function disconnect(edge) {
   try {
     if (edge.id === primaryFeedId.value) {
-      await graph.movePowerNode(props.jobId, editing.value.id, { parent_id: null });
+      await graph.movePowerNode(scopeId.value, editing.value.id, { parent_id: null });
     } else {
-      await graph.deleteEdge(props.jobId, edge.id);
+      await graph.deleteEdge(scopeId.value, edge.id);
     }
     await refresh();
   } catch (err) {
@@ -1091,7 +1116,7 @@ async function saveEdit() {
   if (moved && editForm.parent_id) {
     try {
       const parent = await resolveSource(editForm.parent_id, editForm.feed_connector);
-      await graph.movePowerNode(props.jobId, editing.value.id, {
+      await graph.movePowerNode(scopeId.value, editing.value.id, {
         parent_id: parent.id,
         feed_connector: parent.connector,
         phase: editForm.phase || null,
@@ -1128,7 +1153,7 @@ function openExtension(node) {
 
 async function insertExtension(node, extra = {}) {
   try {
-    await graph.insertExtension(props.jobId, node.id, { ...extForm, ...extra });
+    await graph.insertExtension(scopeId.value, node.id, { ...extForm, ...extra });
     extOpen.value = false;
     await refresh();
   } catch (err) {
@@ -1148,7 +1173,7 @@ async function plugAll() {
   let done = 0;
   for (const load of unplugged.value) {
     try {
-      await graph.assignLoad(props.jobId, load.id, { load_id: load.load_id, power_node_id: target, power_connector: connector });
+      await graph.assignLoad(scopeId.value, load.id, { load_id: load.load_id, power_node_id: target, power_connector: connector });
       done += 1;
     } catch (err) {
       failed(err);
@@ -1168,7 +1193,7 @@ function openFeed(node) {
 async function addFeed() {
   try {
     const parent = await resolveSource(feedForm.parent_id, feedForm.feed_connector);
-    await graph.addPowerFeed(props.jobId, editing.value.id, { ...feedForm, parent_id: parent.id, feed_connector: parent.connector });
+    await graph.addPowerFeed(scopeId.value, editing.value.id, { ...feedForm, parent_id: parent.id, feed_connector: parent.connector });
     feedOpen.value = false;
     await refresh();
   } catch (err) {
@@ -1184,7 +1209,7 @@ async function assign(load, changes) {
       body.power_node_id = parent.id;
       body.power_connector = parent.connector;
     }
-    await graph.assignLoad(props.jobId, load.id, body);
+    await graph.assignLoad(scopeId.value, load.id, body);
     await refresh();
   } catch (err) {
     failed(err);
@@ -1200,7 +1225,7 @@ function removeById(id, name) {
   $q.dialog({ title: t('workspace.remove'), message: name, cancel: true, persistent: true }).onOk(
     async () => {
       try {
-        await graph.deleteDevice(props.jobId, id);
+        await graph.deleteDevice(scopeId.value, id);
         await refresh();
       } catch (err) {
         if (!isRevisionConflict(err)) failed(err);

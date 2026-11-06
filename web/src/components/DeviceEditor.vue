@@ -173,7 +173,13 @@ import { useGraphStore } from '@/stores/graph';
 import DeviceDialog from '@/components/DeviceDialog.vue';
 import { POWER_INLETS, connectorLabel, deviceCreateBody, devicePatch, isGear, portGroups } from '@/utils/workspace';
 
-const props = defineProps({ jobId: { type: String, required: true } });
+// A venue's Standard Base Rig reuses this editor, so it accepts an optional `venueId`; store calls
+// route by the active graph scope, so passing the right id (venue when present, else job) is enough.
+const props = defineProps({
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
+});
+const scopeId = computed(() => props.venueId || props.jobId);
 const { t, te } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
@@ -213,13 +219,13 @@ const pluggedInto = (device) =>
   graph.devices.find((d) => d.id === device.attributes?.power_node_id)?.name || '';
 async function saveInlet(device, value) {
   try {
-    await graph.updateDevice(props.jobId, device.id, { attributes: { power_inlet: value } });
+    await graph.updateDevice(scopeId.value, device.id, { attributes: { power_inlet: value } });
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
 }
 
-const refresh = () => graph.fetchEffective(props.jobId).catch(() => {});
+const refresh = () => graph.fetchEffective(scopeId.value).catch(() => {});
 onMounted(refresh);
 watch(() => graph.devices.length, refresh);
 
@@ -233,7 +239,7 @@ function openDialog(device) {
 
 async function quickSave(device, changes) {
   try {
-    await graph.updateDevice(props.jobId, device.id, changes);
+    await graph.updateDevice(scopeId.value, device.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -242,9 +248,9 @@ async function quickSave(device, changes) {
 async function save(form) {
   try {
     if (editing.value) {
-      await graph.updateDevice(props.jobId, editing.value.id, devicePatch(editing.value, form));
+      await graph.updateDevice(scopeId.value, editing.value.id, devicePatch(editing.value, form));
     } else {
-      await graph.createAudioDevice(props.jobId, deviceCreateBody(form));
+      await graph.createAudioDevice(scopeId.value, deviceCreateBody(form));
     }
     dialogOpen.value = false;
     refresh();
@@ -257,7 +263,7 @@ function remove(device) {
   $q.dialog({ title: t('workspace.remove'), message: device.name, cancel: true, persistent: true }).onOk(
     async () => {
       try {
-        await graph.deleteDevice(props.jobId, device.id);
+        await graph.deleteDevice(scopeId.value, device.id);
       } catch (err) {
         if (err.response?.status === 409) {
           $q.notify({ type: 'warning', message: t('workspace.deviceInUse') });

@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.audio.polygon import check_polygon
 
+FootprintShape = Literal["rectangular", "arena_circular", "amphitheater", "custom_polygon"]
+StageShape = Literal["proscenium", "thrust", "arena_center", "runway", "custom_polygon"]
+
 
 class ProductionJobBase(BaseModel):
     title: str = Field(..., max_length=255)
@@ -22,12 +25,16 @@ class ProductionJobBase(BaseModel):
     stage_x_cm: float = 0.0
     stage_y_cm: float = 0.0
     venue_background_image_url: str = ""
+    venue_footprint_shape: FootprintShape = "rectangular"
+    venue_stage_shape: StageShape = "proscenium"
     audience_polygon: list[list[float]] = Field(default_factory=list)
+    venue_footprint_polygon: list[list[float]] = Field(default_factory=list)
+    venue_stage_polygon: list[list[float]] = Field(default_factory=list)
     cable_plan: dict = Field(default_factory=dict)
 
-    @field_validator("audience_polygon")
+    @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod
-    def _check_audience_polygon(cls, value):
+    def _check_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -49,12 +56,16 @@ class ProductionJobUpdate(BaseModel):
     stage_y_cm: float | None = Field(None, ge=0)
     venue_width_cm: float | None = Field(None, ge=0)
     venue_height_cm: float | None = Field(None, ge=0)
+    venue_footprint_shape: FootprintShape | None = None
+    venue_stage_shape: StageShape | None = None
     cable_plan: dict | None = None
     audience_polygon: list[list[float]] | None = None
+    venue_footprint_polygon: list[list[float]] | None = None
+    venue_stage_polygon: list[list[float]] | None = None
 
-    @field_validator("audience_polygon")
+    @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod
-    def _check_audience_polygon(cls, value):
+    def _check_polygons(cls, value):
         return check_polygon(value)
 
 
@@ -251,7 +262,7 @@ class ChannelListRead(ChannelListBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     created_at: datetime
     channels: list[AudioChannelPatchRead] = []
     outputs: list[ChannelListOutputRead] = []
@@ -300,7 +311,7 @@ class StagePlotElementRead(StagePlotElementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
 
 
 class AudioDevicePort(BaseModel):
@@ -352,7 +363,7 @@ class AudioDeviceRead(AudioDeviceBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     patch_point_count: int = 0
     input_override: int | None = None
     output_override: int | None = None

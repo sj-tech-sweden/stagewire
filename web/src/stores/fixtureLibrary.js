@@ -1,52 +1,60 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
 
-const base = (jobId) => `/jobs/${jobId}/fixture-types`;
+// A fixture type library is owned by exactly one context: a job or a venue. The same store serves
+// both by switching the base path, so the venue Standard Base Rig reuses the job's library UI without
+// duplicating it (see docs/venues-as-template-jobs.md, Phase 1).
+const base = (ctx) =>
+  ctx.kind === 'venue'
+    ? `/venues/${ctx.id}/fixture-types`
+    : `/jobs/${ctx.id}/fixture-types`;
 
 export const useFixtureLibraryStore = defineStore('fixtureLibrary', {
-  state: () => ({ jobId: null, types: [], loading: false }),
+  state: () => ({ ctx: null, types: [], loading: false }),
   actions: {
-    async fetch(jobId) {
-      if (this.jobId !== jobId) this.types = [];
-      this.jobId = jobId;
+    async fetch(ctx) {
+      if (!this.ctx || this.ctx.kind !== ctx.kind || this.ctx.id !== ctx.id) {
+        this.types = [];
+      }
+      this.ctx = ctx;
       this.loading = true;
       try {
-        const { data } = await api.get(base(jobId));
+        const { data } = await api.get(base(ctx));
         this.types = data;
       } finally {
         this.loading = false;
       }
     },
-    async createType(jobId, payload) {
-      const { data } = await api.post(base(jobId), payload);
-      await this.fetch(jobId);
+    async createType(ctx, payload) {
+      const { data } = await api.post(base(ctx), payload);
+      await this.fetch(ctx);
       return data;
     },
-    async updateType(jobId, typeId, payload) {
-      await api.patch(`${base(jobId)}/${typeId}`, payload);
-      await this.fetch(jobId);
+    async updateType(ctx, typeId, payload) {
+      await api.patch(`${base(ctx)}/${typeId}`, payload);
+      await this.fetch(ctx);
     },
-    async deleteType(jobId, typeId) {
-      await api.delete(`${base(jobId)}/${typeId}`);
-      await this.fetch(jobId);
+    async deleteType(ctx, typeId) {
+      await api.delete(`${base(ctx)}/${typeId}`);
+      await this.fetch(ctx);
     },
-    async createMode(jobId, typeId, payload) {
-      await api.post(`${base(jobId)}/${typeId}/modes`, payload);
-      await this.fetch(jobId);
+    async createMode(ctx, typeId, payload) {
+      await api.post(`${base(ctx)}/${typeId}/modes`, payload);
+      await this.fetch(ctx);
     },
-    async updateMode(jobId, typeId, modeId, payload) {
-      await api.patch(`${base(jobId)}/${typeId}/modes/${modeId}`, payload);
-      await this.fetch(jobId);
+    async updateMode(ctx, typeId, modeId, payload) {
+      await api.patch(`${base(ctx)}/${typeId}/modes/${modeId}`, payload);
+      await this.fetch(ctx);
     },
-    async deleteMode(jobId, typeId, modeId) {
-      await api.delete(`${base(jobId)}/${typeId}/modes/${modeId}`);
-      await this.fetch(jobId);
+    async deleteMode(ctx, typeId, modeId) {
+      await api.delete(`${base(ctx)}/${typeId}/modes/${modeId}`);
+      await this.fetch(ctx);
     },
-    async importFromStockwire(jobId, productId) {
-      const { data } = await api.post(`${base(jobId)}/from-stockwire`, {
+    async importFromStockwire(ctx, productId) {
+      const { data } = await api.post(`${base(ctx)}/from-stockwire`, {
         product_id: String(productId),
       });
-      await this.fetch(jobId);
+      await this.fetch(ctx);
       return data;
     },
   },

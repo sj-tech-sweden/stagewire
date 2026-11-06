@@ -151,6 +151,7 @@
           @click="bulkChannels = true"
         />
         <q-btn
+          v-if="contextKind === 'job'"
           flat
           no-caps
           icon="cloud_upload"
@@ -718,6 +719,7 @@
     <ChainDialog
       v-model="chainOpen"
       :job-id="jobId"
+      :venue-id="venueId"
       :title="chainTitle"
       :initial="chainInitial"
       :devices="gear"
@@ -863,7 +865,16 @@ import {
   stereoView,
 } from "@/utils/workspace";
 
-const props = defineProps({ jobId: { type: String, required: true } });
+const props = defineProps({
+  // A job owns its own graph; a venue's Standard Base Rig reuses the same editor. When `venueId`
+  // is set the editor talks to the venue graph routes instead of the job ones (see graph store
+  // scope). `jobId` stays as the fallback so job callers are unaffected.
+  jobId: { type: String, default: '' },
+  venueId: { type: String, default: '' },
+});
+// The id the graph store should scope to: a venue id when present, otherwise the job id.
+const contextId = computed(() => props.venueId || props.jobId);
+const contextKind = computed(() => (props.venueId ? 'venue' : 'job'));
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
@@ -946,6 +957,15 @@ watch(
   { immediate: true },
 );
 
+// Keep the graph store scoped to the right context. The page that mounts us usually fetches first,
+// but we re-fetch only if the scope changed (job <-> venue) so we never clobber another view's data.
+function ensureGraph() {
+  if (graph.scopeId !== contextId.value || graph.scopeKind !== contextKind.value) {
+    graph.fetchGraph(contextId.value, contextKind.value);
+  }
+}
+watch([contextId, contextKind], ensureGraph, { immediate: true });
+
 // One line saying what a channel has set, for the phone card: kind, source, stand, connector, 48V
 // and stereo, so the card shows the state without opening "Details".
 const channelSummary = (ch) => {
@@ -969,7 +989,7 @@ const failed = (err) =>
 
 async function save(node, changes) {
   try {
-    await graph.updateDevice(props.jobId, node.id, changes);
+    await graph.updateDevice(contextId.value, node.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -998,7 +1018,7 @@ async function onWwbFile(event) {
     const body = new FormData();
     body.append("file", file);
     const { data } = await api.post(
-      `/jobs/${props.jobId}/graph/lists/${listId.value}/wireless-workbench/parse`,
+      `${graph.graphBase}/lists/${listId.value}/wireless-workbench/parse`,
       body,
     );
     wwbParseRows.value = data.rows;
@@ -1057,7 +1077,7 @@ async function confirmWwbImport() {
     body.append("file", wwbParseFile.value);
     body.append("mapping", JSON.stringify(mapping));
     const { data } = await api.post(
-      `/jobs/${props.jobId}/graph/lists/${listId.value}/wireless-workbench/import`,
+      `${graph.graphBase}/lists/${listId.value}/wireless-workbench/import`,
       body,
     );
     const parts = [
@@ -1087,17 +1107,17 @@ async function setStereo(node, on) {
   const plan = stereoPairPlan(node, channels.value, on);
   try {
     if (plan.partnerCreate) {
-      await graph.createChannels(props.jobId, listId.value, [
+      await graph.createChannels(contextId.value, listId.value, [
         plan.partnerCreate,
       ]);
     } else if (plan.partner && plan.partnerChanges) {
       await graph.updateDevice(
-        props.jobId,
+        contextId.value,
         plan.partner.id,
         plan.partnerChanges,
       );
     }
-    await graph.updateDevice(props.jobId, node.id, plan.main);
+    await graph.updateDevice(contextId.value, node.id, plan.main);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -1107,7 +1127,7 @@ const setNumber = (node, value) =>
 
 async function addList() {
   try {
-    const created = await graph.createList(props.jobId, {
+    const created = await graph.createList(contextId.value, {
       name: t("workspace.newList"),
     });
     listId.value = created.id;
@@ -1119,7 +1139,7 @@ async function addList() {
 async function addChannels(count) {
   try {
     await graph.createChannels(
-      props.jobId,
+      contextId.value,
       list.value.id,
       Array.from({ length: count }, () => ({})),
     );
@@ -1151,7 +1171,7 @@ async function saveMixer({ product, inputs, buses }) {
   const wantInputs = Number(inputs) || 0;
   const wantBuses = Number(buses) || 0;
   try {
-    await graph.updateDevice(props.jobId, list.value.id, {
+    await graph.updateDevice(contextId.value, list.value.id, {
       attributes: {
         mixer_product_id: product?.id || null,
         mixer_product_name: product?.name || null,
@@ -1166,9 +1186,9 @@ async function saveMixer({ product, inputs, buses }) {
       wantBuses,
     );
     if (add.channels.length)
-      await graph.createChannels(props.jobId, list.value.id, add.channels);
+      await graph.createChannels(contextId.value, list.value.id, add.channels);
     if (add.outputs.length)
-      await graph.createOutputs(props.jobId, list.value.id, add.outputs);
+      await graph.createOutputs(contextId.value, list.value.id, add.outputs);
     if (add.channels.length || add.outputs.length) {
       $q.notify({
         type: "positive",
@@ -1193,18 +1213,18 @@ async function bulkCreate(kind, items, opts = {}) {
   try {
     if (kind === "channels") {
       const created = await graph.createChannels(
-        props.jobId,
+        contextId.value,
         list.value.id,
         items,
       );
       if (opts.deviceId) {
         await graph.setChannelChains(
-          props.jobId,
+          contextId.value,
           created.map((c) => c.id),
           [{ device_id: opts.deviceId }],
         );
       }
-    } else await graph.createOutputs(props.jobId, list.value.id, items);
+    } else await graph.createOutputs(contextId.value, list.value.id, items);
     bulkChannels.value = false;
     bulkOutputs.value = false;
   } catch (err) {
@@ -1269,7 +1289,7 @@ async function setSource(node, pick) {
   let nextId = null;
   try {
     if (!pick) {
-      await graph.updateDevice(props.jobId, node.id, {
+      await graph.updateDevice(contextId.value, node.id, {
         attributes: { device: "", source_device_id: null },
         stockwire_product_id: null,
         stockwire_product_name: null,
@@ -1278,10 +1298,12 @@ async function setSource(node, pick) {
       let device = pick.job_device_id
         ? graph.devices.find((d) => d.id === pick.job_device_id)
         : null;
-      if (!device && pick.id)
-        device = await graph.createDeviceFromProduct(props.jobId, pick);
+      // Venues don't mint Stockwire product devices (that's a job-rental concern), so when only a
+      // product is picked we keep the source name but don't create a graph device.
+      if (!device && pick.id && contextKind.value !== 'venue')
+        device = await graph.createDeviceFromProduct(contextId.value, pick);
       nextId = device?.id || null;
-      await graph.updateDevice(props.jobId, node.id, {
+      await graph.updateDevice(contextId.value, node.id, {
         attributes: {
           device: device?.name || pick.name,
           source_device_id: device?.id || null,
@@ -1305,7 +1327,7 @@ async function removeOrphanedSource(node, previous, nextId) {
   if (!isOrphanedBySource(previous.id, node.id, graph.devices, graph.edges))
     return;
   try {
-    await graph.deleteDevice(props.jobId, previous.id);
+    await graph.deleteDevice(contextId.value, previous.id);
     $q.notify({
       type: "info",
       message: t("workspace.sourceDeviceRemoved", { name: previous.name }),
@@ -1317,9 +1339,12 @@ async function removeOrphanedSource(node, previous, nextId) {
 
 const syncing = ref(false);
 async function syncStockwire() {
+  // Stockwire sync is a job-only operation (it reconciles a job's rig against the rental
+  // library); a venue base rig has no Stockwire job to sync against, so the button is hidden.
+  if (contextKind.value === 'venue') return;
   syncing.value = true;
   try {
-    const { data } = await api.post(`/jobs/${props.jobId}/sync-stockwire`);
+    const { data } = await api.post(`/jobs/${contextId.value}/sync-stockwire`);
     $q.notify({
       type: data.errors?.length ? "warning" : "positive",
       message: data.errors?.length
@@ -1339,7 +1364,7 @@ async function syncStockwire() {
 
 async function addOutput() {
   try {
-    await graph.createOutput(props.jobId, list.value.id, {
+    await graph.createOutput(contextId.value, list.value.id, {
       name: `${t("workspace.output")} ${outputs.value.length + 1}`,
     });
   } catch (err) {
@@ -1383,7 +1408,7 @@ function openChain(node, kind) {
 async function saveChain(steps) {
   try {
     await graph.replaceChain(
-      props.jobId,
+      contextId.value,
       chainKind.value,
       chainNode.value.id,
       steps,
@@ -1402,7 +1427,7 @@ function removeNode(node) {
     persistent: true,
   }).onOk(async () => {
     try {
-      await graph.deleteDevice(props.jobId, node.id);
+      await graph.deleteDevice(contextId.value, node.id);
     } catch (err) {
       if (!isRevisionConflict(err)) failed(err);
     }

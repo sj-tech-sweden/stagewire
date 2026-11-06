@@ -11,14 +11,46 @@
 
 export const DEFAULT_STAGE = { w: 1000, h: 600 };
 
-export function frameFromJob(job) {
-  const stageW = job?.stage_width_cm > 0 ? job.stage_width_cm : DEFAULT_STAGE.w;
-  const stageH = job?.stage_height_cm > 0 ? job.stage_height_cm : DEFAULT_STAGE.h;
-  const stageX = job?.stage_x_cm || 0;
-  const stageY = job?.stage_y_cm || 0;
-  const venueW = job?.venue_width_cm || 0;
-  const venueH = job?.venue_height_cm || 0;
-  const hasVenue = venueW > 0 && venueH > 0;
+// Bounding box (width/height in cm) of a polygon given as [[x, y], ...].
+export function polygonBounds(points) {
+  let w = 0;
+  let h = 0;
+  for (const [x, y] of points || []) {
+    if (x > w) w = x;
+    if (y > h) h = y;
+  }
+  return { w, h };
+}
+
+// A venue carries the same geometry fields as a job's snapshot, so its base-rig editor can reuse
+// the exact same canvas frame a job would get once the venue is assigned. A drawn footprint or
+// stage (custom_polygon) is carried as an outline; the frame grows to enclose it.
+export function frameFromVenue(venue) {
+  const stageW = venue?.stage_width_cm > 0 ? venue.stage_width_cm : DEFAULT_STAGE.w;
+  const stageH = venue?.stage_height_cm > 0 ? venue.stage_height_cm : DEFAULT_STAGE.h;
+  const stageX = venue?.stage_x_cm || 0;
+  const stageY = venue?.stage_y_cm || 0;
+  const venueW = venue?.venue_width_cm || 0;
+  const venueH = venue?.venue_height_cm || 0;
+  const footprintShape = venue?.footprint_shape || 'rectangular';
+  const stageShape = venue?.stage_shape || 'proscenium';
+  const footprintPolygon = venue?.footprint_polygon || [];
+  const stagePolygon = venue?.stage_polygon || [];
+  const hasVenue =
+    (venueW > 0 && venueH > 0) || (footprintShape === 'custom_polygon' && footprintPolygon.length >= 3);
+  const stageBox = stageShape === 'custom_polygon' && stagePolygon.length >= 3
+    ? polygonBounds(stagePolygon)
+    : { w: stageW, h: stageH };
+  let width;
+  let height;
+  if (footprintShape === 'custom_polygon' && footprintPolygon.length >= 3) {
+    const fb = polygonBounds(footprintPolygon);
+    width = Math.max(fb.w, stageX + stageBox.w, 1);
+    height = Math.max(fb.h, stageY + stageBox.h, 1);
+  } else {
+    width = venueW > 0 ? venueW : stageX + stageBox.w;
+    height = venueH > 0 ? venueH : stageY + stageBox.h;
+  }
   return {
     stageX,
     stageY,
@@ -27,9 +59,56 @@ export function frameFromJob(job) {
     venueW,
     venueH,
     hasVenue,
-    // The area the canvas has to show: the venue if there is one, otherwise the stage.
-    width: hasVenue ? venueW : stageX + stageW,
-    height: hasVenue ? venueH : stageY + stageH,
+    width,
+    height,
+    footprintShape,
+    stageShape,
+    footprintPolygon,
+    stagePolygon,
+    audience: venue?.audience_polygon || [],
+  };
+}
+
+export function frameFromJob(job) {
+  const stageW = job?.stage_width_cm > 0 ? job.stage_width_cm : DEFAULT_STAGE.w;
+  const stageH = job?.stage_height_cm > 0 ? job.stage_height_cm : DEFAULT_STAGE.h;
+  const stageX = job?.stage_x_cm || 0;
+  const stageY = job?.stage_y_cm || 0;
+  const venueW = job?.venue_width_cm || 0;
+  const venueH = job?.venue_height_cm || 0;
+  const footprintShape = job?.venue_footprint_shape || 'rectangular';
+  const stageShape = job?.venue_stage_shape || 'proscenium';
+  const footprintPolygon = job?.venue_footprint_polygon || [];
+  const stagePolygon = job?.venue_stage_polygon || [];
+  const hasVenue =
+    (venueW > 0 && venueH > 0) || (footprintShape === 'custom_polygon' && footprintPolygon.length >= 3);
+  const stageBox = stageShape === 'custom_polygon' && stagePolygon.length >= 3
+    ? polygonBounds(stagePolygon)
+    : { w: stageW, h: stageH };
+  let width;
+  let height;
+  if (footprintShape === 'custom_polygon' && footprintPolygon.length >= 3) {
+    const fb = polygonBounds(footprintPolygon);
+    width = Math.max(fb.w, stageX + stageBox.w, 1);
+    height = Math.max(fb.h, stageY + stageBox.h, 1);
+  } else {
+    width = venueW > 0 ? venueW : stageX + stageBox.w;
+    height = venueH > 0 ? venueH : stageY + stageBox.h;
+  }
+  return {
+    stageX,
+    stageY,
+    stageW,
+    stageH,
+    venueW,
+    venueH,
+    hasVenue,
+    width,
+    height,
+    footprintShape,
+    stageShape,
+    footprintPolygon,
+    stagePolygon,
     audience: job?.audience_polygon || [],
   };
 }

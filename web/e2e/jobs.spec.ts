@@ -9,14 +9,25 @@ test('create a production job from the UI', async ({ page }) => {
   await login(page);
 
   const title = `E2E Show ${Date.now()}`;
+  const venue = `E2E Hall ${Date.now()}`;
   await page.getByRole('button', { name: /new job/i }).click();
 
   const dialog = page.locator('.q-dialog');
   await dialog.locator('input').nth(0).fill(title);
-  await dialog.locator('input').nth(1).fill('E2E Hall');
-  await dialog.getByRole('button', { name: /create/i }).click();
 
-  await expect(page.getByText(title)).toBeVisible();
+  // The venue is a searchable picker; typing a name that does not match offers a "create" action.
+  await dialog.locator('.q-select input').fill(venue);
+  await dialog.getByRole('button', { name: /create new venue/i }).click();
+  await expect(dialog.getByText(venue)).toBeVisible();
+
+  // The dialog also holds an inline "Create new venue …" button; match the job's own "Create"
+  // exactly so the inline venue action isn't picked up by the same selector.
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click();
+
+  // The venue name legitimately appears in two places on the job (the job card and the venue
+  // field), so scope to the first match instead of failing strict mode.
+  await expect(page.getByText(title).first()).toBeVisible();
+  await expect(page.getByText(venue).first()).toBeVisible();
 });
 
 test('jobs can be searched and are listed newest first, a page at a time', async ({ page, request }) => {

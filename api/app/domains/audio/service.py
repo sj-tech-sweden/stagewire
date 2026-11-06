@@ -235,8 +235,10 @@ async def create_plot_element(db: AsyncSession, job_id: UUID, data: dict):
     return element
 
 
-async def list_plot_elements(db: AsyncSession, job_id: UUID) -> list:
-    return await plot_native.load_elements(db, job_id)
+async def list_plot_elements(
+    db: AsyncSession, job_id: UUID | None = None, venue_id: UUID | None = None
+) -> list:
+    return await plot_native.load_elements(db, job_id, venue_id)
 
 
 async def update_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID, data: dict):
@@ -257,18 +259,24 @@ async def delete_plot_element(db: AsyncSession, job_id: UUID, element_id: UUID):
 # Devices are graph nodes (graph/devices_native.py); these return objects shaped like the old rows.
 
 
-async def create_device(db: AsyncSession, job_id: UUID, data: dict):
-    device = await devices_native.create_device(db, job_id, data)
+async def create_device(
+    db: AsyncSession, job_id: UUID | None, data: dict, venue_id: UUID | None = None
+):
+    device = await devices_native.create_device(db, job_id, data, venue_id)
     await db.commit()
     return device
 
 
-async def list_devices(db: AsyncSession, job_id: UUID) -> list:
-    return await devices_native.load_devices(db, job_id)
+async def list_devices(
+    db: AsyncSession, job_id: UUID | None = None, venue_id: UUID | None = None
+) -> list:
+    return await devices_native.load_devices(db, job_id, venue_id)
 
 
-async def get_device(db: AsyncSession, device_id: UUID):
-    return await devices_native.get_device(db, device_id)
+async def get_device(
+    db: AsyncSession, device_id: UUID, job_id: UUID | None = None, venue_id: UUID | None = None
+):
+    return await devices_native.get_device(db, device_id, job_id, venue_id)
 
 
 async def update_device(db: AsyncSession, device, data: dict):

@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.graph import devices_native, plot_native
 from app.domains.graph.backfill import Backfill
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, belongs_to, scope_filter
 
 VIDEO_KINDS = ("video_list", "video_input", "video_destination")
 POINT_KEYS = ("connector", "patch_label", "notes", "source_port", "input_port")
@@ -55,7 +55,8 @@ async def rebuild(db: AsyncSession, node: GraphDevice, points: list[dict]) -> No
     old = (
         await db.scalars(
             select(ConnectionEdge).where(
-                ConnectionEdge.job_id == node.job_id, ConnectionEdge.signal == "video"
+                scope_filter(ConnectionEdge, node.job_id, node.venue_id),
+                ConnectionEdge.signal == "video",
             )
         )
     ).all()
@@ -70,7 +71,7 @@ async def rebuild(db: AsyncSession, node: GraphDevice, points: list[dict]) -> No
         for d in (
             await db.scalars(select(GraphDevice).where(GraphDevice.id.in_(wanted or {node.id})))
         ).all()
-        if d.job_id == node.job_id
+        if belongs_to(d, node.job_id, node.venue_id)
     }
     attributes = dict(node.attributes or {})
     attributes["points"] = points
@@ -81,6 +82,7 @@ async def rebuild(db: AsyncSession, node: GraphDevice, points: list[dict]) -> No
             ConnectionEdge(
                 id=uuid.uuid4(),
                 job_id=node.job_id,
+                venue_id=node.venue_id,
                 signal="video",
                 src_device_id=src.id,
                 src_port=sport,
@@ -261,10 +263,15 @@ async def clear_references(db: AsyncSession, node: GraphDevice) -> tuple[list[st
     return removed_nodes, removed_edges
 
 
-async def require_step_devices(db: AsyncSession, job_id: uuid.UUID, ids: list[uuid.UUID]) -> None:
+async def require_step_devices(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    ids: list[uuid.UUID],
+    venue_id: uuid.UUID | None = None,
+) -> None:
     for device_id in ids:
         node = await db.get(GraphDevice, device_id)
-        if node is None or node.job_id != job_id or node.kind in VIDEO_KINDS:
+        if node is None or not belongs_to(node, job_id, venue_id) or node.kind in VIDEO_KINDS:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "Device not found for this job"
             )
@@ -273,11 +280,15 @@ async def require_step_devices(db: AsyncSession, job_id: uuid.UUID, ids: list[uu
 def video_input_node(
     job_id: uuid.UUID, list_node: GraphDevice, data: dict, legacy_id: uuid.UUID | None = None
 ) -> GraphDevice:
+    # A video row inherits the scope (job or venue) of the list it belongs to, so the same
+    # helper builds both job and venue video-list members (mirrors audio_native.channel_node).
+    venue_id = list_node.venue_id
     number = data["input_number"]
     connector = data.get("connector") or ""
     return GraphDevice(
         id=uuid.uuid4(),
-        job_id=job_id,
+        job_id=job_id if venue_id is None else None,
+        venue_id=venue_id,
         domain="video",
         kind="video_input",
         name=data.get("source_label") or f"Input {number}",
@@ -308,11 +319,14 @@ def video_input_node(
 def video_output_node(
     job_id: uuid.UUID, list_node: GraphDevice, data: dict, legacy_id: uuid.UUID | None = None
 ) -> GraphDevice:
+    # Inherits the scope of the list it belongs to (mirrors video_input_node).
+    venue_id = list_node.venue_id
     number = data["output_number"]
     connector = data.get("connector") or ""
     return GraphDevice(
         id=uuid.uuid4(),
-        job_id=job_id,
+        job_id=job_id if venue_id is None else None,
+        venue_id=venue_id,
         domain="video",
         kind="video_destination",
         name=data.get("destination_label") or data.get("name") or f"Output {number}",

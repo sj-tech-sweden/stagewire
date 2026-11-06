@@ -212,3 +212,69 @@ async def test_a_one_phase_group_carries_its_whole_load_on_one_phase_and_gear_ca
         assert load["imbalance_pct"] == 100.0
         # the gear on the overloaded group is over too, not "ok"
         assert {row["power_status"] for row in summary["loads"]} == {"over"}
+
+
+@pytest.mark.asyncio
+async def test_power_groups_form_a_nested_tree_with_an_incoming_supply(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        venue_id, _ = await _venue_job(client, h)
+        gp = f"{BASE}/venues/{venue_id}/power-groups"
+
+        incoming = (
+            await client.post(
+                gp,
+                json={"name": "Incoming 50A", "rating_amps": 50, "kind": "incoming"},
+                headers=h,
+            )
+        ).json()
+        panel_a = (
+            await client.post(
+                gp,
+                json={
+                    "name": "Panel A",
+                    "rating_amps": 32,
+                    "kind": "panel",
+                    "parent_id": incoming["id"],
+                },
+                headers=h,
+            )
+        ).json()
+        panel_b = (
+            await client.post(
+                gp,
+                json={
+                    "name": "Panel B",
+                    "rating_amps": 32,
+                    "kind": "panel",
+                    "parent_id": panel_a["id"],
+                },
+                headers=h,
+            )
+        ).json()
+
+        # the hierarchy is persisted as given
+        groups = (await client.get(gp, headers=h)).json()
+        by_id = {g["id"]: g for g in groups}
+        assert by_id[incoming["id"]]["is_incoming"] is True
+        assert by_id[panel_a["id"]]["parent_id"] == incoming["id"]
+        assert by_id[panel_b["id"]]["parent_id"] == panel_a["id"]
+
+        # a group cannot be nested under one of its own descendants (would loop the load sum)
+        bad = await client.patch(
+            f"{gp}/{incoming['id']}", json={"parent_id": panel_b["id"]}, headers=h
+        )
+        assert bad.status_code == 422 and "descendant" in bad.text
+        # and not under itself
+        self_parent = await client.patch(
+            f"{gp}/{panel_a['id']}", json={"parent_id": panel_a["id"]}, headers=h
+        )
+        assert self_parent.status_code == 422
+
+        # deleting a parent detaches its children instead of removing them
+        gone = await client.delete(f"{gp}/{panel_a['id']}", headers=h)
+        assert gone.status_code == 204
+        groups = (await client.get(gp, headers=h)).json()
+        remaining = {g["id"]: g for g in groups}
+        assert panel_b["id"] in remaining
+        assert remaining[panel_b["id"]]["parent_id"] is None

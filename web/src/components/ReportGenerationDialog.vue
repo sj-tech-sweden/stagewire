@@ -182,7 +182,8 @@ import { useReportsStore } from '@/stores/reports'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  jobId: { type: String, required: true },
+  jobId: { type: String, default: '' },
+  venueId: { type: String, default: '' },
   initialTypeKey: { type: String, default: '' },
   initialPatchpointId: { type: String, default: '' },
   patchpointLocked: { type: Boolean, default: false },
@@ -195,6 +196,11 @@ const open = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),
 })
+// A venue's Standard Base Rig emits the same reports a job can (venues-as-template-jobs). The report
+// endpoints only differ by the leading path segment, so both cases share one dialog via a scope.
+const scope = computed(() =>
+  props.venueId ? { kind: 'venue', id: props.venueId } : { kind: 'job', id: props.jobId },
+)
 const loading = ref(false)
 const previewing = ref(false)
 const generating = ref(false)
@@ -264,7 +270,7 @@ async function loadDialog() {
     const [types, loadedTemplates, loadedPatchSheets] = await Promise.all([
       store.fetchTypes(selectedLocale.value),
       store.fetchTemplates(),
-      store.fetchPatchSheets(props.jobId),
+      store.fetchPatchSheets(scope.value),
     ])
     reportTypes.value = types
     templates.value = loadedTemplates
@@ -329,7 +335,7 @@ async function preview() {
   error.value = ''
   try {
     const template = templates.value.find((item) => item.id === selectedTemplateId.value)
-    const blob = await store.fetchPreview(props.jobId, template, 'blob', selectedOptions())
+    const blob = await store.fetchPreview(scope.value, template, 'blob', selectedOptions())
     if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = URL.createObjectURL(blob)
   } catch (err) {
@@ -345,7 +351,7 @@ async function generate() {
   error.value = ''
   try {
     const result = await store.generate(
-      props.jobId,
+      scope.value,
       selectedType.value,
       selectedTemplateId.value,
       selectedOptions(),

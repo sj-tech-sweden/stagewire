@@ -425,7 +425,17 @@ import {
   universesOf,
 } from '@/utils/workspace';
 
-const props = defineProps({ jobId: { type: String, required: true } });
+// A venue's Standard Base Rig reuses this editor, so it accepts an optional `venueId`. Store calls
+// route by the active graph scope, so passing the right id (venue when present, else job) is enough;
+// the fixture library context additionally carries the kind so it hits /venues/.../fixture-types.
+const props = defineProps({
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
+});
+const scopeId = computed(() => props.venueId || props.jobId);
+const context = computed(() =>
+  props.venueId ? { kind: 'venue', id: props.venueId } : { kind: 'job', id: props.jobId },
+);
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
@@ -475,7 +485,7 @@ const failed = (err) =>
 
 async function saveAttr(node, key, value) {
   try {
-    await graph.updateDevice(props.jobId, node.id, { attributes: { [key]: value } });
+    await graph.updateDevice(scopeId.value, node.id, { attributes: { [key]: value } });
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -507,12 +517,12 @@ async function chooseMode(row, name) {
   await save(fixture, {
     attributes: mode ? modeAttributes(mode) : { channel_mode: name || null },
   });
-  library.fetch(props.jobId).catch(() => {});
+  library.fetch(context.value).catch(() => {});
 }
 
 async function save(node, changes) {
   try {
-    await graph.updateDevice(props.jobId, node.id, changes);
+    await graph.updateDevice(scopeId.value, node.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -520,7 +530,7 @@ async function save(node, changes) {
 
 async function addUniverse() {
   try {
-    await graph.createUniverse(props.jobId, {});
+    await graph.createUniverse(scopeId.value, {});
   } catch (err) {
     failed(err);
   }
@@ -528,7 +538,7 @@ async function addUniverse() {
 
 async function setSource(uni, deviceId) {
   try {
-    await graph.setUniverseSource(props.jobId, uni.id, deviceId || null, uni.attributes.source_port || '');
+    await graph.setUniverseSource(scopeId.value, uni.id, deviceId || null, uni.attributes.source_port || '');
   } catch (err) {
     failed(err);
   }
@@ -542,7 +552,7 @@ function openChain(uni) {
 
 async function saveChain(steps) {
   try {
-    await graph.replaceChain(props.jobId, 'universe', chainNode.value.id, steps);
+    await graph.replaceChain(scopeId.value, 'universe', chainNode.value.id, steps);
     chainOpen.value = false;
   } catch (err) {
     failed(err);
@@ -552,7 +562,8 @@ async function saveChain(steps) {
 async function importFile(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
-  if (!file) return;
+  // Fixture file import is job-only (no venue import route); venues build their rig in-app.
+  if (!file || !props.jobId) return;
   try {
     const result = await graph.importFixtures(props.jobId, file);
     $q.notify({
@@ -569,20 +580,20 @@ const bulkOpen = ref(false);
 async function addFixtures(count) {
   try {
     for (let i = 0; i < count; i += 1) {
-      await graph.createFixture(props.jobId, { footprint: 1 });
+      await graph.createFixture(scopeId.value, { footprint: 1 });
     }
   } catch (err) {
     failed(err);
   }
 }
 
-onMounted(() => library.fetch(props.jobId).catch(() => {}));
+onMounted(() => library.fetch(context.value).catch(() => {}));
 
 function remove(fixture) {
   $q.dialog({ title: t('workspace.remove'), message: fixture.name, cancel: true, persistent: true }).onOk(
     async () => {
       try {
-        await graph.deleteDevice(props.jobId, fixture.id);
+        await graph.deleteDevice(scopeId.value, fixture.id);
       } catch (err) {
         if (!isRevisionConflict(err)) failed(err);
       }

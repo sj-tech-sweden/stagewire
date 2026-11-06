@@ -41,7 +41,13 @@ class ProductionJob(Base):
     stage_x_cm: Mapped[float] = mapped_column(Float, default=0.0)
     stage_y_cm: Mapped[float] = mapped_column(Float, default=0.0)
     venue_background_image_url: Mapped[str] = mapped_column(String(1024), default="")
+    venue_footprint_shape: Mapped[str] = mapped_column(
+        String(32), default="rectangular", nullable=False
+    )
+    venue_stage_shape: Mapped[str] = mapped_column(String(32), default="proscenium", nullable=False)
     audience_polygon: Mapped[list] = mapped_column(JSON, default=list)
+    venue_footprint_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    venue_stage_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
@@ -58,8 +64,11 @@ class StockwireRequirementLink(Base):
     __table_args__ = (UniqueConstraint("job_id", "item_key", name="uq_stockwire_link_job_item"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     item_key: Mapped[str] = mapped_column(String(255), nullable=False)
     product_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -84,8 +93,13 @@ class WwbShowFile(Base):
     list_node_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("graph_devices.id", ondelete="CASCADE"), primary_key=True
     )
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    # Owned by exactly one context: a job or a venue. A venue's Standard Base Rig keeps its
+    # own .shw files, so the storage row is scoped the same way as the lighting library.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

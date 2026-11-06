@@ -677,7 +677,11 @@
         />
 
         <div class="q-mt-md">
-          <MultiDomainPatchDrawer :job-id="jobId" />
+          <MultiDomainPatchDrawer
+            :graph="graph"
+            :update-edge="(id, changes) => graph.updateEdge(jobId, id, changes)"
+            :delete-edge="(id) => graph.deleteEdge(jobId, id)"
+          />
         </div>
       </div>
 
@@ -809,6 +813,9 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const jobId = String(route.params.jobId);
+// Own the store scope now (in setup, before child components mount) so mount-time venue/job-scoped
+// calls use the right prefix instead of the store's default job/null scope. load() re-asserts it.
+graph.setScope('job', jobId);
 
 const job = ref(null);
 const catalogOpen = ref(false);

@@ -32,7 +32,7 @@ from app.domains.graph import (
     video_native,
 )
 from app.domains.graph.ids import power_id_of
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, belongs_to, scope_filter
 from app.domains.stockwire.client import StockwireClient
 from app.domains.stockwire.config import load_integration_config
 
@@ -438,7 +438,7 @@ async def power_load(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schema
     # With a power tree the load is what the tree evaluates (everything plugged in, spread over the
     # phases as the outputs say), summed over the sources; the per-edge figure above only knows
     # edges that carry a phase and so reads 0 for gear plugged into a node.
-    tree = await rigging_router.rigging_summary(job_id, db)
+    tree = await rigging_router.rigging_summary(job_id=job_id, venue_id=None, db=db)
     sources = [n for n in tree["nodes"] if n["kind"] == "source"]
     if sources:
         loads = {p: round(sum(n["watts"].get(p, 0.0) for n in sources), 1) for p in topology.PHASES}
@@ -668,7 +668,7 @@ async def import_wireless_workbench(
         data = {key: row[key] for key in _WWB_WIRELESS_FIELDS if key in row}
         await audio_native.update_channel(db, channel.id, data, job_id)
         updated_ids.append(channel.id)
-    await wwb_store.upsert_show_file(db, list_id, job_id, raw, file.filename or "show.shw")
+    await wwb_store.upsert_show_file(db, list_id, raw, file.filename or "show.shw", job_id=job_id)
     await db.commit()
     await audio_native.publish_nodes(db, job_id, updated_ids)
     if updated_ids:
@@ -684,3 +684,363 @@ async def import_wireless_workbench(
             if id(row) not in matched_rows
         ],
     }
+
+
+# --- venue variant --------------------------------------------------------------------------------
+# A venue's Standard Base Rig reuses the job graph editing UX (WorkspaceCanvas + RiggingEditor +
+# PowerPanel + patch drawer) so it gets the identical rigging/power treatment. The whole-graph GET
+# that the store reads lives on the venues router (`GET /venues/{venue_id}/graph`, which 404s for an
+# unknown venue); these routes provide the incremental device/edge edits (the same ones a job makes)
+# and skip the job-only machinery (mirror/backfill/publish) because a venue has no legacy rows, no
+# per-job websocket and no job lock. Every write is scoped by `venue_id` (job_id is always None), so
+# a venue and a job never share rows, and the job path above is untouched.
+venue_router = APIRouter(
+    prefix="/venues/{venue_id}/graph",
+    tags=["graph:venue"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+async def _venue_device(db: AsyncSession, venue_id: UUID, device_id: UUID) -> GraphDevice:
+    device = await db.get(GraphDevice, device_id)
+    if device is None or not belongs_to(device, None, venue_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    return device
+
+
+async def _venue_edge(db: AsyncSession, venue_id: UUID, edge_id: UUID) -> ConnectionEdge:
+    edge = await db.get(ConnectionEdge, edge_id)
+    if edge is None or not belongs_to(edge, None, venue_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Edge not found")
+    return edge
+
+
+async def _venue_all_edges(db: AsyncSession, venue_id: UUID) -> list[ConnectionEdge]:
+    return list(
+        (
+            await db.scalars(
+                select(ConnectionEdge).where(scope_filter(ConnectionEdge, None, venue_id))
+            )
+        ).all()
+    )
+
+
+@venue_router.post("/devices", response_model=schemas.GraphDeviceRead, status_code=201)
+async def create_device_venue(
+    venue_id: UUID, payload: schemas.GraphDeviceCreate, db: AsyncSession = Depends(get_db)
+) -> GraphDevice:
+    fields = payload.model_dump()
+    if fields["kind"] == "plot_element":
+        fields = plot_native.normalize_new(fields)
+    device = GraphDevice(job_id=None, venue_id=venue_id, **fields)
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+@venue_router.post("/devices/batch", response_model=list[schemas.GraphDeviceRead], status_code=201)
+async def create_devices_batch_venue(
+    venue_id: UUID, payload: list[schemas.GraphDeviceCreate], db: AsyncSession = Depends(get_db)
+) -> list[GraphDevice]:
+    if len(payload) > MAX_BATCH:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"At most {MAX_BATCH} devices")
+    devices = []
+    for item in payload:
+        fields = item.model_dump()
+        if fields["kind"] == "plot_element":
+            fields = plot_native.normalize_new(fields)
+        devices.append(GraphDevice(job_id=None, venue_id=venue_id, **fields))
+    db.add_all(devices)
+    await db.commit()
+    for device in devices:
+        await db.refresh(device)
+    return devices
+
+
+@venue_router.patch("/devices/{device_id}", response_model=schemas.GraphDeviceRead)
+async def update_device_venue(
+    venue_id: UUID,
+    device_id: UUID,
+    payload: schemas.GraphDeviceUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> GraphDevice:
+    device = await _venue_device(db, venue_id, device_id)
+    data = dmx_native.translate_patch(
+        device,
+        video_native.translate_patch(
+            device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+        ),
+    )
+
+    async def apply() -> GraphDevice:
+        for key, value in mirror.merged_attributes(device, data).items():
+            setattr(device, key, value)
+        await db.flush()
+        await dmx_native.after_patch(db, device, data, venue_id=venue_id)
+        await power_native.after_patch(db, None, device, data, venue_id=venue_id)
+        await fixtures_native.after_patch(db, None, device, data, venue_id=venue_id)
+        await plot_native.after_patch(db, None, device, data, venue_id=venue_id)
+        await audio_native.after_patch(db, device, data)
+        await devices_native.after_patch(device, data)
+        await db.commit()
+        await db.refresh(device)
+        return device
+
+    return await run_versioned_write(
+        db,
+        device,
+        payload.expected_revision,
+        schemas.GraphDeviceRead,
+        apply,
+        lambda: db.get(GraphDevice, device_id),
+    )
+
+
+@venue_router.delete("/devices/{device_id}", status_code=204)
+async def delete_device_venue(
+    venue_id: UUID,
+    device_id: UUID,
+    expected_revision: int = Query(ge=1),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    device = await _venue_device(db, venue_id, device_id)
+    touching = [
+        e
+        for e in await _venue_all_edges(db, venue_id)
+        if device_id in (e.src_device_id, e.dst_device_id)
+    ]
+
+    async def remove() -> None:
+        for edge in touching:
+            await db.delete(edge)
+        # The venue's power rules still apply, so a node cannot be removed while something hangs
+        # from it or is plugged into it (a device keeps living when its power side is cleared).
+        if power_id_of(device) is not None:
+            await power_native.check_deletable(db, None, power_id_of(device), venue_id=venue_id)
+        # A rigging point's references (a device/element hanging on it) are cleared with it.
+        if device.kind == "rigging_point":
+            await rigging_native.clear_references(db, device, venue_id=venue_id)
+        # Video/audio list children are job-coupled (legacy); the venue scope deletes the node and
+        # its incident edges (below) — child lists are an extreme edge case on a base rig.
+        await db.delete(device)
+        await db.flush()
+        await dmx_native.drop_node(db, None, device_id, venue_id=venue_id)
+        if power_id_of(device) is not None:
+            await power_native.rebuild_feeds(db, None, venue_id)
+        await db.commit()
+
+    await run_versioned_delete(
+        db,
+        device,
+        expected_revision,
+        schemas.GraphDeviceRead,
+        remove,
+        lambda: db.get(GraphDevice, device_id),
+    )
+
+
+@venue_router.post("/edges", response_model=schemas.ConnectionEdgeRead, status_code=201)
+async def create_edge_venue(
+    venue_id: UUID,
+    payload: schemas.ConnectionEdgeCreate,
+    force: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionEdge:
+    src = await _venue_device(db, venue_id, payload.src_device_id)
+    dst = await _venue_device(db, venue_id, payload.dst_device_id)
+    existing = await _venue_all_edges(db, venue_id)
+    if topology.would_create_cycle(
+        [_as_dict(e) for e in existing if e.signal == payload.signal],
+        str(src.id),
+        str(dst.id),
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Connection would form a loop")
+    issues = topology.validate_edge(
+        payload.model_dump(mode="json"),
+        _as_dict(src),
+        _as_dict(dst),
+        [_as_dict(e) for e in existing],
+    )
+    if issues and not force:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_connection",
+                "issues": [schemas.IssueRead(**vars(i)).model_dump() for i in issues],
+            },
+        )
+    edge = ConnectionEdge(job_id=None, venue_id=venue_id, **payload.model_dump())
+    db.add(edge)
+    await db.commit()
+    await db.refresh(edge)
+    return edge
+
+
+@venue_router.patch("/edges/{edge_id}", response_model=schemas.ConnectionEdgeRead)
+async def update_edge_venue(
+    venue_id: UUID,
+    edge_id: UUID,
+    payload: schemas.ConnectionEdgeUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> ConnectionEdge:
+    edge = await _venue_edge(db, venue_id, edge_id)
+    data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+
+    async def apply() -> ConnectionEdge:
+        for key, value in mirror.merged_attributes(edge, data).items():
+            setattr(edge, key, value)
+        await db.flush()
+        # Venue edges skip the legacy mirror: only the graph-native power/fixture patches run.
+        await power_native.edge_patch(db, None, edge, data, venue_id=venue_id)
+        await fixtures_native.edge_patch(db, None, edge, data, venue_id=venue_id)
+        await db.commit()
+        await db.refresh(edge)
+        return edge
+
+    return await run_versioned_write(
+        db,
+        edge,
+        payload.expected_revision,
+        schemas.ConnectionEdgeRead,
+        apply,
+        lambda: db.get(ConnectionEdge, edge_id),
+    )
+
+
+@venue_router.delete("/edges/{edge_id}", status_code=204)
+async def delete_edge_venue(
+    venue_id: UUID,
+    edge_id: UUID,
+    expected_revision: int = Query(ge=1),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    edge = await _venue_edge(db, venue_id, edge_id)
+
+    async def remove() -> None:
+        await db.delete(edge)
+        await db.flush()
+        # A node's own feed cannot be cut here; an extra feed is removed. Fixture power edges
+        # unplug.
+        await power_native.edge_delete(db, None, edge, venue_id=venue_id)
+        await fixtures_native.edge_delete(db, None, edge, venue_id=venue_id)
+        await db.commit()
+
+    await run_versioned_delete(
+        db,
+        edge,
+        expected_revision,
+        schemas.ConnectionEdgeRead,
+        remove,
+        lambda: db.get(ConnectionEdge, edge_id),
+    )
+
+
+async def _require_venue(db: AsyncSession, venue_id: UUID) -> None:
+    """404 if the venue the editor targets does not exist (a venue graph edit is meaningless then).
+
+    Model import path: ``app.domains.venues.models.Venue``.
+    """
+    from app.domains.venues.models import Venue
+
+    if await db.get(Venue, venue_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
+
+
+async def _venue_all_devices(db: AsyncSession, venue_id: UUID) -> list[GraphDevice]:
+    return list(
+        (
+            await db.scalars(
+                select(GraphDevice)
+                .where(scope_filter(GraphDevice, None, venue_id))
+                .order_by(GraphDevice.position, GraphDevice.created_at)
+            )
+        ).all()
+    )
+
+
+@venue_router.get("/validate", response_model=list[schemas.IssueRead])
+async def validate_graph_venue(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[schemas.IssueRead]:
+    """Validate every edge in a venue's base-rig graph (same checks as the job graph)."""
+    await _require_venue(db, venue_id)
+    edges = await _venue_all_edges(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    rows = [_as_dict(e) for e in edges]
+    return [
+        schemas.IssueRead(**vars(issue))
+        for row in rows
+        for issue in topology.validate_edge(
+            row,
+            devices.get(str(row["src_device_id"])),
+            devices.get(str(row["dst_device_id"])),
+            rows,
+        )
+    ]
+
+
+@venue_router.get("/power-load", response_model=schemas.PhaseLoadRead)
+async def power_load_venue(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> schemas.PhaseLoadRead:
+    """Phase loads for a venue's base rig (same as the job route, scoped by venue)."""
+    await _require_venue(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    edges = [_as_dict(e) for e in await _venue_all_edges(db, venue_id)]
+    loads = topology.phase_loads(devices, edges)
+    # With a power tree the load is what the tree evaluates (everything plugged in, spread over the
+    # phases as the outputs say), summed over the sources; the per-edge figure above only knows
+    # edges that carry a phase and so reads 0 for gear plugged into a node.
+    from app.domains.rigging import router as rigging_router
+
+    tree = await rigging_router.rigging_summary(job_id=None, venue_id=venue_id, db=db)
+    sources = [n for n in tree["nodes"] if n["kind"] == "source"]
+    if sources:
+        loads = {p: round(sum(n["watts"].get(p, 0.0) for n in sources), 1) for p in topology.PHASES}
+    peak, low = max(loads.values()), min(loads.values())
+    return schemas.PhaseLoadRead(
+        **loads,
+        imbalance_pct=round((peak - low) / peak * 100, 1) if peak else 0.0,
+        limit_w=topology.phase_limit_w(devices),
+    )
+
+
+@venue_router.get("/devices/{device_id}/trace", response_model=schemas.TraceRead)
+async def trace_device_venue(
+    venue_id: UUID,
+    device_id: UUID,
+    direction: str = Query(pattern="^(upstream|downstream)$"),
+    signal: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> schemas.TraceRead:
+    """Trace a device in a venue's base rig (same as the job route, scoped by venue)."""
+    await _venue_device(db, venue_id, device_id)
+    edges = await _venue_all_edges(db, venue_id)
+    devices = {str(d.id): _as_dict(d) for d in await _venue_all_devices(db, venue_id)}
+    result = topology.trace([_as_dict(e) for e in edges], str(device_id), direction, signal=signal)
+    by_id = {str(e.id): e for e in edges}
+    issues = [
+        i
+        for hop in result.hops
+        for i in topology.validate_edge(
+            _as_dict(by_id[str(hop.edge["id"])]),
+            devices.get(str(hop.edge["src_device_id"])),
+            devices.get(str(hop.edge["dst_device_id"])),
+            [_as_dict(e) for e in edges],
+        )
+    ]
+    return schemas.TraceRead(
+        root=result.root,
+        direction=direction,
+        truncated=result.truncated,
+        hops=[
+            schemas.HopRead(
+                depth=h.depth,
+                device_id=h.device_id,
+                edge=schemas.ConnectionEdgeRead.model_validate(by_id[str(h.edge["id"])]),
+            )
+            for h in result.hops
+        ],
+        issues=[schemas.IssueRead(**vars(i)) for i in issues],
+    )

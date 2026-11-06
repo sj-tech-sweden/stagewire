@@ -5,6 +5,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import ProductionJob
+from app.domains.graph.models import GraphDevice
+from app.domains.venues.base_rig import clone_base_rig_to_job
 from app.domains.venues.models import Venue
 
 SNAPSHOT_FIELDS = (
@@ -15,6 +17,18 @@ SNAPSHOT_FIELDS = (
     "stage_width_cm",
     "stage_height_cm",
 )
+
+SNAPSHOT_SHAPE_MAP = {
+    "footprint_shape": "venue_footprint_shape",
+    "stage_shape": "venue_stage_shape",
+}
+
+# Custom-polygon outlines (footprint in venue cm, stage in stage-relative cm) copied
+# onto the job so the stage plot shows the same drawn shape once the venue is assigned.
+SNAPSHOT_POLYGON_MAP = {
+    "footprint_polygon": "venue_footprint_polygon",
+    "stage_polygon": "venue_stage_polygon",
+}
 
 
 async def list_venues(db: AsyncSession) -> list[Venue]:
@@ -53,6 +67,10 @@ async def delete_venue(db: AsyncSession, venue: Venue) -> None:
 def _apply_venue_snapshot(job: ProductionJob, venue: Venue) -> None:
     for field in SNAPSHOT_FIELDS:
         setattr(job, field, getattr(venue, field))
+    for venue_field, job_field in SNAPSHOT_SHAPE_MAP.items():
+        setattr(job, job_field, getattr(venue, venue_field))
+    for venue_field, job_field in SNAPSHOT_POLYGON_MAP.items():
+        setattr(job, job_field, list(getattr(venue, venue_field) or []))
     job.venue_background_image_url = venue.background_image_url
     job.audience_polygon = list(venue.audience_polygon or [])
     job.venue_name = venue.name
@@ -62,9 +80,20 @@ async def assign_venue(db: AsyncSession, job: ProductionJob, venue: Venue | None
     job.venue_id = venue.id if venue else None
     if venue is not None:
         _apply_venue_snapshot(job, venue)
+        # A job that already has a graph was either assigned before or edited by hand, so we leave
+        # it untouched. Otherwise the venue's Standard Base Rig seeds the job's graph.
+        if not await _job_has_graph(db, job.id):
+            await clone_base_rig_to_job(db, venue.id, job.id)
     await db.commit()
     await db.refresh(job)
     return job
+
+
+async def _job_has_graph(db: AsyncSession, job_id: UUID) -> bool:
+    existing = (
+        await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id).limit(1))
+    ).first()
+    return existing is not None
 
 
 async def propagate_venue(db: AsyncSession, venue: Venue, scope: str) -> list[ProductionJob]:
@@ -82,6 +111,9 @@ async def propagate_venue(db: AsyncSession, venue: Venue, scope: str) -> list[Pr
     jobs = list(result.scalars().all())
     for job in jobs:
         _apply_venue_snapshot(job, venue)
+        # Push the Standard Base Rig additively: an empty job gets the full rig, while a job that
+        # already has gear keeps its layout and only gains new venue items (never overwritten).
+        await clone_base_rig_to_job(db, venue.id, job.id)
     venue.propagated_at = datetime.now()
     await db.commit()
     for job in jobs:

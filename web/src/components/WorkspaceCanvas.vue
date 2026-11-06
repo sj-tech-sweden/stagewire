@@ -22,7 +22,15 @@
         <v-rect :config="{ x: 0, y: 0, width: size.width, height: size.height, fill: bg, listening: false }" />
         <template v-if="frame">
           <v-rect :config="venueConfig" />
+          <v-line
+            v-if="footprintLine"
+            :config="footprintLine"
+          />
           <v-rect :config="stageConfig" />
+          <v-line
+            v-if="stageLine"
+            :config="stageLine"
+          />
           <v-image
             v-if="coverageImage"
             :config="coverageConfig"
@@ -244,6 +252,33 @@ const stageConfig = computed(() => ({
   strokeWidth: 2,
   listening: false,
 }));
+// A drawn footprint replaces the rectangular venue outline with the polygon the user traced.
+const footprintLine = computed(() => {
+  const poly = props.frame?.footprintPolygon;
+  if (props.frame?.footprintShape !== 'custom_polygon' || !poly || poly.length < 3) return null;
+  return {
+    points: poly.flatMap(([x, y]) => [x * props.zoom, y * props.zoom]),
+    closed: true,
+    fill: 'rgba(69, 90, 100, 0.06)',
+    stroke: '#455a64',
+    strokeWidth: 2,
+    dash: [8, 4],
+    listening: false,
+  };
+});
+// A drawn stage outline (stage-relative cm) replaces the rectangular stage box.
+const stageLine = computed(() => {
+  const poly = props.frame?.stagePolygon;
+  if (props.frame?.stageShape !== 'custom_polygon' || !poly || poly.length < 3) return null;
+  return {
+    points: poly.flatMap(([x, y]) => [(x + origin.value.x) * props.zoom, (y + origin.value.y) * props.zoom]),
+    closed: true,
+    fill: $q.dark.isActive ? 'rgba(15, 22, 26, 0.6)' : 'rgba(255, 255, 255, 0.6)',
+    stroke: '#37474f',
+    strokeWidth: 2,
+    listening: false,
+  };
+});
 const coverageConfig = computed(() => ({
   image: props.coverageImage,
   x: 0,

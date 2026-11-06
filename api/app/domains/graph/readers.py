@@ -66,16 +66,31 @@ def list_view(device: GraphDevice) -> SimpleNamespace:
 
 
 async def load_channel_list(
-    db: AsyncSession, job_id: uuid.UUID, list_id: uuid.UUID
+    db: AsyncSession,
+    job_id: uuid.UUID | None = None,
+    list_id: uuid.UUID | None = None,
+    *,
+    venue_id: uuid.UUID | None = None,
 ) -> tuple[SimpleNamespace, list[SimpleNamespace], list[SimpleNamespace]] | None:
-    """A channel list as the console exporters expect it: (list, channels, outputs)."""
+    """A channel list as the console exporters expect it: (list, channels, outputs).
+
+    Scoped to a job (``job_id``) or a venue (``venue_id``) — exactly one must be given, since
+    a channel list lives in either a job graph or a venue Standard Base Rig graph.
+    """
+    if (job_id is None) == (venue_id is None):
+        raise ValueError("load_channel_list requires exactly one of job_id / venue_id")
     container = await db.get(GraphDevice, list_id)
-    if container is None or container.job_id != job_id or container.kind != "channel_list":
+    if container is None or container.kind != "channel_list":
         return None
+    if job_id is not None and container.job_id != job_id:
+        return None
+    if venue_id is not None and container.venue_id != venue_id:
+        return None
+    scope = GraphDevice.job_id == job_id if job_id is not None else GraphDevice.venue_id == venue_id
     rows = (
         await db.scalars(
             select(GraphDevice).where(
-                GraphDevice.job_id == job_id,
+                scope,
                 GraphDevice.domain == "audio",
                 GraphDevice.kind.in_(("channel", "output")),
             )

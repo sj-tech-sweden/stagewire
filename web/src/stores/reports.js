@@ -105,14 +105,16 @@ export const useReportsStore = defineStore('reports', () => {
     return { elements, cables, devices, cameras: cameras || {} }
   }
 
-  async function fetchPatchSheets(jobId) {
-    const { data } = await api.get(`/jobs/${jobId}/patch-sheets`)
+  async function fetchPatchSheets(scope) {
+    const base = scope.kind === 'venue' ? 'venues' : 'jobs'
+    const { data } = await api.get(`/${base}/${scope.id}/patch-sheets`)
     return data
   }
 
-  async function fetchPreview(jobId, template, responseType = 'blob', options = {}) {
+  async function fetchPreview(scope, template, responseType = 'blob', options = {}) {
+    const base = scope.kind === 'venue' ? 'venues' : 'jobs'
     const { data } = await api.get(
-      `/reports/jobs/${jobId}/${template.domain}/${template.report_type}/preview`,
+      `/reports/${base}/${scope.id}/${template.domain}/${template.report_type}/preview`,
       {
         params: {
           template_id: template.id,
@@ -124,9 +126,10 @@ export const useReportsStore = defineStore('reports', () => {
     return data
   }
 
-  async function generate(jobId, reportType, templateId = null, options = {}) {
+  async function generate(scope, reportType, templateId = null, options = {}) {
+    const base = scope.kind === 'venue' ? 'venues' : 'jobs'
     const { data, headers } = await api.get(
-      `/reports/jobs/${jobId}/${reportType.domain}/${reportType.report_type}/pdf`,
+      `/reports/${base}/${scope.id}/${reportType.domain}/${reportType.report_type}/pdf`,
       {
         params: {
           ...(templateId ? { template_id: templateId } : {}),

@@ -25,8 +25,12 @@ class GraphDevice(Base):
     __tablename__ = "graph_devices"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # A base-rig device belongs to a venue (job_id NULL) until cloned onto a job.
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     domain: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(64), default="", nullable=False)
@@ -59,8 +63,12 @@ class ConnectionEdge(Base):
     __tablename__ = "graph_connection_edges"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("production_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # A base-rig edge belongs to a venue (job_id NULL) until cloned onto a job.
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="CASCADE"), nullable=True, index=True
     )
     signal: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     src_device_id: Mapped[uuid.UUID] = mapped_column(
@@ -82,3 +90,36 @@ class ConnectionEdge(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __mapper_args__ = {"version_id_col": revision}
+
+
+def scope_filter(model, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None):
+    """Narrow a graph row (device or edge) to exactly one context: a job or a venue.
+
+    Mirrors the lighting ``_scope`` helper. A row can never belong to both scopes at once
+    (the venue base rig sets ``venue_id`` and leaves ``job_id`` NULL), so passing both, or
+    neither, is a programming error. Existing callers that pass only ``job_id`` keep working.
+    """
+    if job_id is not None and venue_id is not None:
+        raise ValueError("a graph row cannot be scoped to both a job and a venue")
+    if job_id is not None:
+        return model.job_id == job_id
+    if venue_id is not None:
+        return model.venue_id == venue_id
+    raise ValueError("a graph row requires a job_id or venue_id")
+
+
+def belongs_to(
+    row: "GraphDevice | ConnectionEdge",
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
+    """Whether a *loaded* graph row sits in the given scope (exactly one of job/venue).
+
+    ``scope_filter`` scopes a query; this scopes an already-fetched row the same way, used by the
+    ownership checks that reject cross-scope ids. A row can never belong to both scopes at once.
+    """
+    if job_id is not None:
+        return row.job_id == job_id
+    if venue_id is not None:
+        return row.venue_id == venue_id
+    raise ValueError("a graph row requires a job_id or venue_id")

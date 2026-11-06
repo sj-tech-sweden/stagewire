@@ -23,7 +23,7 @@ class RiggingPointRead(RiggingPointBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     position: int = 0
 
 
@@ -78,11 +78,17 @@ class PowerNodeFeedCreate(PowerNodeFeedBase):
     pass
 
 
+class PowerNodeFeedUpdate(BaseModel):
+    parent_id: UUID | None = None
+    feed_connector: str | None = None
+    phase: Literal["L1", "L2", "L3"] | None = None
+
+
 class PowerNodeFeedRead(PowerNodeFeedBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     node_id: UUID
     position: int = 0
 
@@ -91,7 +97,7 @@ class PowerNodeRead(PowerNodeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     parent_id: UUID | None = None
     position: int = 0
     feeds: list[PowerNodeFeedRead] = []

@@ -116,8 +116,11 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { isPowerNode, needsBookingRequest, powerInletLabel } from '@/utils/workspace';
 
+// A venue's Standard Base Rig reuses this table, so it accepts an optional `venueId`; store calls
+// route by the active graph scope, so passing the right id (venue when present, else job) is enough.
 const props = defineProps({
-  jobId: { type: String, required: true },
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
   devices: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
 });
@@ -126,6 +129,7 @@ const emit = defineEmits(['select', 'request-booking']);
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const scopeId = computed(() => props.venueId || props.jobId);
 
 const columns = computed(() => [
   { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
@@ -138,7 +142,7 @@ const columns = computed(() => [
 
 async function save(row, changes) {
   try {
-    await graph.updateDevice(props.jobId, row.id, changes);
+    await graph.updateDevice(scopeId.value, row.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: apiErrorText(err) });

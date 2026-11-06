@@ -14,11 +14,16 @@ from app.domains.auth.router import router as auth_router
 from app.domains.connectors.router import router as connectors_router
 from app.domains.graph.elements import router as graph_elements_router
 from app.domains.graph.lists import router as graph_lists_router
+from app.domains.graph.lists import venue_router as graph_lists_venue_router
 from app.domains.graph.rigging import router as graph_rigging_router
+from app.domains.graph.rigging import venue_router as graph_rigging_venue_router
 from app.domains.graph.router import router as graph_router
+from app.domains.graph.router import venue_router as graph_router_venue_router
+from app.domains.graph.venue_graph import router as graph_venue_router
 from app.domains.lighting.router import router as lighting_router
 from app.domains.reports.router import router as reports_router
 from app.domains.rigging.router import router as rigging_router
+from app.domains.rigging.router import venue_router as rigging_venue_router
 from app.domains.settings.router import router as settings_router
 from app.domains.stockwire.router import public_router as stockwire_public_router
 from app.domains.stockwire.router import router as stockwire_router
@@ -47,12 +52,17 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(connectors_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
+    app.include_router(graph_router_venue_router, prefix="/api/v1")
     app.include_router(graph_lists_router, prefix="/api/v1")
+    app.include_router(graph_venue_router, prefix="/api/v1")
+    app.include_router(graph_rigging_venue_router, prefix="/api/v1")
+    app.include_router(graph_lists_venue_router, prefix="/api/v1")
     app.include_router(graph_elements_router, prefix="/api/v1")
     app.include_router(graph_rigging_router, prefix="/api/v1")
     app.include_router(lighting_router, prefix="/api/v1")
     app.include_router(reports_router, prefix="/api/v1")
     app.include_router(rigging_router, prefix="/api/v1")
+    app.include_router(rigging_venue_router, prefix="/api/v1")
     app.include_router(settings_router, prefix="/api/v1")
     app.include_router(stockwire_router, prefix="/api/v1")
     app.include_router(stockwire_public_router, prefix="/api/v1")

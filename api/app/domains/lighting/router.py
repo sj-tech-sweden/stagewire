@@ -42,12 +42,24 @@ async def _check_links(db: AsyncSession, job_id: UUID, data: dict) -> None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Power node not found")
 
 
-async def _type_or_404(db: AsyncSession, job_id: UUID, type_id: UUID) -> FixtureType:
-    await _job_or_404(db, job_id)
-    fixture_type = await service.get_type(db, job_id, type_id)
+async def _type_or_404(
+    db: AsyncSession, type_id: UUID, job_id: UUID | None = None, venue_id: UUID | None = None
+) -> FixtureType:
+    if job_id is not None:
+        await _job_or_404(db, job_id)
+    else:
+        await _venue_or_404(db, venue_id)
+    fixture_type = await service.get_type(db, job_id=job_id, type_id=type_id, venue_id=venue_id)
     if fixture_type is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Fixture type not found")
     return fixture_type
+
+
+async def _venue_or_404(db: AsyncSession, venue_id: UUID | None) -> None:
+    from app.domains.venues import service as venue_service
+
+    if venue_id is None or await venue_service.get_venue(db, venue_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
 
 
 async def _reads(db: AsyncSession, job_id: UUID, fixtures: list) -> list[schemas.FixtureRead]:
@@ -191,13 +203,13 @@ async def update_type(
     payload: schemas.FixtureTypeUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    fixture_type = await _type_or_404(db, job_id, type_id)
+    fixture_type = await _type_or_404(db, type_id, job_id=job_id)
     return await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
 
 
 @router.delete("/jobs/{job_id}/fixture-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_type(job_id: UUID, type_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    fixture_type = await _type_or_404(db, job_id, type_id)
+    fixture_type = await _type_or_404(db, type_id, job_id=job_id)
     await service.delete_type(db, fixture_type)
 
 
@@ -212,7 +224,7 @@ async def create_mode(
     payload: schemas.FixtureModeCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    fixture_type = await _type_or_404(db, job_id, type_id)
+    fixture_type = await _type_or_404(db, type_id, job_id=job_id)
     return await service.create_mode(db, fixture_type, payload.model_dump())
 
 
@@ -227,7 +239,7 @@ async def update_mode(
     payload: schemas.FixtureModeUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    await _type_or_404(db, job_id, type_id)
+    await _type_or_404(db, type_id, job_id=job_id)
     mode = next(
         (m for m in (await service.get_type(db, job_id, type_id)).modes if m.id == mode_id), None
     )
@@ -243,7 +255,127 @@ async def update_mode(
 async def delete_mode(
     job_id: UUID, type_id: UUID, mode_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> None:
-    fixture_type = await _type_or_404(db, job_id, type_id)
+    fixture_type = await _type_or_404(db, type_id, job_id=job_id)
+    mode = next((m for m in fixture_type.modes if m.id == mode_id), None)
+    if mode is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
+    await service.delete_mode(db, mode)
+
+
+# --- Venue-scoped fixture library -------------------------------------------------------------
+# A venue's Standard Base Rig reuses the same fixture-type library machinery as a job; these routes
+# are the venue counterpart of the /jobs/{job_id}/fixture-types* routes above, scoped to venue_id
+# instead of job_id (the FixtureType/FixtureMode rows already carry a venue_id column).
+
+
+@router.get("/venues/{venue_id}/fixture-types", response_model=list[schemas.FixtureTypeRead])
+async def list_venue_types(venue_id: UUID, db: AsyncSession = Depends(get_db)):
+    await _venue_or_404(db, venue_id)
+    return await service.list_types(db, venue_id=venue_id)
+
+
+@router.post(
+    "/venues/{venue_id}/fixture-types",
+    response_model=schemas.FixtureTypeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_venue_type(
+    venue_id: UUID, payload: schemas.FixtureTypeCreate, db: AsyncSession = Depends(get_db)
+):
+    await _venue_or_404(db, venue_id)
+    return await service.create_type(db, venue_id=venue_id, data=payload.model_dump())
+
+
+@router.post(
+    "/venues/{venue_id}/fixture-types/from-stockwire",
+    response_model=schemas.FixtureTypeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_venue_type_from_stockwire(
+    venue_id: UUID, payload: schemas.StockwireTypeImport, db: AsyncSession = Depends(get_db)
+):
+    from app.domains.audio.router import stockwire_product_fetcher
+    from app.domains.lighting.stockwire import type_from_product
+
+    await _venue_or_404(db, venue_id)
+    fetch = await stockwire_product_fetcher(db)
+    if fetch is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Stockwire is not connected")
+    try:
+        product = await fetch(payload.product_id)
+    except Exception as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Stockwire could not be reached") from exc
+    if not product:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Product not found in Stockwire")
+    values = type_from_product(product)
+    if not values["name"]:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The product has no name")
+    return await service.import_stockwire_type(
+        db, venue_id=venue_id, product_id=payload.product_id, values=values
+    )
+
+
+@router.patch("/venues/{venue_id}/fixture-types/{type_id}", response_model=schemas.FixtureTypeRead)
+async def update_venue_type(
+    venue_id: UUID,
+    type_id: UUID,
+    payload: schemas.FixtureTypeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
+    return await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
+
+
+@router.delete("/venues/{venue_id}/fixture-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_venue_type(
+    venue_id: UUID, type_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
+    await service.delete_type(db, fixture_type)
+
+
+@router.post(
+    "/venues/{venue_id}/fixture-types/{type_id}/modes",
+    response_model=schemas.FixtureModeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_venue_mode(
+    venue_id: UUID,
+    type_id: UUID,
+    payload: schemas.FixtureModeCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
+    return await service.create_mode(db, fixture_type, payload.model_dump())
+
+
+@router.patch(
+    "/venues/{venue_id}/fixture-types/{type_id}/modes/{mode_id}",
+    response_model=schemas.FixtureModeRead,
+)
+async def update_venue_mode(
+    venue_id: UUID,
+    type_id: UUID,
+    mode_id: UUID,
+    payload: schemas.FixtureModeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    await _type_or_404(db, type_id, venue_id=venue_id)
+    type_row = await service.get_type(db, venue_id=venue_id, type_id=type_id)
+    mode = next((m for m in type_row.modes if m.id == mode_id), None) if type_row else None
+    if mode is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
+    return await service.update_mode(db, mode, payload.model_dump(exclude_unset=True))
+
+
+@router.delete(
+    "/venues/{venue_id}/fixture-types/{type_id}/modes/{mode_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_venue_mode(
+    venue_id: UUID, type_id: UUID, mode_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
     mode = next((m for m in fixture_type.modes if m.id == mode_id), None)
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")

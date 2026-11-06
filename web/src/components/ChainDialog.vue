@@ -50,6 +50,7 @@
             <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
           </q-btn>
           <StockwireProductPicker
+            v-if="contextKind === 'job'"
             class="col-12 col-sm-4"
             :model-value="null"
             own
@@ -170,6 +171,7 @@
     :model-value="!!editedId"
     :device="editedDevice"
     :job-id="jobId"
+    :venue-id="venueId"
     @update:model-value="(v) => !v && (editedId = null)"
   />
 </template>
@@ -190,6 +192,7 @@ const props = defineProps({
   initial: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
   jobId: { type: String, default: '' },
+  venueId: { type: String, default: '' },
   branching: { type: Boolean, default: false },
   // the channels of the bus an output chain feeds (L, R, C, Sub ...); empty for other chains
   busChannels: { type: Array, default: () => [] },
@@ -204,6 +207,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save']);
 const { t } = useI18n();
 const graph = useGraphStore();
+// A chain can live on a job or a venue base rig; scope graph writes to the right context.
+const contextId = computed(() => props.venueId || props.jobId);
+const contextKind = computed(() => (props.venueId ? 'venue' : 'job'));
 // a step's device can be opened for editing without leaving the chain being edited
 const editedId = ref(null);
 const editedDevice = computed(() => graph.devices.find((d) => d.id === editedId.value) || null);
@@ -236,8 +242,10 @@ watch(
 // its connectors and power inlet) and is chosen for this step at once.
 async function addFromStockwire(step, product) {
   if (!product) return;
+  // A venue base rig doesn't mint Stockwire product devices, so the picker is hidden in venue mode.
+  if (contextKind.value === 'venue') return;
   try {
-    const created = await graph.createDeviceFromProduct(props.jobId, product);
+    const created = await graph.createDeviceFromProduct(contextId.value, product);
     await nextTick();
     filtered.value = options();
     if (!filtered.value.some((o) => o.value === created.id)) {

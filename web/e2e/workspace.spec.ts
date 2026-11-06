@@ -1169,6 +1169,96 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
   await expect(page.locator('.q-menu .q-item', { hasText: 'SL 2' })).toBeVisible();
 });
 
+test('venue power panel builds a tree of panels, circuits, generators and temporary kit', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const venue = await post(request, headers, '/venues', { name: `Hall ${Date.now()}` });
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Power tree ${Date.now()}` })).id as string;
+  await request.put(`${API_BASE}/api/v1/jobs/${jobId}/venue`, { headers, data: { venue_id: venue.id } });
+
+  const groups = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/venues/${venue.id}/power-groups`, { headers })).json()) as any[];
+  const childOf = (parentKind: string) => async () =>
+    (await groups()).some((g) => g.kind === parentKind);
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  await page.getByTestId('venue-power').click();
+
+  // No supply yet, so the only offered root is the incoming mains.
+  await page.getByTestId('add-venue-incoming').click();
+  await expect.poll(childOf('incoming')).toBe(true);
+
+  // A panel nests under the incoming supply by default.
+  await page.getByTestId('add-venue-group').click();
+  await expect.poll(async () => (await groups()).filter((g) => g.kind === 'panel').length).toBe(1);
+  const panel = (await groups()).find((g) => g.kind === 'panel')!;
+  const incoming = (await groups()).find((g) => g.kind === 'incoming')!;
+  const incomingName = incoming.name;
+
+  // The panel row carries its name in a q-input whose `value` attribute is the name (not visible
+  // text), so scope the row by that attribute via a CSS :has() rather than a text filter that misses
+  // input values. The parent select is a Quasar q-select whose displayed value lives in the
+  // focus-target input's `value` attribute, so assert on that (toHaveValue) instead of innerText(),
+  // which is empty for a matched option.
+  const panelRow = page.locator(
+    `[data-testid="venue-group"]:has(input[data-testid="venue-group-name"][value="${panel.name}"])`,
+  );
+  const parentSel = panelRow.getByTestId('venue-group-parent');
+
+  // The panel's parent select shows the supply root by its name, never a raw id (the parent field
+  // used to fall back to displaying the UUID when the stored value had no matching option).
+  await expect(parentSel).not.toHaveValue(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  await expect(parentSel).toHaveValue(incomingName);
+
+  // A fused circuit is added inside the panel (not as a standalone node).
+  await panelRow.getByTestId('add-venue-circuit').click();
+  await expect
+    .poll(async () => {
+      const list = await groups();
+      const circuit = list.find((g) => g.kind === 'group');
+      return circuit && circuit.parent_id === panel.id;
+    })
+    .toBe(true);
+
+  // A generator is a second supply root (temporary by default) and shows up in the per-source list.
+  await page.getByTestId('add-venue-generator').click();
+  await expect.poll(async () => {
+    const list = await groups();
+    const gen = list.find((g) => g.kind === 'generator');
+    return gen && gen.temporary === true;
+  }).toBe(true);
+  await expect(page.getByTestId('venue-supply')).toHaveCount(2);
+
+  // A breakout (temporary distro) is added via its own button and defaults under the incoming supply.
+  await page.getByTestId('add-venue-breakout').click();
+  await expect
+    .poll(async () => {
+      const list = await groups();
+      const bo = list.find((g) => g.kind === 'breakout');
+      const incoming = list.find((g) => g.kind === 'incoming');
+      return bo && incoming && bo.parent_id === incoming.id;
+    })
+    .toBe(true);
+
+  // The outlet group select only offers circuits (kind 'group'), never a panel or supply, and each
+  // circuit option is labelled with the board it hangs under so identically-numbered circuits (1-24)
+  // stay distinguishable across different panels.
+  await page.getByTestId('add-venue-outlet').click();
+  const groupSelect = page.getByTestId('venue-outlet-group');
+  await groupSelect.click();
+  await expect(page.locator('.q-menu .q-item')).toHaveCount(1);
+  const circuit = (await groups()).find((g) => g.kind === 'group')!;
+  const circuitPanel = (await groups()).find((g) => g.kind === 'panel')!;
+  await expect(page.locator('.q-menu .q-item').first()).toContainText(circuitPanel.name);
+  await expect(page.locator('.q-menu .q-item').first()).toContainText(circuit.name);
+  await page.keyboard.press('Escape');
+});
+
 test('an outlet is moved on the map and its position is edited in the venue power panel', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);

@@ -12,6 +12,22 @@ jobs:
     defaults:
       run:
         working-directory: api
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: stagewire
+          POSTGRES_PASSWORD: stagewire
+          POSTGRES_DB: stagewire_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U stagewire -d stagewire_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://stagewire:stagewire@localhost:5433/stagewire_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -25,6 +41,15 @@ jobs:
         run: ruff check app tests
       - name: Ruff format check
         run: ruff format --check app tests
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if python -c "import socket; socket.create_connection(('localhost', 5433), timeout=1)" 2>/dev/null; then
+              echo "Postgres is reachable"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become reachable"; exit 1
       - name: Pytest
         run: pytest -q
 

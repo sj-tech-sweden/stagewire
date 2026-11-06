@@ -11,9 +11,20 @@ import {
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
 
+// The same graph store backs both jobs and venues (venues-as-template-jobs). When the scope is a
+// venue we point at the venue graph routes instead of the job ones; callers keep passing the id,
+// but the URL is derived from the active scope so a job never leaks into a venue request.
+function baseFor(store, id) {
+  return store.scopeKind === 'venue' ? store.graphBase : base(id);
+}
+
 export const useGraphStore = defineStore('graph', {
   state: () => ({
     jobId: null,
+    // Active scope for the incremental graph routes: a job or a venue. A venue rig reuses the
+    // job graph editing UX, so the same store serves both; `scopeKind`/`scopeId` pick the prefix.
+    scopeKind: 'job',
+    scopeId: null,
     devices: [],
     edges: [],
     selectedDeviceId: null,
@@ -29,6 +40,10 @@ export const useGraphStore = defineStore('graph', {
     selectedDevice: (state) => state.devices.find((d) => d.id === state.selectedDeviceId) || null,
     unbooked: (state) =>
       state.devices.filter((d) => d.stockwire_product_id && d.stockwire_booked === false),
+    graphBase: (state) =>
+      state.scopeKind === 'venue'
+        ? `/venues/${state.scopeId}/graph`
+        : `/jobs/${state.scopeId}/graph`,
     channelLists: (state) =>
       state.devices.filter((d) => d.kind === 'channel_list').sort((a, b) => a.position - b.position),
     videoLists: (state) =>
@@ -37,18 +52,22 @@ export const useGraphStore = defineStore('graph', {
     devicesByDomain: (state) => (domain) => state.devices.filter((d) => d.domain === domain),
   },
   actions: {
-    async fetchGraph(jobId) {
-      if (this.jobId !== jobId) {
+    setScope(kind, id) {
+      this.scopeKind = kind;
+      this.scopeId = id;
+    },
+    async fetchGraph(id, kind = 'job') {
+      if (this.scopeId !== id || this.scopeKind !== kind) {
         this.devices = [];
         this.edges = [];
         this.issues = [];
         this.effective = {};
       }
-      this.jobId = jobId;
+      this.setScope(kind, id);
       this.loading = true;
       this.error = null;
       try {
-        const { data } = await api.get(base(jobId));
+        const { data } = await api.get(this.graphBase);
         this.devices = data.devices;
         this.edges = data.edges;
       } catch (err) {
@@ -64,12 +83,12 @@ export const useGraphStore = defineStore('graph', {
       this.edges = next.edges;
     },
     async createDevice(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/devices`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/devices`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async createDevices(jobId, payloads) {
-      const { data } = await api.post(`${base(jobId)}/devices/batch`, payloads);
+      const { data } = await api.post(`${baseFor(this, jobId)}/devices/batch`, payloads);
       data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
       return data;
     },
@@ -78,7 +97,7 @@ export const useGraphStore = defineStore('graph', {
     async updateDevice(jobId, id, changes, baseRow) {
       const start = baseRow || this.devices.find((d) => d.id === id);
       return this.versionedPatch(
-        `${base(jobId)}/devices/${id}`,
+        `${baseFor(this, jobId)}/devices/${id}`,
         'device',
         { jobId, id },
         changes,
@@ -89,7 +108,7 @@ export const useGraphStore = defineStore('graph', {
     async updateEdge(jobId, id, changes, baseRow) {
       const start = baseRow || this.edges.find((e) => e.id === id);
       return this.versionedPatch(
-        `${base(jobId)}/edges/${id}`,
+        `${baseFor(this, jobId)}/edges/${id}`,
         'edge',
         { jobId, id },
         changes,
@@ -139,7 +158,7 @@ export const useGraphStore = defineStore('graph', {
     },
     async deleteDevice(jobId, id) {
       const row = this.devices.find((d) => d.id === id);
-      await api.delete(`${base(jobId)}/devices/${id}`, {
+      await api.delete(`${baseFor(this, jobId)}/devices/${id}`, {
         params: { expected_revision: row?.revision },
       });
       this.applyRealtimeEvent({
@@ -153,58 +172,58 @@ export const useGraphStore = defineStore('graph', {
       });
     },
     async createEdge(jobId, payload, { force = false } = {}) {
-      const { data } = await api.post(`${base(jobId)}/edges`, payload, { params: { force } });
+      const { data } = await api.post(`${baseFor(this, jobId)}/edges`, payload, { params: { force } });
       this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: data });
       return data;
     },
     async deleteEdge(jobId, id) {
       const row = this.edges.find((e) => e.id === id);
-      await api.delete(`${base(jobId)}/edges/${id}`, {
+      await api.delete(`${baseFor(this, jobId)}/edges/${id}`, {
         params: { expected_revision: row?.revision },
       });
       this.applyRealtimeEvent({ type: 'graph.edge.delete', payload: { id } });
     },
     async requestStockwireBooking(jobId, id) {
-      const { data } = await api.post(`${base(jobId)}/devices/${id}/request-stockwire`);
+      const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/request-stockwire`);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async trace(jobId, id, direction, signal) {
-      const { data } = await api.get(`${base(jobId)}/devices/${id}/trace`, {
+      const { data } = await api.get(`${baseFor(this, jobId)}/devices/${id}/trace`, {
         params: { direction, signal },
       });
       return data;
     },
     async refreshChecks(jobId) {
       const [issues, loads] = await Promise.all([
-        api.get(`${base(jobId)}/validate`),
-        api.get(`${base(jobId)}/power-load`),
+        api.get(`${baseFor(this, jobId)}/validate`),
+        api.get(`${baseFor(this, jobId)}/power-load`),
       ]);
       this.issues = issues.data;
       this.loads = loads.data;
     },
     async backfill(jobId) {
-      const { data } = await api.post(`${base(jobId)}/backfill`);
-      await this.fetchGraph(jobId);
+      const { data } = await api.post(`${baseFor(this, jobId)}/backfill`);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async createList(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/lists`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/lists`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async createChannels(jobId, listId, payloads) {
-      const { data } = await api.post(`${base(jobId)}/lists/${listId}/channels/batch`, payloads);
+      const { data } = await api.post(`${baseFor(this, jobId)}/lists/${listId}/channels/batch`, payloads);
       data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
       return data;
     },
     async createOutputs(jobId, listId, payloads) {
-      const { data } = await api.post(`${base(jobId)}/lists/${listId}/outputs/batch`, payloads);
+      const { data } = await api.post(`${baseFor(this, jobId)}/lists/${listId}/outputs/batch`, payloads);
       data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
       return data;
     },
     async createOutput(jobId, listId, payload) {
-      const { data } = await api.post(`${base(jobId)}/lists/${listId}/outputs`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/lists/${listId}/outputs`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
@@ -212,9 +231,9 @@ export const useGraphStore = defineStore('graph', {
     // written one by one, then the graph is fetched once instead of after every chain.
     async setChannelChains(jobId, channelIds, steps) {
       for (const id of channelIds) {
-        await api.put(`${base(jobId)}/channels/${id}/chain`, { steps });
+        await api.put(`${baseFor(this, jobId)}/channels/${id}/chain`, { steps });
       }
-      await this.fetchGraph(jobId);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
     },
     async replaceChain(jobId, kind, nodeId, steps) {
       const route =
@@ -224,64 +243,64 @@ export const useGraphStore = defineStore('graph', {
           video_input: 'video-inputs',
           video_output: 'video-outputs',
         }[kind] || 'channels';
-      const url = `${base(jobId)}/${route}/${nodeId}/chain`;
+      const url = `${baseFor(this, jobId)}/${route}/${nodeId}/chain`;
       const { data } = await api.put(url, { steps });
       // the server synced; refetch so devices created for the chain and edge changes all arrive
-      await this.fetchGraph(jobId);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async createVideoList(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/video-lists`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/video-lists`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     // kind is 'inputs' or 'outputs'
     async createVideoRows(jobId, listId, kind, payloads) {
-      const { data } = await api.post(`${base(jobId)}/video-lists/${listId}/${kind}/batch`, payloads);
+      const { data } = await api.post(`${baseFor(this, jobId)}/video-lists/${listId}/${kind}/batch`, payloads);
       data.forEach((payload) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload }));
       return data;
     },
     async fillVideoFromSwitcher(jobId, listId) {
-      const { data } = await api.post(`${base(jobId)}/video-lists/${listId}/fill-from-switcher`);
-      await this.fetchGraph(jobId);
+      const { data } = await api.post(`${baseFor(this, jobId)}/video-lists/${listId}/fill-from-switcher`);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async fetchRiggingSummary(jobId) {
-      const { data } = await api.get(`${base(jobId)}/rigging/summary`);
+      const { data } = await api.get(`${baseFor(this, jobId)}/rigging/summary`);
       return data;
     },
     async createRiggingPoint(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/rigging-points`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/rigging-points`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async createPowerNode(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/power-nodes`, payload);
-      await this.fetchGraph(jobId);
+      const { data } = await api.post(`${baseFor(this, jobId)}/power-nodes`, payload);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     // The source node for a venue outlet (its power group, or the outlet alone), made on first use.
     async outletSource(jobId, outletId) {
-      const { data } = await api.post(`${base(jobId)}/venue-power/outlets/${outletId}/source`);
-      await this.fetchGraph(jobId);
+      const { data } = await api.post(`${baseFor(this, jobId)}/venue-power/outlets/${outletId}/source`);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async movePowerNode(jobId, nodeId, payload) {
-      await api.put(`${base(jobId)}/power-nodes/${nodeId}/parent`, payload);
-      await this.fetchGraph(jobId);
+      await api.put(`${baseFor(this, jobId)}/power-nodes/${nodeId}/parent`, payload);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
     },
     async insertExtension(jobId, nodeId, payload) {
-      const { data } = await api.post(`${base(jobId)}/power-nodes/${nodeId}/extension`, payload);
-      await this.fetchGraph(jobId);
+      const { data } = await api.post(`${baseFor(this, jobId)}/power-nodes/${nodeId}/extension`, payload);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async addPowerFeed(jobId, nodeId, payload) {
-      await api.post(`${base(jobId)}/power-nodes/${nodeId}/feeds`, payload);
-      await this.fetchGraph(jobId);
+      await api.post(`${baseFor(this, jobId)}/power-nodes/${nodeId}/feeds`, payload);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
     },
     async assignLoad(jobId, nodeId, payload) {
-      const { data } = await api.put(`${base(jobId)}/loads/${nodeId}`, payload);
-      await this.fetchGraph(jobId);
+      const { data } = await api.put(`${baseFor(this, jobId)}/loads/${nodeId}`, payload);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     // A device made from a Stockwire product: its connectors, power inlet, weight and power come
@@ -302,46 +321,46 @@ export const useGraphStore = defineStore('graph', {
       return this.createAudioDevice(jobId, deviceCreateBody(form));
     },
     async createAudioDevice(jobId, body) {
-      const { data } = await api.post(`${base(jobId)}/audio-devices`, body);
+      const { data } = await api.post(`${baseFor(this, jobId)}/audio-devices`, body);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async createFixture(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/fixtures`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/fixtures`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async createFixturesBulk(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/fixtures/bulk`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/fixtures/bulk`, payload);
       data.forEach((node) => this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: node }));
       return data;
     },
     async createUniverse(jobId, payload) {
-      const { data } = await api.post(`${base(jobId)}/universes`, payload);
+      const { data } = await api.post(`${baseFor(this, jobId)}/universes`, payload);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
     async setUniverseSource(jobId, universeId, deviceId, port) {
-      await api.put(`${base(jobId)}/universes/${universeId}/source`, { device_id: deviceId, port });
-      await this.fetchGraph(jobId);
+      await api.put(`${baseFor(this, jobId)}/universes/${universeId}/source`, { device_id: deviceId, port });
+      await this.fetchGraph(this.scopeId, this.scopeKind);
     },
     async importFixtures(jobId, file) {
       const form = new FormData();
       form.append('file', file);
       const { data } = await api.post(`/jobs/${jobId}/fixtures/import`, form);
-      await this.fetchGraph(jobId);
+      await this.fetchGraph(this.scopeId, this.scopeKind);
       return data;
     },
     async fetchEffective(jobId) {
-      const { data } = await api.get(`${base(jobId)}/effective`);
+      const { data } = await api.get(`${baseFor(this, jobId)}/effective`);
       this.effective = data;
     },
     async exportPlugins(jobId) {
-      const { data } = await api.get(`${base(jobId)}/export-plugins`);
+      const { data } = await api.get(`${baseFor(this, jobId)}/export-plugins`);
       return data;
     },
     async exportList(jobId, listId, plugin) {
-      const response = await api.get(`${base(jobId)}/lists/${listId}/export`, {
+      const response = await api.get(`${baseFor(this, jobId)}/lists/${listId}/export`, {
         params: { plugin },
         responseType: 'blob',
       });

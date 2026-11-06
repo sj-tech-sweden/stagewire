@@ -1,5 +1,6 @@
 import io
 import zipfile
+from uuid import uuid4
 
 from httpx import ASGITransport, AsyncClient
 
@@ -74,6 +75,10 @@ CSV_PATCH = (
 
 async def _job(client, headers, title: str) -> str:
     return (await client.post(f"{BASE}/jobs", json={"title": title}, headers=headers)).json()["id"]
+
+
+async def _venue(client, headers, name: str) -> str:
+    return (await client.post(f"{BASE}/venues", json={"name": name}, headers=headers)).json()["id"]
 
 
 async def test_fixture_takes_its_profile_from_the_linked_device(auth_headers, monkeypatch):
@@ -604,3 +609,86 @@ async def test_new_fixture_takes_the_first_free_address_of_its_universe(auth_hea
         explicit = await add({"universe": 1, "dmx_address": 1, "footprint": 2})
         assert explicit["dmx_address"] == 1
         assert explicit["dmx_conflict"] is True
+
+
+async def test_venue_fixture_library_is_scoped_and_parity_with_job(auth_headers, monkeypatch):
+    async def no_integration(db):
+        return None
+
+    monkeypatch.setattr(audio_router, "stockwire_product_fetcher", no_integration)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue_id = await _venue(client, auth_headers, "Hall V")
+        job_id = await _job(client, auth_headers, "Job V")
+
+        # A venue fixture type is created with venue_id set and job_id null.
+        created = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/fixture-types",
+                json={"name": "House Spot", "manufacturer": "ACME", "category": "moving"},
+                headers=auth_headers,
+            )
+        ).json()
+        assert created["venue_id"] == venue_id
+        assert created["job_id"] is None
+
+        mode = (
+            await client.post(
+                f"{BASE}/venues/{venue_id}/fixture-types/{created['id']}/modes",
+                json={"name": "Full", "footprint": 12},
+                headers=auth_headers,
+            )
+        ).json()
+        assert mode["name"] == "Full"
+
+        listed = (
+            await client.get(f"{BASE}/venues/{venue_id}/fixture-types", headers=auth_headers)
+        ).json()
+        assert len(listed) == 1
+        assert listed[0]["modes"][0]["name"] == "Full"
+
+        # Update the type and a mode.
+        await client.patch(
+            f"{BASE}/venues/{venue_id}/fixture-types/{created['id']}",
+            json={"manufacturer": "ACME Co"},
+            headers=auth_headers,
+        )
+        updated_mode = (
+            await client.patch(
+                f"{BASE}/venues/{venue_id}/fixture-types/{created['id']}/modes/{mode['id']}",
+                json={"footprint": 14},
+                headers=auth_headers,
+            )
+        ).json()
+        assert updated_mode["footprint"] == 14
+
+        # Strict scoping: a venue type never appears for a job and vice versa.
+        assert (
+            await client.get(f"{BASE}/jobs/{job_id}/fixture-types", headers=auth_headers)
+        ).json() == []
+        await client.post(
+            f"{BASE}/jobs/{job_id}/fixture-types",
+            json={"name": "Job Only"},
+            headers=auth_headers,
+        )
+        assert (
+            len(
+                (
+                    await client.get(
+                        f"{BASE}/venues/{venue_id}/fixture-types", headers=auth_headers
+                    )
+                ).json()
+            )
+            == 1
+        )
+
+        # Deleting the venue type removes it; a missing venue/type 404s.
+        await client.delete(
+            f"{BASE}/venues/{venue_id}/fixture-types/{created['id']}", headers=auth_headers
+        )
+        assert (
+            await client.get(f"{BASE}/venues/{venue_id}/fixture-types", headers=auth_headers)
+        ).json() == []
+        assert (
+            await client.get(f"{BASE}/venues/{uuid4()}/fixture-types", headers=auth_headers)
+        ).status_code == 404

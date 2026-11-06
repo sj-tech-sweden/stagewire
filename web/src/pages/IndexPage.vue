@@ -114,17 +114,35 @@
             :label="t('jobs.fieldTitle')"
             autofocus
           />
-          <q-input
-            v-model="form.venue_name"
+          <q-select
+            v-model="form.venue_id"
+            :options="venueOptions"
             :label="t('jobs.fieldVenue')"
-          />
+            :hint="t('jobs.venueHint')"
+            use-input
+            emit-value
+            map-options
+            clearable
+            input-debounce="0"
+            @filter="onVenueFilter"
+          >
+            <template #no-option="{ inputValue }">
+              <q-item>
+                <q-item-section>
+                  <q-btn
+                    flat
+                    no-caps
+                    color="primary"
+                    :label="t('venues.createNew', { name: inputValue || '' })"
+                    @click="onCreateVenue(inputValue)"
+                  />
+                </q-item-section>
+              </q-item>
+            </template>
+          </q-select>
           <DateTimePicker
             v-model="form.event_date"
             :label="t('jobs.fieldEventDate')"
-          />
-          <q-input
-            v-model="form.stockwire_job_id"
-            :label="t('jobs.fieldStockwireId')"
           />
         </q-card-section>
         <q-card-actions align="right">
@@ -148,38 +166,70 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useJobsStore } from '@/stores/jobs';
+import { useVenuesStore } from '@/stores/venues';
 import DateTimePicker from '@/components/DateTimePicker.vue';
 
 const { t } = useI18n({ useScope: "global" })
 const router = useRouter()
 const store = useJobsStore();
+const venues = useVenuesStore();
 
 function openJob(id) {
   router.push(`/jobs/${id}`)
 }
 const dialog = ref(false);
 const query = ref(store.search || '');
+const venueSearch = ref('');
+const venueOptions = computed(() =>
+  venues.venues
+    .filter((v) => v.name.toLowerCase().includes(venueSearch.value.toLowerCase()))
+    .map((v) => ({ value: v.id, label: v.name })),
+);
 const form = ref({
   title: '',
-  venue_name: '',
+  venue_id: null,
   event_date: '',
-  stockwire_job_id: '',
+});
+
+// The venue picker filters the cached venue list; the no-option button adds a brand new venue
+// when the typed name does not match an existing one, so the picker doubles as a quick venue form.
+function onVenueFilter(val, update) {
+  venueSearch.value = val || '';
+  update(() => {});
+}
+
+async function onCreateVenue(name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return;
+  const created = await venues.createVenue({ name: trimmed });
+  form.value.venue_id = created.id;
+  venueSearch.value = '';
+}
+
+watch(dialog, (open) => {
+  if (open) venues.fetchVenues();
 });
 
 onMounted(() => store.fetchJobs());
 
 async function create() {
-  const payload = { ...form.value };
+  // venue_id is linked after creation (the link also seeds the venue's base rig); the create
+  // payload itself only carries the editable job fields.
+  const { venue_id, ...rest } = form.value;
+  const payload = { ...rest };
   for (const key of Object.keys(payload)) {
     if (payload[key] === '') payload[key] = null;
   }
-  await store.createJob(payload);
+  const job = await store.createJob(payload);
+  if (venue_id) {
+    await venues.assignJobVenue(job.id, venue_id);
+  }
   dialog.value = false;
-  form.value = { title: '', venue_name: '', event_date: '', stockwire_job_id: '' };
+  form.value = { title: '', venue_id: null, event_date: '' };
   query.value = '';
   await store.fetchJobs({ search: '' });
 }

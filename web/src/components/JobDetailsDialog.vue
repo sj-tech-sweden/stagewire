@@ -16,12 +16,6 @@
           :label="t('jobs.fieldTitle')"
           data-testid="job-title"
         />
-        <q-input
-          v-model="form.venue_name"
-          dense
-          outlined
-          :label="t('jobs.fieldVenue')"
-        />
         <q-select
           v-model="form.venue_id"
           dense
@@ -214,7 +208,6 @@ const venues = useVenuesStore();
 const stockwire = useStockwireStore();
 const form = reactive({
   title: '',
-  venue_name: '',
   venue_id: null,
   event_date: '',
   start_date: '',
@@ -244,7 +237,6 @@ watch(
     const eventDay = eventDate ? eventDate.slice(0, 10) : '';
     Object.assign(form, {
       title: props.job?.title || '',
-      venue_name: props.job?.venue_name || '',
       venue_id: props.job?.venue_id || null,
       event_date: eventDate,
       start_date: props.job?.start_date || eventDay,
@@ -261,7 +253,6 @@ async function save() {
   try {
     await api.patch(`/jobs/${props.jobId}`, {
       title: form.title,
-      venue_name: form.venue_name,
       event_date: form.event_date || null,
       start_date: form.start_date || null,
       end_date: form.end_date || null,

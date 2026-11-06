@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.auth.deps import get_current_user, require_admin
 from app.domains.reports import schemas
+from app.domains.reports.context import JobOrVenue
 from app.domains.reports.models import ReportLetterhead, ReportTemplate
 from app.domains.reports.registry import (
     REPORT_DEFINITIONS,
@@ -398,7 +399,7 @@ async def generate_report(
         content = await render_report_pdf(
             db,
             template,
-            job_id,
+            JobOrVenue.job(job_id),
             patchpoint_id,
             stage_plot_options or None,
         )
@@ -434,6 +435,105 @@ async def preview_report(
 ) -> Response:
     response = await generate_report(
         job_id=job_id,
+        domain=domain,
+        report_type=report_type,
+        template_id=template_id,
+        patchpoint_id=patchpoint_id,
+        stage_plot_view=stage_plot_view,
+        show_coverage=show_coverage,
+        show_camera_coverage=show_camera_coverage,
+        show_projector_coverage=show_projector_coverage,
+        camera_view_mode=camera_view_mode,
+        show_cables=show_cables,
+        show_cableways=show_cableways,
+        locale=locale,
+        db=db,
+        _user=_user,
+    )
+    return Response(content=response.body, media_type="application/pdf")
+
+
+@router.get("/venues/{venue_id}/{domain}/{report_type}/pdf")
+async def generate_venue_report(
+    venue_id: UUID,
+    domain: str,
+    report_type: str,
+    template_id: UUID | None = Query(default=None),
+    patchpoint_id: UUID | None = Query(default=None),
+    stage_plot_view: str | None = Query(default=None, pattern="^(stage|venue)$"),
+    show_coverage: bool | None = None,
+    show_camera_coverage: bool | None = None,
+    show_projector_coverage: bool | None = None,
+    camera_view_mode: str | None = Query(default=None, pattern="^(range|chosen)$"),
+    show_cables: bool | None = None,
+    show_cableways: bool | None = None,
+    locale: str = Query(default="en", pattern="^(en|sv)$"),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+) -> Response:
+    """A venue's Standard Base Rig emits the same reports a job can (venues-as-template-jobs)."""
+    _get_registered_type(domain, report_type)
+    await ensure_default_templates(db)
+    template = (
+        await db.get(ReportTemplate, template_id)
+        if template_id
+        else await _get_default_template(db, domain, report_type, locale)
+    )
+    if template is None or (template.domain, template.report_type) != (domain, report_type):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report template not found")
+    try:
+        stage_plot_options = {
+            key: value
+            for key, value in {
+                "view": stage_plot_view,
+                "show_coverage": show_coverage,
+                "show_camera_coverage": show_camera_coverage,
+                "show_projector_coverage": show_projector_coverage,
+                "camera_view_mode": camera_view_mode,
+                "show_cables": show_cables,
+                "show_cableways": show_cableways,
+            }.items()
+            if value is not None
+        }
+        content = await render_report_pdf(
+            db,
+            template,
+            JobOrVenue.venue(venue_id),
+            patchpoint_id,
+            stage_plot_options or None,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ReportRenderError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", template.name).strip("-").lower() or "report"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
+    )
+
+
+@router.get("/venues/{venue_id}/{domain}/{report_type}/preview")
+async def preview_venue_report(
+    venue_id: UUID,
+    domain: str,
+    report_type: str,
+    template_id: UUID | None = Query(default=None),
+    patchpoint_id: UUID | None = Query(default=None),
+    stage_plot_view: str | None = Query(default=None, pattern="^(stage|venue)$"),
+    show_coverage: bool | None = None,
+    show_camera_coverage: bool | None = None,
+    show_projector_coverage: bool | None = None,
+    camera_view_mode: str | None = Query(default=None, pattern="^(range|chosen)$"),
+    show_cables: bool | None = None,
+    show_cableways: bool | None = None,
+    locale: str = Query(default="en", pattern="^(en|sv)$"),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+) -> Response:
+    response = await generate_venue_report(
+        venue_id=venue_id,
         domain=domain,
         report_type=report_type,
         template_id=template_id,

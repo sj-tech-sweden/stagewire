@@ -1,3 +1,4 @@
+from collections import defaultdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,9 +12,22 @@ from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph.models import GraphDevice
+from app.domains.graph.schemas import GraphRead
 from app.domains.rigging import connectors
 from app.domains.venues import schemas, service
+from app.domains.venues.base_rig import get_base_rig, replace_base_rig
 from app.domains.venues.models import VenuePowerGroup, VenuePowerOutlet
+from app.domains.venues.power_load import summarize_venue_power
+
+
+def _uuid(value) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError):
+        return None
+
 
 router = APIRouter(
     tags=["venues"], dependencies=[Depends(get_current_user), Depends(refresh_power_connectors)]
@@ -103,6 +117,51 @@ async def _check_group(db: AsyncSession, venue_id: UUID, group_id: UUID | None) 
     group = await db.get(VenuePowerGroup, group_id)
     if group is None or group.venue_id != venue_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Power group not found")
+    # Outlets are connected to a circuit (kind='group'), never directly to a panel.
+    if group.kind != "group":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Outlets must be connected to a circuit (group), not a panel",
+        )
+
+
+async def _validate_supply_topology(
+    db: AsyncSession, venue_id: UUID, kind: str, parent_id: UUID | None
+) -> None:
+    """Enforce how the supply tree may be wired.
+
+    Roots (no parent): ``incoming`` (mains) and ``generator`` (temporary second supply).
+    Boards/distros (``panel`` / ``breakout``) hang off a root or another board/distro.
+    ``group`` is a fused circuit that must live inside a board or a breakout. Outlets attach to
+    groups (see ``_check_group``), never to a board. Matches ``kind`` on ``VenuePowerGroup``.
+    """
+    if kind in ("incoming", "generator") and parent_id is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"A {kind} is a supply root and cannot have a parent",
+        )
+    if parent_id is None:
+        # A top-level panel/breakout or a single circuit without a named board are allowed (a small
+        # venue may feed circuits straight from the supply); the UI steers toward boards.
+        return
+    parent = await db.get(VenuePowerGroup, parent_id)
+    if parent is None or parent.venue_id != venue_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Parent power group not found")
+    if kind in ("panel", "breakout") and parent.kind not in (
+        "incoming",
+        "generator",
+        "panel",
+        "breakout",
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A board or breakout can only hang off a supply root, a board, or another breakout",
+        )
+    if kind == "group" and parent.kind not in ("panel", "breakout"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A circuit (group) must belong to a panel or a breakout",
+        )
 
 
 @router.get("/venues/{venue_id}/power-groups", response_model=list[schemas.VenuePowerGroupRead])
@@ -125,7 +184,10 @@ async def create_power_group(
     venue_id: UUID, payload: schemas.VenuePowerGroupCreate, db: AsyncSession = Depends(get_db)
 ):
     await _get_venue_or_404(db, venue_id)
+    await _validate_supply_topology(db, venue_id, payload.kind, payload.parent_id)
     group = VenuePowerGroup(venue_id=venue_id, **payload.model_dump())
+    # is_incoming mirrors kind=='incoming' so it stays a reliable "is this the supply root?" flag.
+    group.is_incoming = payload.kind == "incoming"
     db.add(group)
     await db.commit()
     await db.refresh(group)
@@ -145,8 +207,32 @@ async def update_power_group(
     group = await db.get(VenuePowerGroup, group_id)
     if group is None or group.venue_id != venue_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Power group not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # Effective kind/parent after this edit, used for both the cycle and topology checks.
+    new_kind = data.get("kind", group.kind)
+    new_parent = data.get("parent_id", group.parent_id)
+    # A group cannot be nested under itself or under one of its own descendants, otherwise the
+    # recursive load sum would loop. Walk up from the proposed parent and stop at a cycle.
+    if new_parent is not None:
+        if new_parent == group_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "A power group cannot be its own parent"
+            )
+        ancestor = await db.get(VenuePowerGroup, new_parent)
+        while ancestor is not None:
+            if ancestor.id == group_id:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "A power group cannot be nested under one of its own descendants",
+                )
+            ancestor = (
+                await db.get(VenuePowerGroup, ancestor.parent_id) if ancestor.parent_id else None
+            )
+    await _validate_supply_topology(db, venue_id, new_kind, new_parent)
+    for key, value in data.items():
         setattr(group, key, value)
+    # Keep is_incoming mirroring kind so the supply root stays unambiguous.
+    group.is_incoming = group.kind == "incoming"
     await db.commit()
     await db.refresh(group)
     return group
@@ -164,6 +250,11 @@ async def delete_power_group(
         select(VenuePowerOutlet).where(VenuePowerOutlet.group_id == group_id)
     ):
         outlet.group_id = None
+    # child panels are detached (they become top-level) rather than deleted with the parent
+    for sub in await db.scalars(
+        select(VenuePowerGroup).where(VenuePowerGroup.parent_id == group_id)
+    ):
+        sub.parent_id = None
     # power nodes made from the group (on the graph) forget it
     for node in await db.scalars(
         select(GraphDevice).where(
@@ -241,3 +332,113 @@ async def delete_power_outlet(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Outlet not found")
     await db.delete(outlet)
     await db.commit()
+
+
+@router.get("/venues/{venue_id}/power-load", response_model=schemas.VenuePowerLoadRead)
+async def venue_power_load(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> schemas.VenuePowerLoadRead:
+    """Device-driven load for the venue's supply, used by the over-limit check.
+
+    The load is the watts of the venue's Standard Base Rig devices, each attributed to the outlet
+    or group it plugs into (``attributes.venue_outlet_id`` / ``attributes.venue_group_id`` on the
+    device). This is the actual draw, not the sum of each socket's capacity, so a panel with
+    several sockets is not marked overloaded just for existing.
+    """
+    await _get_venue_or_404(db, venue_id)
+    devices = (
+        await db.scalars(
+            select(GraphDevice).where(
+                GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None)
+            )
+        )
+    ).all()
+    outlet_watts: dict[UUID, float] = defaultdict(float)
+    group_direct_watts: dict[UUID, float] = defaultdict(float)
+    for device in devices:
+        attrs = device.attributes or {}
+        raw = attrs.get("power_w")
+        if raw is None:
+            continue
+        try:
+            watts = float(raw)
+        except (TypeError, ValueError):
+            continue
+        outlet_id = _uuid(attrs.get("venue_outlet_id"))
+        group_id = _uuid(attrs.get("venue_group_id"))
+        if outlet_id is not None:
+            outlet_watts[outlet_id] += watts
+        elif group_id is not None:
+            group_direct_watts[group_id] += watts
+
+    groups = (
+        await db.scalars(select(VenuePowerGroup).where(VenuePowerGroup.venue_id == venue_id))
+    ).all()
+    outlets = (
+        await db.scalars(select(VenuePowerOutlet).where(VenuePowerOutlet.venue_id == venue_id))
+    ).all()
+    summary = summarize_venue_power(groups, outlets, dict(outlet_watts), dict(group_direct_watts))
+    return schemas.VenuePowerLoadRead(
+        outlets=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.outlets],
+        groups=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.groups],
+        supplies=[schemas.VenuePowerElementLoad(**vars(e)) for e in summary.supplies],
+        total_watts=summary.total_watts,
+        total_amps=summary.total_amps,
+    )
+
+
+# --- Standard Base Rig -------------------------------------------------------------------------
+
+
+@router.get("/venues/{venue_id}/graph", response_model=GraphRead)
+async def get_venue_base_rig(venue_id: UUID, db: AsyncSession = Depends(get_db)) -> GraphRead:
+    """The venue's Standard Base Rig: the graph of devices/edges it seeds jobs with."""
+    await _get_venue_or_404(db, venue_id)
+    return await get_base_rig(db, venue_id)
+
+
+@router.put("/venues/{venue_id}/graph", response_model=GraphRead)
+async def put_venue_base_rig(
+    venue_id: UUID, payload: schemas.VenueBaseRigWrite, db: AsyncSession = Depends(get_db)
+) -> GraphRead:
+    """Replace the venue's entire Standard Base Rig.
+
+    The editor holds the full graph locally and PUTs it back in one shot, keeping device/edge ids
+    stable so no remapping is required. This is the venue counterpart to a job's incremental graph
+    edits and intentionally skips the job-only mirroring machinery.
+    """
+    await _get_venue_or_404(db, venue_id)
+    return await replace_base_rig(db, venue_id, payload)
+
+
+@router.get("/venues/{venue_id}/patch-sheets", response_model=list[audio_schemas.PatchSheetRead])
+async def venue_patch_sheets(
+    venue_id: UUID, db: AsyncSession = Depends(get_db)
+) -> list[audio_schemas.PatchSheetRead]:
+    """The venue base rig's patch points, derived from its graph (mirrors the job's patch-sheets).
+
+    The venue has no legacy audio tables, so its patch points come from the same graph the report
+    builder reads; the report itself recomputes the rows, so only the id (the patched device) and
+    name are needed to populate the picker.
+    """
+    await _get_venue_or_404(db, venue_id)
+    from app.domains.reports import graph_context
+    from app.domains.reports.context import JobOrVenue
+
+    devices, edges, _ = await graph_context.load_graph(db, JobOrVenue.venue(venue_id))
+    sheets = graph_context.patch_sheets(devices, edges)
+    out: list[audio_schemas.PatchSheetRead] = []
+    for sheet in sheets:
+        try:
+            device_id = UUID(str(sheet["id"]))
+        except (ValueError, TypeError):
+            continue
+        out.append(
+            audio_schemas.PatchSheetRead(
+                name=sheet["name"],
+                device_id=device_id,
+                point_type=sheet.get("type", "mixer"),
+                channels=[],
+            )
+        )
+    return out

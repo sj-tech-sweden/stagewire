@@ -187,8 +187,14 @@ import { modesForType } from '@/utils/workspace';
 // free addresses when none is given (see POST /graph/fixtures/bulk).
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  jobId: { type: String, required: true },
+  // Either a job or a venue owns the library; venue takes precedence so a venue mount never
+  // silently hits the job endpoints.
+  jobId: { type: String, default: null },
+  venueId: { type: String, default: null },
 });
+const context = computed(() =>
+  props.venueId ? { kind: 'venue', id: props.venueId } : { kind: 'job', id: props.jobId },
+);
 const emit = defineEmits(['update:modelValue', 'created', 'error']);
 const { t } = useI18n();
 const graph = useGraphStore();
@@ -260,7 +266,7 @@ async function create() {
     emit('created', created);
     emit('update:modelValue', false);
     // the fixtures exist now; a failed library refresh must not look like a failed create
-    library.fetch(props.jobId).catch(() => {});
+    library.fetch(context.value).catch(() => {});
   } catch (err) {
     emit('error', err);
   } finally {

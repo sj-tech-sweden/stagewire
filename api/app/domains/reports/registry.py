@@ -11,6 +11,7 @@ from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
 from app.domains.reports import graph_context
 from app.domains.reports.cable_routing import routed_cable_paths_from_graph
+from app.domains.reports.context import JobOrVenue, load_subject
 from app.domains.reports.models import ReportTemplate
 from app.domains.reports.power_context import power_sheet_context
 from app.domains.reports.schemas import ReportField, ReportTable, ReportTypeRead
@@ -35,7 +36,7 @@ class ReportDefinition:
     default_html: str
     fields: tuple[ReportField, ...]
     tables: tuple[ReportTable, ...]
-    context_builder: Callable[[AsyncSession, UUID], Awaitable[dict]]
+    context_builder: Callable[[AsyncSession, JobOrVenue], Awaitable[dict]]
     has_stage_plot: bool = False
     name_sv: str = ""
     description_sv: str = ""
@@ -73,9 +74,13 @@ async def _load_job(db: AsyncSession, job_id: UUID) -> ProductionJob:
     return job
 
 
-async def _job_summary_context(db: AsyncSession, job_id: UUID) -> dict:
-    job = await _load_job(db, job_id)
-    return {"job": job}
+def _as_context(value: JobOrVenue | UUID) -> JobOrVenue:
+    """A context builder accepts either a ``JobOrVenue`` or a bare job id (legacy callers/tests)."""
+    return value if isinstance(value, JobOrVenue) else JobOrVenue.job(value)
+
+
+async def _job_summary_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    return {"job": await load_subject(db, _as_context(context))}
 
 
 async def _camera_specs(db: AsyncSession, devices: list, plot_elements) -> dict[str, dict]:
@@ -109,10 +114,14 @@ async def _camera_specs(db: AsyncSession, devices: list, plot_elements) -> dict[
     return await resolve_camera_specs(elements, devices, fetch)
 
 
-async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
-    await backfill_job(db, job_id)
-    job = await _load_job(db, job_id)
-    graph_devices, graph_edges, plot_elements = await graph_context.load_graph(db, job_id)
+async def _stage_plot_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    # backfill is a job-only mirror/publish step; a venue rig is authored directly, so its
+    # chains and patch points are already stored and need no recomputation.
+    if context.is_job:
+        await backfill_job(db, context.id)
+    job = await load_subject(db, context)
+    graph_devices, graph_edges, plot_elements = await graph_context.load_graph(db, context)
     audience = [(float(x), float(y)) for x, y in (job.audience_polygon or [])]
     cables = routed_cable_paths_from_graph(
         cable_plan=job.cable_plan,
@@ -132,25 +141,30 @@ async def _stage_plot_context(db: AsyncSession, job_id: UUID) -> dict:
         }
         for element in plot_elements
     ]
-    devices = await devices_native.load_devices(db, job_id)
+    devices = await devices_native.load_devices(db, **context.as_kwargs())
     return {
         "job": job,
-        "channel_lists": await audio_native.load_lists(db, job_id),
+        # channel_lists is not referenced by the stage-plot template; jobs use the native loader
+        # and venues pass an empty list (the rig's lists are already in graph_devices).
+        "channel_lists": await audio_native.load_lists(db, context.id) if context.is_job else [],
         "elements": plot_elements,
         "stage_plot_elements": rows,
         "cables": cables,
         "audience": audience,
-        "cameras": await _camera_specs(db, devices, plot_elements),
+        # Camera coverage needs Stockwire enrichment; venues have no Stockwire job, so skip it.
+        "cameras": await _camera_specs(db, devices, plot_elements) if context.is_job else {},
         "devices_by_id": {str(device.id): device for device in devices},
     }
 
 
-async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
-    job = await _load_job(db, job_id)
-    fixtures = await lighting_service.list_fixtures(db, job_id)
+async def _fixture_patch_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    job = await load_subject(db, context)
+    fixtures = await lighting_service.list_fixtures(db, **context.as_kwargs())
     flags = lighting_service.dmx_flags(fixtures)
     names = {
-        str(device.id): device.name for device in await devices_native.load_devices(db, job_id)
+        str(device.id): device.name
+        for device in await devices_native.load_devices(db, **context.as_kwargs())
     }
     rows = []
     for fixture in fixtures:
@@ -173,17 +187,21 @@ async def _fixture_patch_context(db: AsyncSession, job_id: UUID) -> dict:
     return {"job": job, "fixture_patch": rows}
 
 
-async def _channel_list_context(db: AsyncSession, job_id: UUID) -> dict:
-    await backfill_job(db, job_id)
-    job = await _load_job(db, job_id)
-    devices, edges, _ = await graph_context.load_graph(db, job_id)
+async def _channel_list_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    if context.is_job:
+        await backfill_job(db, context.id)
+    job = await load_subject(db, context)
+    devices, edges, _ = await graph_context.load_graph(db, context)
     return {"job": job, "channels": graph_context.channel_rows(devices, edges)}
 
 
-async def _patch_sheet_context(db: AsyncSession, job_id: UUID) -> dict:
-    await backfill_job(db, job_id)
-    job = await _load_job(db, job_id)
-    devices, edges, _ = await graph_context.load_graph(db, job_id)
+async def _patch_sheet_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    if context.is_job:
+        await backfill_job(db, context.id)
+    job = await load_subject(db, context)
+    devices, edges, _ = await graph_context.load_graph(db, context)
     return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges)}
 
 

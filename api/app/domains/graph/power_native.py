@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.backfill import Backfill
 from app.domains.graph.ids import power_id_of, public_id
-from app.domains.graph.models import ConnectionEdge, GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 POWER_KINDS = ("source", "distro", "breakout", "extension")
 SETTINGS = ("rating_amps", "active", "outputs", "venue_outlet_id", "venue_group_id")
@@ -46,10 +46,14 @@ def _uuid(value) -> uuid.UUID | None:
         return None
 
 
-async def host_nodes(db: AsyncSession, job_id: uuid.UUID) -> dict[uuid.UUID, GraphDevice]:
-    """Every power node of the job: public power id -> its host node."""
+async def host_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> dict[uuid.UUID, GraphDevice]:
+    """Every power node of the context: public power id -> its host node."""
     out: dict[uuid.UUID, GraphDevice] = {}
-    for node in (await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))).all():
+    for node in (
+        await db.scalars(select(GraphDevice).where(scope_filter(GraphDevice, job_id, venue_id)))
+    ).all():
         power_id = power_id_of(node)
         if power_id is not None:
             out[power_id] = node
@@ -101,34 +105,50 @@ def feed_views(power_id: uuid.UUID, host: GraphDevice) -> list[SimpleNamespace]:
     ]
 
 
-async def load_nodes(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
-    views = [node_view(pid, host) for pid, host in (await host_nodes(db, job_id)).items()]
+async def load_nodes(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
+    views = [node_view(pid, host) for pid, host in (await host_nodes(db, job_id, venue_id)).items()]
     return sorted(views, key=lambda v: (v.position, str(v.id)))
 
 
-async def load_feeds(db: AsyncSession, job_id: uuid.UUID) -> list[SimpleNamespace]:
+async def load_feeds(
+    db: AsyncSession, job_id: uuid.UUID | None = None, venue_id: uuid.UUID | None = None
+) -> list[SimpleNamespace]:
     out = []
-    for pid, host in (await host_nodes(db, job_id)).items():
+    for pid, host in (await host_nodes(db, job_id, venue_id)).items():
         out.extend(feed_views(pid, host))
     return sorted(out, key=lambda f: (f.position, str(f.id)))
 
 
 async def get_node(
-    db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
-    host = (await host_nodes(db, job_id)).get(power_id)
+    host = (await host_nodes(db, job_id, venue_id)).get(power_id)
     return node_view(power_id, host) if host is not None else None
 
 
-async def host_of(db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID) -> GraphDevice | None:
-    return (await host_nodes(db, job_id)).get(power_id)
+async def host_of(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> GraphDevice | None:
+    return (await host_nodes(db, job_id, venue_id)).get(power_id)
 
 
 async def find_by_setting(
-    db: AsyncSession, job_id: uuid.UUID, key: str, value: uuid.UUID
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    key: str,
+    value: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace | None:
     """The power node whose ``venue_outlet_id`` / ``venue_group_id`` is ``value``."""
-    for pid, host in (await host_nodes(db, job_id)).items():
+    for pid, host in (await host_nodes(db, job_id, venue_id)).items():
         if (host.attributes or {}).get(key) == str(value):
             return node_view(pid, host)
     return None
@@ -142,10 +162,20 @@ def _settings(data: dict) -> dict:
     return out
 
 
-async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> SimpleNamespace:
-    """Make a power node (the caller has validated it) and its feed edge."""
+async def create_node(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> SimpleNamespace:
+    """Make a power node (the caller has validated it) and its feed edge.
+
+    Pass ``venue_id`` (and ``job_id=None``) to create the node on a venue's Standard Base Rig;
+    the node is scoped via ``venue_id`` and the read/write helpers filter by scope so a job and a
+    venue never share rows. With ``venue_id=None`` the job path is byte-for-byte the original.
+    """
     power_id = uuid.uuid4()
-    hosts = await host_nodes(db, job_id)
+    hosts = await host_nodes(db, job_id, venue_id)
     position = len(hosts)
     common = {
         **_settings(data),
@@ -161,7 +191,9 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
             (
                 n
                 for n in (
-                    await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
+                    await db.scalars(
+                        select(GraphDevice).where(scope_filter(GraphDevice, job_id, venue_id))
+                    )
                 ).all()
                 if power_id_of(n) is None
                 and (n.legacy_ref or "").startswith("device:")
@@ -183,6 +215,7 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
         host = GraphDevice(
             id=uuid.uuid4(),
             job_id=job_id,
+            venue_id=venue_id,
             domain="power",
             kind=data.get("kind", "distro"),
             name=data.get("name") or data.get("kind", "distro"),
@@ -195,14 +228,18 @@ async def create_node(db: AsyncSession, job_id: uuid.UUID, data: dict) -> Simple
         )
         db.add(host)
     await db.flush()
-    await rebuild_feeds(db, job_id)
+    await rebuild_feeds(db, job_id, venue_id)
     return node_view(power_id, host)
 
 
 async def update_node(
-    db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID, data: dict
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace:
-    host = await host_of(db, job_id, power_id)
+    host = await host_of(db, job_id, power_id, venue_id)
     if host is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Power node not found")
     attributes = dict(host.attributes or {})
@@ -239,12 +276,17 @@ async def update_node(
             host.canvas_y_cm = data["y_cm"]
     host.attributes = attributes
     await db.flush()
-    await rebuild_feeds(db, job_id)
+    await rebuild_feeds(db, job_id, venue_id)
     return node_view(power_id, host)
 
 
-async def delete_node(db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID) -> None:
-    host = await host_of(db, job_id, power_id)
+async def delete_node(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> None:
+    host = await host_of(db, job_id, power_id, venue_id)
     if host is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Power node not found")
     if _hosted(host):  # the device stays; only its power side goes
@@ -263,37 +305,48 @@ async def delete_node(db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID) 
         host.attributes = {k: v for k, v in (host.attributes or {}).items() if k not in drop}
     else:
         for edge in (
-            await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
+            await db.scalars(
+                select(ConnectionEdge).where(scope_filter(ConnectionEdge, job_id, venue_id))
+            )
         ).all():
             if host.id in (edge.src_device_id, edge.dst_device_id):
                 await db.delete(edge)
         await db.delete(host)
     await db.flush()
-    await rebuild_feeds(db, job_id)
+    await rebuild_feeds(db, job_id, venue_id)
 
 
 async def add_feed(
-    db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID, parent_id: uuid.UUID, data: dict
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    parent_id: uuid.UUID,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
 ) -> SimpleNamespace:
-    host = await host_of(db, job_id, power_id)
+    host = await host_of(db, job_id, power_id, venue_id)
     feeds = list((host.attributes or {}).get("power_feeds", []))
     feed = {
         "feed_id": str(uuid.uuid4()),
         "parent_id": str(parent_id),
         "feed_connector": data.get("feed_connector") or "",
         "phase": data.get("phase"),
-        "position": len(await load_feeds(db, job_id)),
+        "position": len(await load_feeds(db, job_id, venue_id)),
     }
     host.attributes = {**host.attributes, "power_feeds": [*feeds, feed]}
     await db.flush()
-    await rebuild_feeds(db, job_id)
+    await rebuild_feeds(db, job_id, venue_id)
     return next(f for f in feed_views(power_id, host) if str(f.id) == feed["feed_id"])
 
 
 async def update_feed(
-    db: AsyncSession, job_id: uuid.UUID, feed_id: uuid.UUID, changes: dict
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    feed_id: uuid.UUID,
+    changes: dict,
+    venue_id: uuid.UUID | None = None,
 ) -> bool:
-    for host in (await host_nodes(db, job_id)).values():
+    for host in (await host_nodes(db, job_id, venue_id)).values():
         feeds = host.attributes.get("power_feeds", [])
         if any(f["feed_id"] == str(feed_id) for f in feeds):
             host.attributes = {
@@ -303,13 +356,18 @@ async def update_feed(
                 ],
             }
             await db.flush()
-            await rebuild_feeds(db, job_id)
+            await rebuild_feeds(db, job_id, venue_id)
             return True
     return False
 
 
-async def remove_feed(db: AsyncSession, job_id: uuid.UUID, feed_id: uuid.UUID) -> bool:
-    for host in (await host_nodes(db, job_id)).values():
+async def remove_feed(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    feed_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
+    for host in (await host_nodes(db, job_id, venue_id)).values():
         feeds = host.attributes.get("power_feeds", [])
         if any(f["feed_id"] == str(feed_id) for f in feeds):
             host.attributes = {
@@ -317,18 +375,23 @@ async def remove_feed(db: AsyncSession, job_id: uuid.UUID, feed_id: uuid.UUID) -
                 "power_feeds": [f for f in feeds if f["feed_id"] != str(feed_id)],
             }
             await db.flush()
-            await rebuild_feeds(db, job_id)
+            await rebuild_feeds(db, job_id, venue_id)
             return True
     return False
 
 
-async def rebuild_feeds(db: AsyncSession, job_id: uuid.UUID) -> None:
-    """Make the job's feed edges match the hosts' attributes, and make their ports.
+async def rebuild_feeds(
+    db: AsyncSession, job_id: uuid.UUID | None, venue_id: uuid.UUID | None = None
+) -> None:
+    """Make the context's feed edges match the hosts' attributes, and make their ports.
 
     Existing edges are kept (same id) when their parent, child and feed are unchanged, so an
     open workspace is not handed new ids on every sync; missing ones are made, stale ones removed.
+
+    ``job_id``/``venue_id`` pick the scope (exactly one is set); the edge query and every new
+    edge are scoped the same way so a venue rig never touches a job's power edges and vice versa.
     """
-    hosts = await host_nodes(db, job_id)
+    hosts = await host_nodes(db, job_id, venue_id)
     wanted: dict[tuple, dict] = {}
 
     def want(parent_id, child_id, connector, phase, marker) -> None:
@@ -366,7 +429,8 @@ async def rebuild_feeds(db: AsyncSession, job_id: uuid.UUID) -> None:
     for edge in (
         await db.scalars(
             select(ConnectionEdge).where(
-                ConnectionEdge.job_id == job_id, ConnectionEdge.signal == "power"
+                scope_filter(ConnectionEdge, job_id, venue_id),
+                ConnectionEdge.signal == "power",
             )
         )
     ).all():
@@ -393,6 +457,7 @@ async def rebuild_feeds(db: AsyncSession, job_id: uuid.UUID) -> None:
                 ConnectionEdge(
                     id=uuid.uuid4(),
                     job_id=job_id,
+                    venue_id=venue_id,
                     signal="power",
                     src_device_id=parent.id,
                     src_port=src_port,
@@ -417,7 +482,13 @@ async def rebuild_feeds(db: AsyncSession, job_id: uuid.UUID) -> None:
 # ---- edits that come in through the graph API -------------------------------------------------
 
 
-async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, data: dict) -> None:
+async def after_patch(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    node: GraphDevice,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> None:
     """A PATCH of a node that hosts a power node: run the power rules on what it changed.
 
     The PATCH is already applied to the node; the engine checks the whole tree with it (a 422 says
@@ -443,30 +514,46 @@ async def after_patch(db: AsyncSession, job_id: uuid.UUID, node: GraphDevice, da
         return
     try:
         await rigging_router.update_node(
-            job_id, power_id, rigging_schemas.PowerNodeUpdate(**changes), db
+            job_id=job_id,
+            venue_id=venue_id,
+            node_id=power_id,
+            payload=rigging_schemas.PowerNodeUpdate(**changes),
+            db=db,
         )
     except HTTPException:
         await db.rollback()
         raise
 
 
-async def check_deletable(db: AsyncSession, job_id: uuid.UUID, power_id: uuid.UUID) -> None:
+async def check_deletable(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    power_id: uuid.UUID,
+    venue_id: uuid.UUID | None = None,
+) -> None:
     """The engine's rules for removing a power node: nothing may hang from it or be plugged in."""
     from app.domains.rigging import service as rigging_service
 
-    nodes = await load_nodes(db, job_id)
-    feeds = await load_feeds(db, job_id)
+    nodes = await load_nodes(db, job_id, venue_id)
+    feeds = await load_feeds(db, job_id, venue_id)
     if any(n.parent_id == power_id for n in nodes) or any(f.parent_id == power_id for f in feeds):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Move or remove the nodes fed from this one first"
         )
     if any(
-        r.power_node_id == str(power_id) for r in await rigging_service.collect_loads(db, job_id)
+        r.power_node_id == str(power_id)
+        for r in await rigging_service.collect_loads(db, job_id, venue_id)
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Unplug the loads on this node first")
 
 
-async def edge_patch(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge, data: dict) -> bool:
+async def edge_patch(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    edge: ConnectionEdge,
+    data: dict,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
     """A PATCH of a feed edge's connector or phase is a change to the feed."""
     from app.domains.rigging import power_tree
     from app.domains.rigging import router as rigging_router
@@ -488,30 +575,39 @@ async def edge_patch(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge, 
     try:
         if marker == "primary":
             await rigging_router.update_node(
-                job_id, child, rigging_schemas.PowerNodeUpdate(**changes), db
+                job_id=job_id,
+                venue_id=venue_id,
+                node_id=child,
+                payload=rigging_schemas.PowerNodeUpdate(**changes),
+                db=db,
             )
         else:
             feed_id = uuid.UUID(marker)
-            nodes = await rigging_service.list_nodes(db, job_id)
+            nodes = await rigging_service.list_nodes(db, job_id, venue_id)
             feeds = [
                 SimpleNamespace(**{**vars(f), **changes}) if f.id == feed_id else f
-                for f in await rigging_service.list_feeds(db, job_id)
+                for f in await rigging_service.list_feeds(db, job_id, venue_id)
             ]
-            rows = await rigging_service.collect_loads(db, job_id)
+            rows = await rigging_service.collect_loads(db, job_id, venue_id)
             evaluation = power_tree.evaluate(
                 rigging_service.to_tree_nodes(nodes, feeds), rigging_service.to_tree_loads(rows)
             )
             feed = next(f for f in feeds if f.id == feed_id)
             names = [n.name for n in nodes if n.id in (feed.node_id, feed.parent_id)]
             await rigging_router._reject(rigging_router._problems(evaluation, *names))
-            await update_feed(db, job_id, feed_id, changes)
+            await update_feed(db, job_id, feed_id, changes, venue_id)
     except HTTPException:
         await db.rollback()
         raise
     return True
 
 
-async def edge_delete(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge) -> bool:
+async def edge_delete(
+    db: AsyncSession,
+    job_id: uuid.UUID | None,
+    edge: ConnectionEdge,
+    venue_id: uuid.UUID | None = None,
+) -> bool:
     """Deleting an extra feed removes it; a node's own feed cannot be cut here."""
     marker = (edge.attributes or {}).get("power_feed")
     if edge.signal != "power" or marker is None:
@@ -521,5 +617,5 @@ async def edge_delete(db: AsyncSession, job_id: uuid.UUID, edge: ConnectionEdge)
             status.HTTP_409_CONFLICT,
             "A node's own feed cannot be cut; move the node to another parent or delete it",
         )
-    await remove_feed(db, job_id, uuid.UUID(marker))
+    await remove_feed(db, job_id, uuid.UUID(marker), venue_id)
     return True

@@ -64,12 +64,12 @@
               <div class="text-weight-medium">
                 <a
                   class="device-link"
-                  @click="graph.selectedDeviceId = item.srcId"
+                  @click="select(item.srcId)"
                 >{{ item.from }}</a>
                 <span class="text-grey-6">{{ item.fromPort }}</span> →
                 <a
                   class="device-link"
-                  @click="graph.selectedDeviceId = item.dstId"
+                  @click="select(item.dstId)"
                 >{{ item.to }}</a>
                 <span class="text-grey-6">{{ item.toPort }}</span>
               </div>
@@ -122,7 +122,7 @@
               class="device-link"
               :label="slot.row.from"
               :data-testid="'patch-edit-from'"
-              @click="graph.selectedDeviceId = slot.row.srcId"
+              @click="select(slot.row.srcId)"
             >
               <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
             </q-btn>
@@ -137,7 +137,7 @@
               class="device-link"
               :label="slot.row.to"
               :data-testid="'patch-edit-to'"
-              @click="graph.selectedDeviceId = slot.row.dstId"
+              @click="select(slot.row.dstId)"
             >
               <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
             </q-btn>
@@ -206,10 +206,16 @@ import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
-import { useGraphStore } from '@/stores/graph';
 import { edgeRows } from '@/utils/workspace';
 
-const props = defineProps({ jobId: { type: String, required: true } });
+// Store-agnostic: the same patch table is used by the job workspace graph and the
+// venue Standard Base Rig graph. The parent injects its store plus the id-scoped
+// edge mutators, so this component never reaches for a specific store singleton.
+const props = defineProps({
+  graph: { type: Object, required: true },
+  updateEdge: { type: Function, required: true },
+  deleteEdge: { type: Function, required: true },
+});
 
 const TABS = [
   { name: 'audio', signal: 'audio', icon: '🎤', label: 'workspace.tabAudio' },
@@ -220,14 +226,23 @@ const TABS = [
 
 const { t } = useI18n();
 const $q = useQuasar();
-const graph = useGraphStore();
 const tab = ref('audio');
 const expanded = ref(true);
 
+// Select a device in whichever store is driving this table (job uses selectedDeviceId,
+// venue uses selectedId) without knowing which one it is. The graph is a Pinia store,
+// so assigning its state is the intended mutation (not a parent-component prop).
+function select(id) {
+  // eslint-disable-next-line vue/no-mutating-props
+  props.graph.selectedId = id;
+  // eslint-disable-next-line vue/no-mutating-props
+  props.graph.selectedDeviceId = id;
+}
+
 const rows = computed(() =>
   edgeRows(
-    graph.edges.filter((e) => e.signal === tab.value),
-    graph.devices,
+    props.graph.edges.filter((e) => e.signal === tab.value),
+    props.graph.devices,
   ),
 );
 
@@ -247,7 +262,7 @@ const columns = computed(() => [
 
 const issuesByEdge = computed(() => {
   const map = new Map();
-  graph.issues.forEach((issue) => {
+  (props.graph.issues || []).forEach((issue) => {
     if (!map.has(issue.edge_id)) map.set(issue.edge_id, []);
     map.get(issue.edge_id).push(issue);
   });
@@ -255,11 +270,11 @@ const issuesByEdge = computed(() => {
 });
 const issuesFor = (id) => issuesByEdge.value.get(id) || [];
 const issueCount = (signal) =>
-  graph.edges.filter((e) => e.signal === signal && issuesFor(e.id).length).length;
+  props.graph.edges.filter((e) => e.signal === signal && issuesFor(e.id).length).length;
 
 async function update(row, changes) {
   try {
-    await graph.updateEdge(props.jobId, row.id, changes);
+    await props.updateEdge(row.id, changes);
   } catch (err) {
     if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: apiErrorText(err) });
@@ -269,7 +284,7 @@ async function update(row, changes) {
 
 async function remove(row) {
   try {
-    await graph.deleteEdge(props.jobId, row.id);
+    await props.deleteEdge(row.id);
   } catch (err) {
     if (!isRevisionConflict(err)) {
       $q.notify({ type: 'negative', message: apiErrorText(err) });

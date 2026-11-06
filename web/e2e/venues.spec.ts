@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { ensureAdmin, login, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
@@ -8,6 +8,15 @@ test.beforeEach(async ({ request }) => {
 async function authedHeaders(page: Page) {
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   return { Authorization: `Bearer ${token}` };
+}
+
+async function createJob(request: APIRequestContext, headers: Record<string, string>) {
+  const res = await request.post(`${API_BASE}/api/v1/jobs`, {
+    headers,
+    data: { title: `E2E Venue Job ${Date.now()}` },
+  });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()).id as string;
 }
 
 test('the venues page lists saved venues', async ({ page, request }) => {
@@ -38,4 +47,89 @@ test('venue propagation status has strong contrast when editing a venue', async 
   await expect(status).toBeVisible();
   await expect(status).toHaveClass(/text-blue-grey-10/);
   await expect(status).toHaveClass(/bg-blue-grey-2/);
+});
+
+test('venue geometry shapes persist and are exposed in the venues page', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const name = `E2E Geometry Venue ${Date.now()}`;
+  const venueRes = await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: {
+      name,
+      venue_width_cm: 800,
+      venue_height_cm: 600,
+      footprint_shape: 'arena_circular',
+      stage_shape: 'thrust',
+    },
+  });
+  expect(venueRes.status()).toBe(201);
+  const venue = await venueRes.json();
+  expect(venue.footprint_shape).toBe('arena_circular');
+  expect(venue.stage_shape).toBe('thrust');
+
+  // The saved shapes are carried onto a job when the venue is assigned.
+  const jobId = await createJob(request, headers);
+  const assign = await request.put(`${API_BASE}/api/v1/jobs/${jobId}/venue`, {
+    headers,
+    data: { venue_id: venue.id },
+  });
+  expect(assign.ok()).toBeTruthy();
+  const assigned = await assign.json();
+  expect(assigned.venue_footprint_shape).toBe('arena_circular');
+  expect(assigned.venue_stage_shape).toBe('thrust');
+
+  // The venues page exposes the two shape selectors when editing.
+  await page.goto('/venues');
+  await page.getByText(name, { exact: true }).click();
+  await expect(page.getByLabel('Footprint shape')).toBeVisible();
+  await expect(page.getByLabel('Stage shape')).toBeVisible();
+});
+
+test('venue directory supports name search and exposes shape filters', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const arena = `E2E Search Arena ${Date.now()}`;
+  const hall = `E2E Search Hall ${Date.now()}`;
+  await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: {
+      name: arena,
+      venue_width_cm: 800,
+      venue_height_cm: 600,
+      footprint_shape: 'arena_circular',
+      stage_shape: 'thrust',
+    },
+  });
+  await request.post(`${API_BASE}/api/v1/venues`, {
+    headers,
+    data: {
+      name: hall,
+      venue_width_cm: 800,
+      venue_height_cm: 600,
+      footprint_shape: 'rectangular',
+      stage_shape: 'proscenium',
+    },
+  });
+
+  await page.goto('/venues');
+  // The directory page exposes the two shape filters. Assert on their exact visible labels
+  // ("Footprint" and "Stage"): the venue-edit form uses "Footprint shape"/"Stage shape", and a
+  // bare substring would also match the "Draw stage" button, so match exactly.
+  await expect(page.getByText('Footprint', { exact: true })).toBeVisible();
+  await expect(page.getByText('Stage', { exact: true })).toBeVisible();
+
+  const search = page.getByPlaceholder('Search venues');
+  await search.fill(arena);
+  await expect(page.getByText(arena, { exact: true })).toBeVisible();
+  await expect(page.getByText(hall, { exact: true })).toHaveCount(0);
+
+  await search.fill('');
+  await expect(page.getByText(hall, { exact: true })).toBeVisible();
 });

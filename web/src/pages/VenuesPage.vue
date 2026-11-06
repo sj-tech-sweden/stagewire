@@ -22,61 +22,117 @@
       </q-card-section>
     </q-card>
 
-    <q-list
-      v-else
-      bordered
-      separator
-      class="rounded-borders"
-    >
-      <q-item
-        v-for="v in venues.venues"
-        :key="v.id"
-        v-ripple
-        clickable
-        @click="openEdit(v)"
+    <template v-else>
+      <div class="row q-gutter-sm q-mb-md items-center">
+        <q-input
+          v-model="venueSearch"
+          :placeholder="t('venues.searchPlaceholder')"
+          dense
+          outlined
+          clearable
+          class="col"
+        >
+          <template #append>
+            <q-icon name="search" />
+          </template>
+        </q-input>
+        <q-select
+          v-model="venueFootprintFilter"
+          :options="footprintFilterOptions"
+          emit-value
+          map-options
+          clearable
+          dense
+          outlined
+          :label="t('venues.filterFootprint')"
+          style="min-width: 180px"
+        />
+        <q-select
+          v-model="venueStageFilter"
+          :options="stageFilterOptions"
+          emit-value
+          map-options
+          clearable
+          dense
+          outlined
+          :label="t('venues.filterStage')"
+          style="min-width: 180px"
+        />
+      </div>
+      <q-list
+        v-if="filteredVenues.length"
+        bordered
+        separator
+        class="rounded-borders"
       >
-        <q-item-section avatar>
-          <q-avatar
-            rounded
-            size="48px"
-          >
-            <img
-              v-if="v.background_image_url"
-              :src="fullImageUrl(v.background_image_url)"
-              alt=""
+        <q-item
+          v-for="v in filteredVenues"
+          :key="v.id"
+          v-ripple
+          clickable
+          @click="openEdit(v)"
+        >
+          <q-item-section avatar>
+            <q-avatar
+              rounded
+              size="48px"
             >
-            <q-icon
-              v-else
-              name="meeting_room"
-            />
-          </q-avatar>
-        </q-item-section>
-        <q-item-section>
-          <q-item-label>{{ v.name }}</q-item-label>
-          <q-item-label caption>
-            {{ t('venues.sizeSummary', { w: v.venue_width_cm, h: v.venue_height_cm }) }}
-            · {{ t('venues.stageSummary', { w: v.stage_width_cm, h: v.stage_height_cm }) }}
-          </q-item-label>
-        </q-item-section>
-        <q-item-section side>
-          <q-btn
-            flat
-            round
-            dense
-            icon="delete"
-            color="negative"
-            :aria-label="t('common.delete')"
-            @click.stop="confirmDelete(v)"
-          />
-        </q-item-section>
-      </q-item>
-    </q-list>
+              <img
+                v-if="v.background_image_url"
+                :src="fullImageUrl(v.background_image_url)"
+                alt=""
+              >
+              <q-icon
+                v-else
+                name="meeting_room"
+              />
+            </q-avatar>
+          </q-item-section>
+          <q-item-section>
+            <q-item-label>{{ v.name }}</q-item-label>
+            <q-item-label caption>
+              {{ t('venues.sizeSummary', { w: v.venue_width_cm, h: v.venue_height_cm }) }}
+              · {{ t('venues.stageSummary', { w: v.stage_width_cm, h: v.stage_height_cm }) }}
+            </q-item-label>
+          </q-item-section>
+          <q-item-section side>
+            <div class="row items-center no-wrap">
+              <q-btn
+                flat
+                round
+                dense
+                icon="architecture"
+                color="primary"
+                :aria-label="t('venues.openBaseRig')"
+                @click.stop="openBaseRig(v)"
+              />
+              <q-btn
+                flat
+                round
+                dense
+                icon="delete"
+                color="negative"
+                :aria-label="t('common.delete')"
+                @click.stop="confirmDelete(v)"
+              />
+            </div>
+          </q-item-section>
+        </q-item>
+      </q-list>
+      <div
+        v-else
+        class="text-grey-7 q-pa-md"
+      >
+        {{ t('venues.noResults') }}
+      </div>
+    </template>
 
     <q-dialog
       v-model="dialog"
       persistent
+      :maximized="$q.screen.lt.sm"
     >
-      <q-card style="min-width: 420px; max-width: 95vw">
+      <q-card style="width: 95vw; max-width: 1320px">
         <q-card-section class="text-h6">
           {{ editingId ? t('venues.editVenue') : t('venues.newVenue') }}
         </q-card-section>
@@ -87,25 +143,102 @@
             :label="t('venues.fieldName')"
             :rules="[(val) => !!val || t('common.required')]"
           />
+
+          <div class="row q-gutter-xs q-mb-xs items-center wrap">
+            <q-btn
+              dense
+              no-caps
+              :color="drawFootprint ? 'primary' : 'grey-7'"
+              :flat="!drawFootprint"
+              icon="draw"
+              :label="t('venues.geometry.drawFootprint')"
+              @click="onDrawFootprint"
+            />
+            <q-btn
+              dense
+              no-caps
+              :color="drawStage ? 'primary' : 'grey-7'"
+              :flat="!drawStage"
+              icon="draw"
+              :label="t('venues.geometry.drawStage')"
+              @click="onDrawStage"
+            />
+            <q-btn
+              dense
+              no-caps
+              flat
+              color="grey-7"
+              icon="delete_sweep"
+              :label="t('venues.geometry.clear')"
+              :disable="form.footprint_shape !== 'custom_polygon' && form.stage_shape !== 'custom_polygon'"
+              @click="clearAll"
+            />
+          </div>
+
+          <VenueGeometryCanvas
+            :venue-width="form.venue_width_cm"
+            :venue-height="form.venue_height_cm"
+            :stage-x="form.stage_x_cm"
+            :stage-y="form.stage_y_cm"
+            :stage-w="form.stage_width_cm"
+            :stage-h="form.stage_height_cm"
+            :footprint-shape="form.footprint_shape"
+            :footprint-polygon="form.footprint_polygon"
+            :stage-shape="form.stage_shape"
+            :stage-polygon="form.stage_polygon"
+            :draw-footprint="drawFootprint"
+            :draw-stage="drawStage"
+            @change="onGeometryChange"
+          />
+
           <div class="text-subtitle2">
-            {{ t('venues.venueSize') }}
+            {{ t('venues.geometrySection') }}
           </div>
           <div class="row q-gutter-sm">
-            <q-input
-              v-model.number="form.venue_width_cm"
-              type="number"
-              :label="t('venues.venueWidth')"
+            <q-select
+              v-model="form.footprint_shape"
+              :options="footprintShapeOptions"
+              emit-value
+              map-options
+              :label="t('venues.footprintShape')"
               dense
               class="col"
+              @update:model-value="onFootprintShapeChange"
             />
-            <q-input
-              v-model.number="form.venue_height_cm"
-              type="number"
-              :label="t('venues.venueHeight')"
+            <q-select
+              v-model="form.stage_shape"
+              :options="stageShapeOptions"
+              emit-value
+              map-options
+              :label="t('venues.stageShape')"
               dense
               class="col"
+              @update:model-value="onStageShapeChange"
             />
           </div>
+
+          <template v-if="form.footprint_shape !== 'custom_polygon'">
+            <div class="text-subtitle2">
+              {{ t('venues.venueSize') }}
+            </div>
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="form.venue_width_cm"
+                type="number"
+                :label="t('venues.venueWidth')"
+                dense
+                class="col"
+              />
+              <q-input
+                v-model.number="form.venue_height_cm"
+                type="number"
+                :label="t('venues.venueHeight')"
+                dense
+                class="col"
+              />
+            </div>
+          </template>
+
           <div class="text-subtitle2">
             {{ t('venues.stageSection') }}
           </div>
@@ -125,22 +258,24 @@
               class="col"
             />
           </div>
-          <div class="row q-gutter-sm">
-            <q-input
-              v-model.number="form.stage_width_cm"
-              type="number"
-              :label="t('venues.stageWidth')"
-              dense
-              class="col"
-            />
-            <q-input
-              v-model.number="form.stage_height_cm"
-              type="number"
-              :label="t('venues.stageHeight')"
-              dense
-              class="col"
-            />
-          </div>
+          <template v-if="form.stage_shape !== 'custom_polygon'">
+            <div class="row q-gutter-sm">
+              <q-input
+                v-model.number="form.stage_width_cm"
+                type="number"
+                :label="t('venues.stageWidth')"
+                dense
+                class="col"
+              />
+              <q-input
+                v-model.number="form.stage_height_cm"
+                type="number"
+                :label="t('venues.stageHeight')"
+                dense
+                class="col"
+              />
+            </div>
+          </template>
 
           <div>
             <q-file
@@ -250,13 +385,21 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
+import { useRouter } from 'vue-router';
 import { api } from '@/boot/api';
 import { getApiBaseUrl } from '@/utils/runtime-config';
+import { polygonBounds } from '@/utils/plotFrame';
 import { useVenuesStore } from '@/stores/venues';
+import VenueGeometryCanvas from '@/components/VenueGeometryCanvas.vue';
 
 const { t } = useI18n({ useScope: 'global' });
 const $q = useQuasar();
+const router = useRouter();
 const venues = useVenuesStore();
+
+function openBaseRig(v) {
+  router.push({ path: `/venues/${v.id}/base-rig` });
+}
 
 const dialog = ref(false);
 const editingId = ref(null);
@@ -264,6 +407,11 @@ const editingVenue = ref(null);
 const saving = ref(false);
 const uploading = ref(false);
 const propagating = ref(false);
+// Draw mode is owned by the parent so activating "Draw" can also flip the matching
+// shape to custom_polygon. Without that flip, the clicked points are appended to an
+// array that is never rendered, so the canvas would appear to do nothing.
+const drawFootprint = ref(false);
+const drawStage = ref(false);
 
 const EMPTY = {
   name: '',
@@ -274,9 +422,54 @@ const EMPTY = {
   stage_y_cm: 0,
   stage_width_cm: 0,
   stage_height_cm: 0,
+  footprint_shape: 'rectangular',
+  stage_shape: 'proscenium',
+  footprint_polygon: [],
+  stage_polygon: [],
   background_image_url: '',
 };
 const form = reactive({ ...EMPTY });
+
+const footprintShapeOptions = [
+  { value: 'rectangular', label: t('venues.footprintShapes.rectangular') },
+  { value: 'arena_circular', label: t('venues.footprintShapes.arena_circular') },
+  { value: 'amphitheater', label: t('venues.footprintShapes.amphitheater') },
+  { value: 'custom_polygon', label: t('venues.footprintShapes.custom_polygon') },
+];
+const stageShapeOptions = [
+  { value: 'proscenium', label: t('venues.stageShapes.proscenium') },
+  { value: 'thrust', label: t('venues.stageShapes.thrust') },
+  { value: 'arena_center', label: t('venues.stageShapes.arena_center') },
+  { value: 'runway', label: t('venues.stageShapes.runway') },
+  { value: 'custom_polygon', label: t('venues.stageShapes.custom_polygon') },
+];
+
+const venueSearch = ref('');
+const venueFootprintFilter = ref(null);
+const venueStageFilter = ref(null);
+
+const footprintFilterOptions = [
+  { value: 'rectangular', label: t('venues.footprintShapes.rectangular') },
+  { value: 'arena_circular', label: t('venues.footprintShapes.arena_circular') },
+  { value: 'amphitheater', label: t('venues.footprintShapes.amphitheater') },
+  { value: 'custom_polygon', label: t('venues.footprintShapes.custom_polygon') },
+];
+const stageFilterOptions = [
+  { value: 'proscenium', label: t('venues.stageShapes.proscenium') },
+  { value: 'thrust', label: t('venues.stageShapes.thrust') },
+  { value: 'arena_center', label: t('venues.stageShapes.arena_center') },
+  { value: 'runway', label: t('venues.stageShapes.runway') },
+];
+
+const filteredVenues = computed(() => {
+  const term = venueSearch.value.trim().toLowerCase();
+  return venues.venues.filter(
+    (v) =>
+      (!venueFootprintFilter.value || v.footprint_shape === venueFootprintFilter.value) &&
+      (!venueStageFilter.value || v.stage_shape === venueStageFilter.value) &&
+      (!term || v.name.toLowerCase().includes(term)),
+  );
+});
 
 const lastPropagatedText = computed(() => {
   const at = editingVenue.value?.propagated_at;
@@ -309,9 +502,88 @@ function openEdit(v) {
     stage_y_cm: v.stage_y_cm,
     stage_width_cm: v.stage_width_cm,
     stage_height_cm: v.stage_height_cm,
+    footprint_shape: v.footprint_shape || 'rectangular',
+    stage_shape: v.stage_shape || 'proscenium',
+    footprint_polygon: v.footprint_polygon || [],
+    stage_polygon: v.stage_polygon || [],
     background_image_url: v.background_image_url || '',
   });
   dialog.value = true;
+}
+
+// The canvas emits a partial of the geometry fields; merge it back into the form
+// so the numeric inputs and the drawing always agree.
+function onGeometryChange(partial) {
+  Object.assign(form, partial);
+}
+
+// When a shape becomes a drawn polygon, seed a default rectangle so there is
+// something to edit. When it goes back to a preset, keep the drawn size as the
+// rectangular footprint/stage and drop the now-unused polygon.
+function defaultRectPolygon(w, h) {
+  const cw = Math.max(1, w);
+  const ch = Math.max(1, h);
+  return [
+    [0, 0],
+    [cw, 0],
+    [cw, ch],
+    [0, ch],
+  ];
+}
+
+function onFootprintShapeChange(val) {
+  if (val === 'custom_polygon') {
+    if (!form.footprint_polygon || form.footprint_polygon.length < 3) {
+      const w = form.venue_width_cm > 0 ? form.venue_width_cm : 1000;
+      const h = form.venue_height_cm > 0 ? form.venue_height_cm : 800;
+      form.footprint_polygon = defaultRectPolygon(w, h);
+    }
+  } else if (form.footprint_polygon && form.footprint_polygon.length >= 3) {
+    const b = polygonBounds(form.footprint_polygon);
+    form.venue_width_cm = Math.round(b.w);
+    form.venue_height_cm = Math.round(b.h);
+    form.footprint_polygon = [];
+  }
+  form.footprint_shape = val;
+}
+
+function onStageShapeChange(val) {
+  if (val === 'custom_polygon') {
+    if (!form.stage_polygon || form.stage_polygon.length < 3) {
+      const w = form.stage_width_cm > 0 ? form.stage_width_cm : 300;
+      const h = form.stage_height_cm > 0 ? form.stage_height_cm : 200;
+      form.stage_polygon = defaultRectPolygon(w, h);
+    }
+  } else if (form.stage_polygon && form.stage_polygon.length >= 3) {
+    const b = polygonBounds(form.stage_polygon);
+    form.stage_width_cm = Math.round(b.w);
+    form.stage_height_cm = Math.round(b.h);
+    form.stage_polygon = [];
+  }
+  form.stage_shape = val;
+}
+
+// Entering draw mode flips the matching shape to custom_polygon (and seeds a default
+// rectangle the first time) so the freshly drawn outline is actually rendered. The two
+// draw modes are mutually exclusive.
+function onDrawFootprint() {
+  drawFootprint.value = !drawFootprint.value;
+  if (drawFootprint.value) drawStage.value = false;
+  if (form.footprint_shape !== 'custom_polygon') onFootprintShapeChange('custom_polygon');
+}
+
+function onDrawStage() {
+  drawStage.value = !drawStage.value;
+  if (drawStage.value) drawFootprint.value = false;
+  if (form.stage_shape !== 'custom_polygon') onStageShapeChange('custom_polygon');
+}
+
+// Clears any drawn polygons and returns both shapes to their rectangular presets.
+function clearAll() {
+  drawFootprint.value = false;
+  drawStage.value = false;
+  if (form.footprint_shape === 'custom_polygon') onFootprintShapeChange('rectangular');
+  if (form.stage_shape === 'custom_polygon') onStageShapeChange('rectangular');
 }
 
 function payload() {
@@ -324,6 +596,10 @@ function payload() {
     stage_y_cm: Number(form.stage_y_cm) || 0,
     stage_width_cm: Number(form.stage_width_cm) || 0,
     stage_height_cm: Number(form.stage_height_cm) || 0,
+    footprint_shape: form.footprint_shape || 'rectangular',
+    stage_shape: form.stage_shape || 'proscenium',
+    footprint_polygon: form.footprint_shape === 'custom_polygon' ? form.footprint_polygon || [] : [],
+    stage_polygon: form.stage_shape === 'custom_polygon' ? form.stage_polygon || [] : [],
   };
 }
 
