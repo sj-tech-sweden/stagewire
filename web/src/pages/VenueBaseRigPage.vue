@@ -348,15 +348,10 @@
           :delete-edge="(id) => graph.deleteEdge(venueId, id)"
         />
 
-        <PowerPanel
-          class="q-mt-md"
-          :venue-id="venueId"
-          @changed="reloadOutlets"
-        />
-
         <RiggingEditor
           class="q-mt-md"
           :venue-id="venueId"
+          @changed="reloadOutlets"
         />
 
         <FixtureLibraryDialog
@@ -391,11 +386,8 @@ import { useGraphStore } from '@/stores/graph';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
-import PowerPanel from '@/components/PowerPanel.vue';
 import RiggingEditor from '@/components/RiggingEditor.vue';
 import FixtureLibraryDialog from '@/components/FixtureLibraryDialog.vue';
-
-const { t } = useI18n();
 const $q = useQuasar();
 const route = useRoute();
 const router = useRouter();

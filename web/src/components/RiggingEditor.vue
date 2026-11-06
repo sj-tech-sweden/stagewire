@@ -2,7 +2,8 @@
   <div data-testid="rigging-editor">
     <PowerPanel
       :job-id="jobId"
-      @changed="loadOutlets"
+      :venue-id="venueId"
+      @changed="onPowerChanged"
     />
     <div
       v-if="summary?.errors?.length"
@@ -811,6 +812,14 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const scopeId = computed(() => props.venueId || props.jobId);
+// The shared power panel fires `changed` when the supply tree is edited. On the job page it is the
+// only power panel; on the venue page the parent also needs that event to refresh the canvas outlet
+// layer, so forward it alongside this editor's own outlet reload.
+const emit = defineEmits(['changed']);
+function onPowerChanged() {
+  loadOutlets();
+  emit('changed');
+}
 const summary = ref(null);
 const catalog = ref([]);
 const createOpen = ref(false);
