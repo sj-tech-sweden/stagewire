@@ -593,3 +593,118 @@ async def test_venue_cable_plan_round_trip(auth_headers):
         )
         assert cleared.status_code == 200, cleared.text
         assert cleared.json()["cable_plan"] == {}
+
+
+async def test_propagate_pushes_base_rig_into_jobs(auth_headers):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        venue = (
+            await client.post(
+                f"{BASE}/venues", json={**VENUE, "name": "Rig Prop Venue"}, headers=auth_headers
+            )
+        ).json()
+        vid = venue["id"]
+
+        # A job assigned while the venue rig is still empty starts with no devices.
+        job = (
+            await client.post(f"{BASE}/jobs", json={"title": "Rig Job"}, headers=auth_headers)
+        ).json()
+        await client.put(
+            f"{BASE}/jobs/{job['id']}/venue", json={"venue_id": vid}, headers=auth_headers
+        )
+        empty = (await client.get(f"{BASE}/jobs/{job['id']}/graph", headers=auth_headers)).json()
+        assert empty["devices"] == []
+
+        # Seed two venue rig devices plus an edge between them.
+        dev_a, dev_b = uuid4(), uuid4()
+        rig = {
+            "devices": [
+                {
+                    "id": str(dev_a),
+                    "domain": "audio",
+                    "kind": "speaker",
+                    "name": "House Speaker",
+                    "attributes": {},
+                    "ports": [],
+                },
+                {
+                    "id": str(dev_b),
+                    "domain": "audio",
+                    "kind": "console",
+                    "name": "House Console",
+                    "attributes": {},
+                    "ports": [],
+                },
+            ],
+            "edges": [
+                {
+                    "id": str(uuid4()),
+                    "signal": "audio",
+                    "src_device_id": str(dev_a),
+                    "src_port": "out",
+                    "dst_device_id": str(dev_b),
+                    "dst_port": "in",
+                }
+            ],
+        }
+        put = await client.put(f"{BASE}/venues/{vid}/graph", json=rig, headers=auth_headers)
+        assert put.status_code == 200, put.text
+
+        # Propagate: the (still empty) job receives the full rig.
+        prop = await client.post(
+            f"{BASE}/venues/{vid}/propagate", json={"scope": "all"}, headers=auth_headers
+        )
+        assert prop.status_code == 200, prop.text
+        assert prop.json()["updated"] == 1
+        job_graph = (
+            await client.get(f"{BASE}/jobs/{job['id']}/graph", headers=auth_headers)
+        ).json()
+        assert {d["name"] for d in job_graph["devices"]} == {"House Speaker", "House Console"}
+        assert len(job_graph["edges"]) == 1
+
+        # Add a third venue device and re-propagate: the job gains it but keeps the first two
+        # (additive — matching devices are skipped so there are no duplicates, and existing ones are
+        # never overwritten).
+        dev_c = uuid4()
+        await client.put(
+            f"{BASE}/venues/{vid}/graph",
+            json={
+                "devices": rig["devices"]
+                + [
+                    {
+                        "id": str(dev_c),
+                        "domain": "lighting",
+                        "kind": "dimmer",
+                        "name": "House Dimmer",
+                        "attributes": {},
+                        "ports": [],
+                    }
+                ],
+                "edges": rig["edges"],
+            },
+            headers=auth_headers,
+        )
+        prop2 = await client.post(
+            f"{BASE}/venues/{vid}/propagate", json={"scope": "all"}, headers=auth_headers
+        )
+        assert prop2.status_code == 200, prop2.text
+        job_graph2 = (
+            await client.get(f"{BASE}/jobs/{job['id']}/graph", headers=auth_headers)
+        ).json()
+        names = {d["name"] for d in job_graph2["devices"]}
+        assert names == {"House Speaker", "House Console", "House Dimmer"}
+        assert sum(1 for d in job_graph2["devices"] if d["name"] == "House Speaker") == 1
+
+        # Editing a job device and re-propagating must NOT overwrite it (the rename survives).
+        speaker = next(d for d in job_graph2["devices"] if d["name"] == "House Speaker")
+        renamed = await client.patch(
+            f"{BASE}/jobs/{job['id']}/graph/devices/{speaker['id']}",
+            json={"name": "Renamed Speaker", "expected_revision": speaker["revision"]},
+            headers=auth_headers,
+        )
+        assert renamed.status_code == 200, renamed.text
+        await client.post(
+            f"{BASE}/venues/{vid}/propagate", json={"scope": "all"}, headers=auth_headers
+        )
+        final = (await client.get(f"{BASE}/jobs/{job['id']}/graph", headers=auth_headers)).json()
+        assert any(d["name"] == "Renamed Speaker" for d in final["devices"])

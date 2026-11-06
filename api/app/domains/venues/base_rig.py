@@ -119,26 +119,61 @@ def _remap_id(value: object, id_map: dict[UUID, UUID]) -> object:
 
 
 async def clone_base_rig_to_job(db: AsyncSession, venue_id: UUID, job_id: UUID) -> int:
-    """Copy the venue's rig into ``job_id``. Returns the number of devices cloned.
+    """Additively copy the venue's rig into ``job_id``. Returns the number of devices added.
 
     Each device/edge gets a fresh id; ``venue_id`` is cleared so the clone reads as a normal job
     graph. Ids referenced inside edge endpoints and device attributes (e.g. a rigging point or
     power node the rig links to) are remapped to their cloned counterparts.
+
+    The copy is **additive** so it can be re-run (e.g. on every "Update jobs" propagate) without
+    clobbering a job's hand-edited graph:
+    * a venue device already present in the job (matched by ``(domain, kind, name)``) is left
+      untouched and its id is reused, so connecting edges stay correct;
+    * only venue devices that are not already there are cloned in;
+    * an edge is added only when both endpoints exist in the job afterwards and an equivalent edge
+      (signal + endpoints + ports) is not already present.
+
+    Matching by name (not a stored provenance id) keeps this schema-free; the only consequence is
+    that renaming a job device after a first push makes it no longer "the same", so a later push
+    would re-add the original-named venue device as a duplicate rather than skip it. That is a
+    benign extra device, never an overwrite of the user's edited one.
     """
-    devices = (
+    venue_devices = (
         await db.scalars(
             select(GraphDevice).where(
                 GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None)
             )
         )
     ).all()
-    if not devices:
+    if not venue_devices:
         return 0
 
+    job_devices = (
+        await db.scalars(
+            select(GraphDevice).where(GraphDevice.job_id == job_id, GraphDevice.venue_id.is_(None))
+        )
+    ).all()
+
+    def match_key(d: GraphDevice) -> tuple:
+        return (d.domain, d.kind, d.name)
+
+    # Map an existing job device id per matched key; first wins so a single venue device never
+    # maps onto two job devices.
+    job_by_key: dict[tuple, UUID] = {}
+    for jd in job_devices:
+        job_by_key.setdefault(match_key(jd), jd.id)
+
     id_map: dict[UUID, UUID] = {}
-    for device in devices:
+    added_ids: list[UUID] = []
+    for device in venue_devices:
+        key = match_key(device)
+        if key in job_by_key:
+            # Already present in the job: reuse its id so edges connect to the existing node.
+            id_map[device.id] = job_by_key[key]
+            continue
         new_id = uuid4()
         id_map[device.id] = new_id
+        added_ids.append(new_id)
         db.add(
             GraphDevice(
                 id=new_id,
@@ -168,23 +203,45 @@ async def clone_base_rig_to_job(db: AsyncSession, venue_id: UUID, job_id: UUID) 
             )
         )
 
-    edges = (
+    # Only add edges whose endpoints exist in the job (pre-existing or just added) and that are not
+    # already present, so we never duplicate an edge or dangle one onto a skipped device.
+    valid_ids = set(job_by_key.values()) | set(added_ids)
+    venue_edges = (
         await db.scalars(
             select(ConnectionEdge).where(
                 ConnectionEdge.venue_id == venue_id, ConnectionEdge.job_id.is_(None)
             )
         )
     ).all()
-    for edge in edges:
+    job_edges = (
+        await db.scalars(
+            select(ConnectionEdge).where(
+                ConnectionEdge.job_id == job_id, ConnectionEdge.venue_id.is_(None)
+            )
+        )
+    ).all()
+    existing_edge_keys = {
+        (e.signal, e.src_device_id, e.src_port, e.dst_device_id, e.dst_port) for e in job_edges
+    }
+    for edge in venue_edges:
+        new_src = id_map.get(edge.src_device_id)
+        new_dst = id_map.get(edge.dst_device_id)
+        if new_src is None or new_dst is None:
+            continue
+        if new_src not in valid_ids or new_dst not in valid_ids:
+            continue
+        ekey = (edge.signal, new_src, edge.src_port, new_dst, edge.dst_port)
+        if ekey in existing_edge_keys:
+            continue
         db.add(
             ConnectionEdge(
                 id=uuid4(),
                 venue_id=None,
                 job_id=job_id,
                 signal=edge.signal,
-                src_device_id=id_map[edge.src_device_id],
+                src_device_id=new_src,
                 src_port=edge.src_port,
-                dst_device_id=id_map[edge.dst_device_id],
+                dst_device_id=new_dst,
                 dst_port=edge.dst_port,
                 channels=edge.channels,
                 phase=edge.phase,
@@ -195,5 +252,6 @@ async def clone_base_rig_to_job(db: AsyncSession, venue_id: UUID, job_id: UUID) 
                 revision=1,
             )
         )
+
     await db.commit()
-    return len(devices)
+    return len(added_ids)

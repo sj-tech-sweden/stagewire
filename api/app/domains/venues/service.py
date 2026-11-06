@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.audio.models import ProductionJob
 from app.domains.graph.models import GraphDevice
+from app.domains.venues.base_rig import clone_base_rig_to_job
 from app.domains.venues.models import Venue
 
 SNAPSHOT_FIELDS = (
@@ -82,8 +83,6 @@ async def assign_venue(db: AsyncSession, job: ProductionJob, venue: Venue | None
         # A job that already has a graph was either assigned before or edited by hand, so we leave
         # it untouched. Otherwise the venue's Standard Base Rig seeds the job's graph.
         if not await _job_has_graph(db, job.id):
-            from app.domains.venues.base_rig import clone_base_rig_to_job
-
             await clone_base_rig_to_job(db, venue.id, job.id)
     await db.commit()
     await db.refresh(job)
@@ -112,6 +111,9 @@ async def propagate_venue(db: AsyncSession, venue: Venue, scope: str) -> list[Pr
     jobs = list(result.scalars().all())
     for job in jobs:
         _apply_venue_snapshot(job, venue)
+        # Push the Standard Base Rig additively: an empty job gets the full rig, while a job that
+        # already has gear keeps its layout and only gains new venue items (never overwritten).
+        await clone_base_rig_to_job(db, venue.id, job.id)
     venue.propagated_at = datetime.now()
     await db.commit()
     for job in jobs:
