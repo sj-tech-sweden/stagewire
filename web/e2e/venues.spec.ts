@@ -119,12 +119,13 @@ test('venue directory supports name search and exposes shape filters', async ({
   });
 
   await page.goto('/venues');
-  // Use the full label text: a bare "Stage" also matches the user-menu button
-  // (the account email contains "stagewire"), and "Footprint" is ambiguous too.
-  await expect(page.getByLabel('Footprint shape')).toBeVisible();
-  await expect(page.getByLabel('Stage shape')).toBeVisible();
+  // The directory page exposes the two shape filters. Assert on their exact visible labels
+  // ("Footprint" and "Stage"): the venue-edit form uses "Footprint shape"/"Stage shape", and a
+  // bare substring would also match the "Draw stage" button, so match exactly.
+  await expect(page.getByText('Footprint', { exact: true })).toBeVisible();
+  await expect(page.getByText('Stage', { exact: true })).toBeVisible();
 
-  const search = page.getByPlaceholder('Search venues by name');
+  const search = page.getByPlaceholder('Search venues');
   await search.fill(arena);
   await expect(page.getByText(arena, { exact: true })).toBeVisible();
   await expect(page.getByText(hall, { exact: true })).toHaveCount(0);

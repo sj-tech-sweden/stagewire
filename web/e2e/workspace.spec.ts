@@ -1197,30 +1197,26 @@ test('venue power panel builds a tree of panels, circuits, generators and tempor
   await page.getByTestId('add-venue-group').click();
   await expect.poll(async () => (await groups()).filter((g) => g.kind === 'panel').length).toBe(1);
   const panel = (await groups()).find((g) => g.kind === 'panel')!;
-  const incomingName = (await groups()).find((g) => g.kind === 'incoming')!.name;
+  const incoming = (await groups()).find((g) => g.kind === 'incoming')!;
+  const incomingName = incoming.name;
+
+  // The panel row carries its name in a q-input whose `value` attribute is the name (not visible
+  // text), so scope the row by that attribute via a CSS :has() rather than a text filter that misses
+  // input values. The parent select is a Quasar q-select whose displayed value lives in the
+  // focus-target input's `value` attribute, so assert on that (toHaveValue) instead of innerText(),
+  // which is empty for a matched option.
+  const panelRow = page.locator(
+    `[data-testid="venue-group"]:has(input[data-testid="venue-group-name"][value="${panel.name}"])`,
+  );
+  const parentSel = panelRow.getByTestId('venue-group-parent');
 
   // The panel's parent select shows the supply root by its name, never a raw id (the parent field
   // used to fall back to displaying the UUID when the stored value had no matching option).
-  await expect
-    .poll(async () =>
-      (
-        await page
-          .getByTestId('venue-group')
-          .filter({ hasText: panel.name })
-          .getByTestId('venue-group-parent')
-          .innerText()
-      ).trim(),
-    )
-    .not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-  await expect(
-    page.getByTestId('venue-group').filter({ hasText: panel.name }).getByTestId('venue-group-parent'),
-  ).toContainText(incomingName);
+  await expect(parentSel).not.toHaveValue(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  await expect(parentSel).toHaveValue(incomingName);
 
   // A fused circuit is added inside the panel (not as a standalone node).
-  await page.getByTestId('venue-group')
-    .filter({ hasText: panel.name })
-    .getByTestId('add-venue-circuit')
-    .click();
+  await panelRow.getByTestId('add-venue-circuit').click();
   await expect
     .poll(async () => {
       const list = await groups();
