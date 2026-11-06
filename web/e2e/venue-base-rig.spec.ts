@@ -34,8 +34,12 @@ test('venue base rig can be edited on the canvas and persists', async ({ page, r
   await page.goto(`/venues/${venue.id}/base-rig`);
   await expect(page.getByText('No devices yet')).toBeVisible();
 
-  // Seed one device through the editor and save it.
-  await page.getByRole('button', { name: 'Audio' }).click();
+  // Seed one device through the editor and save it. The venue rig reuses the job-style
+  // "Add gear" dropdown; pick an audio element to drop a device onto the canvas.
+  await page.getByRole('button', { name: 'Add gear' }).click();
+  await page.getByTestId('add-gear-speaker_main').click();
+  // The new device is unselected until clicked on the canvas, which opens its inspector.
+  await page.getByText('Main speaker').first().click();
   const nameInput = page.getByLabel('Name');
   await expect(nameInput).toBeVisible();
   await nameInput.fill('House L/R');
@@ -176,7 +180,8 @@ test('venue channel list reuses the editor and imports a Wireless Workbench file
   // The same editor the jobs use drives the venue rig; the Wireless Workbench import lands the
   // coordinated frequency onto the venue's wireless channel.
   await page.goto(`/venues/${venue.id}/base-rig`);
-  await page.getByRole('button', { name: 'Channel lists' }).click();
+  // The channel-list editor is reached via the "Sound" mode tab (the same editor the jobs use).
+  await page.getByRole('tab', { name: 'Sound' }).click();
   await page.getByTestId('channel-list-editor').waitFor();
 
   await page.getByTestId('import-wwb').click();

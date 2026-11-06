@@ -162,6 +162,7 @@
             emit-value
             map-options
             :options="parentOptions(row.group)"
+            :display-value="parentDisplay(row.group)"
             :label="t('workspace.venueGroupParent')"
             data-testid="venue-group-parent"
             @update:model-value="(v) => saveGroup(row.group, { parent_id: v || null })"
@@ -498,6 +499,16 @@ function pathNames(groupId) {
 // are excluded so the tree can never loop. The current parent is always offered even if it would
 // otherwise be ineligible (e.g. it was later reclassified), so a valid stored value never falls back
 // to displaying its raw id in the select.
+// `parentDisplay` is a belt-and-suspenders guard: even if option matching ever lags the bound value
+// (e.g. a stale render before the group list reloads), the select shows the resolved parent name
+// rather than falling back to the raw UUID.
+function parentDisplay(group) {
+  if (!group.parent_id) return t('workspace.venueGroupTop');
+  const cur = groupById.value[group.parent_id];
+  if (!cur) return t('workspace.venueGroupTop');
+  return (cur.temporary ? '⏱ ' : '') + pathNames(group.parent_id);
+}
+
 function parentOptions(group) {
   const excluded = new Set([group.id, ...descendantIds(group.id)]);
   let allowed;
