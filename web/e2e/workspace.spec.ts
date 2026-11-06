@@ -1,5 +1,5 @@
 import { test, expect, APIRequestContext, Page } from '@playwright/test';
-import { ensureAdmin, login, API_BASE } from './helpers';
+import { ensureAdmin, login, enableStockwire, setStockwireEnabled, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
   await ensureAdmin(request);
@@ -26,6 +26,8 @@ async function fittedZoom(page: Page) {
 }
 
 async function seedGraph(page: Page, request: APIRequestContext) {
+  // CI seeds the stockwire integration disabled; enable it so the stockwire-dependent UI under test is present.
+  await enableStockwire(request);
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Workspace ${Date.now()}` })).id as string;
@@ -140,6 +142,7 @@ test('on a phone the list becomes cards and the catalog is full screen', async (
 });
 
 async function seedPair(page: Page, request: APIRequestContext) {
+  await enableStockwire(request);
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Connect ${Date.now()}` })).id as string;
@@ -605,6 +608,7 @@ test('the fixture library is managed in the lights editor and its modes set the 
 
 test('a fixture type is imported from Stockwire into the library', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Import ${Date.now()}` })).id as string;
@@ -729,6 +733,7 @@ test('fixtures are added in bulk by kind and quantity, and the header offers imp
   request,
 }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Bulk ${Date.now()}` })).id as string;
@@ -882,6 +887,7 @@ test('the stage and venue are edited on the canvas, plot objects are added and a
 
 test('a device is created from a Stockwire product with its connectors and power inlet', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
   await login(page);
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Product import ${Date.now()}` })).id as string;
@@ -1038,6 +1044,8 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);
   const headers = await authedHeaders(page);
+  // Enable the integration so the stockwire-dependent sound-editor controls (sync button) are present.
+  await enableStockwire(request);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Sound ${Date.now()}` })).id as string;
   await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
   // the pickers list the company's own equipment, with the number of devices as quantity
@@ -1301,6 +1309,8 @@ test('the job details and the Stockwire link are edited in the workspace, and th
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);
   const headers = await authedHeaders(page);
+  // Enable the integration so the job details Stockwire-link controls are present.
+  await enableStockwire(request);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Job ${Date.now()}` })).id as string;
   let linkedBody: { stockwire_job_id: string | null } | null = null;
   await page.route('**/api/v1/stockwire/rental-jobs*', (route) =>
@@ -1464,6 +1474,8 @@ test('a patch point can search Stockwire for a device and a video input takes a 
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);
   const headers = await authedHeaders(page);
+  // Enable the integration so the stockwire "from Stockwire" chain picker is present.
+  await enableStockwire(request);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Search ${Date.now()}` })).id as string;
   const g = `/jobs/${jobId}/graph`;
   const vlist = await post(request, headers, `${g}/video-lists`, { name: 'Cameras' });
@@ -1655,6 +1667,8 @@ test('a channel list gets a mixer size that fills it with the empty inputs and o
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);
   const headers = await authedHeaders(page);
+  // Enable the integration so the mixer (set-mixer) control is present.
+  await enableStockwire(request);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer ${Date.now()}` })).id as string;
   const g = `/jobs/${jobId}/graph`;
   const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
@@ -1788,6 +1802,8 @@ test('the gear behind a channel or a video input is edited from its list', async
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);
   const headers = await authedHeaders(page);
+  // Enable the integration so the mixer (list-mixer-devices) control is present.
+  await enableStockwire(request);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E ListEdit ${Date.now()}` })).id as string;
   const g = `/jobs/${jobId}/graph`;
   const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
@@ -2013,3 +2029,45 @@ test('on a phone lights and video rows are cards with every editor, and power lo
     expect(box && box.width > 250 && box.x >= 0 && box.x + box.width <= 390).toBe(true);
   }
 });
+
+test('when the stockwire integration is disabled, every stockwire control is hidden but the settings tab stays', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // Disable before the UI logs in so loadIntegration() picks up the disabled flag on first load.
+  await setStockwireEnabled(request, false);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Disabled ${Date.now()}` })).id as string;
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Lead mic',
+    stockwire_product_id: '4242',
+    stockwire_product_name: 'SM58',
+    stockwire_booked: false,
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  // Job header buttons are gone entirely (v-if removes them from the DOM, so count is 0).
+  await expect(page.getByTestId('open-catalog')).toHaveCount(0);
+  await expect(page.getByTestId('open-availability')).toHaveCount(0);
+  await expect(page.getByTestId('open-in-stockwire')).toHaveCount(0);
+
+  // Table mode: the stockwire column (booking status / linked product) is dropped and the
+  // "request to add" action is hidden.
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await expect(page.getByTestId('workspace-table')).toBeVisible();
+  await expect(page.locator('th', { hasText: /stockwire/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /request to add to stockwire job booking/i })).toHaveCount(0);
+
+  // Device creation: the "from Stockwire" picker is removed.
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await expect(page.getByTestId('device-from-stockwire')).toHaveCount(0);
+
+  // The Settings stockwire tab must remain reachable so the integration can be re-enabled.
+  await page.goto('/settings');
+  await expect(page.getByTestId('settings-tab-stockwire')).toBeVisible();
+});
+

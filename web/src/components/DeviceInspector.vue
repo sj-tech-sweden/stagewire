@@ -262,7 +262,7 @@
       />
 
       <div
-        v-if="needsBookingRequest(device) || device.stockwire_request_status"
+        v-if="(needsBookingRequest(device) || device.stockwire_request_status) && stockwire.isEnabled"
         class="q-mb-md"
       >
         <q-btn
@@ -422,6 +422,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
+import { useStockwireStore } from '@/stores/stockwire';
 import { legacyId } from '@/utils/graphLegacy';
 import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
@@ -439,6 +440,7 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const stagePlot = useStagePlotStore();
+const stockwire = useStockwireStore();
 
 // A plot object links to a channel (a performer's name goes onto it) and to a device (the
 // microphone or other gear they use). Links are set by legacy id, through the plot store.

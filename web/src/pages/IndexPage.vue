@@ -65,7 +65,10 @@
           </q-item-label>
         </q-item-section>
         <q-item-section side>
-          <q-item-label caption>
+          <q-item-label
+            v-if="stockwire.isEnabled"
+            caption
+          >
             {{ t('jobs.stockwire') }}: {{ job.stockwire_job_id || '—' }}
           </q-item-label>
         </q-item-section>
@@ -171,12 +174,14 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useJobsStore } from '@/stores/jobs';
 import { useVenuesStore } from '@/stores/venues';
+import { useStockwireStore } from '@/stores/stockwire';
 import DateTimePicker from '@/components/DateTimePicker.vue';
 
 const { t } = useI18n({ useScope: "global" })
 const router = useRouter()
 const store = useJobsStore();
 const venues = useVenuesStore();
+const stockwire = useStockwireStore();
 
 function openJob(id) {
   router.push(`/jobs/${id}`)

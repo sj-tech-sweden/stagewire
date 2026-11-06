@@ -41,8 +41,16 @@
         class="q-pa-sm q-mb-sm row items-center q-gutter-sm"
         data-testid="list-mixer"
       >
-        <q-icon name="tune" color="primary" size="sm" />
-        <div class="col">
+        <q-icon
+          v-if="stockwire.isEnabled"
+          name="tune"
+          color="primary"
+          size="sm"
+        />
+        <div
+          v-if="stockwire.isEnabled"
+          class="col"
+        >
           <div class="text-caption text-grey-7">
             {{ t("stockwire.mixerOfList") }}
           </div>
@@ -74,7 +82,7 @@
           </div>
         </div>
         <div
-          v-if="listMixers.length"
+          v-if="stockwire.isEnabled && listMixers.length"
           class="row q-gutter-xs"
           data-testid="list-mixer-devices"
         >
@@ -93,6 +101,7 @@
           </q-chip>
         </div>
         <q-btn
+          v-if="stockwire.isEnabled"
           outline
           no-caps
           color="primary"
@@ -151,7 +160,7 @@
           @click="bulkChannels = true"
         />
         <q-btn
-          v-if="contextKind === 'job'"
+          v-if="contextKind === 'job' && stockwire.isEnabled"
           flat
           no-caps
           icon="cloud_upload"
@@ -840,6 +849,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { useGraphStore } from "@/stores/graph";
+import { useStockwireStore } from "@/stores/stockwire";
 import ChainDialog from "@/components/ChainDialog.vue";
 import StockwireProductPicker from "@/components/StockwireProductPicker.vue";
 import { api } from "@/boot/api";
@@ -878,6 +888,7 @@ const contextKind = computed(() => (props.venueId ? 'venue' : 'job'));
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const stockwire = useStockwireStore();
 const listId = ref(null);
 const chainOpen = ref(false);
 const chainNode = ref(null);

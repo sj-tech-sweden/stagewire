@@ -33,6 +33,30 @@ export async function ensureAdmin(request: APIRequestContext): Promise<void> {
   });
 }
 
+// Configure the stockwire-rental integration's `enabled` flag directly via the API.
+// The frontend reads `settings.stockwire.enabled` on auth to decide which UI to show; CI seeds
+// the integration disabled, so any test that exercises stockwire UI must enable it first. We log in
+// via the API (independent of the page) to obtain a token, then PUT the setting. Doing this before
+// the UI logs in means the app's `loadIntegration()` picks up the correct flag on its first load.
+export async function setStockwireEnabled(request: APIRequestContext, enabled: boolean): Promise<void> {
+  await waitForApi(request);
+  const loginRes = await request.post(`${API_BASE}/api/v1/auth/login`, { data: ADMIN });
+  const token = (await loginRes.json()).access_token as string;
+  const res = await request.put(`${API_BASE}/api/v1/settings/stockwire`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      enabled,
+      base_url: 'http://host.docker.internal:8000',
+      public_url: 'http://host.docker.internal:8010',
+    },
+  });
+  if (!res.ok()) throw new Error(`setStockwireEnabled failed: ${await res.text()}`);
+}
+
+export async function enableStockwire(request: APIRequestContext): Promise<void> {
+  await setStockwireEnabled(request, true);
+}
+
 export async function login(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/login');
   await page.locator('input[type="email"]').fill(ADMIN.email);
