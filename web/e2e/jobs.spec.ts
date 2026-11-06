@@ -24,8 +24,10 @@ test('create a production job from the UI', async ({ page }) => {
   // exactly so the inline venue action isn't picked up by the same selector.
   await dialog.getByRole('button', { name: 'Create', exact: true }).click();
 
-  await expect(page.getByText(title)).toBeVisible();
-  await expect(page.getByText(venue)).toBeVisible();
+  // The venue name legitimately appears in two places on the job (the job card and the venue
+  // field), so scope to the first match instead of failing strict mode.
+  await expect(page.getByText(title).first()).toBeVisible();
+  await expect(page.getByText(venue).first()).toBeVisible();
 });
 
 test('jobs can be searched and are listed newest first, a page at a time', async ({ page, request }) => {

@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { ensureAdmin, login, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
@@ -8,6 +8,15 @@ test.beforeEach(async ({ request }) => {
 async function authedHeaders(page: Page) {
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   return { Authorization: `Bearer ${token}` };
+}
+
+async function createJob(request: APIRequestContext, headers: Record<string, string>) {
+  const res = await request.post(`${API_BASE}/api/v1/jobs`, {
+    headers,
+    data: { title: `E2E Venue Job ${Date.now()}` },
+  });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()).id as string;
 }
 
 test('the venues page lists saved venues', async ({ page, request }) => {
@@ -110,8 +119,10 @@ test('venue directory supports name search and exposes shape filters', async ({
   });
 
   await page.goto('/venues');
-  await expect(page.getByLabel('Footprint')).toBeVisible();
-  await expect(page.getByLabel('Stage')).toBeVisible();
+  // Use the full label text: a bare "Stage" also matches the user-menu button
+  // (the account email contains "stagewire"), and "Footprint" is ambiguous too.
+  await expect(page.getByLabel('Footprint shape')).toBeVisible();
+  await expect(page.getByLabel('Stage shape')).toBeVisible();
 
   const search = page.getByPlaceholder('Search venues by name');
   await search.fill(arena);
