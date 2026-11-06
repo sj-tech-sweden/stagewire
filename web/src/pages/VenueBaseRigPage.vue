@@ -19,29 +19,44 @@
           {{ t('venues.baseRig.title') }}
         </div>
       </div>
-      <q-btn-toggle
-        v-model="view"
-        dense
-        no-caps
-        spread
-        :options="[
-          { label: t('venues.baseRig.stage'), value: 'stage' },
-          { label: t('channels.lists'), value: 'lists' },
-        ]"
-      />
       <q-btn
-        outline
+        flat
+        no-caps
         icon="auto_awesome_motion"
         :label="t('workspace.library')"
         @click="libraryOpen = true"
       />
       <q-btn
-        outline
+        flat
+        no-caps
         icon="summarize"
         :label="t('reports.openReports')"
         @click="reportsOpen = true"
       />
     </div>
+
+    <q-tabs
+      :model-value="view"
+      dense
+      no-caps
+      align="left"
+      mobile-arrows
+      active-color="primary"
+      indicator-color="primary"
+      class="q-mb-md workspace-tabs"
+      @update:model-value="view = $event"
+    >
+      <q-tab
+        name="stage"
+        icon="map"
+        :label="t('venues.baseRig.stage')"
+      />
+      <q-tab
+        name="lists"
+        icon="queue_music"
+        :label="t('channels.lists')"
+      />
+    </q-tabs>
 
     <div
       v-if="view === 'stage'"
@@ -391,6 +406,11 @@ const router = useRouter();
 const graph = useGraphStore();
 
 const venueId = computed(() => route.params.venueId);
+// Scope the graph store to this venue synchronously, in setup and therefore before child components
+// mount. Child components (e.g. RiggingEditor) fire venue-scoped API calls on mount; without this the
+// store's default job/null scope would send those requests to /jobs/null/... and fail UUID validation.
+// This mirrors how the job workspace owns the store scope while it is mounted.
+graph.setScope('venue', venueId.value);
 const view = ref('stage');
 const libraryOpen = ref(false);
 const reportsOpen = ref(false);

@@ -813,6 +813,9 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const jobId = String(route.params.jobId);
+// Own the store scope now (in setup, before child components mount) so mount-time venue/job-scoped
+// calls use the right prefix instead of the store's default job/null scope. load() re-asserts it.
+graph.setScope('job', jobId);
 
 const job = ref(null);
 const catalogOpen = ref(false);
