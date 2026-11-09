@@ -2380,4 +2380,91 @@ test('a passive source like a microphone gets one default XLR out port from the 
     .toBe(true);
 });
 
+test('assigning a mic as a channel source auto-patches its XLR-out to the channel input', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The source picker (StockwireProductPicker) only renders when the integration is enabled, so the
+  // UI under test exists; enable it explicitly rather than relying on global state.
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E AutoPatch ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  // The channel's input is digital (Dante): per the crew-view design, a channel-list input reaches
+  // the mixer even when it arrives by Dante/AES50/MADI/Slink, so the auto-edge's destination port is
+  // the channel's actual input type, not a hard-coded analogue XLR.
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, {
+    source_label: 'Vox',
+    connector: 'dante',
+  });
+  // A passive mic with a default XLR output to feed the channel from.
+  const mic = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Lead Mic',
+    kind: 'mic',
+    ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 1 }],
+  });
+
+  const graphOf = async () =>
+    (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  const channelNode = async () =>
+    (await graphOf()).devices.find((d: any) => d.id === channel.id) as any;
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // pick the mic as the channel's source via the in-job device picker
+  const picker = page.getByTestId('source-picker');
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  await page.keyboard.type('Lead Mic');
+  // select the in-job device, not the "use as typed" freetext row
+  const item = page.locator('.q-menu .q-item', { hasText: 'Lead Mic ·' });
+  await item.first().waitFor({ state: 'visible' });
+  await item.first().click();
+
+  // the source is linked (existing behaviour) ...
+  await expect.poll(async () => (await channelNode()).attributes.source_device_id).toBe(mic.id);
+  // ... and the mic's XLR-out is auto-patched into the channel's real input connector.
+  await expect
+    .poll(async () => {
+      const edge = (await graphOf()).edges.find(
+        (e: any) =>
+          e.signal === 'audio' &&
+          e.src_device_id === mic.id &&
+          e.dst_device_id === channel.id,
+      );
+      if (!edge) return null;
+      return { src_port: edge.src_port, dst_port: edge.dst_port };
+    })
+    .toMatchObject({ src_port: expect.stringMatching(/xlr/i), dst_port: 'dante' });
+
+  // re-patching to a different mic re-points the cable rather than stacking a second one
+  const mic2 = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Second Mic',
+    kind: 'mic',
+    ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 1 }],
+  });
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  await page.keyboard.type('Second Mic');
+  const item2 = page.locator('.q-menu .q-item', { hasText: 'Second Mic ·' });
+  await item2.first().waitFor({ state: 'visible' });
+  await item2.first().click();
+  await expect
+    .poll(async () => {
+      const edges = (await graphOf()).edges.filter(
+        (e: any) =>
+          e.signal === 'audio' &&
+          e.dst_device_id === channel.id,
+      );
+      return edges.map((e: any) => e.src_device_id).sort();
+    })
+    .toEqual([mic2.id].sort());
+});
+
 
