@@ -48,6 +48,12 @@
           icon="map"
           :label="t('workspace.share.map')"
         />
+        <q-tab
+          name="scan"
+          icon="qr_code_scanner"
+          :label="t('workspace.scan.openScan')"
+          data-testid="share-tab-scan"
+        />
       </q-tabs>
 
       <q-tab-panels
@@ -173,6 +179,47 @@
             {{ t('workspace.share.noDevices') }}
           </div>
         </q-tab-panel>
+
+        <!-- Scan view: multi-input capture (camera QR/barcode, NFC, keyboard wedge). The
+             crew view is read-only, so a scan looks up the matched device rather than editing. -->
+        <q-tab-panel
+          name="scan"
+          class="q-pa-sm"
+        >
+          <ScanCapture
+            :active="tab === 'scan'"
+            data-testid="share-scan"
+            @captured="onScanned"
+          />
+          <q-banner
+            v-if="lastScan"
+            class="rounded-borders q-mt-md"
+            :class="matchedDevice ? 'bg-positive text-white' : 'bg-warning text-dark'"
+            data-testid="share-scan-result"
+          >
+            <template #avatar>
+              <q-icon :name="matchedDevice ? 'check_circle' : 'warning'" />
+            </template>
+            <div class="text-caption text-grey-5">
+              {{ t('workspace.scan.scanned') }}
+            </div>
+            <div class="text-body2">
+              {{ lastScan }}
+            </div>
+            <div
+              v-if="matchedDevice"
+              class="text-caption"
+            >
+              {{ t('workspace.scan.matched', { name: matchedDevice.name }) }}
+            </div>
+            <div
+              v-else
+              class="text-caption"
+            >
+              {{ t('workspace.scan.noMatch') }}
+            </div>
+          </q-banner>
+        </q-tab-panel>
       </q-tab-panels>
     </template>
 
@@ -195,6 +242,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
+import ScanCapture from '@/components/ScanCapture.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -213,6 +261,8 @@ const devices = ref([]);
 const tab = ref('list');
 const search = ref('');
 const selectedId = ref(null);
+const lastScan = ref('');
+const matchedDevice = ref(null);
 
 const filteredDevices = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -268,4 +318,26 @@ async function load() {
 }
 
 load();
+
+// The crew view is read-only: a scan looks up (rather than edits) the device whose bound
+// Stockwire asset, product id, or name matches the captured code.
+function onScanned(value) {
+  lastScan.value = value;
+  const q = String(value).toLowerCase();
+  const match = devices.value.find((d) => {
+    const a = d.attributes || {};
+    return (
+      a.stockwire_asset_id === value ||
+      d.stockwire_asset_id === value ||
+      a.stockwire_product_id === value ||
+      d.stockwire_product_id === value ||
+      d.name.toLowerCase().includes(q)
+    );
+  });
+  matchedDevice.value = match || null;
+  if (match) {
+    selectedId.value = match.id;
+    tab.value = 'map';
+  }
+}
 </script>

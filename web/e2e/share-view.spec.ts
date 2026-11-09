@@ -85,3 +85,34 @@ test('the workspace can generate a shareable QR + link for the crew view', async
   await page.goto(link);
   await expect(page.getByTestId('share-device-list')).toBeVisible();
 });
+
+test('a keyboard-wedge scan in the crew view looks up the matched device', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share E2E ${Date.now()}` })).id;
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Stagebox A',
+    kind: 'stagebox',
+    attributes: { stockwire_asset_id: 'ASSET-123' },
+  });
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  await expect(page.getByTestId('share-device-list')).toBeVisible();
+
+  // Switch to the scan tab and feed a code through the keyboard-wedge input.
+  await page.getByTestId('share-tab-scan').click();
+  await expect(page.getByTestId('share-scan')).toBeVisible();
+  await page.getByTestId('scan-keyboard-input').fill('ASSET-123');
+  await page.getByTestId('scan-keyboard-input').press('Enter');
+
+  const result = page.getByTestId('share-scan-result');
+  await expect(result).toBeVisible();
+  await expect(result).toContainText('ASSET-123');
+  await expect(result).toContainText('Stagebox A');
+});
