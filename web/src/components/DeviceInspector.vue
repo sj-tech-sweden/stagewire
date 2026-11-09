@@ -660,6 +660,7 @@ async function unbind() {
     await graph.updateDevice(props.jobId, props.device.id, {
       attributes: {
         stockwire_asset_id: null,
+        stockwire_asset_code: null,
         stockwire_asset_tag: null,
         stockwire_asset_serial: null,
         stockwire_asset_description: null,
@@ -708,8 +709,12 @@ const bindOpen = ref(false);
 // The bound Stockwire inventory asset, if any, surfaced from the device's attribute bag.
 const boundAsset = computed(() => {
   const a = props.device?.attributes || {};
+  // Show the scanned/typed code (stockwire_asset_code) to the user, not the resolved
+  // Stockwire DB id — that's what a crew member will scan to locate this device.
+  const code = a.stockwire_asset_code || a.stockwire_asset_id || null;
   return {
-    id: a.stockwire_asset_id || null,
+    id: code,
+    code,
     tag: a.stockwire_asset_tag || null,
     serial: a.stockwire_asset_serial || null,
     description: a.stockwire_asset_description || null,

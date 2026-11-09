@@ -91,6 +91,18 @@ async def _all_devices(db: AsyncSession, job_id: UUID) -> list[GraphDevice]:
     )
 
 
+async def read_job_graph(db: AsyncSession, job_id: UUID) -> schemas.GraphRead:
+    """Read-only projection of a job's device/edge graph.
+
+    Public entry point used by other domains (e.g. the share view) so they don't have to reach
+    into this router's private ``_all_devices``/``_all_edges`` helpers.
+    """
+    return schemas.GraphRead(
+        devices=[schemas.GraphDeviceRead.model_validate(d) for d in await _all_devices(db, job_id)],
+        edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
+    )
+
+
 def _device_payload(device: GraphDevice) -> dict:
     return schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
 
@@ -210,9 +222,14 @@ async def bind_stockwire_asset(
         resolved = await client.resolve_asset(payload.code)
 
     attrs = dict(device.attributes or {})
+    # The canonical Stockwire asset id (when resolution succeeds) is kept on stockwire_asset_id,
+    # but the raw scanned/typed code is always recorded on stockwire_asset_code. The crew view
+    # looks devices up by the code the user actually scans, so both must be present for the
+    # scan-to-locate feature to work whether or not the integration is enabled.
     attrs["stockwire_asset_id"] = (
         resolved.get("asset_id") if resolved and resolved.get("asset_id") else payload.code
     )
+    attrs["stockwire_asset_code"] = payload.code
     if resolved:
         if resolved.get("asset_tag"):
             attrs["stockwire_asset_tag"] = resolved["asset_tag"]

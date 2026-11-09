@@ -498,6 +498,7 @@ export default {
       bind: "Koppla enhet",
       unbind: "Koppla bort",
       cancel: "Avbryt",
+      done: "Klar",
       bound: "Kopplad till Stockwire-enhet",
       success: "Enhet kopplad",
     },

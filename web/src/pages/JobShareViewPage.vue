@@ -327,6 +327,7 @@ function onScanned(value) {
   const match = devices.value.find((d) => {
     const a = d.attributes || {};
     return (
+      a.stockwire_asset_code === value ||
       a.stockwire_asset_id === value ||
       d.stockwire_asset_id === value ||
       a.stockwire_product_id === value ||

@@ -79,7 +79,7 @@
         <q-btn
           flat
           no-caps
-          :label="t('workspace.bind.cancel')"
+          :label="bound ? t('workspace.bind.done') : t('workspace.bind.cancel')"
           @click="emit('update:modelValue', false)"
         />
         <q-btn

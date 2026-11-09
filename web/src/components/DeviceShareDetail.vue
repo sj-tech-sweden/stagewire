@@ -61,6 +61,12 @@
         {{ t('workspace.bind.title') }}
       </div>
       <div
+        v-if="boundAsset.code"
+        class="text-caption"
+      >
+        <span class="text-grey-5">{{ t('workspace.bind.code') }}:</span> {{ boundAsset.code }}
+      </div>
+      <div
         v-if="boundAsset.tag"
         class="text-caption"
       >
@@ -176,8 +182,10 @@ const dmx = computed(() => {
 
 const boundAsset = computed(() => {
   const a = attrs.value;
+  const code = a.stockwire_asset_code || a.stockwire_asset_id || null;
   return {
-    id: a.stockwire_asset_id || null,
+    id: code,
+    code,
     tag: a.stockwire_asset_tag || null,
     serial: a.stockwire_asset_serial || null,
     description: a.stockwire_asset_description || null,

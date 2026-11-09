@@ -496,6 +496,7 @@ export default {
       bind: "Bind asset",
       unbind: "Unbind",
       cancel: "Cancel",
+      done: "Done",
       bound: "Bound to Stockwire asset",
       success: "Asset linked",
     },

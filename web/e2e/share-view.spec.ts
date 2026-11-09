@@ -156,4 +156,14 @@ test('a workspace user can bind a Stockwire asset to a device and see it read-on
   await page.goto(`/jobs/${jobId}/view?token=${token}`);
   await expect(page.getByTestId('share-device-list')).toBeVisible();
   await expect(page.getByText('ASSET-XYZ')).toBeVisible();
+
+  // Scanning the bound code on the crew view locates the device (the High fix: lookup by the
+  // scanned code, not the resolved Stockwire id).
+  await page.getByTestId('share-tab-scan').click();
+  await expect(page.getByTestId('share-scan')).toBeVisible();
+  await page.getByTestId('scan-keyboard-input').fill('ASSET-XYZ');
+  await page.getByTestId('scan-keyboard-input').press('Enter');
+  const result = page.getByTestId('share-scan-result');
+  await expect(result).toBeVisible();
+  await expect(result).toContainText('Stagebox A');
 });

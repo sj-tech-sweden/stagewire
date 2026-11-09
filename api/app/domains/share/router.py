@@ -17,8 +17,7 @@ from app.core.db import get_db
 from app.domains.audio.models import ProductionJob
 from app.domains.auth.deps import get_current_user
 from app.domains.auth.security import create_share_token, verify_share_token
-from app.domains.graph import schemas
-from app.domains.graph.router import _all_devices, _all_edges, _require_job
+from app.domains.graph.router import read_job_graph
 
 router = APIRouter(prefix="/jobs/{job_id}", tags=["share"])
 
@@ -40,7 +39,8 @@ async def create_share_link(
     Requires a normal user session — you must be logged in to hand out a link — but the
     resulting token grants view-only access with no login.
     """
-    await _require_job(db, job_id)
+    if await db.get(ProductionJob, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     token = create_share_token(job_id, ttl_minutes=ttl_minutes)
     return {"token": token}
 
@@ -66,10 +66,7 @@ async def mobile_view(
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
 
-    graph = schemas.GraphRead(
-        devices=[schemas.GraphDeviceRead.model_validate(d) for d in await _all_devices(db, job_id)],
-        edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
-    )
+    graph = await read_job_graph(db, job_id)
     return {
         "job": {"id": str(job.id), "title": job.title},
         "graph": graph.model_dump(mode="json"),

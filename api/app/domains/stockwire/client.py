@@ -68,37 +68,47 @@ class StockwireClient:
         """Best-effort lookup of a physical inventory asset by its tag, serial, or id.
 
         Returns a normalized dict (asset_id, asset_tag, serial_number, description) or None.
-        Any network/integration failure is swallowed so that local binding still works offline.
+        The rental inventory list endpoint filters only by skip/limit (not by asset tag), so we
+        walk the pages until we find a match; a hard cap bounds the work. Any network/integration
+        failure is swallowed so that local binding still works offline.
         """
         code = (code or "").strip()
         if not code:
             return None
+        cap = 2000  # don't scan an unbounded inventory inside a bind request
+        skip = 0
+        limit = 100
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url, headers=self._headers(), timeout=10.0
             ) as client:
-                resp = await client.get(
-                    "/api/v1/inventory/devices",
-                    params={"asset_tag": code, "limit": 50},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+                while skip < cap:
+                    resp = await client.get(
+                        "/api/v1/inventory/devices",
+                        params={"asset_tag": code, "skip": skip, "limit": limit},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    items = data.get("items") or data.get("devices") or []
+                    for item in items:
+                        tag = str(item.get("asset_tag") or "")
+                        serial = str(item.get("serial_number") or "")
+                        aid = str(item.get("id") or "")
+                        if code in (tag, serial, aid):
+                            return {
+                                "asset_id": item.get("id"),
+                                "asset_tag": item.get("asset_tag"),
+                                "serial_number": item.get("serial_number"),
+                                "description": item.get("description")
+                                or item.get("name")
+                                or item.get("product_name"),
+                            }
+                    # Stop once the list is drained (rental pagination envelope).
+                    if not data.get("has_more", False) or len(items) < limit:
+                        break
+                    skip += limit
         except Exception:
             return None
-        items = data.get("items") or data.get("devices") or []
-        for item in items:
-            tag = str(item.get("asset_tag") or "")
-            serial = str(item.get("serial_number") or "")
-            aid = str(item.get("id") or "")
-            if code in (tag, serial, aid):
-                return {
-                    "asset_id": item.get("id"),
-                    "asset_tag": item.get("asset_tag"),
-                    "serial_number": item.get("serial_number"),
-                    "description": item.get("description")
-                    or item.get("name")
-                    or item.get("product_name"),
-                }
         return None
 
     async def search_rental_jobs(self, search: str | None, limit: int = 20) -> dict:

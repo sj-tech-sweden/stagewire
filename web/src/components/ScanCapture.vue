@@ -199,9 +199,19 @@ async function startCameraCapture() {
     }
     videoEl.srcObject = s;
     await videoEl.play();
-    const detector = new window.BarcodeDetector({
-      formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e'],
-    });
+    // Feature-detect the formats this device's BarcodeDetector actually supports, so an
+    // unsupported format in our wish-list doesn't make the whole detector constructor throw.
+    const wanted = ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e'];
+    let formats = wanted;
+    try {
+      if (typeof window.BarcodeDetector.getSupportedFormats === 'function') {
+        const supported = await window.BarcodeDetector.getSupportedFormats();
+        formats = wanted.filter((f) => supported.includes(f));
+      }
+    } catch {
+      /* fall back to the full wish-list */
+    }
+    const detector = new window.BarcodeDetector({ formats });
     const detectLoop = async () => {
       if (!props.active || !cameraActive.value) return;
       try {
