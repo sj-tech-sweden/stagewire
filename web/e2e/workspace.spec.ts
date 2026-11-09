@@ -109,6 +109,60 @@ test('the patch drawer lists connections per domain and the inspector shows the 
   await expect(page.getByTestId('inspector-name')).toHaveValue('Lead mic');
 });
 
+test('the inspector shows a Network & Control panel for AVL devices and hides it for power', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const { jobId, headers, mic } = await seedGraph(page, request);
+  // a power device has no networked control panel
+  const power = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'power',
+    name: 'Distro',
+    kind: 'distro',
+  });
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  // Open the audio device (AVL domain) in the inspector.
+  await page.getByTestId('patch-edit-from').first().click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Lead mic');
+  await expect(page.getByTestId('network-panel')).toBeVisible();
+
+  // Set the network fields.
+  await page.getByTestId('network-panel').click();
+  const ip = page.getByTestId('network-ip');
+  await ip.fill('192.168.1.50');
+  await ip.press('Enter');
+  await page.getByTestId('network-subnet').fill('255.255.255.0');
+  await page.getByTestId('network-subnet').press('Enter');
+  await page.getByTestId('network-vlan').fill('120');
+  await page.getByTestId('network-vlan').press('Enter');
+
+  // The quick-launch link points at the device's management page.
+  const launch = page.getByTestId('network-open-webui');
+  await expect(launch).toBeVisible();
+  await expect(launch).toHaveAttribute('href', 'http://192.168.1.50');
+
+  // Protocols are a multiselect; picking Dante persists the whole list.
+  await page.getByTestId('network-protocols').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Dante' }).click();
+  // close the select popup
+  await page.keyboard.press('Escape');
+
+  // Backend holds the AVL network metadata on the device attributes.
+  const graph = (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  await expect
+    .poll(async () => (await graph).devices.find((d: { id: string }) => d.id === mic.id).attributes)
+    .toMatchObject({ network_ip: '192.168.1.50', network_subnet: '255.255.255.0', network_vlan: 120, network_protocols: ['dante'] });
+
+  // Switching to the power device hides the panel entirely.
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await dataRows(page).filter({ hasText: 'Distro' }).locator('td').nth(1).click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Distro');
+  await expect(page.getByTestId('network-panel')).toHaveCount(0);
+});
+
+
 test('layer toggles and the catalog drawer open', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const { jobId } = await seedGraph(page, request);
