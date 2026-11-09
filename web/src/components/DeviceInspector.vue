@@ -396,6 +396,78 @@
         </div>
       </q-expansion-item>
 
+      <q-expansion-item
+        v-if="isNetworkedDomain"
+        dense
+        icon="router"
+        :label="t('workspace.network.title')"
+        data-testid="network-panel"
+      >
+        <div class="q-gutter-sm q-pa-sm">
+          <div class="text-caption text-grey-6">
+            {{ t('workspace.network.hint') }}
+          </div>
+          <q-input
+            :model-value="attrs.network_ip || ''"
+            dense
+            outlined
+            placeholder="192.168.1.10"
+            :label="t('workspace.network.ip')"
+            data-testid="network-ip"
+            @change="(v) => save({ attributes: { network_ip: v || null } })"
+          />
+          <q-btn
+            v-if="deviceIpWebUi"
+            dense
+            flat
+            no-caps
+            icon="open_in_new"
+            color="primary"
+            class="q-mb-xs"
+            :label="t('workspace.network.openWebUi')"
+            :href="deviceIpWebUi"
+            target="_blank"
+            rel="noopener"
+            data-testid="network-open-webui"
+          >
+            <q-tooltip>{{ t('workspace.network.webUiHint') }}</q-tooltip>
+          </q-btn>
+          <q-input
+            :model-value="attrs.network_subnet || ''"
+            dense
+            outlined
+            placeholder="255.255.255.0"
+            :label="t('workspace.network.subnet')"
+            data-testid="network-subnet"
+            @change="(v) => save({ attributes: { network_subnet: v || null } })"
+          />
+          <q-input
+            :model-value="attrs.network_vlan"
+            dense
+            outlined
+            type="number"
+            min="0"
+            max="4095"
+            :label="t('workspace.network.vlan')"
+            data-testid="network-vlan"
+            @change="(v) => save({ attributes: { network_vlan: v === '' || v === null ? null : Number(v) } })"
+          />
+          <q-select
+            :model-value="attrs.network_protocols || []"
+            dense
+            outlined
+            multiple
+            use-chips
+            emit-value
+            map-options
+            :options="networkProtocols"
+            :label="t('workspace.network.protocols')"
+            data-testid="network-protocols"
+            @update:model-value="(v) => save({ attributes: { network_protocols: v || [] } })"
+          />
+        </div>
+      </q-expansion-item>
+
       <q-btn
         flat
         color="negative"
@@ -529,6 +601,26 @@ async function linkElement(links) {
 const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 });
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });
+
+// AVL signal domains (audio/video/lighting) carry IP-networked control gear; power and
+// rigging nodes don't, so the Network & Control panel is hidden for them.
+const NETWORK_PROTOCOLS = [
+  { label: 'Dante', value: 'dante' },
+  { label: 'NDI', value: 'ndi' },
+  { label: 'ArtNet', value: 'artnet' },
+  { label: 'sACN', value: 'sacn' },
+];
+const networkProtocols = NETWORK_PROTOCOLS;
+const isNetworkedDomain = computed(() =>
+  ['audio', 'video', 'lighting'].includes(props.device?.domain),
+);
+// Snapshot of the device's attribute bag; new keys (network_*) are merged in by the
+// shallow-merge update path, so sibling keys are never clobbered by a single-field edit.
+const attrs = computed(() => props.device?.attributes || {});
+const deviceIpWebUi = computed(() => {
+  const ip = props.device?.attributes?.network_ip;
+  return ip ? `http://${ip}` : null;
+});
 
 // Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
 // power, camera specs. It opens from here so any device reached through the inspector can use it.

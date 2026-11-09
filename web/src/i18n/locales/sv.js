@@ -457,6 +457,16 @@ export default {
     selectAll: "Markera synliga",
     clear: "Rensa",
     results: "{n} träffar",
+    network: {
+      title: "Nätverk & styrning",
+      hint: "AVL-nätverksinställningar för den här enheten (sparas lokalt — synkas inte till NetBox).",
+      ip: "IP-adress",
+      subnet: "Subnätmask",
+      vlan: "VLAN-ID",
+      protocols: "Strömningsprotokoll",
+      openWebUi: "Öppna webbgränssnitt",
+      webUiHint: "Öppnar enhetens administrationssida i en ny flik.",
+    },
   },
   common: {
     all: "Alla",

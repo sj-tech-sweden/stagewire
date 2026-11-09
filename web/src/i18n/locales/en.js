@@ -455,6 +455,16 @@ export default {
     selectAll: "Select visible",
     clear: "Clear",
     results: "{n} results",
+    network: {
+      title: "Network & Control",
+      hint: "AVL network settings for this device (stored locally — not synced to NetBox).",
+      ip: "IP address",
+      subnet: "Subnet mask",
+      vlan: "VLAN ID",
+      protocols: "Streaming protocols",
+      openWebUi: "Open web UI",
+      webUiHint: "Opens the device's management page in a new tab.",
+    },
   },
   common: {
     all: "All",
