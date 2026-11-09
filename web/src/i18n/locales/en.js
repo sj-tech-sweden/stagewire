@@ -487,6 +487,7 @@ export default {
       dialogHint: "Anyone with this link can view the day-of-show reference — no login required. It cannot edit the job.",
       live: "Live",
       offline: "Offline",
+      patch: "Patch list",
     },
     bind: {
       title: "Stockwire asset",

@@ -278,3 +278,111 @@ test('the crew map reuses the workspace canvas and opens a read-only inspector o
   // Read-only: the edit-details affordance is not offered.
   await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
 });
+
+test('the crew patch tab shows the full patch list, read-only', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share patch ${Date.now()}` })).id;
+
+  // Two real pieces of gear, patched together with an audio cable.
+  const mic = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Lead Mic',
+    kind: 'mic',
+  });
+  const wedge = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Monitor Wedge',
+    kind: 'speaker',
+  });
+  await post(
+    request,
+    headers,
+    `/jobs/${jobId}/graph/edges?force=true`,
+    {
+      signal: 'audio',
+      src_device_id: mic.id,
+      src_port: 'out',
+      dst_device_id: wedge.id,
+      dst_port: 'in',
+      channels: 1,
+    },
+  );
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+
+  // The patch tab renders the full multi-domain patch table, read-only.
+  await page.getByTestId('share-tab-patch').click();
+  const table = page.getByTestId('patch-table');
+  await expect(table).toBeVisible();
+  // The connection is listed (from the mic, to the wedge).
+  await expect(table.getByText('Lead Mic')).toBeVisible();
+  await expect(table.getByText('Monitor Wedge')).toBeVisible();
+  // Read-only: no per-row delete action is offered.
+  await expect(table.getByRole('button', { name: /remove/i })).toHaveCount(0);
+
+  // Tapping a device link selects it and opens its read-only inspector.
+  await table.getByRole('button', { name: 'Lead Mic' }).click();
+  const detail = page.getByTestId('share-patch-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail.getByTestId('inspector-name')).toHaveValue('Lead Mic');
+  // Read-only: the edit-details affordance is not offered.
+  await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
+});
+
+test('a channel in the crew patch tab opens as its own device, not a mixer port', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share channel ${Date.now()}` })).id;
+
+  // A channel list, its channel node (not gear), and the real mic it feeds.
+  const list = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Ch 1',
+    kind: 'channel',
+    attributes: { list_id: list.id, channel_number: 1 },
+  });
+  const mic = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Lead Mic',
+    kind: 'mic',
+  });
+  await post(
+    request,
+    headers,
+    `/jobs/${jobId}/graph/edges?force=true`,
+    {
+      signal: 'audio',
+      src_device_id: channel.id,
+      src_port: 'out',
+      dst_device_id: mic.id,
+      dst_port: 'in',
+      channels: 1,
+    },
+  );
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+
+  // The channel is filtered out of the gear list (it is not gear)...
+  await expect(page.getByTestId('share-device-list').getByText('Ch 1')).toHaveCount(0);
+  // ...but is a first-class row in the patch tab, so a crew member can trace it.
+  await page.getByTestId('share-tab-patch').click();
+  const table = page.getByTestId('patch-table');
+  await expect(table).toBeVisible();
+  await expect(table.getByText('Ch 1')).toBeVisible();
+
+  // Tapping the channel opens its own device inspector (read-only), proving channels
+  // behave as devices here rather than as ports nested under a mixer.
+  await table.getByRole('button', { name: 'Ch 1' }).click();
+  const detail = page.getByTestId('share-patch-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail.getByTestId('inspector-name')).toHaveValue('Ch 1');
+  await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
+});

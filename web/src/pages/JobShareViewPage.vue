@@ -70,6 +70,12 @@
           :label="t('workspace.scan.openScan')"
           data-testid="share-tab-scan"
         />
+        <q-tab
+          name="patch"
+          icon="cable"
+          :label="t('workspace.share.patch')"
+          data-testid="share-tab-patch"
+        />
       </q-tabs>
 
       <q-tab-panels
@@ -163,14 +169,14 @@
             </div>
 
             <div
-              v-if="selected"
+              v-if="selectedPlaced"
               class="bg-grey-9 text-white q-mt-sm rounded-borders"
               data-testid="share-map-detail"
             >
               <DeviceInspector
                 readonly
                 :job-id="jobId"
-                :device="selected"
+                :device="selectedPlaced"
               />
             </div>
           </div>
@@ -222,6 +228,31 @@
             </div>
           </q-banner>
         </q-tab-panel>
+        <!-- Patch-list view: the full multi-domain patch table, read-only. Tapping a
+             device name selects it (and opens its inspector below) so a crew member can
+             trace a channel's cable flow without editing anything. -->
+        <q-tab-panel
+          name="patch"
+          class="q-pa-sm"
+        >
+          <MultiDomainPatchDrawer
+            readonly
+            :graph="patchGraph"
+            :update-edge="noopEdge"
+            :delete-edge="noopEdge"
+          />
+          <div
+            v-if="selected"
+            class="bg-grey-9 text-white q-mt-sm rounded-borders"
+            data-testid="share-patch-detail"
+          >
+            <DeviceInspector
+              readonly
+              :job-id="jobId"
+              :device="selected"
+            />
+          </div>
+        </q-tab-panel>
       </q-tab-panels>
     </template>
 
@@ -241,7 +272,7 @@
 
 <script setup>
 import axios from 'axios';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { getApiBaseUrl } from '@/utils/runtime-config';
@@ -251,6 +282,7 @@ import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import DeviceInspector from '@/components/DeviceInspector.vue';
 import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
 import ScanCapture from '@/components/ScanCapture.vue';
+import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import { useJobSocket } from '@/composables/useJobSocket';
 
 const { t } = useI18n();
@@ -317,7 +349,40 @@ const placedDevices = computed(() =>
   ),
 );
 
-const selected = computed(() => placedDevices.value.find((d) => d.id === selectedId.value) || null);
+const selected = computed(() => devices.value.find((d) => d.id === selectedId.value) || null);
+// Only a device that is actually drawn on the map may open the map-tab inspector, so a
+// channel selected from the patch tab never shows an inspector over an empty canvas.
+const selectedPlaced = computed(() => placedDevices.value.find((d) => d.id === selectedId.value) || null);
+
+// Read-only bridge to the multi-domain patch drawer. The drawer expects a graph store
+// (edges/devices/issues + selectedId/selectedDeviceId it can mutate on device-link taps),
+// but the crew view keeps its graph in plain refs, not the store. This reactive object
+// projects those refs into the shape the drawer wants; its selectedId/selectedDeviceId
+// setters write back to the crew's selectedId so a tap in the patch table selects the
+// device here. Edge edits are rejected by the drawer's readonly guards, but we pass
+// no-ops anyway.
+const patchGraph = reactive({
+  issues: [],
+  get edges() {
+    return edges.value;
+  },
+  get devices() {
+    return devices.value;
+  },
+  get selectedId() {
+    return selectedId.value;
+  },
+  set selectedId(v) {
+    selectedId.value = v;
+  },
+  get selectedDeviceId() {
+    return selectedId.value;
+  },
+  set selectedDeviceId(v) {
+    selectedId.value = v;
+  },
+});
+const noopEdge = async () => {};
 
 // The same stage frame the editor draws, derived from the job's geometry, so the read-only
 // map looks and feels identical to the workspace canvas.
