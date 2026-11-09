@@ -188,6 +188,53 @@ async def update_device(
     return device
 
 
+@router.post("/devices/{device_id}/bind-asset", response_model=schemas.GraphDeviceRead)
+async def bind_stockwire_asset(
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AssetBind,
+    db: AsyncSession = Depends(get_db),
+) -> GraphDevice:
+    """Bind a physical Stockwire inventory asset to this Stagewire device/patch node.
+
+    The scanned or typed code is always recorded locally as ``stockwire_asset_id``. When the
+    Stockwire integration is enabled, the code is first resolved against the inventory so the
+    asset's tag/serial/description are captured too; resolution failures never block the bind.
+    The updated device is pushed to every connected client in real time.
+    """
+    device = await _device(db, job_id, device_id)
+    resolved = None
+    cfg = await load_integration_config(db)
+    if cfg.get("enabled"):
+        client = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+        resolved = await client.resolve_asset(payload.code)
+
+    attrs = dict(device.attributes or {})
+    attrs["stockwire_asset_id"] = (
+        resolved.get("asset_id") if resolved and resolved.get("asset_id") else payload.code
+    )
+    if resolved:
+        if resolved.get("asset_tag"):
+            attrs["stockwire_asset_tag"] = resolved["asset_tag"]
+        if resolved.get("serial_number"):
+            attrs["stockwire_asset_serial"] = resolved["serial_number"]
+        if resolved.get("description"):
+            attrs["stockwire_asset_description"] = resolved["description"]
+    else:
+        if payload.tag:
+            attrs["stockwire_asset_tag"] = payload.tag
+        if payload.serial:
+            attrs["stockwire_asset_serial"] = payload.serial
+        if payload.description:
+            attrs["stockwire_asset_description"] = payload.description
+
+    device.attributes = attrs
+    await db.commit()
+    await db.refresh(device)
+    await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
+    return device
+
+
 @router.delete("/devices/{device_id}", status_code=204)
 async def delete_device(
     job_id: UUID,

@@ -59,6 +59,19 @@ class GraphDeviceUpdate(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class AssetBind(BaseModel):
+    """Bind a scanned/typed Stockwire inventory code to a Stagewire device.
+
+    Resolution against the Stockwire API is best-effort (see the binding endpoint); the raw
+    ``code`` is always stored locally as ``stockwire_asset_id`` so the link survives offline.
+    """
+
+    code: str = Field(min_length=1, max_length=255)
+    tag: str | None = None
+    serial: str | None = None
+    description: str | None = None
+
+
 class GraphDeviceRead(GraphDeviceBase):
     model_config = ConfigDict(from_attributes=True)
 
