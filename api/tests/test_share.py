@@ -36,18 +36,14 @@ async def test_share_flow_roundtrip(auth_headers):
         token = minted.json()["token"]
 
         # The mobile view is reachable with only the token, no login.
-        view = await client.get(
-            f"{BASE}/jobs/{job_id}/mobile-view", params={"token": token}
-        )
+        view = await client.get(f"{BASE}/jobs/{job_id}/mobile-view", params={"token": token})
         assert view.status_code == 200, view.text
         body = view.json()
         assert body["job"]["id"] == job_id
         assert any(d["name"] == "Lead mic" for d in body["graph"]["devices"])
 
         # A forged/tampered token is rejected.
-        bad = await client.get(
-            f"{BASE}/jobs/{job_id}/mobile-view", params={"token": token + "x"}
-        )
+        bad = await client.get(f"{BASE}/jobs/{job_id}/mobile-view", params={"token": token + "x"})
         assert bad.status_code == 401
 
 
@@ -55,12 +51,10 @@ async def test_share_token_is_job_scoped(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         job_a = await _make_job(client, auth_headers)
         job_b = await _make_job(client, auth_headers)
-        token = (
-            await client.post(f"{BASE}/jobs/{job_a}/share", headers=auth_headers)
-        ).json()["token"]
+        token = (await client.post(f"{BASE}/jobs/{job_a}/share", headers=auth_headers)).json()[
+            "token"
+        ]
 
         # Token for job A must not open job B.
-        other = await client.get(
-            f"{BASE}/jobs/{job_b}/mobile-view", params={"token": token}
-        )
+        other = await client.get(f"{BASE}/jobs/{job_b}/mobile-view", params={"token": token})
         assert other.status_code == 401
