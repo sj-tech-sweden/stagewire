@@ -108,8 +108,8 @@ async function mint() {
   link.value = '';
   try {
     const { data } = await api.post(`/jobs/${props.jobId}/share`);
-    const base = window.location.href.split('#')[0];
-    const url = `${base}#/jobs/${props.jobId}/view?token=${encodeURIComponent(data.token)}`;
+    // The app uses history-mode routing, so the share link is a normal path (not a hash).
+    const url = `${window.location.origin}/jobs/${props.jobId}/view?token=${encodeURIComponent(data.token)}`;
     link.value = url;
     qrDataUrl.value = await QRCode.toDataURL(url, { width: 240, margin: 1 });
   } catch {

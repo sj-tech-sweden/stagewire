@@ -1,5 +1,9 @@
 <template>
-  <q-page class="bg-grey-10 text-white q-pa-sm">
+  <!-- Standalone page: it is routed outside MainLayout, so it must supply its own QLayout
+       (Quasar requires q-page to be a deep child of q-layout). -->
+  <q-layout view="lHh Lpr lff">
+    <q-page-container>
+      <q-page class="bg-grey-10 text-white q-pa-sm">
     <!-- The crew view is deliberately stripped of chrome: no nav, no edit tools. -->
     <div
       v-if="error"
@@ -232,7 +236,9 @@
         size="2rem"
       />
     </div>
-  </q-page>
+      </q-page>
+    </q-page-container>
+  </q-layout>
 </template>
 
 <script setup>
@@ -336,9 +342,10 @@ function onScanned(value) {
     );
   });
   matchedDevice.value = match || null;
+  // Keep the scan feedback visible (don't jump tabs); still select the device so the stage
+  // map highlights it if the crew member switches to the map tab.
   if (match) {
     selectedId.value = match.id;
-    tab.value = 'map';
   }
 }
 </script>

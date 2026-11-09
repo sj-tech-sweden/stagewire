@@ -79,6 +79,7 @@
         <q-btn
           flat
           no-caps
+          data-testid="bind-dismiss"
           :label="bound ? t('workspace.bind.done') : t('workspace.bind.cancel')"
           @click="emit('update:modelValue', false)"
         />

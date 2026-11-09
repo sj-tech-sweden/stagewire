@@ -46,7 +46,8 @@ test('a crew member opens the read-only mobile view with a share token and no lo
   const list = page.getByTestId('share-device-list');
   await expect(list).toBeVisible();
   await expect(page.getByText('Stagebox A')).toBeVisible();
-  // The network metadata we seeded is surfaced read-only.
+  // Network metadata is surfaced read-only inside the expanded device detail.
+  await page.locator('.q-expansion-item', { hasText: 'Stagebox A' }).click();
   await expect(page.getByText('192.168.1.10')).toBeVisible();
 
   // No editing affordances leak into the read-only view.
@@ -133,8 +134,15 @@ test('a workspace user can bind a Stockwire asset to a device and see it read-on
 
   await page.goto(`/jobs/${jobId}/workspace`);
 
-  // Open the device in the inspector via the patch drawer.
-  await page.getByTestId('patch-edit-from').first().click();
+  // Open the device in the inspector from the workspace table (a lone device has no patch edges).
+  // The table rows are keyed by kind (e.g. "stagebox"), not the device name.
+  await page.getByTestId('mode-toggle').getByText(/all gear|all utrustning/i).click();
+  const row = page
+    .getByTestId('workspace-table')
+    .locator('tbody tr')
+    .filter({ hasText: 'stagebox' })
+    .first();
+  await row.locator('td').nth(1).click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox A');
   await expect(page.getByTestId('stockwire-asset-panel')).toBeVisible();
 
@@ -146,7 +154,7 @@ test('a workspace user can bind a Stockwire asset to a device and see it read-on
   await expect(page.getByTestId('bind-result')).toBeVisible();
 
   // Close the dialog; the inspector now shows the bound asset and an unbind action.
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByTestId('bind-dismiss').click();
   await expect(page.getByTestId('stockwire-asset-panel')).toContainText('ASSET-XYZ');
   await expect(page.getByTestId('bind-unbind')).toBeVisible();
 
@@ -155,6 +163,8 @@ test('a workspace user can bind a Stockwire asset to a device and see it read-on
   const { token } = await share.json();
   await page.goto(`/jobs/${jobId}/view?token=${token}`);
   await expect(page.getByTestId('share-device-list')).toBeVisible();
+  // The bound asset code is surfaced inside the expanded device detail in the crew view.
+  await page.locator('.q-expansion-item', { hasText: 'Stagebox A' }).click();
   await expect(page.getByText('ASSET-XYZ')).toBeVisible();
 
   // Scanning the bound code on the crew view locates the device (the High fix: lookup by the
