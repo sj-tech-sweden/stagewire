@@ -386,3 +386,28 @@ test('a channel in the crew patch tab opens as its own device, not a mixer port'
   await expect(detail.getByTestId('inspector-name')).toHaveValue('Ch 1');
   await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
 });
+
+test('a crew share link carries its creator locale and renders the UI in that language', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share locale ${Date.now()}` })).id;
+
+  // Mint the share link with the creator's locale embedded in the token.
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, {
+    headers,
+    params: { locale: 'sv' },
+  });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+
+  // The view applies the link's locale before it renders: the document language flips to Swedish.
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.lang))
+    .toBe('sv');
+  // And a localised string is actually shown (not just the lang attribute).
+  await expect(page.getByText('Skrivskyddad')).toBeVisible();
+});

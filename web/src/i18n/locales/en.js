@@ -1112,6 +1112,7 @@ export default {
     linkDevice: "Linked device",
     openChannel: "Open channel",
     openDevice: "Open device",
+    channelsOfMixer: "Channels",
     viewOnStagePlot: "View on stage plot",
     highlightActive: "Highlighting items linked to {name}",
     highlightClear: "Clear",

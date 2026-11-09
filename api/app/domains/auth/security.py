@@ -58,12 +58,19 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 
 
-def create_share_token(job_id: str | int, *, ttl_minutes: int | None = None) -> str:
+def create_share_token(
+    job_id: str | int, *, ttl_minutes: int | None = None, locale: str | None = None
+) -> str:
     """Mint a read-only, login-free share token for the day-of-show crew view.
 
     The token carries only the job id and a ``view`` scope, so it can neither write
     nor read anything outside that job. A logged-in user mints it; a crew member
     then opens the mobile view with it and no session.
+
+    ``locale`` (e.g. ``"en"`` / ``"sv"``) is embedded so the crew link itself carries
+    the language the creator was using — a crew member opening the link sees the UI in
+    that language even on a phone whose browser defaults to something else. Unknown or
+    missing locales are dropped so the view falls back to its own default.
     """
     if ttl_minutes is None:
         ttl_minutes = settings.share_token_ttl_minutes
@@ -72,9 +79,20 @@ def create_share_token(job_id: str | int, *, ttl_minutes: int | None = None) -> 
         "scope": "view",
         "iat": datetime.now(UTC),
     }
+    normalized_locale = _normalize_share_locale(locale)
+    if normalized_locale:
+        payload["locale"] = normalized_locale
     if ttl_minutes and ttl_minutes > 0:
         payload["exp"] = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def _normalize_share_locale(locale: str | None) -> str | None:
+    """Accept only the app's supported display locales ('en', 'sv'); ignore the rest."""
+    if not locale:
+        return None
+    base = str(locale).strip().lower().split("-")[0].split("_")[0]
+    return base if base in {"en", "sv"} else None
 
 
 def verify_share_token(token: str) -> dict:

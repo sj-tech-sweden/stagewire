@@ -723,6 +723,7 @@
             :device="graph.selectedDevice"
             @request-booking="requestBooking"
             @remove="removeDevice"
+            @select="(id) => (graph.selectedDeviceId = id)"
           />
         </q-card>
       </div>
@@ -750,6 +751,7 @@
           :device="graph.selectedDevice"
           @request-booking="requestBooking"
           @remove="removeDevice"
+          @select="(id) => (graph.selectedDeviceId = id)"
         />
       </q-card>
     </q-dialog>

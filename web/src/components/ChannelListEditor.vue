@@ -604,6 +604,15 @@
               flat
               dense
               round
+              icon="open_in_new"
+              :aria-label="t('workspace.openDevice')"
+              data-testid="open-channel-device"
+              @click="editDevice(slot.row)"
+            />
+            <q-btn
+              flat
+              dense
+              round
               color="negative"
               icon="delete"
               :aria-label="t('workspace.remove')"

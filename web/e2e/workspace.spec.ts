@@ -2467,4 +2467,63 @@ test('assigning a mic as a channel source auto-patches its XLR-out to the channe
     .toEqual([mic2.id].sort());
 });
 
+test('a channel opens its own inspector from the channel-list editor', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E ChInspect ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+
+  // The channel is its own entity: opening it from the editor must show the channel's own
+  // inspector (name, not a port of the mixer), consistent with the crew/patch views.
+  const channelName = async () =>
+    ((((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d: any) => d.id === channel.id,
+    ) as any).name;
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await page.getByTestId('open-channel-device').click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue(await channelName());
+});
+
+test('a mixer lists its channels and opens one as its own device', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E MixerCh ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const mixer = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Console FOH',
+    kind: 'mixer',
+    sound_list_id: list.id,
+  });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+
+  // Find and select the mixer in the workspace so its inspector opens.
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await page.getByTestId('workspace-table').getByText('Console FOH').click();
+
+  // The mixer's channels are surfaced as their own entities (subdevices), not buried ports.
+  const channels = page.getByTestId('mixer-channels');
+  await expect(channels).toBeVisible();
+  const chItem = channels.getByText('Vox').first();
+  await chItem.click();
+
+  // Clicking a channel opens that channel's own inspector.
+  await expect(page.getByTestId('inspector-name')).toHaveValue(
+    ((((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d: any) => d.kind === 'channel',
+    ) as any).name,
+  );
+});
+
 

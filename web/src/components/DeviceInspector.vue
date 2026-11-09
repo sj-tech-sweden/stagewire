@@ -264,6 +264,44 @@
         class="q-mb-md"
       />
 
+      <!-- A mixer's channels are their own entities (subdevices), not ports on the mixer. List them so
+           tapping one opens that channel's own inspector (cable flow, source, ports) — consistent with
+           the crew/patch views, which already treat a channel as its own device. -->
+      <div
+        v-if="mixerChannels.length"
+        class="q-mb-md"
+        data-testid="mixer-channels"
+      >
+        <div class="text-caption text-grey-5 text-uppercase q-mb-xs">
+          {{ t('workspace.channelsOfMixer') }}
+        </div>
+        <q-list
+          bordered
+          separator
+        >
+          <q-item
+            v-for="ch in mixerChannels"
+            :key="ch.id"
+            clickable
+            :data-testid="`mixer-channel-${ch.id}`"
+            @click="emit('select', ch.id)"
+          >
+            <q-item-section>
+              <q-item-label>{{ ch.name }}</q-item-label>
+              <q-item-label
+                v-if="ch.attributes?.source_label || ch.attributes?.device"
+                caption
+              >
+                {{ ch.attributes.source_label || ch.attributes.device }}
+              </q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <q-icon name="open_in_new" />
+            </q-item-section>
+          </q-item>
+        </q-list>
+      </div>
+
       <div
         v-if="(needsBookingRequest(device) || device.stockwire_request_status) && stockwire.isEnabled"
         class="q-mb-md"
@@ -561,7 +599,13 @@ import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useStockwireStore } from '@/stores/stockwire';
 import { legacyId } from '@/utils/graphLegacy';
-import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
+import {
+  isPlotElement,
+  isPowerNode,
+  isVirtual,
+  outputPointOptions,
+  channelsOf,
+} from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import BindStockwireDialog from '@/components/BindStockwireDialog.vue';
@@ -575,7 +619,7 @@ const props = defineProps({
   // disabled and no action button is offered, so the crew sees an exact, non-editable copy.
   readonly: { type: Boolean, default: false },
 });
-const emit = defineEmits(['request-booking', 'remove']);
+const emit = defineEmits(['request-booking', 'remove', 'select']);
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -607,6 +651,13 @@ const isCameraOrProjector = computed(() =>
   ['camera', 'projector'].includes(props.device?.attributes?.element_type),
 );
 const outputPoints = computed(() => outputPointOptions(graph.devices, graph.edges));
+// A mixer owns a channel list: its channels are their own entities (subdevices of the mixer), not
+// buried ports. List them so the crew/editor can open a channel's own inspector from the mixer.
+const mixerChannels = computed(() =>
+  props.device?.sound_list_id
+    ? channelsOf(graph.devices, props.device.sound_list_id)
+    : [],
+);
 const videoInputOptions = computed(() =>
   graph.devices
     .filter((d) => d.kind === 'video_input')

@@ -177,6 +177,7 @@
                 readonly
                 :job-id="jobId"
                 :device="selectedPlaced"
+                @select="(id) => { selectedId = id; tab = 'patch'; }"
               />
             </div>
           </div>
@@ -250,6 +251,7 @@
               readonly
               :job-id="jobId"
               :device="selected"
+              @select="(id) => { selectedId = id; tab = 'patch'; }"
             />
           </div>
         </q-tab-panel>
@@ -284,6 +286,7 @@ import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
 import ScanCapture from '@/components/ScanCapture.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import { useJobSocket } from '@/composables/useJobSocket';
+import { applyLocale } from '@/i18n';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -407,6 +410,9 @@ async function load() {
     job.value = data.job;
     devices.value = data.graph.devices;
     edges.value = data.graph.edges || [];
+    // Apply the link's locale before the view renders so the crew member sees the UI in the
+    // language the creator shared it in, not their own browser default.
+    if (data.locale) applyLocale(data.locale);
     loaded.value = true;
     // Now that we have a baseline, follow live graph updates (mixer channels/buses, map moves, …).
     connectSocket();

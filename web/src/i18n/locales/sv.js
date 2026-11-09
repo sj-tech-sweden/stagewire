@@ -1116,6 +1116,7 @@ export default {
     linkDevice: "Länkad enhet",
     openChannel: "Öppna kanal",
     openDevice: "Öppna enhet",
+    channelsOfMixer: "Kanaler",
     viewOnStagePlot: "Visa på scenkarta",
     highlightActive: "Markerar objekt länkade till {name}",
     highlightClear: "Rensa",

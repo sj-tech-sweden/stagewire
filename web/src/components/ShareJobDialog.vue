@@ -78,6 +78,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import QRCode from 'qrcode';
 import { api } from '@/boot/api';
+import { i18n } from '@/i18n';
 
 const { t } = useI18n();
 const $q = useQuasar();
@@ -107,7 +108,11 @@ async function mint() {
   qrDataUrl.value = '';
   link.value = '';
   try {
-    const { data } = await api.post(`/jobs/${props.jobId}/share`);
+    // The link carries the creator's current UI locale, so a crew member opens it in that
+    // language regardless of their own device/browser default (see the share token + mobile-view).
+    const { data } = await api.post(`/jobs/${props.jobId}/share`, null, {
+      params: { locale: i18n.global.locale.value },
+    });
     // The app uses history-mode routing, so the share link is a normal path (not a hash).
     const url = `${window.location.origin}/jobs/${props.jobId}/view?token=${encodeURIComponent(data.token)}`;
     link.value = url;

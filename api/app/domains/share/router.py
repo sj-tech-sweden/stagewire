@@ -34,15 +34,21 @@ async def create_share_link(
         le=60 * 24 * 30,
         description="Token lifetime in minutes; 0 = never expires. Omit to use the server default.",
     ),
+    locale: str | None = Query(
+        None,
+        description="Display locale the crew link should open in (e.g. 'en', 'sv'). "
+        "Embeds in the token so the link carries its own language.",
+    ),
 ):
     """Mint a read-only share token for the day-of-show mobile view.
 
     Requires a normal user session — you must be logged in to hand out a link — but the
-    resulting token grants view-only access with no login.
+    resulting token grants view-only access with no login. The creator's current UI
+    locale is embedded so a crew member opens the link in that language.
     """
     if await db.get(ProductionJob, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-    token = create_share_token(job_id, ttl_minutes=ttl_minutes)
+    token = create_share_token(job_id, ttl_minutes=ttl_minutes, locale=locale)
     return {"token": token}
 
 
@@ -70,7 +76,10 @@ async def mobile_view(
     graph = await read_job_graph(db, job_id)
     # The full job carries the stage/venue geometry the crew view redraws as the same stage frame
     # the workspace canvas uses, so the read-only map looks and feels identical to the editor.
+    # The token's locale is echoed so the read-only view can apply it before it renders (the link
+    # itself carries the language; there is no user session to derive one from).
     return {
         "job": ProductionJobRead.model_validate(job).model_dump(mode="json"),
         "graph": graph.model_dump(mode="json"),
+        "locale": claims.get("locale"),
     }
