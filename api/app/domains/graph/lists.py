@@ -152,7 +152,13 @@ async def _read(
 ) -> schemas.GraphDeviceRead:
     if job_id is not None:
         await backfill_job(db, job_id)
-    return schemas.GraphDeviceRead.model_validate(await _by_ref(db, job_id, ref, venue_id))
+    device = await _by_ref(db, job_id, ref, venue_id)
+    payload = schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+    # ``sound_list_id`` / ``video_list_id`` live in the node's ``attributes`` dict, so the ORM
+    # object has no top-level column to read them from; copy them across for the frontend.
+    payload["sound_list_id"] = device.attributes.get("sound_list_id")
+    payload["video_list_id"] = device.attributes.get("video_list_id")
+    return schemas.GraphDeviceRead.model_validate(payload)
 
 
 async def _device_twin(

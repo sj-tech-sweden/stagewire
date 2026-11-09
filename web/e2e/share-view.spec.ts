@@ -177,3 +177,27 @@ test('a workspace user can bind a Stockwire asset to a device and see it read-on
   await expect(result).toBeVisible();
   await expect(result).toContainText('Stagebox A');
 });
+
+test('the crew view receives new gear live over the websocket, without a reload', async ({ page, request, context }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share live ${Date.now()}` })).id as string;
+  // Seed a device so the crew view has content, then mint a read-only share token.
+  await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Stagebox A', device_type: 'stagebox' });
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  expect(token).toBeTruthy();
+
+  // Crew member opens the read-only view with only the share token (no session).
+  const crew = await context.newPage();
+  await crew.goto(`/jobs/${jobId}/view?token=${token}`);
+  await expect(crew.getByTestId('share-device-list')).toBeVisible();
+  await expect(crew.getByText('Stagebox A')).toBeVisible();
+  // Wait until the crew socket is actually connected, so the next event is delivered live (the
+  // websocket only broadcasts to currently-connected clients, so a post before connect would be missed).
+  await expect(crew.locator('[data-socket]').first()).toHaveAttribute('data-socket', 'open');
+
+  // The editor adds another device; the crew view should surface it live, not after a manual refresh.
+  await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Monitor Wedge', device_type: 'other' });
+  await expect(crew.getByText('Monitor Wedge')).toBeVisible({ timeout: 20000 });
+});

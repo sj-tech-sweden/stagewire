@@ -98,20 +98,25 @@ async def read_job_graph(db: AsyncSession, job_id: UUID) -> schemas.GraphRead:
     into this router's private ``_all_devices``/``_all_edges`` helpers.
     """
     return schemas.GraphRead(
-        devices=[schemas.GraphDeviceRead.model_validate(d) for d in await _all_devices(db, job_id)],
+        devices=[_device_payload(d) for d in await _all_devices(db, job_id)],
         edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
     )
 
 
 def _device_payload(device: GraphDevice) -> dict:
-    return schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+    payload = schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+    # ``sound_list_id`` / ``video_list_id`` live in the node's ``attributes`` dict, so the ORM
+    # object has no top-level column to read them from; copy them across for the frontend.
+    payload["sound_list_id"] = device.attributes.get("sound_list_id")
+    payload["video_list_id"] = device.attributes.get("video_list_id")
+    return payload
 
 
 @router.get("", response_model=schemas.GraphRead)
 async def get_graph(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schemas.GraphRead:
     await _require_job(db, job_id)
     return schemas.GraphRead(
-        devices=[schemas.GraphDeviceRead.model_validate(d) for d in await _all_devices(db, job_id)],
+        devices=[_device_payload(d) for d in await _all_devices(db, job_id)],
         edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
     )
 
@@ -197,7 +202,7 @@ async def update_device(
         lambda: db.get(GraphDevice, device_id),
     )
     await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
-    return device
+    return _device_payload(device)
 
 
 @router.post("/devices/{device_id}/bind-asset", response_model=schemas.GraphDeviceRead)

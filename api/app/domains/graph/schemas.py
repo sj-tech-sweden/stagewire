@@ -80,6 +80,10 @@ class GraphDeviceRead(GraphDeviceBase):
     venue_id: UUID | None = None
     stockwire_request_status: str | None = None
     legacy_ref: str | None = None
+    # Stored on the node's ``attributes`` (not a column); surfaced here so the frontend can
+    # find the gear a channel/video list auto-minted (e.g. a mixer) and avoid creating duplicates.
+    sound_list_id: UUID | None = None
+    video_list_id: UUID | None = None
     created_at: datetime
     revision: int
 

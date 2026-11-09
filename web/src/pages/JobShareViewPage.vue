@@ -3,7 +3,10 @@
        (Quasar requires q-page to be a deep child of q-layout). -->
   <q-layout view="lHh Lpr lff">
     <q-page-container>
-      <q-page class="bg-grey-10 text-white q-pa-sm">
+      <q-page
+      class="bg-grey-10 text-white q-pa-sm"
+      :data-socket="live ? 'open' : 'closed'"
+    >
     <!-- The crew view is deliberately stripped of chrome: no nav, no edit tools. -->
     <div
       v-if="error"
@@ -34,6 +37,14 @@
             />{{ t('workspace.share.readOnly') }}
           </div>
         </div>
+        <q-chip
+          dense
+          size="sm"
+          :color="live ? 'positive' : 'grey-7'"
+          :icon="live ? 'wifi' : 'wifi_off'"
+          :label="live ? t('workspace.share.live') : t('workspace.share.offline')"
+          data-testid="share-live"
+        />
       </div>
 
       <q-tabs
@@ -249,6 +260,7 @@ import { useRoute } from 'vue-router';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
 import ScanCapture from '@/components/ScanCapture.vue';
+import { useJobSocket } from '@/composables/useJobSocket';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -259,6 +271,31 @@ const shareApi = axios.create({ baseURL: `${getApiBaseUrl()}/api/v1` });
 
 const jobId = route.params.jobId;
 const token = route.query.token;
+
+// Live updates: the crew view only holds a view-scoped share token (no user session), so it opens
+// the job websocket with that token. The backend admits a `view`-scoped token read-only.
+const live = ref(false);
+const { connect: connectSocket } = useJobSocket(
+  jobId,
+  handleSocketEvent,
+  token,
+  (status) => {
+    live.value = status === 'open';
+  },
+);
+
+function handleSocketEvent(event) {
+  if (!event || !event.type) return;
+  if (event.type === 'graph.device.upsert' || event.type === 'device.upsert') {
+    const payload = event.payload;
+    const idx = devices.value.findIndex((d) => d.id === payload.id);
+    if (idx === -1) devices.value.push(payload);
+    else devices.value[idx] = payload;
+  } else if (event.type === 'graph.device.delete' || event.type === 'device.delete') {
+    const id = typeof event.payload === 'object' && event.payload ? event.payload.id : event.payload;
+    devices.value = devices.value.filter((d) => d.id !== id);
+  }
+}
 
 const loaded = ref(false);
 const error = ref(false);
@@ -318,6 +355,8 @@ async function load() {
     job.value = data.job;
     devices.value = data.graph.devices;
     loaded.value = true;
+    // Now that we have a baseline, follow live graph updates (mixer channels/buses, map moves, …).
+    connectSocket();
   } catch {
     error.value = true;
   }

@@ -485,6 +485,8 @@ export default {
       generate: "Generate share link",
       dialogTitle: "Share read-only crew view",
       dialogHint: "Anyone with this link can view the day-of-show reference — no login required. It cannot edit the job.",
+      live: "Live",
+      offline: "Offline",
     },
     bind: {
       title: "Stockwire asset",

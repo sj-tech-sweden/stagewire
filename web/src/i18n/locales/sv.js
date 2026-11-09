@@ -487,6 +487,8 @@ export default {
       generate: "Skapa delningslänk",
       dialogTitle: "Dela skrivskyddad personalvy",
       dialogHint: "Den som har länken kan se showdagsreferensen — ingen inloggning krävs. Den kan inte redigera jobbet.",
+      live: "Live",
+      offline: "Frånkopplad",
     },
     bind: {
       title: "Stockwire-enhet",

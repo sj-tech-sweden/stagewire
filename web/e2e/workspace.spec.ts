@@ -1043,11 +1043,11 @@ test('power inlets show in the device list, a new power connector asks for its r
   await page.keyboard.type(label);
   await page.keyboard.press('Enter');
   await page.locator('input[data-autofocus="true"]').fill('30');
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
   await expect(page.locator('input[data-autofocus="true"]')).toHaveCount(1);
   await expect(page.locator('input[data-autofocus="true"]')).toHaveValue('1');
   await page.locator('input[data-autofocus="true"]').fill('1');
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
   const kinds = async () =>
     (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as {
       label: string;
@@ -2165,5 +2165,130 @@ test('when the stockwire integration is disabled, every stockwire control is hid
   // The Settings stockwire tab must remain reachable so the integration can be re-enabled.
   await page.goto('/settings');
   await expect(page.getByTestId('settings-tab-stockwire')).toBeVisible();
+});
+
+test('passive source gear (microphones, mic stands) defaults to No power inlet', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Passive power ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 58, name: 'Mic 58', sku: 'M58', category: 'Microphones' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/58/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 58,
+        name: 'Mic 58',
+        connector_groups: [{ connector: 'xlr3', direction: 'in', count: 1, signal: 'audio' }],
+        weight_kg: 0.3,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-from-stockwire').click();
+  await page.keyboard.type('mic');
+  await page.locator('.q-menu .q-item', { hasText: 'Mic 58' }).click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Mic 58');
+  // No power inlet spec on the product -> passive source gear defaults to No power.
+  await expect(page.getByTestId('power-inlet')).toHaveValue('No power (passive)');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as {
+      name: string;
+      power_inlet: string;
+    }[];
+  await expect
+    .poll(async () => (await legacy()).find((d) => d.name === 'Mic 58')?.power_inlet, { timeout: 20000 })
+    .toBe('none');
+});
+
+test('powered audio gear keeps its power inlet from the product spec', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Powered power ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 59, name: 'Active Speaker', sku: 'AS', category: 'Speakers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/59/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 59,
+        name: 'Active Speaker',
+        connector_groups: [{ connector: 'xlr3', direction: 'in', count: 1, signal: 'audio' }],
+        power_inlet: 'iec_c13',
+        power_watts: 350,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-from-stockwire').click();
+  await page.keyboard.type('active');
+  await page.locator('.q-menu .q-item', { hasText: 'Active Speaker' }).click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Active Speaker');
+  await expect(page.getByTestId('power-inlet')).toHaveValue('IEC C13');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as {
+      name: string;
+      power_inlet: string;
+    }[];
+  await expect
+    .poll(async () => (await legacy()).find((d) => d.name === 'Active Speaker')?.power_inlet, { timeout: 20000 })
+    .toBe('iec_c13');
+});
+
+test('setting a mixer auto-creates a placeable mixer device linked to the channel list', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // Enable the integration BEFORE the SPA loads, so the stockwire picker (v-if on isEnabled) is present.
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer auto ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 77, name: 'Yamaha QL1', sku: 'QL1', category: 'Mixers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/categories*', (route) => route.fulfill({ json: { items: [], total: 0 } }));
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-picker').click();
+  await page.keyboard.type('yamaha');
+  await page.locator('.q-menu .q-item', { hasText: 'Yamaha QL1' }).click();
+  await page.getByTestId('mixer-inputs').fill('6');
+  await page.getByTestId('mixer-buses').fill('2');
+  await page.getByTestId('mixer-save').click();
+
+  // A mixer device is minted and linked back to the list (so it is not recreated); it starts
+  // unplaced, i.e. it shows in the gear list and can be dragged onto the map.
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { id: string; name: string; kind: string; sound_list_id: string | null; canvas_x_cm: number | null }[];
+    };
+  await expect
+    .poll(async () => (await graph()).devices.find((d) => d.kind === 'mixer' && d.sound_list_id === lst.id), { timeout: 20000 })
+    .toBeTruthy();
+  await expect
+    .poll(async () => (await graph()).devices.find((d) => d.kind === 'mixer')?.canvas_x_cm, { timeout: 20000 })
+    .toBeNull();
+  // Saving the mixer again must not mint a second device (regression: the link must survive the
+  // create response so the re-save finds the existing one instead of duplicating it).
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-save').click();
+  await expect
+    .poll(async () => (await graph()).devices.filter((d) => d.kind === 'mixer' && d.sound_list_id === lst.id).length, { timeout: 20000 })
+    .toBe(1);
 });
 

@@ -845,6 +845,7 @@
 <script setup>
 import { apiErrorText } from "@/utils/errors";
 import { isRevisionConflict } from "@/utils/graph";
+import { deviceCreateBody } from "@/utils/workspace";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
@@ -1167,9 +1168,15 @@ function editDevice(device) {
 }
 const listMixers = computed(() => {
   const seen = new Map();
+  // The list's own auto-minted mixer device (linked by sound_list_id) is shown here even before any
+  // channel is actually patched into it.
+  const own = graph.devices.find(
+    (d) => (d.kind === "mixer" || d.device_type === "mixer") && d.sound_list_id === list.value.id,
+  );
+  if (own) seen.set(own.id, own);
   for (const channel of channels.value) {
     for (const device of chainDevices(channel, graph.edges, graph.devices)) {
-      if (device.kind === "mixer") seen.set(device.id, device);
+      if (device.kind === "mixer" || device.device_type === "mixer") seen.set(device.id, device);
     }
   }
   return [...seen.values()];
@@ -1178,6 +1185,10 @@ const listMixers = computed(() => {
 const mixerOpen = ref(false);
 // The mixer is stored on the list, which the server mirrors to the legacy list the Stockwire sync
 // reads. The list is then padded with empty inputs and outputs up to the mixer's size.
+//
+// We also keep a real, placeable mixer device in sync with that selection: setting a mixer mints one
+// (linked back to the list via `sound_list_id`) so it shows up in the gear list and can be dragged
+// onto the stage plot; clearing the mixer removes it again unless something is already patched to it.
 async function saveMixer({ product, inputs, buses }) {
   const wantInputs = Number(inputs) || 0;
   const wantBuses = Number(buses) || 0;
@@ -1209,6 +1220,35 @@ async function saveMixer({ product, inputs, buses }) {
         }),
       });
     }
+
+    const existing = graph.devices.find(
+      (d) =>
+        (d.kind === "mixer" || d.device_type === "mixer") &&
+        d.sound_list_id === list.value.id,
+    );
+    if (product) {
+      const name = product?.name || `${list.value.name} · Mixer`;
+      if (existing) {
+        if (existing.name !== name) await graph.updateDevice(contextId.value, existing.id, { name });
+      } else {
+        await graph.createAudioDevice(
+          contextId.value,
+          deviceCreateBody({
+            name,
+            device_type: "mixer",
+            notes: "",
+            ports: [],
+            sound_list_id: list.value.id,
+          }),
+        );
+      }
+    } else if (existing) {
+      const inUse = graph.edges.some(
+        (e) => e.src_device_id === existing.id || e.dst_device_id === existing.id,
+      );
+      if (!inUse) await graph.deleteDevice(contextId.value, existing.id);
+    }
+
     mixerOpen.value = false;
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);

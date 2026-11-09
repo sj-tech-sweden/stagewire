@@ -5,6 +5,31 @@ from app.main import app
 BASE = "/api/v1"
 
 
+async def test_graph_read_surfaces_sound_list_link(auth_headers):
+    """A mixer device minted for a channel list must expose its sound_list_id on the graph read,
+    so the frontend can find the same device after a reload instead of creating a duplicate."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        job_id = (
+            await client.post(f"{BASE}/jobs", json={"title": "Graph read"}, headers=auth_headers)
+        ).json()["id"]
+        lst = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/channel-lists", json={"name": "FOH"}, headers=auth_headers
+            )
+        ).json()
+        made = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/devices",
+                json={"name": "FOH · Mixer", "device_type": "mixer", "sound_list_id": lst["id"]},
+                headers=auth_headers,
+            )
+        ).json()
+        graph = (await client.get(f"{BASE}/jobs/{job_id}/graph", headers=auth_headers)).json()
+        by_id = {d["id"]: d for d in graph["devices"]}
+        assert by_id[made["id"]]["sound_list_id"] == lst["id"]
+
+
 async def test_each_sound_list_has_its_own_mixer_counts(auth_headers):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

@@ -7,6 +7,8 @@ import {
   deviceTypeFromCategory,
   fillFormFromSpecs,
   isVirtual,
+  POWERED_AUDIO_TYPES,
+  signalForType,
 } from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
@@ -331,6 +333,15 @@ export const useGraphStore = defineStore('graph', {
       const form = deviceForm(null);
       form.device_type = deviceTypeFromCategory(product.category);
       fillFormFromSpecs(form, product, specs);
+      // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+      // An explicit product spec (e.g. a powered speaker) still wins over this default.
+      if (
+        !form.power_inlet &&
+        signalForType(form.device_type) === 'audio' &&
+        !POWERED_AUDIO_TYPES.has(form.device_type)
+      ) {
+        form.power_inlet = 'none';
+      }
       form.name = form.name || product.name;
       return this.createAudioDevice(jobId, deviceCreateBody(form));
     },

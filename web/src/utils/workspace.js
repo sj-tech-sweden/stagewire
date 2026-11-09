@@ -52,9 +52,14 @@ export function deviceFromProduct(product, { parentId = null } = {}) {
   const attributes = {};
   if (product.power_consumption_watts) attributes.power_w = Number(product.power_consumption_watts);
   if (product.weight_kg) attributes.weight_kg = Number(product.weight_kg);
+  const domain = domainForCategory(product.category);
   const inlet = String(product.specs?.power_inlet || '').trim().toLowerCase();
   if (inlet) attributes.power_inlet = inlet;
-  const domain = domainForCategory(product.category);
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+  // An explicit product spec (e.g. a powered speaker) wins; clearly-powered categories (amplifiers,
+  // active/powered boxes) are left for the user to set rather than assumed passive.
+  else if (domain === 'audio' && !/amplif|powered|active/i.test(String(product.category || '')))
+    attributes.power_inlet = 'none';
   return {
     domain,
     kind: product.category || '',
@@ -373,6 +378,24 @@ export const DEVICE_TYPES = [
 export const IO_DEVICE_TYPES = ['mixer', 'switcher', 'router', 'multiviewer'];
 export const CAMERA_TYPES = ['camera', 'ptz_camera'];
 
+// Audio gear that is actively powered (needs a mains inlet) versus passive source gear
+// (microphones, mic stands, DIs, instruments). Passive gear defaults to no power inlet.
+export const POWERED_AUDIO_TYPES = new Set([
+  'mixer',
+  'switcher',
+  'router',
+  'multiviewer',
+  'digital_stagebox',
+  'analog_stagebox',
+  'split',
+  'patchbay',
+  'converter',
+  'encoder',
+  'network',
+  'computer',
+  'recorder',
+]);
+
 export function signalForType(type) {
   if (type === 'fixture') return 'dmx';
   if (['camera', 'ptz_camera', 'lens', 'screen', 'projector', 'switcher', 'multiviewer'].includes(type)) {
@@ -574,10 +597,24 @@ export function deviceCreateBody(form) {
     body.stockwire_product_id = form.stockwire_product_id;
     body.stockwire_product_name = form.stockwire_product_name;
   }
+  // A channel/video list that minted this device (e.g. an auto-created mixer) travels with it so
+  // the backend can link the gear back to the list and the frontend can find it again.
+  if (form.sound_list_id) body.sound_list_id = form.sound_list_id;
+  if (form.video_list_id) body.video_list_id = form.video_list_id;
   const map = { power_w: 'power_watts' };
   for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) {
     const value = form[key];
     if (value !== null && value !== '' && value !== undefined) body[map[key] || key] = value;
+  }
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default;
+  // only actively-powered audio boxes keep the inherited IEC C13 inlet. An explicit inlet (e.g. from
+  // a product spec) always wins.
+  if (
+    !body.power_inlet &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    body.power_inlet = 'none';
   }
   return body;
 }
@@ -735,6 +772,15 @@ export function fillFormFromSpecs(form, product, specs) {
   if (specs.power_inlet) form.power_inlet = specs.power_inlet;
   if (specs.weight_kg) form.weight_kg = specs.weight_kg;
   if (specs.power_watts) form.power_w = specs.power_watts;
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+  // An explicit product spec (e.g. a powered speaker) still wins over this default.
+  if (
+    !form.power_inlet &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    form.power_inlet = 'none';
+  }
   return form;
 }
 
