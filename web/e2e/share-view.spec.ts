@@ -201,3 +201,80 @@ test('the crew view receives new gear live over the websocket, without a reload'
   await post(request, headers, `/jobs/${jobId}/devices`, { name: 'Monitor Wedge', device_type: 'other' });
   await expect(crew.getByText('Monitor Wedge')).toBeVisible({ timeout: 20000 });
 });
+
+test('the crew list shows only real gear, not channels, buses or channel lists', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share filter ${Date.now()}` })).id;
+  // A channel list (and its channels) are structural, not gear — they must not appear in the crew list.
+  const list = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'FOH List',
+    kind: 'channel_list',
+    attributes: { channel_list_id: list.id },
+  });
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Ch 1',
+    kind: 'channel',
+    attributes: { list_id: list.id, channel_number: 1 },
+  });
+  // A real, placed piece of gear is what the crew should see.
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Lead Mic',
+    kind: 'mic',
+    canvas_x_cm: 200,
+    canvas_y_cm: 200,
+  });
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  const listPanel = page.getByTestId('share-device-list');
+  await expect(listPanel).toBeVisible();
+  await expect(listPanel.getByText('Lead Mic')).toBeVisible();
+  // Structural nodes are filtered out of the crew gear list.
+  await expect(listPanel.getByText('FOH List')).toHaveCount(0);
+  await expect(listPanel.getByText('Ch 1')).toHaveCount(0);
+});
+
+test('the crew map reuses the workspace canvas and opens a read-only inspector on tap', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share map ${Date.now()}` })).id;
+  // Place a single piece of gear at the centre of the (default) 1000x600 stage.
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Stage Mic',
+    kind: 'mic',
+    canvas_x_cm: 500,
+    canvas_y_cm: 300,
+  });
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  await page.getByTestId('share-tab-map').click();
+
+  // The map is the same Konva canvas the editor uses, with gear drawn on it.
+  const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-canvas-devices', '1');
+
+  // Tap the device to open its read-only inspector. Click by a position relative to the canvas
+  // surface (the standalone page can overflow horizontally, so viewport maths would miss).
+  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  const [panX, panY] = (await canvas.getAttribute('data-pan'))!.split(',').map(Number);
+  const rx = panX + 500 * zoom + 30 * zoom;
+  const ry = panY + 300 * zoom + 15 * zoom;
+  await canvas.click({ position: { x: rx, y: ry } });
+
+  const detail = page.getByTestId('share-map-detail');
+  await expect(detail).toBeVisible();
+  await expect(detail.getByTestId('inspector-name')).toHaveValue('Stage Mic');
+  // Read-only: the edit-details affordance is not offered.
+  await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
+});

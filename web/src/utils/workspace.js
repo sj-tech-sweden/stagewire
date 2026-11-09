@@ -60,16 +60,25 @@ export function deviceFromProduct(product, { parentId = null } = {}) {
   // active/powered boxes) are left for the user to set rather than assumed passive.
   else if (domain === 'audio' && !/amplif|powered|active/i.test(String(product.category || '')))
     attributes.power_inlet = 'none';
+  // The same passive source gear carries a single XLR output by default; an explicit product spec
+  // (its connectors or channel counts) still wins.
+  const specGroups = connectorGroupsFromProduct(product).map((g) => ({
+    ...g,
+    signal: g.signal || DOMAIN_SIGNAL[domain] || 'audio',
+  }));
+  if (
+    !specGroups.length &&
+    domain === 'audio' &&
+    !/amplif|powered|active|mixer|console|stagebox|split|patchbay/i.test(String(product.category || ''))
+  ) {
+    specGroups.push({ connector: 'xlr3', direction: 'out', count: 1, signal: 'audio' });
+  }
   return {
     domain,
     kind: product.category || '',
     name: product.name || product.sku || 'Item',
     attributes,
-    ports: portsFromGroups(
-      connectorGroupsFromProduct(product).map((g) => ({ ...g, signal: g.signal || DOMAIN_SIGNAL[domain] || 'audio' })),
-      [],
-      '',
-    ),
+    ports: portsFromGroups(specGroups, [], ''),
     case_parent_id: parentId,
     stockwire_product_id: product.id != null ? String(product.id) : null,
     stockwire_product_name: product.name || null,
@@ -780,6 +789,15 @@ export function fillFormFromSpecs(form, product, specs) {
     !POWERED_AUDIO_TYPES.has(form.device_type)
   ) {
     form.power_inlet = 'none';
+  }
+  // The same passive source gear carries a single XLR output by default so a patch has somewhere
+  // to start; an explicit product spec (its connectors or channel counts) always wins.
+  if (
+    !form.ports.length &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    form.ports = addConnector(form.ports, { connector: 'xlr3', direction: 'out', count: 1 });
   }
   return form;
 }

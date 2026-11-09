@@ -2292,3 +2292,92 @@ test('setting a mixer auto-creates a placeable mixer device linked to the channe
     .toBe(1);
 });
 
+test('setting a mixer imports its I/O ports from the Stockwire product spec', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer ports ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 77, name: 'Yamaha QL1', sku: 'QL1', category: 'Mixers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/categories*', (route) => route.fulfill({ json: { items: [], total: 0 } }));
+  // The product's device spec carries its inputs and outputs as connector groups.
+  await page.route('**/api/v1/stockwire/products/77/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 77,
+        name: 'Yamaha QL1',
+        connector_groups: [
+          { connector: 'xlr3', direction: 'in', count: 16, signal: 'audio' },
+          { connector: 'xlr3', direction: 'out', count: 8, signal: 'audio' },
+        ],
+        power_inlet: 'iec_c13',
+        weight_kg: 22,
+        power_watts: 180,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-picker').click();
+  await page.keyboard.type('yamaha');
+  await page.locator('.q-menu .q-item', { hasText: 'Yamaha QL1' }).click();
+  await page.getByTestId('mixer-inputs').fill('6');
+  await page.getByTestId('mixer-buses').fill('2');
+  await page.getByTestId('mixer-save').click();
+
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { kind: string; sound_list_id: string | null; ports: { connector: string; direction: string }[] }[];
+    };
+  await expect
+    .poll(async () => {
+      const mixer = (await graph()).devices.find((d) => d.kind === 'mixer' && d.sound_list_id === lst.id);
+      if (!mixer) return false;
+      const keys = mixer.ports.map((p) => `${p.connector}:${p.direction}`);
+      return keys.includes('xlr3:in') && keys.includes('xlr3:out');
+    }, { timeout: 20000 })
+    .toBe(true);
+});
+
+test('a passive source like a microphone gets one default XLR out port from the catalog', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mic default ${Date.now()}` })).id as string;
+  // A passive mic in the rental catalog carries no connectors of its own, so it should default to one XLR out.
+  await page.route('**/api/v1/stockwire/catalog/search*', (route) =>
+    route.fulfill({
+      json: {
+        items: [{ id: 201, name: 'SM58', sku: 'SM58', category: 'Microphones', manufacturer: 'Shure', available_qty: 3 }],
+        total: 1,
+        facets: { category: { Microphones: 1 }, manufacturer: { Shure: 1 } },
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('open-catalog').click();
+  await expect(page.getByTestId('catalog-search')).toBeVisible();
+  await page.getByTestId('catalog-item').first().click();
+  await page.getByTestId('catalog-add').click();
+
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { name: string; ports: { connector: string; direction: string }[] }[];
+    };
+  await expect
+    .poll(async () => {
+      const mic = (await graph()).devices.find((d) => d.name === 'SM58');
+      if (!mic) return false;
+      const keys = mic.ports.map((p) => `${p.connector}:${p.direction}`);
+      return keys.length === 1 && keys[0] === 'xlr3:out';
+    }, { timeout: 20000 })
+    .toBe(true);
+});
+
+

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.domains.audio.models import ProductionJob
+from app.domains.audio.schemas import ProductionJobRead
 from app.domains.auth.deps import get_current_user
 from app.domains.auth.security import create_share_token, verify_share_token
 from app.domains.graph.router import read_job_graph
@@ -67,7 +68,9 @@ async def mobile_view(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
 
     graph = await read_job_graph(db, job_id)
+    # The full job carries the stage/venue geometry the crew view redraws as the same stage frame
+    # the workspace canvas uses, so the read-only map looks and feels identical to the editor.
     return {
-        "job": {"id": str(job.id), "title": job.title},
+        "job": ProductionJobRead.model_validate(job).model_dump(mode="json"),
         "graph": graph.model_dump(mode="json"),
     }

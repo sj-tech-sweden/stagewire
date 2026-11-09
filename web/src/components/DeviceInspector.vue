@@ -1,5 +1,8 @@
 <template>
-  <div class="q-pa-md">
+  <div
+    class="q-pa-md"
+    :class="{ 'inspector-readonly': readonly }"
+  >
     <div class="text-subtitle1 q-mb-sm">
       {{ t('workspace.inspector') }}
     </div>
@@ -568,6 +571,9 @@ import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from 
 const props = defineProps({
   jobId: { type: String, required: true },
   device: { type: Object, default: null },
+  // Read-only views (e.g. the crew share link) render the same inspector, but every editor is
+  // disabled and no action button is offered, so the crew sees an exact, non-editable copy.
+  readonly: { type: Boolean, default: false },
 });
 const emit = defineEmits(['request-booking', 'remove']);
 
@@ -721,7 +727,12 @@ const boundAsset = computed(() => {
   };
 });
 const canEditDetails = computed(
-  () => props.device && !isPlotElement(props.device) && !isPowerNode(props.device) && !isVirtual(props.device),
+  () =>
+    props.device &&
+    !props.readonly &&
+    !isPlotElement(props.device) &&
+    !isPowerNode(props.device) &&
+    !isVirtual(props.device),
 );
 const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
 const otherDevices = computed(() =>
@@ -757,6 +768,7 @@ async function loadTrace(direction) {
 }
 
 async function save(changes) {
+  if (props.readonly) return;
   try {
     await graph.updateDevice(props.jobId, props.device.id, changes);
   } catch (err) {
@@ -790,3 +802,15 @@ async function connect(force) {
   }
 }
 </script>
+
+<style scoped>
+/* Read-only crew view: the inspector still renders identically, but every editor is inert and no
+   action button is offered, so a crew member sees an exact, non-editable copy. */
+.inspector-readonly :deep(.q-field) {
+  pointer-events: none;
+}
+.inspector-readonly :deep(.q-btn) {
+  display: none !important;
+}
+</style>
+

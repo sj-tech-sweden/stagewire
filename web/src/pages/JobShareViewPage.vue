@@ -62,6 +62,7 @@
           name="map"
           icon="map"
           :label="t('workspace.share.map')"
+          data-testid="share-tab-map"
         />
         <q-tab
           name="scan"
@@ -144,48 +145,34 @@
             v-if="placedDevices.length"
             class="q-pa-sm"
           >
-            <svg
-              :viewBox="mapViewBox"
-              class="full-width bg-grey-11 rounded-borders"
-              style="aspect-ratio: 16 / 10"
+            <div
+              ref="mapHost"
               data-testid="share-stage-map"
-              @click.self="selectedId = null"
+              class="full-width"
             >
-              <rect
-                v-for="device in placedDevices"
-                :key="device.id"
-                :x="mapX(device.canvas_x_cm)"
-                :y="mapY(device.canvas_y_cm)"
-                width="14"
-                height="10"
-                rx="2"
-                :fill="selectedId === device.id ? '#35A853' : '#3F873F'"
-                class="cursor-pointer"
-                @click="selectedId = device.id"
-              >
-                <title>{{ device.name }}</title>
-              </rect>
-            </svg>
+              <WorkspaceCanvas
+                :devices="placedDevices"
+                :edges="edges"
+                :frame="frame"
+                :selected-id="selectedId"
+                :zoom="zoom"
+                :device-scale="1"
+                readonly
+                @select="(id) => (selectedId = id)"
+              />
+            </div>
 
-            <q-card
+            <div
               v-if="selected"
-              flat
-              class="bg-grey-9 text-white q-mt-sm"
+              class="bg-grey-9 text-white q-mt-sm rounded-borders"
               data-testid="share-map-detail"
             >
-              <q-card-section>
-                <div class="text-subtitle2">
-                  {{ selected.name }}
-                </div>
-                <div class="text-caption text-grey-5 text-capitalize">
-                  {{ selected.domain }} · {{ selected.kind }}
-                </div>
-                <DeviceShareDetail
-                  :device="selected"
-                  class="q-mt-sm"
-                />
-              </q-card-section>
-            </q-card>
+              <DeviceInspector
+                readonly
+                :job-id="jobId"
+                :device="selected"
+              />
+            </div>
           </div>
           <div
             v-else
@@ -254,10 +241,14 @@
 
 <script setup>
 import axios from 'axios';
-import { computed, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { getApiBaseUrl } from '@/utils/runtime-config';
+import { isGear } from '@/utils/workspace';
+import { frameFromJob, fitWidthZoom } from '@/utils/plotFrame';
+import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
+import DeviceInspector from '@/components/DeviceInspector.vue';
 import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
 import ScanCapture from '@/components/ScanCapture.vue';
 import { useJobSocket } from '@/composables/useJobSocket';
@@ -306,43 +297,39 @@ const search = ref('');
 const selectedId = ref(null);
 const lastScan = ref('');
 const matchedDevice = ref(null);
+const edges = ref([]);
+
+// Only real gear (not channels, buses, channel lists) belongs in the crew list and on the map.
+const gear = computed(() => devices.value.filter(isGear));
 
 const filteredDevices = computed(() => {
   const q = search.value.trim().toLowerCase();
-  if (!q) return devices.value;
-  return devices.value.filter((d) =>
+  if (!q) return gear.value;
+  return gear.value.filter((d) =>
     [d.name, d.domain, d.kind].join(' ').toLowerCase().includes(q),
   );
 });
 
+// Only real gear that has been placed on the plot is drawn on the map.
 const placedDevices = computed(() =>
-  devices.value.filter(
+  gear.value.filter(
     (d) => typeof d.canvas_x_cm === 'number' && typeof d.canvas_y_cm === 'number',
   ),
 );
 
 const selected = computed(() => placedDevices.value.find((d) => d.id === selectedId.value) || null);
 
-// The map fits itself to wherever devices are placed (no stage dimensions needed).
-const mapBounds = computed(() => {
-  const xs = placedDevices.value.map((d) => d.canvas_x_cm);
-  const ys = placedDevices.value.map((d) => d.canvas_y_cm);
-  const minX = Math.min(...xs, 0);
-  const minY = Math.min(...ys, 0);
-  const maxX = Math.max(...xs, 100);
-  const maxY = Math.max(...ys, 100);
-  return { minX, minY, w: maxX - minX + 20, h: maxY - minY + 20 };
-});
+// The same stage frame the editor draws, derived from the job's geometry, so the read-only
+// map looks and feels identical to the workspace canvas.
+const frame = computed(() => frameFromJob(job.value));
 
-const mapViewBox = computed(
-  () => `${mapBounds.value.minX - 10} ${mapBounds.value.minY - 10} ${mapBounds.value.w} ${mapBounds.value.h}`,
-);
-
-function mapX(cm) {
-  return cm - mapBounds.value.minX - 7;
-}
-function mapY(cm) {
-  return cm - mapBounds.value.minY - 5;
+// Fit the stage frame to the panel width; fall back to a readable default until measured.
+const mapHost = ref(null);
+const mapWidth = ref(0);
+const zoom = ref(0.8);
+function fitMap() {
+  const w = mapWidth.value || mapHost.value?.clientWidth || 0;
+  if (w && frame.value?.width) zoom.value = fitWidthZoom(frame.value, w);
 }
 
 async function load() {
@@ -354,6 +341,7 @@ async function load() {
     const { data } = await shareApi.get(`/jobs/${jobId}/mobile-view`, { params: { token } });
     job.value = data.job;
     devices.value = data.graph.devices;
+    edges.value = data.graph.edges || [];
     loaded.value = true;
     // Now that we have a baseline, follow live graph updates (mixer channels/buses, map moves, …).
     connectSocket();
@@ -364,12 +352,20 @@ async function load() {
 
 load();
 
+// Fit the stage frame to the panel once the map is shown or the job (and thus frame) arrives.
+watch([tab, frame], () => {
+  if (tab.value === 'map') nextTick(fitMap);
+});
+onMounted(() => {
+  if (tab.value === 'map') nextTick(fitMap);
+});
+
 // The crew view is read-only: a scan looks up (rather than edits) the device whose bound
 // Stockwire asset, product id, or name matches the captured code.
 function onScanned(value) {
   lastScan.value = value;
   const q = String(value).toLowerCase();
-  const match = devices.value.find((d) => {
+  const match = gear.value.find((d) => {
     const a = d.attributes || {};
     return (
       a.stockwire_asset_code === value ||

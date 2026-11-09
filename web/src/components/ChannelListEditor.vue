@@ -845,7 +845,7 @@
 <script setup>
 import { apiErrorText } from "@/utils/errors";
 import { isRevisionConflict } from "@/utils/graph";
-import { deviceCreateBody } from "@/utils/workspace";
+import { deviceCreateBody, deviceForm, fillFormFromSpecs } from "@/utils/workspace";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
@@ -1228,8 +1228,26 @@ async function saveMixer({ product, inputs, buses }) {
     );
     if (product) {
       const name = product?.name || `${list.value.name} · Mixer`;
+      // The mixer device carries the product's inputs/outputs as ports so the stage plot shows
+      // its I/O; if the product spec says nothing we leave it empty (the list still reflects the
+      // channels/buses the user entered).
+      let ports = [];
+      if (product.id) {
+        try {
+          const { data: specs } = await api.get(`/stockwire/products/${product.id}/device-specs`);
+          const form = deviceForm(null);
+          form.device_type = "mixer";
+          fillFormFromSpecs(form, product, specs || {});
+          ports = form.ports;
+        } catch {
+          ports = [];
+        }
+      }
       if (existing) {
-        if (existing.name !== name) await graph.updateDevice(contextId.value, existing.id, { name });
+        const changes = { name };
+        if (ports.length) changes.ports = ports;
+        if (existing.name !== name || (ports.length && JSON.stringify(existing.ports) !== JSON.stringify(ports)))
+          await graph.updateDevice(contextId.value, existing.id, changes);
       } else {
         await graph.createAudioDevice(
           contextId.value,
@@ -1237,7 +1255,7 @@ async function saveMixer({ product, inputs, buses }) {
             name,
             device_type: "mixer",
             notes: "",
-            ports: [],
+            ports,
             sound_list_id: list.value.id,
           }),
         );
