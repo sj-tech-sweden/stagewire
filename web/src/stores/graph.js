@@ -188,6 +188,14 @@ export const useGraphStore = defineStore('graph', {
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
+    // Binds a physical Stockwire inventory asset to this device. The server records the code
+    // locally (so the link survives offline) and, when the integration is enabled, resolves
+    // tag/serial/description. The returned device is applied as a realtime upsert event.
+    async bindStockwireAsset(jobId, id, payload) {
+      const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/bind-asset`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
     async trace(jobId, id, direction, signal) {
       const { data } = await api.get(`${baseFor(this, jobId)}/devices/${id}/trace`, {
         params: { direction, signal },

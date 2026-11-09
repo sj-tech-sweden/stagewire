@@ -116,3 +116,44 @@ test('a keyboard-wedge scan in the crew view looks up the matched device', async
   await expect(result).toContainText('ASSET-123');
   await expect(result).toContainText('Stagebox A');
 });
+
+test('a workspace user can bind a Stockwire asset to a device and see it read-only', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Bind E2E ${Date.now()}` })).id;
+  await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Stagebox A',
+    kind: 'stagebox',
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+
+  // Open the device in the inspector via the patch drawer.
+  await page.getByTestId('patch-edit-from').first().click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox A');
+  await expect(page.getByTestId('stockwire-asset-panel')).toBeVisible();
+
+  // Bind a Stockwire asset (the integration is off in e2e, so the code is stored locally).
+  await page.getByTestId('bind-open').click();
+  await expect(page.getByTestId('bind-code')).toBeVisible();
+  await page.getByTestId('bind-code').fill('ASSET-XYZ');
+  await page.getByTestId('bind-confirm').click();
+  await expect(page.getByTestId('bind-result')).toBeVisible();
+
+  // Close the dialog; the inspector now shows the bound asset and an unbind action.
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByTestId('stockwire-asset-panel')).toContainText('ASSET-XYZ');
+  await expect(page.getByTestId('bind-unbind')).toBeVisible();
+
+  // The crew view reflects the binding read-only.
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  await expect(page.getByTestId('share-device-list')).toBeVisible();
+  await expect(page.getByText('ASSET-XYZ')).toBeVisible();
+});

@@ -52,6 +52,34 @@
       </div>
     </section>
 
+    <!-- Stockwire inventory asset bound to this physical device (read-only reference). -->
+    <section
+      v-if="boundAsset.id"
+      class="q-mb-sm"
+    >
+      <div class="text-caption text-grey-5 text-uppercase">
+        {{ t('workspace.bind.title') }}
+      </div>
+      <div
+        v-if="boundAsset.tag"
+        class="text-caption"
+      >
+        <span class="text-grey-5">{{ t('workspace.bind.tag') }}:</span> {{ boundAsset.tag }}
+      </div>
+      <div
+        v-if="boundAsset.serial"
+        class="text-caption"
+      >
+        <span class="text-grey-5">{{ t('workspace.bind.serial') }}:</span> {{ boundAsset.serial }}
+      </div>
+      <div
+        v-if="boundAsset.description"
+        class="text-caption"
+      >
+        {{ boundAsset.description }}
+      </div>
+    </section>
+
     <!-- Power: how the device draws power (inlet / phase where known). -->
     <section
       v-if="power"
@@ -144,5 +172,15 @@ const dmx = computed(() => {
   const footprint = attrs.value.footprint;
   if (universe == null && start == null && footprint == null) return null;
   return { universe, start, footprint };
+});
+
+const boundAsset = computed(() => {
+  const a = attrs.value;
+  return {
+    id: a.stockwire_asset_id || null,
+    tag: a.stockwire_asset_tag || null,
+    serial: a.stockwire_asset_serial || null,
+    description: a.stockwire_asset_description || null,
+  };
 });
 </script>

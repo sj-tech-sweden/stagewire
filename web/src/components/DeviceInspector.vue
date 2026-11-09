@@ -282,6 +282,63 @@
         />
       </div>
 
+      <div
+        v-if="canEditDetails"
+        class="q-mb-md"
+        data-testid="stockwire-asset-panel"
+      >
+        <div class="text-caption text-grey-5 text-uppercase q-mb-xs">
+          {{ t('workspace.bind.title') }}
+        </div>
+        <div
+          v-if="boundAsset.id"
+          class="q-mb-xs"
+        >
+          <div class="text-caption">
+            <span class="text-grey-5">{{ t('workspace.bind.code') }}:</span> {{ boundAsset.id }}
+          </div>
+          <div
+            v-if="boundAsset.tag"
+            class="text-caption"
+          >
+            <span class="text-grey-5">{{ t('workspace.bind.tag') }}:</span> {{ boundAsset.tag }}
+          </div>
+          <div
+            v-if="boundAsset.serial"
+            class="text-caption"
+          >
+            <span class="text-grey-5">{{ t('workspace.bind.serial') }}:</span> {{ boundAsset.serial }}
+          </div>
+          <div
+            v-if="boundAsset.description"
+            class="text-caption"
+          >
+            {{ boundAsset.description }}
+          </div>
+        </div>
+        <div class="row q-gutter-sm">
+          <q-btn
+            v-if="!boundAsset.id"
+            color="primary"
+            no-caps
+            icon="link"
+            :label="t('workspace.bind.bind')"
+            data-testid="bind-open"
+            @click="bindOpen = true"
+          />
+          <q-btn
+            v-else
+            flat
+            color="negative"
+            no-caps
+            icon="link_off"
+            :label="t('workspace.bind.unbind')"
+            data-testid="bind-unbind"
+            @click="unbind"
+          />
+        </div>
+      </div>
+
       <q-expansion-item
         dense
         default-opened
@@ -484,6 +541,11 @@
     :device="device"
     :job-id="jobId"
   />
+  <BindStockwireDialog
+    v-model="bindOpen"
+    :job-id="jobId"
+    :device="device"
+  />
 </template>
 
 <script setup>
@@ -499,6 +561,7 @@ import { legacyId } from '@/utils/graphLegacy';
 import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
+import BindStockwireDialog from '@/components/BindStockwireDialog.vue';
 import { isSpeakerType } from '@/utils/plotObjects';
 import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
 
@@ -591,6 +654,22 @@ async function unplug() {
   }
 }
 
+// Unbinding clears the local asset link (the integration has no allocation to release — out of scope).
+async function unbind() {
+  try {
+    await graph.updateDevice(props.jobId, props.device.id, {
+      attributes: {
+        stockwire_asset_id: null,
+        stockwire_asset_tag: null,
+        stockwire_asset_serial: null,
+        stockwire_asset_description: null,
+      },
+    });
+  } catch (err) {
+    if (!isRevisionConflict(err)) $q.notify({ type: 'negative', message: apiErrorText(err) });
+  }
+}
+
 async function linkElement(links) {
   try {
     await stagePlot.updateElement(props.jobId, legacyId(props.device), links);
@@ -625,6 +704,17 @@ const deviceIpWebUi = computed(() => {
 // Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
 // power, camera specs. It opens from here so any device reached through the inspector can use it.
 const detailsOpen = ref(false);
+const bindOpen = ref(false);
+// The bound Stockwire inventory asset, if any, surfaced from the device's attribute bag.
+const boundAsset = computed(() => {
+  const a = props.device?.attributes || {};
+  return {
+    id: a.stockwire_asset_id || null,
+    tag: a.stockwire_asset_tag || null,
+    serial: a.stockwire_asset_serial || null,
+    description: a.stockwire_asset_description || null,
+  };
+});
 const canEditDetails = computed(
   () => props.device && !isPlotElement(props.device) && !isPowerNode(props.device) && !isVirtual(props.device),
 );
