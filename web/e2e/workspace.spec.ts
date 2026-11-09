@@ -145,14 +145,22 @@ test('the inspector shows a Network & Control panel for AVL devices and hides it
 
   // Protocols are a multiselect; picking Dante persists the whole list.
   await page.getByTestId('network-protocols').click();
-  await page.locator('.q-menu .q-item', { hasText: 'Dante' }).click();
+  const danteItem = page.locator('.q-menu .q-item', { hasText: 'Dante' });
+  // Wait for the dropdown options to be ready before clicking, otherwise the click can land before
+  // the menu item is rendered (slower on a busy database, e.g. later in the suite) and the selection
+  // is silently dropped.
+  await danteItem.first().waitFor({ state: 'visible' });
+  await danteItem.first().click();
   // close the select popup
   await page.keyboard.press('Escape');
 
-  // Backend holds the AVL network metadata on the device attributes.
-  const graph = (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  // Backend holds the AVL network metadata on the device attributes. Re-fetch on every poll tick
+  // (a single snapshot taken before the async saves settle would never observe the final state).
   await expect
-    .poll(async () => (await graph).devices.find((d: { id: string }) => d.id === mic.id).attributes)
+    .poll(async () => {
+      const g = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+      return g.devices.find((d: { id: string }) => d.id === mic.id).attributes;
+    }, { timeout: 10_000 })
     .toMatchObject({ network_ip: '192.168.1.50', network_subnet: '255.255.255.0', network_vlan: 120, network_protocols: ['dante'] });
 
   // Switching to the power device hides the panel entirely.
@@ -422,6 +430,10 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
   await page.goto(`/jobs/${jobId}/workspace`);
   const canvas = page.getByTestId('workspace-canvas');
   await expect(canvas).toBeVisible();
+  // Wait for the graph to finish loading and render the element + box onto the canvas before
+  // dragging, otherwise the drag can land before the Konva node exists (slower graph load on a
+  // busier database, e.g. later in the suite).
+  await expect(canvas).toHaveAttribute('data-canvas-devices', '2');
   const area = (await canvas.boundingBox())!;
   const zoom = await fittedZoom(page);
   // element: top-left (100,100) cm, 100x50 cm -> 80x40 px; grab it near its middle
@@ -711,6 +723,17 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   const kind = `Neon plug ${String(Date.now()).slice(-5)}`;
   await page.keyboard.type(kind);
   await page.keyboard.press('Enter');
+  // Picking a brand-new connector is asynchronous: the field adds the kind to the shared list and
+  // only then commits the value to the step. Wait for that to land before saving, otherwise a slower
+  // (busy-database) run can save an empty connector while the kinds.add() roundtrip is still in flight.
+  await expect
+    .poll(async () => {
+      const kindsResp = (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as {
+        label: string;
+      }[];
+      return kindsResp.some((k) => k.label === kind);
+    })
+    .toBe(true);
   await page.getByTestId('chain-save').click();
   await expect(row.getByTestId('edit-video-chain')).toContainText('Switcher A');
   await row.getByTestId('show-video-flow').click();
@@ -1334,8 +1357,13 @@ test('an outlet is moved on the map and its position is edited in the venue powe
     ((await (await request.get(`${API_BASE}/api/v1/venues/${venue.id}/power-outlets`, { headers })).json()) as any[]).find((o) => o.id === outlet.id);
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('canvas-fit').click();
   const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+  // Wait for the venue's power outlets to finish loading and render their markers on the canvas
+  // before clicking, otherwise the click can land on empty canvas (slower outlet load on a busy
+  // database, e.g. later in the suite) and the outlet inspector never opens.
+  await expect(canvas).toHaveAttribute('data-outlets', '1');
+  await page.getByTestId('canvas-fit').click();
   const box = (await canvas.boundingBox())!;
   const zoom = Number(await canvas.getAttribute('data-zoom'));
   const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
@@ -1501,10 +1529,16 @@ test('cables are routed on the new map: settings, a drawn cableway and the cable
   const routeOf = async () => Object.values(((await plan()).routes || {}) as Record<string, any>)[0];
   await page.getByTestId('cable-reroute').click();
   await expect(page.getByTestId('reroute-bar')).toBeVisible();
+  // Re-fit now that the frame has fully loaded so the click coordinates match the rendered map: a
+  // late frame load in a busy-database run can leave the earlier fit stale, and the reroute clicks
+  // would then land off the stage and be ignored (no waypoints get added).
+  await page.getByTestId('canvas-fit').click();
   await canvas.scrollIntoViewIfNeeded();
   const area2 = (await canvas.boundingBox())!;
-  await page.mouse.click(area2.x + 400 * zoom, area2.y + 300 * zoom);
-  await page.mouse.click(area2.x + 600 * zoom, area2.y + 300 * zoom);
+  const zoom2 = Number(await canvas.getAttribute('data-zoom'));
+  await page.mouse.click(area2.x + 400 * zoom2, area2.y + 300 * zoom2);
+  await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(1);
+  await page.mouse.click(area2.x + 600 * zoom2, area2.y + 300 * zoom2);
   await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(2);
   expect((await routeOf()).mode).toBe('manual');
   await page.getByTestId('reroute-undo').click();
@@ -1966,10 +2000,18 @@ test('replacing or clearing a source removes the device it created, but not one 
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
   const pick = async (row: number, name: string) => {
-    await page.getByTestId('source-picker').nth(row).click();
+    const picker = page.getByTestId('source-picker').nth(row);
+    // The picker only exists once the channel list has rendered in sound mode; wait for it before
+    // interacting (slower render on a busy database can otherwise leave the click hanging).
+    await picker.waitFor({ state: 'visible' });
+    await picker.click();
     await page.keyboard.type(name);
-    // not the "use as typed" row: the device already in the job
-    await page.locator('.q-menu .q-item', { hasText: `${name} ·` }).click();
+    // not the "use as typed" row: the device already in the job. Wait for the dropdown row to be
+    // ready before clicking, otherwise the click can land before it renders (slower on a busy
+    // database) and the source is never assigned.
+    const item = page.locator('.q-menu .q-item', { hasText: `${name} ·` });
+    await item.first().waitFor({ state: 'visible' });
+    await item.first().click();
   };
   await pick(0, 'Mic A');
   await expect(page.getByTestId('open-source-device')).toHaveCount(1);

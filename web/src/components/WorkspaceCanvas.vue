@@ -5,6 +5,8 @@
     :class="{ 'hand-cursor': panning }"
     :data-zoom="zoom"
     :data-pan="`${Math.round(pan.x)},${Math.round(pan.y)}`"
+    :data-canvas-devices="devices.length"
+    :data-outlets="outlets.length"
     data-testid="workspace-canvas"
   >
     <v-stage

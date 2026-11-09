@@ -116,7 +116,7 @@ export const useGraphStore = defineStore('graph', {
         'graph.edge.upsert',
       );
     },
-    async versionedPatch(url, entityType, ids, changes, start, eventType, retried = false) {
+    async versionedPatch(url, entityType, ids, changes, start, eventType, attempt = 0) {
       try {
         const { data } = await api.patch(url, {
           ...changes,
@@ -130,8 +130,14 @@ export const useGraphStore = defineStore('graph', {
         const current = error.response.data.detail.current;
         this.applyRealtimeEvent({ type: eventType, payload: current });
         const { merged, conflicts } = threeWayMerge(start, changes, current);
-        if (conflicts.length === 0 && !retried) {
-          return this.versionedPatch(url, entityType, ids, merged, current, eventType, true);
+        // An empty conflict list means the user's edit did not actually collide with the
+        // server's row — it was only an optimistic-concurrency race (typically two rapid
+        // field edits on the same device firing before the first response lands). Never open
+        // the conflict dialog for that; retry against the latest row instead, bounded so a
+        // pathological storm of concurrent editors cannot loop forever.
+        if (conflicts.length === 0) {
+          if (attempt >= 5) return current;
+          return this.versionedPatch(url, entityType, ids, merged, current, eventType, attempt + 1);
         }
         this.conflict = { entityType, ids, base: start, draft: changes, current, conflicts };
         throw error;
