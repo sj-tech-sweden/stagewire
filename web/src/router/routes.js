@@ -33,6 +33,9 @@ const routes = [
   },
   { path: '/login', component: () => import('@/pages/LoginPage.vue') },
   { path: '/setup', component: () => import('@/pages/SetupPage.vue') },
+  // Read-only, login-free day-of-show crew view. Lives outside MainLayout on purpose: it
+  // carries no user session and must never trigger the "redirect to login" guard.
+  { path: '/jobs/:jobId/view', component: () => import('@/pages/JobShareViewPage.vue') },
   { path: '/:catchAll(.*)*', component: () => import('@/pages/ErrorNotFound.vue') },
 ];
 

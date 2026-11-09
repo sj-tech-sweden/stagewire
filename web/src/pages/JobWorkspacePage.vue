@@ -167,6 +167,14 @@
         data-testid="open-reports"
         @click="reportDialog = true"
       />
+      <q-btn
+        flat
+        no-caps
+        icon="share"
+        :label="t('workspace.share.openMobile')"
+        data-testid="open-share"
+        @click="shareOpen = true"
+      />
     </div>
 
     <q-tabs
@@ -754,6 +762,10 @@
       :start-date="job?.start_date || null"
       :end-date="job?.end_date || null"
     />
+    <ShareJobDialog
+      v-model="shareOpen"
+      :job-id="jobId"
+    />
   </q-page>
 </template>
 
@@ -800,6 +812,7 @@ import DeviceEditor from '@/components/DeviceEditor.vue';
 import LightsEditor from '@/components/LightsEditor.vue';
 import VideoEditor from '@/components/VideoEditor.vue';
 import RiggingEditor from '@/components/RiggingEditor.vue';
+import ShareJobDialog from '@/components/ShareJobDialog.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import WorkspaceTable from '@/components/WorkspaceTable.vue';
 
@@ -1098,6 +1111,7 @@ async function exportList(list, plugin) {
 
 const importInput = ref(null);
 const reportDialog = ref(false);
+const shareOpen = ref(false);
 const stageVenueOpen = ref(false);
 
 // Outlets belong to the venue. A job without a venue gets one (after a confirmation) made from its

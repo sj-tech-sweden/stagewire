@@ -23,9 +23,12 @@ export default route(function (/* ctx */) {
 
   Router.beforeEach(async (to) => {
     const token = localStorage.getItem('sw_access_token')
+    // The read-only crew view is reached by a share token in the URL, never by a user session,
+    // so it must pass the guard without a login.
     const publicRoutes = ['/login', '/setup']
+    const isPublicShareView = to.path.startsWith('/jobs/') && to.path.endsWith('/view')
 
-    if (publicRoutes.includes(to.path)) {
+    if (publicRoutes.includes(to.path) || isPublicShareView) {
       return true
     }
 

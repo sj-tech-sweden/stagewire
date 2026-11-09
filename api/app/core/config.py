@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     jwt_access_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 30
     jwt_refresh_reuse_grace_seconds: int = 30
+    # Read-only day-of-show share tokens (minted by a logged-in user, consumed without login).
+    # Default 1 day; 0 means the token never expires.
+    share_token_ttl_minutes: int = 1440
 
     # Where the SPA lives; used for SAML/SSO post-login redirects.
     effective_frontend_base_url: str = "http://localhost:9010"

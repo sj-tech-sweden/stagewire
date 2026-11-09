@@ -13,19 +13,20 @@
   "dependencies": {
     "@quasar/extras": "^2.0.0",
     "axios": "^1.7.7",
-    "vue-i18n": "^11.0.0",
     "dompurify": "^3.1.6",
     "konva": "^10.0.0",
     "marked": "^18.0.0",
     "pinia": "^4.0.0",
+    "qrcode": "^1.5.4",
     "quasar": "^2.24.0",
     "vue": "^3.5.11",
+    "vue-i18n": "^11.0.0",
     "vue-konva": "^4.0.0",
     "vue-router": "^5.0.0"
   },
   "devDependencies": {
-    "@quasar/app-vite": "^3.10.3",
     "@playwright/test": "^1.48.0",
+    "@quasar/app-vite": "^3.10.3",
     "eslint": "^10.0.0",
     "eslint-plugin-vue": "^10.0.0",
     "globals": "^17.0.0",

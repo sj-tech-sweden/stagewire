@@ -25,6 +25,7 @@ from app.domains.reports.router import router as reports_router
 from app.domains.rigging.router import router as rigging_router
 from app.domains.rigging.router import venue_router as rigging_venue_router
 from app.domains.settings.router import router as settings_router
+from app.domains.share.router import router as share_router
 from app.domains.stockwire.router import public_router as stockwire_public_router
 from app.domains.stockwire.router import router as stockwire_router
 from app.domains.uploads.router import router as uploads_router
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(rigging_router, prefix="/api/v1")
     app.include_router(rigging_venue_router, prefix="/api/v1")
     app.include_router(settings_router, prefix="/api/v1")
+    app.include_router(share_router, prefix="/api/v1")
     app.include_router(stockwire_router, prefix="/api/v1")
     app.include_router(stockwire_public_router, prefix="/api/v1")
     app.include_router(uploads_router, prefix="/api/v1")

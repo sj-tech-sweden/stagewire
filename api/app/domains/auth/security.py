@@ -58,6 +58,38 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 
 
+def create_share_token(job_id: str | int, *, ttl_minutes: int | None = None) -> str:
+    """Mint a read-only, login-free share token for the day-of-show crew view.
+
+    The token carries only the job id and a ``view`` scope, so it can neither write
+    nor read anything outside that job. A logged-in user mints it; a crew member
+    then opens the mobile view with it and no session.
+    """
+    if ttl_minutes is None:
+        ttl_minutes = settings.share_token_ttl_minutes
+    payload: dict = {
+        "job_id": str(job_id),
+        "scope": "view",
+        "iat": datetime.now(UTC),
+    }
+    if ttl_minutes and ttl_minutes > 0:
+        payload["exp"] = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def verify_share_token(token: str) -> dict:
+    """Validate a share token; returns its claims or raises ``ValueError``."""
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except jwt.PyJWTError as exc:  # expired / tampered / malformed
+        raise ValueError("Invalid or expired share token") from exc
+    if claims.get("scope") != "view":
+        raise ValueError("Share token is not view-scoped")
+    if "job_id" not in claims:
+        raise ValueError("Share token is missing its job id")
+    return claims
+
+
 def _get_api_key_pepper() -> str:
     pepper = os.getenv("API_KEY_PEPPER")
     if pepper:
