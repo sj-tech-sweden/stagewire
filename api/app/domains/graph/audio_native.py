@@ -48,6 +48,7 @@ LIST_ATTRS = ("mixer_product_id", "mixer_product_name", "mixer_inputs", "mixer_b
 CHANNEL_ATTRS = (
     "channel_number",
     "input_type",
+    "mixer_input",
     "connector",
     "device",
     "stand_type",
@@ -412,7 +413,14 @@ def channel_node(job_id: uuid.UUID | None, list_node: GraphDevice, data: dict) -
         position=attributes.get("channel_number") or 0,
         notes=data.get("notes") or "",
         attributes=attributes,
-        ports=[{"id": "out", "direction": "out", "signal": "audio"}],
+        # A channel is the logical endpoint of a source signal: a mic or a digital stagebox
+        # feeds *into* the channel, and the channel then feeds *out* to a bus / PA. So it needs
+        # both an `in` (where the source terminates — the true end of the chain) and the existing
+        # `out` (toward the mix). Edges terminating on a channel node are valid without force.
+        ports=[
+            {"id": "in", "direction": "in", "signal": "audio"},
+            {"id": "out", "direction": "out", "signal": "audio"},
+        ],
         stockwire_product_id=data.get("stockwire_product_id"),
         stockwire_product_name=data.get("stockwire_product_name"),
     )

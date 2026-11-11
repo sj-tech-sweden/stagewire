@@ -796,6 +796,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useJobSocket } from '@/composables/useJobSocket';
 import {
   PRODUCT_MIME,
+  channelsOf,
   deviceFromProduct,
   devicesShownAsElements,
   isPlotElement,
@@ -1012,12 +1013,24 @@ async function connectDevices({ srcId, dstId }) {
     $q.notify({ type: 'negative', message: t('workspace.noFreePorts', { from: src.name, to: dst.name }) });
     return;
   }
+  // When the destination is a mixer, terminate the edge on its first channel rather than the
+  // mixer's physical jack — the channel is the true end of the signal chain (a mic or a digital
+  // stagebox lands on the channel). Downstream the channel feeds the bus/PA as before.
+  let dstDeviceId = dstId;
+  let dstPortId = fit.dstPort;
+  if (fit.signal === 'audio' && dst && (dst.kind === 'mixer' || dst.device_type === 'mixer')) {
+    const chs = channelsOf(graph.devices, dst.sound_list_id);
+    if (chs.length) {
+      dstDeviceId = chs[0].id;
+      dstPortId = 'in';
+    }
+  }
   const payload = {
     signal: fit.signal,
     src_device_id: srcId,
     src_port: fit.srcPort,
-    dst_device_id: dstId,
-    dst_port: fit.dstPort,
+    dst_device_id: dstDeviceId,
+    dst_port: dstPortId,
     channels: 1,
   };
   try {

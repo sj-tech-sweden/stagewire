@@ -393,7 +393,7 @@
             outlined
             emit-value
             map-options
-            :options="portOptions(device, 'out')"
+            :options="sourcePortOptions"
             :label="t('workspace.fromPort')"
           />
           <q-select
@@ -413,7 +413,7 @@
             emit-value
             map-options
             :disable="!form.dstId"
-            :options="portOptions(devicesById.get(form.dstId), 'in')"
+            :options="dstPortOptions"
             :label="t('workspace.toPort')"
           />
           <q-input
@@ -607,6 +607,7 @@ import {
   isGear,
   outputPointOptions,
   channelsOf,
+  outputsOf,
 } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
@@ -788,6 +789,7 @@ const canEditDetails = computed(
     !isVirtual(props.device),
 );
 const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
+const isMixer = (d) => d && (d.kind === 'mixer' || d.device_type === 'mixer');
 // Connection targets are real gear only: channels, buses (channel lists), outputs, DMX/video
 // virtual nodes, plot elements and power nodes are not endpoints you patch *into*, so offering
 // them in the "to device" picker would let a user wire a cable to a non-device (a channel appears
@@ -797,6 +799,46 @@ const otherDevices = computed(() =>
     .filter((d) => d.id !== props.device?.id && isGear(d))
     .map((d) => ({ label: d.name, value: d.id })),
 );
+// Source ("from") ports: the device's own out-ports, plus — when this device is a mixer — each of
+// its channels and output buses as a selectable source. A `node:<id>` value means the edge leaves
+// that sub-node's `out` port (so you can send from a specific channel, not just the mixer's jack).
+const sourcePortOptions = computed(() => {
+  const base = portOptions(props.device, 'out');
+  if (!isMixer(props.device)) return base;
+  const listId = props.device.sound_list_id;
+  const subs = [
+    ...channelsOf(graph.devices, listId).map((ch) => ({
+      label: `${ch.name} · channel out`,
+      value: `node:${ch.id}`,
+    })),
+    ...outputsOf(graph.devices, listId).map((o) => ({
+      label: `${o.name} · bus out`,
+      value: `node:${o.id}`,
+    })),
+  ];
+  return [...base, ...subs];
+});
+// Destination ("to") ports: when the chosen gear is a mixer, offer its channels as the targets —
+// each ends on the channel's `in` port, which is the *true end of the signal chain* (a mic or a
+// digital stagebox terminates on the channel, not on the mixer's physical jack). Generic in-ports
+// of the mixer are still offered for the rare direct-to-jack case.
+const dstDevice = computed(() => devicesById.value.get(form.dstId));
+const dstPortOptions = computed(() => {
+  const d = dstDevice.value;
+  if (!d) return [];
+  if (!isMixer(d)) return portOptions(d, 'in');
+  const listId = d.sound_list_id;
+  const subs = channelsOf(graph.devices, listId).map((ch) => ({
+    label: `${ch.name} · channel in`,
+    value: `node:${ch.id}`,
+  }));
+  return [...subs, ...portOptions(d, 'in')];
+});
+function resolveNodeRef(ref) {
+  // `node:<id>` selects a sub-node (channel/bus) of a mixer; plain ids stay as the device/port.
+  if (typeof ref === 'string' && ref.startsWith('node:')) return { id: ref.slice(5), port: null };
+  return { id: null, port: ref };
+}
 const statusLabel = computed(() => {
   const status = props.device?.stockwire_request_status;
   if (status === 'failed') return t('workspace.requestFailed');
@@ -837,16 +879,26 @@ async function save(changes) {
 
 async function connect(force) {
   const src = props.device;
-  const port = (src.ports || []).find((p) => p.id === form.srcPort);
+  // A `node:<id>` source/destination means the edge terminates on a mixer sub-node (a channel or
+  // output bus) rather than the mixer itself — the channel being the true endpoint of the chain.
+  const srcRef = resolveNodeRef(form.srcPort);
+  const dstRef = resolveNodeRef(form.dstPort);
+  const srcDeviceId = srcRef.id ?? src.id;
+  const srcPortId = srcRef.port ?? 'out';
+  const dstDeviceId = dstRef.id ?? form.dstId;
+  const dstPortId = dstRef.port ?? 'in';
+  const port =
+    (devicesById.value.get(srcDeviceId)?.ports || []).find((p) => p.id === srcPortId) ||
+    (src.ports || []).find((p) => p.id === srcPortId);
   try {
     await graph.createEdge(
       props.jobId,
       {
         signal: port?.signal || DOMAIN_SIGNAL[src.domain] || 'audio',
-        src_device_id: src.id,
-        src_port: form.srcPort,
-        dst_device_id: form.dstId,
-        dst_port: form.dstPort,
+        src_device_id: srcDeviceId,
+        src_port: srcPortId,
+        dst_device_id: dstDeviceId,
+        dst_port: dstPortId,
         channels: form.channels || 1,
       },
       { force },

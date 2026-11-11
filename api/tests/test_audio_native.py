@@ -98,6 +98,47 @@ async def test_lists_channels_and_points_are_nodes_and_their_edges_follow_the_po
 
 
 @pytest.mark.asyncio
+async def test_a_channel_is_a_two_way_node_and_a_non_forced_edge_can_end_on_it(auth_headers):
+    """A channel is the true endpoint of the signal chain: it exposes both an `in` port (where a
+    source such as a mic or a digital stagebox terminates) and the existing `out` port (toward the
+    mix). Because the `in` port now exists, a normal (non-forced) audio edge can land on a channel
+    node rather than needing the legacy force-bypass used by the mic auto-connect path."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        # a second channel so we can patch one channel's output into another's input
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        nodes = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}
+        chan = nodes[ch["id"]]
+        # the channel node carries both an input and an output port
+        port_ids = {p["id"] for p in chan["ports"]}
+        assert {"in", "out"} <= port_ids
+        assert {p["direction"] for p in chan["ports"] if p["id"] == "in"} == {"in"}
+        assert {p["direction"] for p in chan["ports"] if p["id"] == "out"} == {"out"}
+
+        # a non-forced edge that terminates on the channel node's `in` port is accepted
+        res = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": ch["id"],
+                "src_port": "out",
+                "dst_device_id": ch2["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        edge = res.json()
+        assert edge["src_device_id"] == ch["id"] and edge["src_port"] == "out"
+        assert edge["dst_device_id"] == ch2["id"] and edge["dst_port"] == "in"
+
+
+@pytest.mark.asyncio
 async def test_an_output_chain_branches_and_deleting_a_point_hands_its_children_up(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers

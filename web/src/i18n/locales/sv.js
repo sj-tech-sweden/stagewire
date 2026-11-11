@@ -397,6 +397,7 @@ export default {
     colName: "Namn",
     colDomain: "Område",
     colKind: "Typ",
+    colMixerInput: "Mixer-ingång",
     colStockwire: "Stockwire",
     colNotes: "Anteckningar",
     colPorts: "Portar",

@@ -395,6 +395,7 @@ export default {
     colName: "Name",
     colDomain: "Domain",
     colKind: "Type",
+    colMixerInput: "Mixer input",
     colStockwire: "Stockwire",
     colNotes: "Notes",
     colPorts: "Ports",

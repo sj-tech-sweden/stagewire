@@ -338,6 +338,15 @@
                 :model-value="ch.attributes.connector || ''"
                 @update:model-value="(v) => saveAttr(ch, 'connector', v)"
               />
+              <q-input
+                :model-value="ch.attributes.mixer_input || ''"
+                dense
+                outlined
+                :label="t('workspace.colMixerInput')"
+                placeholder="in 1"
+                data-testid="channel-mixer-input"
+                @change="(v) => saveAttr(ch, 'mixer_input', v || null)"
+              />
               <div class="row items-center">
                 <q-checkbox
                   :model-value="!!ch.attributes.phantom_power"
@@ -525,6 +534,18 @@
               :model-value="slot.row.attributes.connector || ''"
               borderless
               @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
+            />
+          </q-td>
+        </template>
+        <template #body-cell-mixer_input="slot">
+          <q-td :props="slot">
+            <q-input
+              :model-value="slot.row.attributes.mixer_input || ''"
+              dense
+              borderless
+              placeholder="in 1"
+              data-testid="channel-mixer-input"
+              @change="(v) => saveAttr(slot.row, 'mixer_input', v || null)"
             />
           </q-td>
         </template>
@@ -950,6 +971,13 @@ const columns = computed(() => [
     label: t("workspace.stepConnector"),
     field: () => "",
     align: "left",
+  },
+  {
+    name: "mixer_input",
+    label: t("workspace.colMixerInput"),
+    field: () => "",
+    align: "left",
+    style: "min-width: 120px; width: 120px",
   },
   { name: "phantom_power", label: "48V", field: () => "", align: "center" },
   { name: "stereo", label: "ST", field: () => "", align: "center" },
@@ -1452,8 +1480,11 @@ async function autoConnectSourceToChannel(channel, source, previous) {
         signal: 'audio',
         src_device_id: source.id,
         src_port: outPort.id || 'xlr3',
+        // The channel is the true end of the chain: terminate on its `in` port (added so a
+        // normal, non-forced edge can land on a channel). `force` still bypasses any residual
+        // connector/cycle checks for odd digital hybrids.
         dst_device_id: channel.id,
-        dst_port: dstConnector,
+        dst_port: 'in',
         channels: 1,
       },
       { force: true },
