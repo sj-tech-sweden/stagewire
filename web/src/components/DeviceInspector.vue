@@ -42,6 +42,18 @@
         class="q-mb-sm"
         @change="(v) => save({ notes: v })"
       />
+      <q-input
+        v-if="device.kind === 'channel'"
+        :model-value="device.attributes?.mixer_input || ''"
+        dense
+        outlined
+        :label="t('workspace.colMixerInput')"
+        :hint="t('workspace.colMixerInputHint')"
+        placeholder="in 1"
+        class="q-mb-sm"
+        data-testid="inspector-channel-mixer-input"
+        @change="(v) => save({ attributes: { mixer_input: v || null } })"
+      />
       <div
         v-if="pluggedNode"
         class="row items-center q-mb-sm"
@@ -808,7 +820,8 @@ const sourcePortOptions = computed(() => {
   const listId = props.device.sound_list_id;
   const subs = [
     ...channelsOf(graph.devices, listId).map((ch) => ({
-      label: `${ch.name} · channel out`,
+      // the physical mixer input a channel is fed from is part of the signal flow, so surface it
+      label: `${ch.name}${ch.attributes?.mixer_input ? ` (${ch.attributes.mixer_input})` : ""} · channel out`,
       value: `node:${ch.id}`,
     })),
     ...outputsOf(graph.devices, listId).map((o) => ({
@@ -829,7 +842,8 @@ const dstPortOptions = computed(() => {
   if (!isMixer(d)) return portOptions(d, 'in');
   const listId = d.sound_list_id;
   const subs = channelsOf(graph.devices, listId).map((ch) => ({
-    label: `${ch.name} · channel in`,
+    // the physical mixer input a channel is fed from is part of the signal flow, so surface it
+    label: `${ch.name}${ch.attributes?.mixer_input ? ` (${ch.attributes.mixer_input})` : ""} · channel in`,
     value: `node:${ch.id}`,
   }));
   return [...subs, ...portOptions(d, 'in')];

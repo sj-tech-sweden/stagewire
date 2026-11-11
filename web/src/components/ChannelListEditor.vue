@@ -537,18 +537,6 @@
             />
           </q-td>
         </template>
-        <template #body-cell-mixer_input="slot">
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.attributes.mixer_input || ''"
-              dense
-              borderless
-              placeholder="in 1"
-              data-testid="channel-mixer-input"
-              @change="(v) => saveAttr(slot.row, 'mixer_input', v || null)"
-            />
-          </q-td>
-        </template>
         <template #body-cell-stereo="slot">
           <q-td :props="slot">
             <q-checkbox
@@ -971,13 +959,6 @@ const columns = computed(() => [
     label: t("workspace.stepConnector"),
     field: () => "",
     align: "left",
-  },
-  {
-    name: "mixer_input",
-    label: t("workspace.colMixerInput"),
-    field: () => "",
-    align: "left",
-    style: "min-width: 120px; width: 120px",
   },
   { name: "phantom_power", label: "48V", field: () => "", align: "center" },
   { name: "stereo", label: "ST", field: () => "", align: "center" },

@@ -51,7 +51,13 @@ async def get_stockwire_client(db: AsyncSession = Depends(get_db)) -> StockwireC
 
 
 def _as_dict(row: GraphDevice | ConnectionEdge) -> dict:
-    return {column.key: getattr(row, column.key) for column in row.__mapper__.column_attrs}
+    data = {column.key: getattr(row, column.key) for column in row.__mapper__.column_attrs}
+    # Channels are fixed-shape nodes: guarantee the `in`/`out` ports exist even on nodes stored
+    # before the `in` port was introduced, so edge validation and traces never reject a channel as
+    # a valid endpoint. Purely a read-time view — the ORM row is left untouched.
+    if getattr(row, "kind", None) == "channel" and isinstance(data.get("ports"), list):
+        data["ports"] = audio_native.normalize_channel_ports(data["ports"])
+    return data
 
 
 async def _require_job(db: AsyncSession, job_id: UUID) -> None:
@@ -109,6 +115,10 @@ def _device_payload(device: GraphDevice) -> dict:
     # object has no top-level column to read them from; copy them across for the frontend.
     payload["sound_list_id"] = device.attributes.get("sound_list_id")
     payload["video_list_id"] = device.attributes.get("video_list_id")
+    # Channels are fixed-shape nodes: guarantee the `in`/`out` ports exist even on nodes stored
+    # before the `in` port was introduced, so the frontend shows channels as valid endpoints.
+    if device.kind == "channel" and isinstance(payload.get("ports"), list):
+        payload["ports"] = audio_native.normalize_channel_ports(payload["ports"])
     return payload
 
 

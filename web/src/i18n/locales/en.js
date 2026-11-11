@@ -396,6 +396,7 @@ export default {
     colDomain: "Domain",
     colKind: "Type",
     colMixerInput: "Mixer input",
+    colMixerInputHint: "The physical mixer input this channel is fed from, e.g. in 1",
     colStockwire: "Stockwire",
     colNotes: "Notes",
     colPorts: "Ports",

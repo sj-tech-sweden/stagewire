@@ -3,6 +3,8 @@
 The legacy endpoints and the graph endpoints write the same nodes; the patch edges are drawn from
 the points, and the ids other things hold (plot links, a device's sound list) stay valid."""
 
+from uuid import UUID
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -136,6 +138,50 @@ async def test_a_channel_is_a_two_way_node_and_a_non_forced_edge_can_end_on_it(a
         edge = res.json()
         assert edge["src_device_id"] == ch["id"] and edge["src_port"] == "out"
         assert edge["dst_device_id"] == ch2["id"] and edge["dst_port"] == "in"
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_channel_missing_the_in_port_is_normalised_and_still_accepts_an_edge(
+    auth_headers,
+):
+    """Channels created before the `in` port was introduced only stored an `out` port. The `in`
+    port must be derived at read/validation time (not trusted from the stored column), so such a
+    channel still validates as a connection endpoint and shows both ports in the graph."""
+    from app.core import db as db_mod
+    from app.domains.graph.models import GraphDevice
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        # a second channel (fresh, has both ports) to use as the source of the edge
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        # simulate legacy data: strip the channel's stored `in` port
+        async with db_mod.SessionLocal() as db:
+            node = await db.get(GraphDevice, UUID(ch["id"]))
+            node.ports = [p for p in node.ports if p["id"] != "in"]
+            await db.commit()
+
+        # the graph read derives the missing `in` port
+        nodes = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}
+        assert {p["id"] for p in nodes[ch["id"]]["ports"]} == {"in", "out"}
+
+        # and a non-forced edge into the channel's `in` is accepted despite the stale storage
+        res = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": ch2["id"],
+                "src_port": "out",
+                "dst_device_id": ch["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
 
 
 @pytest.mark.asyncio

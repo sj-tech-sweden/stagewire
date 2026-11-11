@@ -398,6 +398,7 @@ export default {
     colDomain: "Område",
     colKind: "Typ",
     colMixerInput: "Mixer-ingång",
+    colMixerInputHint: "Den fysiska mixer-ingång kanalen matas från, t.ex. in 1",
     colStockwire: "Stockwire",
     colNotes: "Anteckningar",
     colPorts: "Portar",

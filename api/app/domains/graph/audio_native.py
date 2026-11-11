@@ -67,6 +67,27 @@ CHANNEL_ATTRS = (
     "stand_product_name",
 )
 OUTPUT_ATTRS = ("mode", "connector", "color_code")
+# A channel is the logical endpoint of a source signal: a mic or a digital stagebox feeds *into*
+# the channel (`in`), and the channel then feeds *out* to a bus / PA (`out`). These two ports are
+# fixed for every channel, so they are derived rather than trusted from the stored `ports` column:
+# older channels created before the `in` port existed only stored `out`, and would otherwise fail
+# edge validation ("no port 'in'") even though the channel is a valid endpoint.
+CHANNEL_PORTS = (
+    {"id": "in", "direction": "in", "signal": "audio"},
+    {"id": "out", "direction": "out", "signal": "audio"},
+)
+
+
+def normalize_channel_ports(ports: list | None) -> list:
+    """Return the channel's ports with `in` and `out` guaranteed present (idempotent)."""
+    have = {p.get("id") for p in (ports or [])}
+    merged = list(ports or [])
+    for canon in CHANNEL_PORTS:
+        if canon["id"] not in have:
+            merged.append(dict(canon))
+    return merged
+
+
 CHANNEL_DEFAULTS = {
     "stand_type": "",
     "instrument_group": "other",
@@ -417,10 +438,12 @@ def channel_node(job_id: uuid.UUID | None, list_node: GraphDevice, data: dict) -
         # feeds *into* the channel, and the channel then feeds *out* to a bus / PA. So it needs
         # both an `in` (where the source terminates — the true end of the chain) and the existing
         # `out` (toward the mix). Edges terminating on a channel node are valid without force.
-        ports=[
-            {"id": "in", "direction": "in", "signal": "audio"},
-            {"id": "out", "direction": "out", "signal": "audio"},
-        ],
+        ports=normalize_channel_ports(
+            [
+                {"id": "in", "direction": "in", "signal": "audio"},
+                {"id": "out", "direction": "out", "signal": "audio"},
+            ]
+        ),
         stockwire_product_id=data.get("stockwire_product_id"),
         stockwire_product_name=data.get("stockwire_product_name"),
     )
