@@ -523,6 +523,8 @@ export default {
       matched: "Matched: {name}",
       openScan: "Scan",
     },
+    openDevice: "Open device",
+    channelsOfMixer: "Channels",
   },
   common: {
     all: "All",

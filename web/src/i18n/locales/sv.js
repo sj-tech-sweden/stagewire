@@ -525,6 +525,8 @@ export default {
       matched: "Matchad: {name}",
       openScan: "Skanna",
     },
+    openDevice: "Öppna enhet",
+    channelsOfMixer: "Kanaler",
   },
   common: {
     all: "Alla",
