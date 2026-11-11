@@ -53,7 +53,9 @@ class Trace:
 # that is not there, or a cable from an input / to an output. "Connect anyway" can accept a
 # connector or capacity mismatch, but never these, since a cable saved against a missing port
 # shows up in the signal flow under a port name that is not on the device.
-HARD_ISSUES = frozenset({"unknown_port", "missing_device", "direction"})
+HARD_ISSUES = frozenset(
+    {"unknown_port", "missing_device", "direction", "socket_range", "socket_in_use"}
+)
 
 
 def blocks_forced(issues: Iterable[Issue]) -> bool:
@@ -167,6 +169,21 @@ def validate_edge(
                 f"{owner['name']}:{port['id']} has {capacity} channels, edge needs {channels}",
             )
     others = [e for e in siblings if str(e.get("id")) != str(edge.get("id"))]
+    socket = (edge.get("attributes") or {}).get("dst_socket")
+    if socket is not None:
+        # A socket is one physical input of a multi-channel port (XLR in 5 of a 32-input stagebox):
+        # it must exist on the port and carry at most one cable.
+        if not isinstance(socket, int) or not 1 <= socket <= int(dport.get("channels") or 1):
+            add("socket_range", f"{dst['name']}:{edge['dst_port']} has no input {socket}")
+        taken = [
+            e
+            for e in others
+            if str(e["dst_device_id"]) == str(dst["id"])
+            and e["dst_port"] == edge["dst_port"]
+            and (e.get("attributes") or {}).get("dst_socket") == socket
+        ]
+        if taken:
+            add("socket_in_use", f"{dst['name']}:{edge['dst_port']} input {socket} is already used")
     on_dst = [
         e
         for e in others

@@ -2440,7 +2440,7 @@ test('assigning a mic as a channel source auto-patches its XLR-out to the channe
       if (!edge) return null;
       return { src_port: edge.src_port, dst_port: edge.dst_port };
     })
-    .toMatchObject({ src_port: expect.stringMatching(/xlr/i), dst_port: 'dante' });
+    .toMatchObject({ src_port: expect.stringMatching(/xlr/i), dst_port: 'in' });
 
   // re-patching to a different mic re-points the cable rather than stacking a second one
   const mic2 = await post(request, headers, `${g}/devices`, {

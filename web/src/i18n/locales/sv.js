@@ -369,6 +369,7 @@ export default {
     noOutputs: "Inga utgångar än",
     chain: "Patch",
     chainEmpty: "Inte patchad",
+    directConnections: "Kopplat i inspektorn (skrivskyddat här)",
     editChain: "Redigera patch",
     colDevice: "Källenhet",
     colStand: "Stativ",

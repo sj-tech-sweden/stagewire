@@ -354,11 +354,80 @@ export function mixerInputChoices(channel, devices, edges) {
 
 // The label a port shows in the signal flow: the port's own label when it has one, else its
 // connector ("XLR out"), never the raw generated id ("out-xlr3") alone.
-export function portLabelOf(device, portId) {
+export function portLabelOf(device, portId, socket = null) {
   const port = (device?.ports || []).find((p) => p.id === portId);
-  if (port?.label) return port.label;
-  if (port?.connector) return `${port.connector.toUpperCase()} ${port.direction || ''}`.trim();
-  return portId || '';
+  let label;
+  if (port?.label) label = port.label;
+  else if (port?.connector) label = `${port.connector.toUpperCase()} ${port.direction || ''}`.trim();
+  else label = portId || '';
+  return socket ? `${label} ${socket}` : label;
+}
+
+// A port with several channels is a row of physical sockets (XLR in 1 … XLR in 32). Each socket is
+// an option valued `<portId>#<n>`; a single-channel port stays one option valued by its id. Used
+// by the connect form, so a mic can be cabled to one specific input of a stagebox.
+export function socketOptions(device, direction) {
+  const options = [];
+  for (const p of device?.ports || []) {
+    if (p.direction !== direction) continue;
+    const count = Number(p.channels) || 1;
+    const conn = (p.connector || direction).toUpperCase();
+    if (count <= 1) {
+      options.push({ label: `${p.id}${p.connector ? ` (${p.connector})` : ''}`, value: p.id });
+      continue;
+    }
+    for (let i = 1; i <= count; i += 1) {
+      options.push({ label: `${conn} ${direction} ${i}`, value: `${p.id}#${i}` });
+    }
+  }
+  return options;
+}
+
+// Splits a socket option value into its port id and socket number (null for a plain port).
+export function splitSocket(value) {
+  const text = String(value ?? '');
+  const at = text.lastIndexOf('#');
+  if (at < 0) return { port: text, socket: null };
+  return { port: text.slice(0, at), socket: Number(text.slice(at + 1)) || null };
+}
+
+// The cables a node has outside its patch chain (drawn in the inspector, not the chain editor), one
+// line per cable, read from the graph edges: the node's own port, the other device and its port.
+export function directConnections(node, edges, devices) {
+  if (!node) return [];
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  return edges
+    .filter(
+      (e) =>
+        FEED_SIGNALS.has(e.signal) &&
+        !e.attributes?.chain &&
+        (e.src_device_id === node.id || e.dst_device_id === node.id),
+    )
+    .map((e) => {
+      const incoming = e.dst_device_id === node.id;
+      const other = byId.get(incoming ? e.src_device_id : e.dst_device_id);
+      const socket = e.attributes?.dst_socket || null;
+      const nodePort = incoming ? portLabelOf(node, e.dst_port, socket) : portLabelOf(node, e.src_port);
+      const otherPort = incoming
+        ? portLabelOf(other, e.src_port)
+        : portLabelOf(other, e.dst_port, socket);
+      const otherName = other?.name || '?';
+      const text = incoming
+        ? `${otherName} ${otherPort} → ${node.name} ${nodePort}`
+        : `${node.name} ${nodePort} → ${otherName} ${otherPort}`;
+      return { id: e.id, incoming, other: otherName, text };
+    });
+}
+
+// The Patch column: what the node is connected to, upstream feeds first, then its patch chain, then
+// cables out. A node with inspector cables includes its own name so the chain reads through it.
+export function patchSummary(node, edges, devices) {
+  const direct = directConnections(node, edges, devices);
+  const chain = chainSteps(node, edges, devices);
+  if (!direct.length) return chain.join(' → ');
+  const upstream = direct.filter((d) => d.incoming).map((d) => d.other);
+  const downstream = direct.filter((d) => !d.incoming).map((d) => d.other);
+  return [...upstream, node.name, ...chain, ...downstream].join(' → ');
 }
 
 // Upstream feed chains into a node over audio/data cables, as root-to-leaf arrays of devices. A
@@ -404,7 +473,7 @@ function directDownstream(node, edges, byId, depth = 0, visited = new Set([node.
         device_id: dst.id,
         label: dst.name,
         kind: 'device',
-        in_port: portLabelOf(dst, e.dst_port),
+        in_port: portLabelOf(dst, e.dst_port, e.attributes?.dst_socket || null),
         out_port: portLabelOf(node, e.src_port),
         connector: '',
         children: isVirtual(dst) ? [] : directDownstream(dst, edges, byId, depth + 1, new Set([...visited, dst.id])),

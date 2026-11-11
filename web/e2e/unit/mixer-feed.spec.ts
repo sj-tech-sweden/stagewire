@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 import {
   channelFlowTree,
+  directConnections,
   feedingStageboxes,
   mixerInputChoices,
+  patchSummary,
   portLabelOf,
+  socketOptions,
+  splitSocket,
 } from '../../src/utils/workspace';
 
 // A console with one channel list, a stagebox on stage and an ethernet switch between them.
@@ -113,4 +117,36 @@ test('the channel flow shows the upstream feed and the inspector cable it was co
   expect(all).toContain('Stagebox');
   expect(all).toContain('Switch');
   expect(all).toContain('Ch 2');
+});
+
+test('a multi-channel input port is offered as one socket per physical input', () => {
+  const options = socketOptions(stagebox, 'in');
+  expect(options[0]).toEqual({ label: 'XLR3 in 1', value: 'in-xlr3#1' });
+  expect(options).toHaveLength(32);
+  expect(splitSocket('in-xlr3#5')).toEqual({ port: 'in-xlr3', socket: 5 });
+  expect(splitSocket('in-xlr3')).toEqual({ port: 'in-xlr3', socket: null });
+});
+
+test('a socket shows in the port label of a cable', () => {
+  expect(portLabelOf(stagebox, 'in-xlr3', 5)).toBe('XLR3 in 5');
+});
+
+test('an inspector cable into a stagebox socket is named by that socket', () => {
+  const edges = [
+    edge('mic', 'mic', 'out-xlr3', 'box', 'in-xlr3', 'audio', { attributes: { dst_socket: 5 } }),
+  ];
+  const mic = { id: 'mic', name: 'SM58', kind: 'other', ports: [{ id: 'out-xlr3', direction: 'out', connector: 'xlr3' }] };
+  const lines = directConnections(stagebox, edges, [...devices, mic]);
+  expect(lines.map((l) => l.text)).toEqual(['SM58 XLR3 out → Stagebox XLR3 in 5']);
+});
+
+test('the Patch column names a channel connected directly to the mixer, not "Not patched"', () => {
+  const edges = [edge('direct', 'mixer', 'out-xlr3', 'ch2', 'in', 'audio')];
+  const text = patchSummary(devices[3], edges, devices);
+  expect(text).toBe('Desk → Ch 2');
+  expect(text).not.toBe('');
+});
+
+test('a channel with no cables and no chain has an empty Patch column', () => {
+  expect(patchSummary(devices[4], [], devices)).toBe('');
 });

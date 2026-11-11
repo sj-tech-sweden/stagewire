@@ -186,7 +186,7 @@
       </div>
       <!-- On phones every channel is a card with the same editors as the table row: the header
            has the number, name and actions, the summary line says what is set, and "Details"
-           opens kind, source, stand, connector, 48V, stereo, wireless and notes. -->
+           opens kind, source, stand, mixer input, 48V, stereo, wireless and notes. -->
       <div
         v-if="$q.screen.lt.sm"
         class="column q-gutter-sm"
@@ -333,10 +333,6 @@
                 :label="t('stockwire.selectStand')"
                 :hint="''"
                 @update:model-value="(p) => setStand(ch, p)"
-              />
-              <ConnectorSelect
-                :model-value="ch.attributes.connector || ''"
-                @update:model-value="(v) => saveAttr(ch, 'connector', v)"
               />
               <q-select
                 :model-value="ch.attributes.mixer_input || null"
@@ -529,15 +525,6 @@
               borderless
               data-testid="stand-picker"
               @update:model-value="(p) => setStand(slot.row, p)"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-connector="slot">
-          <q-td :props="slot">
-            <ConnectorSelect
-              :model-value="slot.row.attributes.connector || ''"
-              borderless
-              @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
             />
           </q-td>
         </template>
@@ -753,6 +740,7 @@
       :venue-id="venueId"
       :title="chainTitle"
       :initial="chainInitial"
+      :direct="chainNode ? directLines(chainNode) : []"
       :devices="gear"
       :branching="chainKind === 'output'"
       :bus-channels="
@@ -879,12 +867,12 @@ import { api } from "@/boot/api";
 import ListBulkDialog from "@/components/ListBulkDialog.vue";
 import MixerDialog from "@/components/MixerDialog.vue";
 import ChainFlowDialog from "@/components/ChainFlowDialog.vue";
-import ConnectorSelect from "@/components/ConnectorSelect.vue";
 import {
   chainForm,
   busChannelsFor,
   chainDevices,
-  chainSteps,
+  directConnections,
+  patchSummary,
   flowTree,
   channelFlowTree,
   OUTPUT_MODES,
@@ -960,12 +948,6 @@ const columns = computed(() => [
     field: () => "",
     align: "left",
   },
-  {
-    name: "connector",
-    label: t("workspace.stepConnector"),
-    field: () => "",
-    align: "left",
-  },
   { name: "phantom_power", label: "48V", field: () => "", align: "center" },
   { name: "stereo", label: "ST", field: () => "", align: "center" },
   {
@@ -1002,8 +984,9 @@ function ensureGraph() {
 }
 watch([contextId, contextKind], ensureGraph, { immediate: true });
 
-// One line saying what a channel has set, for the phone card: kind, source, stand, connector, 48V
-// and stereo, so the card shows the state without opening "Details".
+// One line saying what a channel has set, for the phone card: kind, source, stand, 48V and stereo,
+// so the card shows the state without opening "Details". The connector is the device's, not the
+// channel's, so it is not repeated here.
 const channelSummary = (ch) => {
   const a = ch.attributes;
   const side = stereoView(ch, channels.value);
@@ -1011,15 +994,17 @@ const channelSummary = (ch) => {
     a.input_type ? t(`channels.type.${a.input_type}`) : "",
     sourceOf(ch)?.name,
     a.stand_type,
-    a.connector,
     a.phantom_power ? "48V" : "",
     side.linked ? `${t("channels.fieldStereo")} ${side.isL ? "L" : "R"}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
 };
-const chain = (node) =>
-  chainSteps(node, graph.edges, graph.devices).join(" → ");
+// The Patch column: the patch chain plus any cables made in the inspector (see patchSummary).
+const chain = (node) => patchSummary(node, graph.edges, graph.devices);
+// Cables to and from the node that are not in its patch chain, shown read-only in the chain dialog.
+const directLines = (node) =>
+  directConnections(node, graph.edges, graph.devices).map((d) => d.text);
 const failed = (err) =>
   $q.notify({ type: "negative", message: apiErrorText(err) });
 
@@ -1458,8 +1443,6 @@ async function autoConnectSourceToChannel(channel, source, previous) {
     )
   )
     return;
-  const dstConnector =
-    channel.attributes?.connector || channel.attributes?.input_type || 'xlr3';
   try {
     await graph.createEdge(
       contextId.value,

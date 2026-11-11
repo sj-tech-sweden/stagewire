@@ -664,6 +664,9 @@ import {
   channelsOf,
   outputsOf,
   mixerInputChoices,
+  socketOptions,
+  splitSocket,
+  portLabelOf,
 } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
@@ -809,13 +812,16 @@ const deviceConnections = computed(() => {
       const otherId = isSrc ? e.dst_device_id : e.src_device_id;
       const other = devicesById.value.get(otherId);
       const otherName = other?.name || otherId;
+      const socket = e.attributes?.dst_socket || null;
+      const srcName = isSrc ? props.device.name : otherName;
+      const dstName = isSrc ? otherName : props.device.name;
       return {
         id: e.id,
         signal: e.signal,
-        fromName: isSrc ? props.device.name : otherName,
-        fromPort: isSrc ? e.src_port : e.dst_port,
-        toName: isSrc ? otherName : props.device.name,
-        toPort: isSrc ? e.dst_port : e.src_port,
+        fromName: srcName,
+        fromPort: portLabelOf(isSrc ? props.device : other, e.src_port),
+        toName: dstName,
+        toPort: portLabelOf(isSrc ? other : props.device, e.dst_port, socket),
       };
     });
 });
@@ -910,14 +916,14 @@ const dstDevice = computed(() => devicesById.value.get(form.dstId));
 const dstPortOptions = computed(() => {
   const d = dstDevice.value;
   if (!d) return [];
-  if (!isMixer(d)) return portOptions(d, 'in');
+  if (!isMixer(d)) return socketOptions(d, 'in');
   const listId = d.sound_list_id;
   const subs = channelsOf(graph.devices, listId).map((ch) => ({
     // the physical mixer input a channel is fed from is part of the signal flow, so surface it
     label: `${ch.name}${ch.attributes?.mixer_input ? ` (${ch.attributes.mixer_input})` : ""} · channel in`,
     value: `node:${ch.id}`,
   }));
-  return [...subs, ...portOptions(d, 'in')];
+  return [...subs, ...socketOptions(d, 'in')];
 });
 function resolveNodeRef(ref) {
   // `node:<id>` selects a sub-node (channel/bus) of a mixer; plain ids stay as the device/port.
@@ -968,10 +974,13 @@ async function connect(force) {
   // output bus) rather than the mixer itself — the channel being the true endpoint of the chain.
   const srcRef = resolveNodeRef(form.srcPort);
   const dstRef = resolveNodeRef(form.dstPort);
+  // A socket ("in-xlr3#5") lands on one physical input of a multi-channel port: the port is the
+  // id before the `#`, and the socket travels on the edge so validation can check it.
+  const dstSplit = dstRef.port ? splitSocket(dstRef.port) : { port: null, socket: null };
   const srcDeviceId = srcRef.id ?? src.id;
   const srcPortId = srcRef.port ?? 'out';
   const dstDeviceId = dstRef.id ?? form.dstId;
-  const dstPortId = dstRef.port ?? 'in';
+  const dstPortId = dstSplit.port ?? 'in';
   const port =
     (devicesById.value.get(srcDeviceId)?.ports || []).find((p) => p.id === srcPortId) ||
     (src.ports || []).find((p) => p.id === srcPortId);
@@ -985,6 +994,7 @@ async function connect(force) {
         dst_device_id: dstDeviceId,
         dst_port: dstPortId,
         channels: form.channels || 1,
+        attributes: dstSplit.socket ? { dst_socket: dstSplit.socket } : {},
       },
       { force },
     );

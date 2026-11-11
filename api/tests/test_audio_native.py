@@ -141,6 +141,74 @@ async def test_a_channel_is_a_two_way_node_and_a_non_forced_edge_can_end_on_it(a
 
 
 @pytest.mark.asyncio
+async def test_a_mic_lands_on_one_socket_of_a_stagebox_and_a_socket_takes_one_cable(auth_headers):
+    """A multi-channel input port is a row of physical sockets. An edge names the socket it lands
+    on (attributes.dst_socket); a socket outside the port, or one already cabled, is refused even
+    when the connection is forced."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        stagebox = (
+            await client.post(
+                f"{api}/devices",
+                json={
+                    "name": "Stage",
+                    "device_type": "analog_stagebox",
+                    "ports": [{"direction": "in", "connector": "XLR3", "count": 32}],
+                },
+                headers=h,
+            )
+        ).json()
+        mic = (
+            await client.post(
+                f"{api}/devices",
+                json={
+                    "name": "SM58",
+                    "device_type": "other",
+                    "ports": [{"direction": "out", "connector": "XLR3", "count": 1}],
+                },
+                headers=h,
+            )
+        ).json()
+        devices = (await _graph(client, h, api))["devices"]
+        mic_node = next(d for d in devices if d["id"] == mic["id"])
+        assert mic_node["ports"][0]["id"] == "out-xlr3"
+
+        def cable(socket, force=False):
+            return client.post(
+                f"{api}/graph/edges",
+                json={
+                    "signal": "audio",
+                    "src_device_id": mic["id"],
+                    "src_port": "out-xlr3",
+                    "dst_device_id": stagebox["id"],
+                    "dst_port": "in-xlr3",
+                    "channels": 1,
+                    "attributes": {"dst_socket": socket},
+                },
+                headers=h,
+                params={"force": force},
+            )
+
+        res = await cable(5)
+        assert res.status_code == 201, res.text
+        assert res.json()["attributes"]["dst_socket"] == 5
+
+        taken = await cable(5, force=True)
+        assert taken.status_code == 422
+        assert taken.json()["detail"]["issues"][0]["code"] == "socket_in_use"
+
+        missing = await cable(33, force=True)
+        assert missing.status_code == 422
+        assert missing.json()["detail"]["issues"][0]["code"] == "socket_range"
+
+        # the mic has one output and is already cabled, so a second socket is refused on the source
+        second = await cable(6)
+        assert second.status_code == 422
+        assert second.json()["detail"]["issues"][0]["code"] == "port_in_use"
+
+
+@pytest.mark.asyncio
 async def test_connect_anyway_cannot_save_an_edge_to_a_port_the_device_does_not_have(auth_headers):
     """A forced edge may bypass a connector or capacity mismatch, but never a port the device does
     not have: that cable would show in the signal flow under a port name that is not on the device

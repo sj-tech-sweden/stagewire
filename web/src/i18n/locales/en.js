@@ -367,6 +367,7 @@ export default {
     noOutputs: "No outputs yet",
     chain: "Patch",
     chainEmpty: "Not patched",
+    directConnections: "Connected in the inspector (read-only here)",
     editChain: "Edit patch",
     colDevice: "Source device",
     colStand: "Stand",

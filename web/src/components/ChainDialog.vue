@@ -13,6 +13,22 @@
           {{ t('workspace.chainHint') }}
         </div>
       </q-card-section>
+      <q-card-section
+        v-if="direct.length"
+        class="q-pt-none"
+        data-testid="chain-direct"
+      >
+        <div class="text-caption text-grey-6 q-mb-xs">
+          {{ t('workspace.directConnections') }}
+        </div>
+        <div
+          v-for="(line, i) in direct"
+          :key="i"
+          class="text-body2"
+        >
+          {{ line }}
+        </div>
+      </q-card-section>
       <q-card-section class="q-pt-none">
         <div
           v-for="(step, i) in steps"
@@ -191,6 +207,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   title: { type: String, default: '' },
   initial: { type: Array, default: () => [] },
+  // Cables made outside the chain (in the inspector), shown read-only so the endpoints are visible.
+  direct: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
   jobId: { type: String, default: '' },
   venueId: { type: String, default: '' },
