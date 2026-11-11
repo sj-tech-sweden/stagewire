@@ -141,6 +141,35 @@ async def test_a_channel_is_a_two_way_node_and_a_non_forced_edge_can_end_on_it(a
 
 
 @pytest.mark.asyncio
+async def test_connect_anyway_cannot_save_an_edge_to_a_port_the_device_does_not_have(auth_headers):
+    """A forced edge may bypass a connector or capacity mismatch, but never a port the device does
+    not have: that cable would show in the signal flow under a port name that is not on the device
+    (the "Ch 2 out-xlr3" case). The same forced edge to a real port is still accepted."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        bogus = {
+            "signal": "audio",
+            "src_device_id": ch2["id"],
+            "src_port": "out-xlr3",
+            "dst_device_id": ch["id"],
+            "dst_port": "in",
+            "channels": 1,
+        }
+        res = await client.post(f"{api}/graph/edges", json=bogus, headers=h, params={"force": True})
+        assert res.status_code == 422, res.text
+        assert res.json()["detail"]["issues"][0]["code"] == "unknown_port"
+
+        real = {**bogus, "src_port": "out"}
+        res = await client.post(f"{api}/graph/edges", json=real, headers=h, params={"force": True})
+        assert res.status_code == 201, res.text
+
+
+@pytest.mark.asyncio
 async def test_a_legacy_channel_missing_the_in_port_is_normalised_and_still_accepts_an_edge(
     auth_headers,
 ):

@@ -886,6 +886,7 @@ import {
   chainDevices,
   chainSteps,
   flowTree,
+  channelFlowTree,
   OUTPUT_MODES,
   channelsOf,
   isPlotElement,
@@ -1547,11 +1548,13 @@ const flowSteps = ref([]);
 function openFlow(node, kind) {
   chainNode.value = node;
   chainKind.value = kind;
-  flowSteps.value = flowTree(
-    node.name,
-    chainForm(node, graph.edges, graph.devices),
-    graph.devices,
-  );
+  const steps = chainForm(node, graph.edges, graph.devices);
+  // A channel's flow also shows what feeds it and the direct cables it was connected with in the
+  // inspector, so the diagram matches the connections; outputs keep the patch chain only.
+  flowSteps.value =
+    kind === "channel"
+      ? channelFlowTree(node, steps, graph.edges, graph.devices, node.name)
+      : flowTree(node.name, steps, graph.devices);
   flowOpen.value = true;
 }
 function editFromFlow() {

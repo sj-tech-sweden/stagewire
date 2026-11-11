@@ -607,6 +607,7 @@
             <WorkspaceCanvas
               class="full-width"
               :devices="canvasDevices"
+              :anchors="cableAnchors"
               :edges="canvasEdges"
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
@@ -887,6 +888,21 @@ const canvasDevices = computed(() =>
       d.canvas_y_cm != null,
   ),
 );
+// A device drawn on the plot as an element (its link edge) has no box of its own, so a cable to it
+// is anchored at the element's position: the element is returned under the device's id. These are
+// used only to place cable ends, never drawn as devices.
+const cableAnchors = computed(() => {
+  const byId = new Map(graph.devices.map((d) => [d.id, d]));
+  const anchors = [];
+  for (const e of graph.edges) {
+    if (e.signal !== 'link' || e.attributes?.role !== 'device') continue;
+    const element = byId.get(e.src_device_id);
+    const device = byId.get(e.dst_device_id);
+    if (!element || !device || element.canvas_x_cm == null || element.canvas_y_cm == null) continue;
+    anchors.push({ ...element, id: device.id });
+  }
+  return anchors;
+});
 // Gear is on the stage plot once it has a position. Anything else is offered as a chip to place,
 // so the canvas never shows gear that is not part of the plot.
 const unplacedGear = computed(() =>

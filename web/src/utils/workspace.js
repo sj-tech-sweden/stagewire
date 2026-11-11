@@ -278,33 +278,61 @@ export const outputsOf = (devices, listId) =>
     .filter((d) => d.kind === 'output' && d.attributes?.list_id === listId)
     .sort((a, b) => a.position - b.position);
 
+// Signals that run over a cable a stagebox can reach the mixer on: audio (analog or Dante/AES50/
+// MADI over the network) and data (the ethernet switch fabric in between). Power, video, DMX and
+// plot links are not part of the path a mic signal takes to the console.
+const FEED_SIGNALS = new Set(['audio', 'data']);
+export const isStagebox = (d) =>
+  d.kind === 'digital_stagebox' ||
+  d.kind === 'analog_stagebox' ||
+  d.device_type === 'digital_stagebox' ||
+  d.device_type === 'analog_stagebox';
+export const isMixerDevice = (d) => d.kind === 'mixer' || d.device_type === 'mixer';
+
+// The stageboxes that reach a mixer, directly or indirectly: a stagebox patched into the mixer (or
+// one of its channels) with an audio cable, or through any chain of network gear (switches,
+// routers, computers) in between. The walk is undirected over audio/data edges, never expands into
+// virtual nodes (channels, buses) and never passes through another console, so a stagebox that
+// feeds a different mixer is not claimed by this one.
+export function feedingStageboxes(mixer, devices, edges) {
+  if (!mixer) return [];
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const listId = mixer.sound_list_id;
+  const start = new Set([mixer.id, ...channelsOf(devices, listId).map((c) => c.id)]);
+  const seen = new Set(start);
+  const queue = [...start];
+  const found = new Map();
+  while (queue.length) {
+    const id = queue.shift();
+    for (const e of edges) {
+      if (!FEED_SIGNALS.has(e.signal)) continue;
+      let next = null;
+      if (e.src_device_id === id) next = e.dst_device_id;
+      else if (e.dst_device_id === id) next = e.src_device_id;
+      if (!next || seen.has(next)) continue;
+      const dev = byId.get(next);
+      if (!dev) continue;
+      seen.add(next);
+      if (isStagebox(dev)) {
+        found.set(next, dev);
+        continue; // a stagebox is an end of the walk: its own inputs are the stage side
+      }
+      if (isVirtual(dev) || isMixerDevice(dev)) continue;
+      queue.push(next);
+    }
+  }
+  return [...found.values()];
+}
+
 // The physical inputs a channel can be fed from, as a strict dropdown: the mixer's own input ports
-// plus the input ports of any digital/analog stagebox patched into that mixer (the stagebox's
-// digital out lands on the mixer's input bus). Each port carrying a channel count expands into its
-// individual physical sockets — an 8-channel XLR group becomes "XLR in 1" … "XLR in 8" — so a
-// channel maps to one specific physical input (input 1 -> channel 3 and 6).
+// plus the input ports of every stagebox that reaches the mixer (feedingStageboxes). Each port
+// carrying a channel count expands into its individual physical sockets — an 8-channel XLR group
+// becomes "XLR in 1" … "XLR in 8" — so a channel maps to one specific physical input.
 export function mixerInputChoices(channel, devices, edges) {
   const listId = channel?.attributes?.list_id;
   if (!listId) return [];
-  const mixer = devices.find(
-    (d) => (d.kind === 'mixer' || d.device_type === 'mixer') && d.sound_list_id === listId,
-  );
+  const mixer = devices.find((d) => isMixerDevice(d) && d.sound_list_id === listId);
   if (!mixer) return [];
-  const channelIds = new Set(channelsOf(devices, listId).map((c) => c.id));
-  // stageboxes that feed this mixer: digital/analog box whose audio out terminates on the mixer or
-  // one of its channels
-  const feedTargets = new Set([mixer.id, ...channelIds]);
-  const stageboxes = devices.filter(
-    (d) =>
-      (d.kind === 'digital_stagebox' ||
-        d.kind === 'analog_stagebox' ||
-        d.device_type === 'digital_stagebox' ||
-        d.device_type === 'analog_stagebox') &&
-      edges.some(
-        (e) =>
-          e.signal === 'audio' && feedTargets.has(e.dst_device_id) && e.src_device_id === d.id,
-      ),
-  );
   const choices = [];
   const seen = new Set();
   const add = (label) => {
@@ -312,8 +340,8 @@ export function mixerInputChoices(channel, devices, edges) {
     seen.add(label);
     choices.push({ label, value: label });
   };
-  for (const dev of [mixer, ...stageboxes]) {
-    const tag = dev === mixer ? '' : ' (stagebox)';
+  for (const dev of [mixer, ...feedingStageboxes(mixer, devices, edges)]) {
+    const tag = dev === mixer ? '' : ` (${dev.name})`;
     for (const p of dev.ports || []) {
       if (p.direction !== 'in') continue;
       const conn = (p.connector || 'in').toUpperCase();
@@ -321,12 +349,101 @@ export function mixerInputChoices(channel, devices, edges) {
       for (let i = 1; i <= n; i += 1) add(`${conn} in ${i}${tag}`);
     }
   }
-  // keep an existing free-text value selectable after the switch to a strict dropdown
-  const current = channel?.attributes?.mixer_input;
-  if (current && !seen.has(current)) {
-    choices.push({ label: `${current} (legacy)`, value: current });
-  }
   return choices;
+}
+
+// The label a port shows in the signal flow: the port's own label when it has one, else its
+// connector ("XLR out"), never the raw generated id ("out-xlr3") alone.
+export function portLabelOf(device, portId) {
+  const port = (device?.ports || []).find((p) => p.id === portId);
+  if (port?.label) return port.label;
+  if (port?.connector) return `${port.connector.toUpperCase()} ${port.direction || ''}`.trim();
+  return portId || '';
+}
+
+// Upstream feed chains into a node over audio/data cables, as root-to-leaf arrays of devices. A
+// chain ends at the node's direct feeder (the device whose cable lands on it) or further up the
+// network when a switch/router sits between. Cycles and virtual nodes end a chain.
+function feedChains(node, devices, edges, byId, depth = 0, visited = new Set([node.id])) {
+  const feeds = edges.filter(
+    (e) =>
+      FEED_SIGNALS.has(e.signal) &&
+      e.dst_device_id === node.id &&
+      !visited.has(e.src_device_id) &&
+      byId.has(e.src_device_id),
+  );
+  if (!feeds.length || depth > 8) return [];
+  const chains = [];
+  for (const e of feeds) {
+    const src = byId.get(e.src_device_id);
+    const step = { device: src, edge: e };
+    const deeper = isVirtual(src) ? [] : feedChains(src, devices, edges, byId, depth + 1, new Set([...visited, src.id]));
+    if (!deeper.length) chains.push([step]);
+    else for (const chain of deeper) chains.push([...chain, step]);
+  }
+  return chains;
+}
+
+// Direct downstream cables out of a node that are not patch-chain edges (the chain editor owns
+// those): an inspector connection from a channel to a device, followed over audio/data.
+function directDownstream(node, edges, byId, depth = 0, visited = new Set([node.id])) {
+  if (depth > 8) return [];
+  return edges
+    .filter(
+      (e) =>
+        FEED_SIGNALS.has(e.signal) &&
+        e.src_device_id === node.id &&
+        !(e.attributes && e.attributes.chain) &&
+        !visited.has(e.dst_device_id) &&
+        byId.has(e.dst_device_id),
+    )
+    .map((e) => {
+      const dst = byId.get(e.dst_device_id);
+      return {
+        id: `direct-${e.id}`,
+        device_id: dst.id,
+        label: dst.name,
+        kind: 'device',
+        in_port: portLabelOf(dst, e.dst_port),
+        out_port: portLabelOf(node, e.src_port),
+        connector: '',
+        children: isVirtual(dst) ? [] : directDownstream(dst, edges, byId, depth + 1, new Set([...visited, dst.id])),
+      };
+    });
+}
+
+// The signal flow of a channel as a tree the flow diagram draws left to right: each upstream feed
+// chain (the furthest source first) ends at the channel, whose children are its patch chain plus any
+// direct downstream cables. `steps` is the chain-editor form (chainForm), which the patch chain is
+// built from; inspector cables are drawn from the graph edges so the flow matches what was connected.
+export function channelFlowTree(channel, steps, edges, devices, sourceLabel) {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const base = flowTree(sourceLabel, steps, devices);
+  const source = base[0];
+  if (!source) return base;
+  source.children = [...source.children, ...directDownstream(channel, edges, byId)];
+  const chains = feedChains(channel, devices, edges, byId);
+  if (!chains.length) return [source];
+  return chains.map((chain, index) => {
+    // the channel node is shared by every feed, so each copy gets its own id and the downstream
+    // children are drawn under the first copy only
+    const node = index === 0 ? source : { ...source, id: `${source.id}-feed-${index}`, children: [] };
+    // `chain` runs furthest source first, ending at the direct feeder, so wrapping from the last
+    // step outwards nests each device under the one upstream of it, with the channel at the end.
+    return chain.reduceRight(
+      (child, { device, edge }) => ({
+        id: `feed-${edge.id}`,
+        device_id: device.id,
+        label: device.name,
+        kind: 'device',
+        in_port: '',
+        out_port: portLabelOf(device, edge.src_port),
+        connector: '',
+        children: [child],
+      }),
+      node,
+    );
+  });
 }
 
 export const videoListsOf = (devices) =>

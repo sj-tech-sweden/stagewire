@@ -49,6 +49,17 @@ class Trace:
     truncated: bool = False
 
 
+# Issues that mean the edge cannot exist at all: it names a port the device does not have, a device
+# that is not there, or a cable from an input / to an output. "Connect anyway" can accept a
+# connector or capacity mismatch, but never these, since a cable saved against a missing port
+# shows up in the signal flow under a port name that is not on the device.
+HARD_ISSUES = frozenset({"unknown_port", "missing_device", "direction"})
+
+
+def blocks_forced(issues: Iterable[Issue]) -> bool:
+    return any(issue.code in HARD_ISSUES for issue in issues)
+
+
 def find_port(device: Mapping[str, Any], port_id: str) -> Mapping[str, Any] | None:
     return next((p for p in device.get("ports") or [] if p.get("id") == port_id), None)
 

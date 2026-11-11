@@ -358,7 +358,7 @@ async def create_edge(
         _as_dict(dst),
         [_as_dict(e) for e in existing],
     )
-    if issues and not force:
+    if issues and (not force or topology.blocks_forced(issues)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -941,7 +941,7 @@ async def create_edge_venue(
         _as_dict(dst),
         [_as_dict(e) for e in existing],
     )
-    if issues and not force:
+    if issues and (not force or topology.blocks_forced(issues)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={

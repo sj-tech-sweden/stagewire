@@ -172,6 +172,8 @@ const props = defineProps({
   audienceDrawing: { type: Boolean, default: false },
   devices: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
+  // Positions for cable ends that are not drawn as devices (a device shown as a plot element).
+  anchors: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
   zoom: { type: Number, default: 0.8 },
   deviceScale: { type: Number, default: 1 },
@@ -392,7 +394,11 @@ const center = (device) => {
   const [x, y] = centerOf(device, props.zoom, props.deviceScale);
   return [x + origin.value.x * props.zoom, y + origin.value.y * props.zoom];
 };
-const placed = computed(() => new Map(props.devices.map((d) => [d.id, d])));
+// Cable ends resolve against the drawn devices and the element anchors; anchors come last so an
+// element's position wins where a device is only drawn through its element.
+const placed = computed(
+  () => new Map([...props.devices, ...props.anchors].map((d) => [d.id, d])),
+);
 const lines = computed(() =>
   props.edges
     .filter((e) => placed.value.has(e.src_device_id) && placed.value.has(e.dst_device_id))
