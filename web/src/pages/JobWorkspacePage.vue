@@ -905,9 +905,38 @@ const viewShapes = computed(() => {
   const byLegacy = new Map(graph.devices.map((d) => [legacyId(d), d]));
   return plotFrame.viewShapes(elements, (el) => byLegacy.get(el.linked_device_id)?.attributes || null);
 });
-const canvasEdges = computed(() =>
-  graph.edges.filter((e) => e.signal !== 'link' && layers[SIGNAL_LAYER[e.signal]] !== false),
-);
+// Channels are virtual nodes (no stage position) and are the true endpoint of a source signal, but
+// on the stage plot the physical connection lands on the mixer. So any edge that terminates on a
+// channel is drawn to the channel's parent mixer instead — a mic into channel 3 reads as mic -> mixer.
+const channelToMixer = computed(() => {
+  const listToMixer = new Map();
+  for (const d of graph.devices) {
+    if ((d.kind === 'mixer' || d.device_type === 'mixer') && d.sound_list_id) {
+      listToMixer.set(d.sound_list_id, d.id);
+    }
+  }
+  const map = new Map();
+  for (const d of graph.devices) {
+    if (d.kind !== 'channel') continue;
+    const listId = d.attributes?.list_id;
+    const mixerId = listId && listToMixer.get(listId);
+    if (mixerId) map.set(d.id, mixerId);
+  }
+  return map;
+});
+const canvasEdges = computed(() => {
+  const map = channelToMixer.value;
+  const out = [];
+  for (const e of graph.edges) {
+    if (e.signal === 'link') continue;
+    if (layers[SIGNAL_LAYER[e.signal]] === false) continue;
+    const src = map.get(e.src_device_id) ?? e.src_device_id;
+    const dst = map.get(e.dst_device_id) ?? e.dst_device_id;
+    if (src === dst) continue; // a resolved self-loop (channel->channel of one mixer) is not drawn
+    out.push({ ...e, src_device_id: src, dst_device_id: dst });
+  }
+  return out;
+});
 const inspectorOpen = computed(() => Boolean(graph.selectedDevice) || Boolean(selectedOutlet.value));
 
 const modeKey = `sw_ws_mode_${jobId}`;
