@@ -404,6 +404,7 @@
             map-options
             :options="otherDevices"
             :label="t('workspace.toDevice')"
+            data-testid="connect-to-device"
           />
           <q-select
             v-model="form.dstPort"

@@ -2507,10 +2507,15 @@ test('a mixer lists its channels and opens one as its own device', async ({ page
   });
   await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
 
-  // Find and select the mixer in the workspace so its inspector opens.
+  // Find and select the mixer in the workspace so its inspector opens. The name lives in an
+  // <input> value (not text), so locate the row via that input and click a non-input cell.
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
-  await page.getByTestId('workspace-table').getByText('Console FOH').click();
+  const mixerRow = page
+    .getByTestId('workspace-table')
+    .locator('tbody tr')
+    .filter({ has: page.getByDisplayValue('Console FOH') });
+  await mixerRow.locator('td').nth(1).click();
 
   // The mixer's channels are surfaced as their own entities (subdevices), not buried ports.
   const channels = page.getByTestId('mixer-channels');
@@ -2548,17 +2553,20 @@ test('the connect-to-device picker offers real gear only, not channels or buses'
 
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
-  await page.getByTestId('workspace-table').getByText('FOH Mixer').click();
+  const mixerRow = page
+    .getByTestId('workspace-table')
+    .locator('tbody tr')
+    .filter({ has: page.getByDisplayValue('FOH Mixer') });
+  await mixerRow.locator('td').nth(1).click();
 
   // Open the "to device" connection picker.
-  await page.getByLabel(/to device/i).click();
+  await page.getByTestId('connect-to-device').click();
   const menu = page.locator('.q-menu');
   // Real gear is offered...
   await expect(menu.getByText('Wedge L')).toBeVisible();
-  // ...but virtual nodes are not: a channel and a bus are never patch targets.
-  await expect(menu.getByText('Ch 1')).toHaveCount(0);
-  await expect(menu.getByText('Bus 1')).toHaveCount(0);
-  await expect(menu.getByText('FOH')).toHaveCount(0);
+  // ...and it is the ONLY option: the source mixer (FOH Mixer), the channel (Ch 1) and the bus
+  // (Bus 1) are all excluded — channels/buses are virtual nodes, never patch targets.
+  await expect(menu.locator('.q-item')).toHaveCount(1);
 });
 
 
