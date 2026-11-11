@@ -49,7 +49,6 @@ CHANNEL_ATTRS = (
     "channel_number",
     "input_type",
     "mixer_input",
-    "connector",
     "device",
     "stand_type",
     "instrument_group",
@@ -106,7 +105,6 @@ CLEARABLE = {
     "mixer_inputs",
     "mixer_buses",
     "device",
-    "connector",
 }
 POINT_KEYS = ("connector", "patch_label", "notes")
 POINT_TEXT = ("point_type", "connector", "patch_label", "notes")

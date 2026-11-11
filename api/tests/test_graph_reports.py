@@ -37,7 +37,6 @@ async def _seed():
                     "wireless_group": "G50",
                     "wireless_channel": "12",
                     "phantom_power": True,
-                    "connector": "XLR",
                 },
             ),
             (second, 1, "Keys", {"input_type": "di", "instrument_group": "keys"}),

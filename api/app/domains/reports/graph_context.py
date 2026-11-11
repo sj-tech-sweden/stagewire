@@ -83,7 +83,6 @@ def channel_rows(devices: list[Any], edges: list[Any]) -> list[dict]:
                         )
                         if v
                     ),
-                    "connector": channel.connector or "",
                     "phantom_power": channel.phantom_power,
                     "notes": channel.notes,
                     "list_name": channel_list.name,

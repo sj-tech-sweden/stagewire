@@ -213,7 +213,6 @@ _CHANNEL_COLUMNS = (
     ReportField(key="device", label="Device"),
     ReportField(key="input_details", label="Input details"),
     ReportField(key="wireless_details", label="Wireless details"),
-    ReportField(key="connector", label="Connector"),
     ReportField(key="phantom_power", label="48V"),
     ReportField(key="notes", label="Notes"),
 )
@@ -261,7 +260,6 @@ _CHANNEL_COLUMNS_SV = (
     ReportField(key="device", label="Enhet"),
     ReportField(key="input_details", label="Ingångsdetaljer"),
     ReportField(key="wireless_details", label="Trådlös information"),
-    ReportField(key="connector", label="Kontakt"),
     ReportField(key="phantom_power", label="48 V"),
     ReportField(key="notes", label="Anteckningar"),
 )

@@ -10,7 +10,6 @@ from app.domains.graph.models import GraphDevice
 CHANNEL_DEFAULTS = {
     "channel_number": 0,
     "input_type": None,
-    "connector": None,
     "device": None,
     "stand_type": "",
     "instrument_group": "other",

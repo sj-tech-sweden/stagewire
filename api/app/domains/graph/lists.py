@@ -78,7 +78,6 @@ class ChannelCreate(BaseModel):
     channel_number: int | None = None
     source_label: str = ""
     input_type: str | None = None
-    connector: str | None = None
     device: str | None = None
     stand_type: str = ""
     instrument_group: str = "other"
