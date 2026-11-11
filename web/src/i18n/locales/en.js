@@ -421,6 +421,8 @@ export default {
     connectAction: "Connect",
     connectFailed: "Connection rejected",
     connectForce: "Connect anyway",
+    existingConnections: "Already connected",
+    removeConnection: "Remove connection",
     remove: "Remove device",
     removeFail: "Could not remove",
     tabAudio: "Audio",

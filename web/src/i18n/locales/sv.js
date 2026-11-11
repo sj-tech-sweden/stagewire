@@ -423,6 +423,8 @@ export default {
     connectAction: "Koppla",
     connectFailed: "Kopplingen avvisades",
     connectForce: "Koppla ändå",
+    existingConnections: "Redan kopplade",
+    removeConnection: "Ta bort koppling",
     remove: "Ta bort enhet",
     removeFail: "Kunde inte ta bort",
     tabAudio: "Ljud",

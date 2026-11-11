@@ -338,14 +338,18 @@
                 :model-value="ch.attributes.connector || ''"
                 @update:model-value="(v) => saveAttr(ch, 'connector', v)"
               />
-              <q-input
-                :model-value="ch.attributes.mixer_input || ''"
+              <q-select
+                :model-value="ch.attributes.mixer_input || null"
                 dense
                 outlined
+                emit-value
+                map-options
+                clearable
+                :options="mixerInputChoices(ch, graph.devices, graph.edges)"
                 :label="t('workspace.colMixerInput')"
-                placeholder="in 1"
+                :hint="t('workspace.colMixerInputHint')"
                 data-testid="channel-mixer-input"
-                @change="(v) => saveAttr(ch, 'mixer_input', v || null)"
+                @update:model-value="(v) => saveAttr(ch, 'mixer_input', v || null)"
               />
               <div class="row items-center">
                 <q-checkbox
@@ -887,6 +891,7 @@ import {
   isPlotElement,
   isOrphanedBySource,
   isVirtual,
+  mixerInputChoices,
   mixerSlotsToAdd,
   nextChannelNumber,
   outputsOf,

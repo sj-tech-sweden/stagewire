@@ -278,6 +278,57 @@ export const outputsOf = (devices, listId) =>
     .filter((d) => d.kind === 'output' && d.attributes?.list_id === listId)
     .sort((a, b) => a.position - b.position);
 
+// The physical inputs a channel can be fed from, as a strict dropdown: the mixer's own input ports
+// plus the input ports of any digital/analog stagebox patched into that mixer (the stagebox's
+// digital out lands on the mixer's input bus). Each port carrying a channel count expands into its
+// individual physical sockets — an 8-channel XLR group becomes "XLR in 1" … "XLR in 8" — so a
+// channel maps to one specific physical input (input 1 -> channel 3 and 6).
+export function mixerInputChoices(channel, devices, edges) {
+  const listId = channel?.attributes?.list_id;
+  if (!listId) return [];
+  const mixer = devices.find(
+    (d) => (d.kind === 'mixer' || d.device_type === 'mixer') && d.sound_list_id === listId,
+  );
+  if (!mixer) return [];
+  const channelIds = new Set(channelsOf(devices, listId).map((c) => c.id));
+  // stageboxes that feed this mixer: digital/analog box whose audio out terminates on the mixer or
+  // one of its channels
+  const feedTargets = new Set([mixer.id, ...channelIds]);
+  const stageboxes = devices.filter(
+    (d) =>
+      (d.kind === 'digital_stagebox' ||
+        d.kind === 'analog_stagebox' ||
+        d.device_type === 'digital_stagebox' ||
+        d.device_type === 'analog_stagebox') &&
+      edges.some(
+        (e) =>
+          e.signal === 'audio' && feedTargets.has(e.dst_device_id) && e.src_device_id === d.id,
+      ),
+  );
+  const choices = [];
+  const seen = new Set();
+  const add = (label) => {
+    if (seen.has(label)) return;
+    seen.add(label);
+    choices.push({ label, value: label });
+  };
+  for (const dev of [mixer, ...stageboxes]) {
+    const tag = dev === mixer ? '' : ' (stagebox)';
+    for (const p of dev.ports || []) {
+      if (p.direction !== 'in') continue;
+      const conn = (p.connector || 'in').toUpperCase();
+      const n = Number(p.channels) || 1;
+      for (let i = 1; i <= n; i += 1) add(`${conn} in ${i}${tag}`);
+    }
+  }
+  // keep an existing free-text value selectable after the switch to a strict dropdown
+  const current = channel?.attributes?.mixer_input;
+  if (current && !seen.has(current)) {
+    choices.push({ label: `${current} (legacy)`, value: current });
+  }
+  return choices;
+}
+
 export const videoListsOf = (devices) =>
   devices.filter((d) => d.kind === 'video_list').sort((a, b) => a.position - b.position);
 

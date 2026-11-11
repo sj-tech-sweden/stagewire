@@ -42,17 +42,20 @@
         class="q-mb-sm"
         @change="(v) => save({ notes: v })"
       />
-      <q-input
+      <q-select
         v-if="device.kind === 'channel'"
-        :model-value="device.attributes?.mixer_input || ''"
+        :model-value="device.attributes?.mixer_input || null"
         dense
         outlined
+        emit-value
+        map-options
+        clearable
+        :options="mixerInputOptions"
         :label="t('workspace.colMixerInput')"
         :hint="t('workspace.colMixerInputHint')"
-        placeholder="in 1"
         class="q-mb-sm"
         data-testid="inspector-channel-mixer-input"
-        @change="(v) => save({ attributes: { mixer_input: v || null } })"
+        @update:model-value="(v) => save({ attributes: { mixer_input: v || null } })"
       />
       <div
         v-if="pluggedNode"
@@ -467,6 +470,46 @@
             data-testid="connect"
             @click="connect(false)"
           />
+          <div
+            v-if="deviceConnections.length"
+            class="q-mt-sm"
+          >
+            <div class="text-caption text-grey-6 q-mb-xs">
+              {{ t('workspace.existingConnections') }}
+            </div>
+            <q-list
+              dense
+              bordered
+              separator
+            >
+              <q-item
+                v-for="c in deviceConnections"
+                :key="c.id"
+              >
+                <q-item-section>
+                  <div class="text-caption">
+                    {{ c.fromName }}
+                    <span class="text-grey-6">{{ c.fromPort }}</span>
+                    → {{ c.toName }}
+                    <span class="text-grey-6">{{ c.toPort }}</span>
+                  </div>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn
+                    v-if="!readonly"
+                    flat
+                    dense
+                    round
+                    icon="link_off"
+                    color="negative"
+                    :aria-label="t('workspace.removeConnection')"
+                    data-testid="remove-connection"
+                    @click="removeConnection(c.id)"
+                  />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </div>
         </div>
       </q-expansion-item>
 
@@ -620,6 +663,7 @@ import {
   outputPointOptions,
   channelsOf,
   outputsOf,
+  mixerInputChoices,
 } from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
@@ -753,6 +797,28 @@ async function linkElement(links) {
 const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 });
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });
+// The device's own connections, so the connect section shows what is already patched to it
+// (a freshly made connection appears here immediately, without opening the trace).
+const deviceConnections = computed(() => {
+  const id = props.device?.id;
+  if (!id) return [];
+  return graph.edges
+    .filter((e) => e.src_device_id === id || e.dst_device_id === id)
+    .map((e) => {
+      const isSrc = e.src_device_id === id;
+      const otherId = isSrc ? e.dst_device_id : e.src_device_id;
+      const other = devicesById.value.get(otherId);
+      const otherName = other?.name || otherId;
+      return {
+        id: e.id,
+        signal: e.signal,
+        fromName: isSrc ? props.device.name : otherName,
+        fromPort: isSrc ? e.src_port : e.dst_port,
+        toName: isSrc ? otherName : props.device.name,
+        toPort: isSrc ? e.dst_port : e.src_port,
+      };
+    });
+});
 
 // AVL signal domains (audio/video/lighting) carry IP-networked control gear; power and
 // rigging nodes don't, so the Network & Control panel is hidden for them.
@@ -769,6 +835,11 @@ const isNetworkedDomain = computed(() =>
 // Snapshot of the device's attribute bag; new keys (network_*) are merged in by the
 // shallow-merge update path, so sibling keys are never clobbered by a single-field edit.
 const attrs = computed(() => props.device?.attributes || {});
+// Strict dropdown of the physical inputs a channel can be fed from: the mixer's inputs plus any
+// stagebox patched into that mixer (see mixerInputChoices in workspace.js).
+const mixerInputOptions = computed(() =>
+  mixerInputChoices(props.device, graph.devices, graph.edges),
+);
 const deviceIpWebUi = computed(() => {
   const ip = props.device?.attributes?.network_ip;
   return ip ? `http://${ip}` : null;
@@ -918,10 +989,21 @@ async function connect(force) {
       { force },
     );
     rejected.value = [];
+    // reset the form so the new edge shows in the connection list below rather than lingering
+    Object.assign(form, { srcPort: null, dstId: null, dstPort: null, channels: 1 });
   } catch (err) {
     const detail = err.response?.data?.detail;
     if (detail?.code === 'invalid_connection') rejected.value = detail.issues;
     else $q.notify({ type: 'negative', message: typeof detail === 'string' ? detail : err.message });
+  }
+}
+
+async function removeConnection(edgeId) {
+  if (props.readonly) return;
+  try {
+    await graph.deleteEdge(props.jobId, edgeId);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
   }
 }
 </script>
