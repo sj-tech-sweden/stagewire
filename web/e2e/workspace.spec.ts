@@ -2526,4 +2526,40 @@ test('a mixer lists its channels and opens one as its own device', async ({ page
   );
 });
 
+test('the connect-to-device picker offers real gear only, not channels or buses', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E ConnectTargets ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  // A mixer this device connects *from*, a second piece of real gear (valid target), and a
+  // channel + a bus (virtual nodes that must NOT appear as patch targets).
+  await post(request, headers, `${g}/devices`, { domain: 'audio', name: 'FOH Mixer', kind: 'mixer' });
+  await post(request, headers, `${g}/devices`, { domain: 'audio', name: 'Wedge L', kind: 'speaker' });
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Ch 1' });
+  await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Bus 1',
+    kind: 'channel_list',
+    attributes: { list_id: list.id },
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await page.getByTestId('workspace-table').getByText('FOH Mixer').click();
+
+  // Open the "to device" connection picker.
+  await page.getByLabel(/to device/i).click();
+  const menu = page.locator('.q-menu');
+  // Real gear is offered...
+  await expect(menu.getByText('Wedge L')).toBeVisible();
+  // ...but virtual nodes are not: a channel and a bus are never patch targets.
+  await expect(menu.getByText('Ch 1')).toHaveCount(0);
+  await expect(menu.getByText('Bus 1')).toHaveCount(0);
+  await expect(menu.getByText('FOH')).toHaveCount(0);
+});
+
+
 

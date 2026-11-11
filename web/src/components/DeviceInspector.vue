@@ -603,6 +603,7 @@ import {
   isPlotElement,
   isPowerNode,
   isVirtual,
+  isGear,
   outputPointOptions,
   channelsOf,
 } from '@/utils/workspace';
@@ -786,9 +787,13 @@ const canEditDetails = computed(
     !isVirtual(props.device),
 );
 const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
+// Connection targets are real gear only: channels, buses (channel lists), outputs, DMX/video
+// virtual nodes, plot elements and power nodes are not endpoints you patch *into*, so offering
+// them in the "to device" picker would let a user wire a cable to a non-device (a channel appears
+// as its own entity elsewhere, but it is never a connection target).
 const otherDevices = computed(() =>
   graph.devices
-    .filter((d) => d.id !== props.device?.id)
+    .filter((d) => d.id !== props.device?.id && isGear(d))
     .map((d) => ({ label: d.name, value: d.id })),
 );
 const statusLabel = computed(() => {

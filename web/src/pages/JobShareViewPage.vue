@@ -127,6 +127,17 @@
                   </q-chip>
                 </q-item-section>
                 <q-item-section>{{ device.name }}</q-item-section>
+                <q-item-section side>
+                  <q-btn
+                    flat
+                    round
+                    dense
+                    icon="open_in_new"
+                    :aria-label="t('workspace.openDevice')"
+                    :data-testid="`share-device-inspect-${device.id}`"
+                    @click.stop="inspectId = device.id"
+                  />
+                </q-item-section>
               </template>
 
               <div class="q-pa-sm bg-grey-9">
@@ -256,6 +267,25 @@
           </div>
         </q-tab-panel>
       </q-tab-panels>
+
+      <!-- Opening a device from the list shows its full read-only inspector (trace, source, ports),
+           the same one the map and patch tabs use. Selecting a related device (e.g. a channel in a
+           mixer) swaps the dialog to that device. -->
+      <q-dialog
+        :model-value="Boolean(inspectId)"
+        position="right"
+        @update:model-value="(v) => !v && (inspectId = null)"
+      >
+        <q-card style="width: 380px; max-width: 92vw; max-height: 90vh; overflow: auto">
+          <DeviceInspector
+            v-if="inspectDevice"
+            readonly
+            :job-id="jobId"
+            :device="inspectDevice"
+            @select="(id) => (inspectId = id)"
+          />
+        </q-card>
+      </q-dialog>
     </template>
 
     <div
@@ -333,6 +363,10 @@ const selectedId = ref(null);
 const lastScan = ref('');
 const matchedDevice = ref(null);
 const edges = ref([]);
+// The device list offers a quick day-of-show summary (DeviceShareDetail) on expand; a crew member
+// can also open the full read-only inspector for any listed device from the list itself.
+const inspectId = ref(null);
+const inspectDevice = computed(() => devices.value.find((d) => d.id === inspectId.value) || null);
 
 // Only real gear (not channels, buses, channel lists) belongs in the crew list and on the map.
 const gear = computed(() => devices.value.filter(isGear));

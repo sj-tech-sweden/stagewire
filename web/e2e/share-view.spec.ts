@@ -279,6 +279,32 @@ test('the crew map reuses the workspace canvas and opens a read-only inspector o
   await expect(detail.getByTestId('inspector-edit-details')).toHaveCount(0);
 });
 
+test('the crew device list opens the full read-only inspector', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share list-inspect ${Date.now()}` })).id;
+  const gear = await post(request, headers, `/jobs/${jobId}/graph/devices`, {
+    domain: 'audio',
+    name: 'Stagebox A',
+    kind: 'stagebox',
+  });
+
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+
+  // The list tab is the default; each row has an "open" action that opens the full inspector.
+  const listPanel = page.getByTestId('share-device-list');
+  await expect(listPanel.getByText('Stagebox A')).toBeVisible();
+  await listPanel.getByTestId(`share-device-inspect-${gear.id}`).click();
+
+  // The dialog shows the same read-only inspector the map/patch tabs use (name editable=false).
+  const dialog = page.getByTestId('inspector-name');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveValue('Stagebox A');
+});
+
 test('the crew patch tab shows the full patch list, read-only', async ({ page, request }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await login(page);
