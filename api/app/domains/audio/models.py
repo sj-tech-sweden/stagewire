@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -49,6 +50,12 @@ class ProductionJob(Base):
     venue_footprint_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     venue_stage_polygon: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     cable_plan: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Per-job NetBox integration toggle. The global integration must also be
+    # enabled; this lets individual jobs opt out (or in) of device mirroring and
+    # IP assignment even when NetBox is configured globally.
+    netbox_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )

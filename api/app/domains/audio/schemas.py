@@ -31,6 +31,7 @@ class ProductionJobBase(BaseModel):
     venue_footprint_polygon: list[list[float]] = Field(default_factory=list)
     venue_stage_polygon: list[list[float]] = Field(default_factory=list)
     cable_plan: dict = Field(default_factory=dict)
+    netbox_enabled: bool = False
 
     @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod
@@ -62,6 +63,7 @@ class ProductionJobUpdate(BaseModel):
     audience_polygon: list[list[float]] | None = None
     venue_footprint_polygon: list[list[float]] | None = None
     venue_stage_polygon: list[list[float]] | None = None
+    netbox_enabled: bool | None = None
 
     @field_validator("audience_polygon", "venue_footprint_polygon", "venue_stage_polygon")
     @classmethod

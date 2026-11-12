@@ -165,6 +165,41 @@
           </q-list>
         </div>
         </template>
+
+        <template v-if="netbox.isEnabled">
+          <q-separator class="q-my-md" />
+          <div class="text-subtitle2">
+            {{ t('netbox.jobSection') }}
+          </div>
+          <div class="row items-center q-gutter-sm">
+            <q-toggle
+              v-model="form.netbox_enabled"
+              :label="t('netbox.jobEnabled')"
+              data-testid="job-netbox-enabled"
+            />
+            <q-btn
+              dense
+              outline
+              no-caps
+              color="primary"
+              icon="sync"
+              :label="t('netbox.syncJob')"
+              :loading="pushingNetbox"
+              data-testid="job-sync-netbox"
+              @click="syncNetbox"
+            />
+          </div>
+          <div class="text-caption text-grey-6">
+            {{ t('netbox.jobHint') }}
+          </div>
+          <div
+            v-if="netboxMessage"
+            class="text-caption"
+            :class="netboxError ? 'text-negative' : 'text-positive'"
+          >
+            {{ netboxMessage }}
+          </div>
+        </template>
       </q-card-section>
       <q-card-actions align="right">
         <q-btn
@@ -195,6 +230,7 @@ import DateTimePicker from '@/components/DateTimePicker.vue';
 import DatePicker from '@/components/DatePicker.vue';
 import { useVenuesStore } from '@/stores/venues';
 import { useStockwireStore } from '@/stores/stockwire';
+import { useNetboxStore } from '@/stores/netbox';
 
 // The job itself: title, venue, date and notes, and its link to a Stockwire job (link an existing
 // one, create one, open it through the deeplink, send the gear to it). These are the same calls the
@@ -208,6 +244,7 @@ const emit = defineEmits(['update:modelValue', 'saved']);
 const { t } = useI18n();
 const venues = useVenuesStore();
 const stockwire = useStockwireStore();
+const netbox = useNetboxStore();
 const form = reactive({
   title: '',
   venue_id: null,
@@ -215,6 +252,7 @@ const form = reactive({
   start_date: '',
   end_date: '',
   notes: '',
+  netbox_enabled: false,
 });
 const busy = ref(false);
 const pushing = ref(false);
@@ -224,6 +262,9 @@ const linkOpen = ref(false);
 const search = ref('');
 const results = ref([]);
 const loading = ref(false);
+const pushingNetbox = ref(false);
+const netboxMessage = ref('');
+const netboxError = ref(false);
 let timer = null;
 
 const venueOptions = computed(() => venues.venues.map((v) => ({ value: v.id, label: v.name })));
@@ -244,8 +285,10 @@ watch(
       start_date: props.job?.start_date || eventDay,
       end_date: props.job?.end_date || eventDay,
       notes: props.job?.notes || '',
+      netbox_enabled: !!props.job?.netbox_enabled,
     });
     message.value = '';
+    netboxMessage.value = '';
     linkOpen.value = false;
     venues.fetchVenues();
   },
@@ -259,6 +302,7 @@ async function save() {
       start_date: form.start_date || null,
       end_date: form.end_date || null,
       notes: form.notes,
+      netbox_enabled: form.netbox_enabled,
     });
     if ((form.venue_id || null) !== (props.job?.venue_id || null)) {
       await venues.assignJobVenue(props.jobId, form.venue_id || null);
@@ -351,6 +395,29 @@ async function sync() {
     message.value = failure(err);
   } finally {
     pushing.value = false;
+  }
+}
+
+async function syncNetbox() {
+  pushingNetbox.value = true;
+  netboxMessage.value = '';
+  netboxError.value = false;
+  try {
+    const { data } = await api.post(`/netbox/sync-job/${props.jobId}`);
+    if (data?.ok) {
+      netboxMessage.value = t('netbox.syncOk', {
+        created: data.devices_created,
+        updated: data.devices_updated,
+      });
+    } else {
+      netboxError.value = true;
+      netboxMessage.value = data?.message || t('netbox.syncFailed');
+    }
+  } catch (err) {
+    netboxError.value = true;
+    netboxMessage.value = apiErrorText(err) || t('netbox.syncFailed');
+  } finally {
+    pushingNetbox.value = false;
   }
 }
 </script>

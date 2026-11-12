@@ -27,6 +27,27 @@ export function applyGraphEvent(state, event) {
   if (type === 'graph.edge.delete') {
     return { ...state, edges: state.edges.filter((e) => e.id !== payload.id) };
   }
+  // NetBox sync events (IP assigned/changed/conflict) update only the device's
+  // NetBox attribute bag; the device entity itself is unchanged so we merge in
+  // place rather than replacing it. `netbox_url`/`netbox_device_id` arrive on a
+  // successful assignment so the inspector can link back out to NetBox.
+  if (type === 'graph.device.netbox') {
+    const p = payload || {};
+    return {
+      ...state,
+      devices: state.devices.map((d) => {
+        if (d.id !== p.device_id) return d;
+        const attributes = {
+          ...(d.attributes || {}),
+          netbox_sync_status: p.status,
+        };
+        if (p.ip) attributes.network_ip = p.ip;
+        if (p.netbox_url) attributes.netbox_url = p.netbox_url;
+        if (p.netbox_device_id) attributes.netbox_device_id = p.netbox_device_id;
+        return { ...d, attributes };
+      }),
+    };
+  }
   return state;
 }
 

@@ -623,6 +623,89 @@
             @update:model-value="(v) => save({ attributes: { network_protocols: v || [] } })"
           />
         </div>
+        <template v-if="netbox.isEnabled">
+          <q-separator class="q-my-sm" />
+          <div class="text-caption text-grey-7 q-mb-xs">
+            {{ t('workspace.network.netboxTitle') }}
+          </div>
+          <div class="row q-gutter-xs items-center q-mb-xs">
+            <q-chip
+              v-if="attrs.netbox_sync_status"
+              :color="netboxStatusColor"
+              text-color="white"
+              dense
+            >
+              {{ t(`workspace.network.netboxStatus.${attrs.netbox_sync_status}`) }}
+            </q-chip>
+            <q-btn
+              v-if="attrs.netbox_url"
+              dense
+              flat
+              no-caps
+              icon="open_in_new"
+              color="primary"
+              :label="t('workspace.network.netboxOpen')"
+              :href="attrs.netbox_url"
+              target="_blank"
+              rel="noopener"
+            />
+          </div>
+          <q-banner
+            v-if="attrs.netbox_sync_status === 'conflict'"
+            dense
+            rounded
+            class="bg-negative text-white q-mb-sm"
+          >
+            <template #avatar>
+              <q-icon name="warning" />
+            </template>
+            {{ t('workspace.network.netboxConflict') }}
+          </q-banner>
+          <q-input
+            v-if="!readonly"
+            :model-value="attrs.network_prefix || ''"
+            dense
+            outlined
+            placeholder="10.0.0.0/24"
+            :label="t('workspace.network.netboxPrefix')"
+            data-testid="network-netbox-prefix"
+            @change="(v) => save({ attributes: { network_prefix: v || null } })"
+          />
+          <div
+            v-if="!readonly"
+            class="row q-gutter-xs items-center"
+          >
+            <q-btn
+              dense
+              outline
+              no-caps
+              icon="search"
+              :label="t('workspace.network.netboxQuery')"
+              :loading="netboxQuerying"
+              @click="queryNetboxIps"
+            />
+            <q-select
+              v-if="netbox.availableIps.length"
+              v-model="netboxSelectedIp"
+              class="col"
+              dense
+              outlined
+              :options="netboxIpOptions"
+              :label="t('workspace.network.netboxAvailable')"
+            />
+            <q-btn
+              dense
+              flat
+              no-caps
+              color="primary"
+              icon="check"
+              :label="t('workspace.network.netboxAssign')"
+              :disable="!netboxSelectedIp"
+              :loading="netboxAssigning"
+              @click="assignNetboxIp"
+            />
+          </div>
+        </template>
       </q-expansion-item>
 
       <q-btn
@@ -661,6 +744,7 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useStockwireStore } from '@/stores/stockwire';
+import { useNetboxStore } from '@/stores/netbox';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { legacyId } from '@/utils/graphLegacy';
 import {
@@ -880,6 +964,64 @@ const deviceIpWebUi = computed(() => {
   const ip = props.device?.attributes?.network_ip;
   return ip ? `http://${ip}` : null;
 });
+
+// --- NetBox integration (IPAM/DCIM) -------------------------------------
+// When enabled, technicians can pull available IPs from NetBox and assign them
+// directly to this device, and conflicts pushed from NetBox surface here. The
+// whole block is hidden unless the integration is enabled (see netbox store).
+const netbox = useNetboxStore();
+const netboxQuerying = ref(false);
+const netboxAssigning = ref(false);
+const netboxSelectedIp = ref(null);
+
+const netboxIpOptions = computed(() =>
+  (netbox.availableIps || []).map((ip) => ({ label: ip.address, value: ip.address })),
+);
+const netboxStatusColor = computed(() => {
+  const s = props.device?.attributes?.netbox_sync_status;
+  return { ok: 'positive', conflict: 'negative', error: 'negative', pending: 'warning' }[s] || 'grey';
+});
+
+async function queryNetboxIps() {
+  const prefix = props.device?.attributes?.network_prefix;
+  if (!prefix) {
+    $q.notify({ type: 'warning', message: t('workspace.network.netboxNeedsSubnet') });
+    return;
+  }
+  netboxQuerying.value = true;
+  try {
+    await netbox.queryIps(prefix);
+    netboxSelectedIp.value = null;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxQuerying.value = false;
+  }
+}
+
+async function assignNetboxIp() {
+  if (!netboxSelectedIp.value) return;
+  netboxAssigning.value = true;
+  try {
+    const res = await netbox.assignIp({
+      device_id: props.device.id,
+      prefix: props.device?.attributes?.network_prefix || undefined,
+      address: netboxSelectedIp.value,
+    });
+    if (res?.ok) {
+      $q.notify({
+        type: 'positive',
+        message: t('workspace.network.netboxAssigned', { ip: res.ip }),
+      });
+    } else {
+      $q.notify({ type: 'warning', message: res?.message || 'NetBox assignment failed' });
+    }
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxAssigning.value = false;
+  }
+}
 
 // Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
 // power, camera specs. It opens from here so any device reached through the inspector can use it.

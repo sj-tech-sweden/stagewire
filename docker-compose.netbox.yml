@@ -1,0 +1,94 @@
+# Local NetBox dev instance for building & testing the Stagewire NetBox integration.
+#
+# This is intentionally a SEPARATE compose file from the main `docker-compose.yml`
+# so a NetBox instance only runs when you opt into it. It uses its own Postgres
+# (5434) and Redis (6381) so it never collides with Stagewire's stack (5433/6380).
+#
+# NetBox is the IPAM/DCIM source of truth; Stagewire talks to it over HTTP. From a
+# Stagewire container the callback URL (for webhooks) must use
+# `http://host.docker.internal:8010` rather than `localhost`, because `localhost`
+# inside the NetBox container is NetBox itself.
+#
+# Usage:
+#   docker compose -f docker-compose.netbox.yml up -d
+#   # wait for it to come up, then seed defaults + an API token:
+#   python scripts/seed_netbox_dev.py --base-url http://localhost:8000 \
+#       --user admin --password admin --site hq --tenant stagewire
+#
+# First login in the browser: http://localhost:8000  (admin / admin)
+services:
+  netbox-db:
+    image: postgres:16-alpine
+    container_name: stagewire-netbox-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: netbox
+    ports:
+      - "5434:5432"
+    volumes:
+      - netbox-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  netbox-redis:
+    image: redis:7-alpine
+    container_name: stagewire-netbox-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    volumes:
+      - netbox-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  netbox:
+    image: netbox/netbox:latest
+    container_name: stagewire-netbox
+    restart: unless-stopped
+    depends_on:
+      netbox-db:
+        condition: service_healthy
+      netbox-redis:
+        condition: service_healthy
+    environment:
+      # NetBox expects these (the docker image treats them as required).
+      ALLOWED_HOSTS: "localhost,127.0.0.1,host.docker.internal,netbox"
+      DB_HOST: netbox-db
+      DB_NAME: netbox
+      DB_USER: netbox
+      DB_PASSWORD: netbox
+      REDIS_HOST: netbox-redis
+      REDIS_PORT: "6379"
+      REDIS_CACHE_HOST: netbox-redis
+      REDIS_CACHE_PORT: "6379"
+      SECRET_KEY: "dev-only-insecure-stagewire-netbox-secret-change-me"
+      SUPERUSER_NAME: admin
+      SUPERUSER_PASSWORD: admin
+      SUPERUSER_EMAIL: admin@stagewire.local
+      SKIP_SUPERUSER: "false"
+      # NetBox v4 prefers the API to run over the same scheme it is served on.
+      INTERNAL_URL: "http://localhost:8080"
+      BASE_PATH: ""
+      # Disable the default SSL redirect in dev so the plain-http webhook from
+      # Stagewire (and the API) works without TLS.
+      SECURE_PROXY_SSL_HEADER: ""
+      CSRF_TRUSTED_ORIGINS: "http://localhost:8000,http://host.docker.internal:8000"
+    ports:
+      - "8000:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  netbox-db-data:
+  netbox-redis-data:

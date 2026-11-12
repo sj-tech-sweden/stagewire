@@ -32,6 +32,7 @@ export const useGraphStore = defineStore('graph', {
     selectedDeviceId: null,
     mode: 'canvas',
     conflict: null,
+    netboxAlert: null,
     issues: [],
     effective: {},
     loads: { L1: 0, L2: 0, L3: 0, imbalance_pct: 0 },
@@ -80,6 +81,16 @@ export const useGraphStore = defineStore('graph', {
     },
     applyRealtimeEvent(event) {
       if (!event?.type?.startsWith('graph.')) return;
+      // A NetBox sync event that flags a conflict (e.g. the IP was deleted or
+      // reassigned away from this device) raises a transient alert the UI shows
+      // as a warning banner on the affected device.
+      if (event.type === 'graph.device.netbox' && event.payload?.status === 'conflict') {
+        this.netboxAlert = {
+          deviceId: event.payload.device_id,
+          jobId: event.payload.job_id,
+          message: event.payload.message || 'NetBox IP conflict',
+        };
+      }
       const next = applyGraphEvent({ devices: this.devices, edges: this.edges }, event);
       this.devices = next.devices;
       this.edges = next.edges;
