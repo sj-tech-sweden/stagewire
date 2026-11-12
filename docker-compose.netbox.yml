@@ -51,7 +51,7 @@ services:
       retries: 10
 
   netbox:
-    image: netbox/netbox:latest
+    image: netboxcommunity/netbox:latest
     container_name: stagewire-netbox
     restart: unless-stopped
     depends_on:
