@@ -1,11 +1,18 @@
 """Thin async client for the NetBox REST API (v3.7+ / v4.x).
 
-NetBox authenticates with ``Authorization: Token <key>`` and serves everything
-under ``/api/``. The client is deliberately close to ``StockwireClient`` so the
-two integration domains read the same way, but it speaks NetBox's own shapes:
-list endpoints return ``{count, next, previous, results}`` and write endpoints
-for devices need a real ``device_type`` (referenced by id) plus ``role``/``site``
-(referenced by slug).
+NetBox 4.7 authenticates API tokens with ``Authorization: Bearer nbt_<key>.<token>``
+(a version-2 token, where ``key`` is the short display key — prefixed with
+``nbt_`` — and ``token`` is the secret). The legacy ``Token <token>`` (v1) scheme
+is rejected for v2 tokens. The token stored in settings is therefore the full
+``Bearer nbt_<key>.<token>`` string emitted by the seed script; if a bare value
+is supplied the client prefixes the ``Bearer `` scheme (assuming a
+``nbt_<key>.<token>`` secret was pasted without it).
+
+The client is deliberately close to ``StockwireClient`` so the two integration
+domains read the same way, but it speaks NetBox's own shapes: list endpoints
+return ``{count, next, previous, results}`` and write endpoints for devices need
+a real ``device_type`` (referenced by id) plus ``role``/``site`` (referenced by
+slug).
 """
 
 import time
@@ -39,13 +46,21 @@ class NetboxClient:
         self.token = token or settings.netbox_api_token
 
     def _headers(self) -> dict[str, str]:
-        # NetBox' Token authentication is distinct from the Bearer scheme used
-        # by stockwire-rental; sending the wrong scheme is the most common
-        # first-time misconfiguration, so keep it explicit here.
+        # NetBox 4.7 uses version-2 tokens: the Authorization header must be
+        # `Bearer nbt_<key>.<token>`. The settings value is normally the full
+        # `Bearer ...` string the seed script prints, so use it verbatim when it
+        # already carries a scheme; otherwise prefix `Bearer ` (a bare
+        # `nbt_<key>.<token>` secret was pasted without the scheme). Never send
+        # the legacy `Token <token>` form, which NetBox 4.7 rejects for v2 tokens.
+        token = self.token or ""
+        if token.lower().startswith(("bearer ", "token ")):
+            auth = token
+        else:
+            auth = f"Bearer {token}"
         return {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "Authorization": f"Token {self.token}",
+            "Authorization": auth,
         }
 
     def _client(self, timeout: float = 15.0) -> httpx.AsyncClient:

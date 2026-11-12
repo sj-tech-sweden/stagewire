@@ -13,10 +13,10 @@
 # Usage:
 #   docker compose -f docker-compose.netbox.yml up -d
 #   # wait for it to come up, then seed defaults + an API token:
-#   python scripts/seed_netbox_dev.py --base-url http://localhost:8000 \
+#   python scripts/seed_netbox_dev.py --base-url http://localhost:8088 \
 #       --user admin --password admin --site hq --tenant stagewire
 #
-# First login in the browser: http://localhost:8000  (admin / admin)
+# First login in the browser: http://localhost:8088  (admin / admin)
 services:
   netbox-db:
     image: postgres:18-alpine
@@ -29,7 +29,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - netbox-db-data:/var/lib/postgresql/data
+      - netbox-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"]
       interval: 10s
@@ -73,6 +73,10 @@ services:
       REDIS_CACHE_HOST: netbox-valkey
       REDIS_CACHE_PORT: "6379"
       SECRET_KEY: "dev-only-insecure-stagewire-netbox-secret-change-me"
+      # NetBox v4.7+ requires a token pepper (env var API_TOKEN_PEPPER_1) to
+      # provision API tokens. Dev-only placeholder; use a real random value in any
+      # non-dev deployment.
+      API_TOKEN_PEPPER_1: "dev-only-insecure-stagewire-netbox-pepper-change-me"
       SUPERUSER_NAME: admin
       SUPERUSER_PASSWORD: admin
       SUPERUSER_EMAIL: admin@stagewire.local
@@ -83,9 +87,9 @@ services:
       # Disable the default SSL redirect in dev so the plain-http webhook from
       # Stagewire (and the API) works without TLS.
       SECURE_PROXY_SSL_HEADER: ""
-      CSRF_TRUSTED_ORIGINS: "http://localhost:8000,http://host.docker.internal:8000"
+      CSRF_TRUSTED_ORIGINS: "http://localhost:8088,http://host.docker.internal:8088"
     ports:
-      - "8000:8080"
+      - "8088:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/login/"]
       interval: 30s
