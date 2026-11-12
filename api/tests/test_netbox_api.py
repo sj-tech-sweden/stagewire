@@ -37,6 +37,30 @@ async def _seed_job_and_device() -> tuple[str, str]:
         return str(job.id), str(device.id)
 
 
+async def _seed_venue_and_device() -> tuple[str, str]:
+    from app.domains.venues.models import Venue
+
+    async with db_mod.SessionLocal() as db:
+        venue = Venue(name="Venue Sync Test")
+        db.add(venue)
+        await db.commit()
+        await db.refresh(venue)
+        device = GraphDevice(
+            id=uuid.uuid4(),
+            name="Venue Mixer",
+            domain="audio",
+            kind="mixer",
+            # A base-rig device belongs to the venue and to no job (job_id IS NULL),
+            # which is exactly the scope sync_venue mirrors.
+            venue_id=venue.id,
+            job_id=None,
+            attributes={},
+        )
+        db.add(device)
+        await db.commit()
+        return str(venue.id), str(device.id)
+
+
 def test_device_web_url_uses_id_not_display() -> None:
     # NetBox 4.7 returns `display` as a plain string (older versions returned a
     # dict with a `url` key). Building the UI URL from `display.get("url")` raised
@@ -256,6 +280,130 @@ async def test_netbox_sync_job_missing_config_returns_200_not_500(auth_headers) 
         body = resp.json()
         assert body["ok"] is False
         assert "site" in body["message"].lower() or "device type" in body["message"].lower()
+
+
+async def test_netbox_sync_venue_missing_config_returns_200_not_500(auth_headers) -> None:
+    # Mirror of the job test: a missing site/role/device-type must yield a clean
+    # 200/ok=False, never a 500, for the venue base-rig sync endpoint too.
+    venue_id, _ = await _seed_venue_and_device()
+    async with db_mod.SessionLocal() as db:
+        await netbox_config.save_integration_config(
+            db,
+            enabled=True,
+            base_url="http://netbox",
+            api_token="tok",
+            site_slug="",
+            device_role_slug="",
+            device_type_id=None,
+        )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(f"{BASE}/netbox/sync-venue/{venue_id}", headers=auth_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert "site" in body["message"].lower() or "device type" in body["message"].lower()
+
+
+async def test_netbox_sync_venue_mirrors_base_rig_with_venue_cf(auth_headers, monkeypatch) -> None:
+    """The venue base rig mirrors into NetBox carrying stagewire_venue_id (not job_id).
+
+    Uses an in-memory NetBox fake so we can assert the exact custom fields written,
+    confirming venue sync is scoped correctly and link back to the venue, not a job.
+    """
+    from httpx import MockTransport, Request, Response
+
+    from app.domains.netbox.client import NetboxClient
+
+    venue_id, device_id = await _seed_venue_and_device()
+    async with db_mod.SessionLocal() as db:
+        await netbox_config.save_integration_config(
+            db,
+            enabled=True,
+            base_url="http://netbox",
+            api_token="tok",
+            site_slug="hq",
+            device_role_slug="stagewire",
+            device_type_id=1,
+            public_url="http://stagewire",
+        )
+
+    state: dict = {"cf": {}, "devices": {}, "next_device_id": 1}
+
+    def handler(request: Request) -> Response:
+        path = request.url.path
+        method = request.method
+        params = request.url.params
+        if method == "GET" and path == "/api/extras/custom-fields/":
+            all_cf = list(state["cf"].values())
+            return Response(200, json={"count": len(all_cf), "next": None, "results": all_cf})
+        if method == "POST" and path == "/api/extras/custom-fields/":
+            body = json.loads(request.content or b"{}")
+            cf_id = len(state["cf"]) + 1
+            row = {**body, "id": cf_id, "object_types": body.get("object_types", [])}
+            state["cf"][body["name"]] = row
+            return Response(201, json=row)
+        if (
+            method == "PATCH"
+            and path.startswith("/api/extras/custom-fields/")
+            and path.endswith("/")
+        ):
+            cf_id = int(path.split("/")[-2])
+            body = json.loads(request.content or b"{}")
+            for row in state["cf"].values():
+                if row.get("id") == cf_id:
+                    row.update(body)
+                    return Response(200, json=row)
+            return Response(404, json={})
+        if method == "GET" and path == "/api/dcim/devices/":
+            key = params.get("cf_stagewire_device_id")
+            matches = [
+                d
+                for d in state["devices"].values()
+                if d.get("custom_fields", {}).get("stagewire_device_id") == key
+            ]
+            return Response(200, json={"count": len(matches), "next": None, "results": matches})
+        if method == "POST" and path == "/api/dcim/devices/":
+            body = json.loads(request.content or b"{}")
+            did = state["next_device_id"]
+            state["next_device_id"] += 1
+            row = {**body, "id": did}
+            state["devices"][str(did)] = row
+            return Response(201, json=row)
+        return Response(404, json={})
+
+    fake = NetboxClient(base_url="http://netbox", token="tok", transport=MockTransport(handler))
+
+    # service.sync_venue builds the client via get_client; swap it for the fake.
+    async def _fake_get_client(db):
+        return fake
+
+    monkeypatch.setattr(netbox_service, "get_client", _fake_get_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(f"{BASE}/netbox/sync-venue/{venue_id}", headers=auth_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["devices_created"] == 1
+
+    # The mirrored NetBox device carries the venue id, never a job id.
+    assert state["devices"], "no device was created in the fake NetBox"
+    mirrored = next(iter(state["devices"].values()))
+    cf = mirrored["custom_fields"]
+    assert cf["stagewire_venue_id"] == venue_id
+    assert "stagewire_job_id" not in cf
+    assert cf["stagewire_device_id"] == device_id
+
+    # The local base-rig device records the NetBox id + ok status.
+    async with db_mod.SessionLocal() as db:
+        dev = (
+            await db.execute(select(GraphDevice).where(GraphDevice.id == uuid.UUID(device_id)))
+        ).scalar_one()
+        assert dev.attributes["netbox_sync_status"] == "ok"
+        assert dev.attributes["netbox_device_id"] == str(mirrored["id"])
 
 
 async def test_netbox_webhook_accepts_address_update() -> None:

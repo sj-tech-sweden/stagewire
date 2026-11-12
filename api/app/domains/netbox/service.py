@@ -19,6 +19,7 @@ from app.domains.netbox.config import (
     NETBOX_CF_JOB_ID,
     NETBOX_CF_LINK,
     NETBOX_CF_SYNC_STATUS,
+    NETBOX_CF_VENUE_ID,
 )
 from app.domains.netbox.schemas import (
     NetboxAssignIpResult,
@@ -37,19 +38,45 @@ ATTR_NETBOX_IP_ID = "netbox_ip_id"
 ATTR_NETBOX_LINK = "netbox_link"
 
 
-def _stagewire_link(public_url: str, job_id: uuid.UUID, device_id: uuid.UUID) -> str:
+def _stagewire_link(
+    public_url: str,
+    *,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
+    device_id: uuid.UUID,
+) -> str:
     base = (public_url or "").rstrip("/")
     if not base:
         return ""
-    return f"{base}/jobs/{job_id}?device={device_id}"
+    if job_id is not None:
+        return f"{base}/jobs/{job_id}?device={device_id}"
+    if venue_id is not None:
+        return f"{base}/venues/{venue_id}?device={device_id}"
+    return ""
 
 
-def _device_custom_fields(job_id: uuid.UUID, device_id: uuid.UUID, link: str, status: str) -> dict:
+def _device_custom_fields(
+    *,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
+    device_id: uuid.UUID,
+    link: str,
+    status: str,
+) -> dict:
+    # Exactly one scope is set: a job-synced device carries stagewire_job_id, a
+    # venue base-rig device carries stagewire_venue_id. Both reference the same
+    # stagewire_device_id (the GraphDevice id) so NetBox→Stagewire webhooks resolve
+    # the local device regardless of which scope created it.
+    if job_id is None and venue_id is None:
+        raise ValueError("a NetBox device needs a job_id or venue_id scope")
     cf: dict = {
-        NETBOX_CF_JOB_ID: str(job_id),
         NETBOX_CF_DEVICE_ID: str(device_id),
         NETBOX_CF_SYNC_STATUS: status,
     }
+    if job_id is not None:
+        cf[NETBOX_CF_JOB_ID] = str(job_id)
+    if venue_id is not None:
+        cf[NETBOX_CF_VENUE_ID] = str(venue_id)
     if link:
         cf[NETBOX_CF_LINK] = link
     return cf
@@ -151,8 +178,101 @@ async def sync_job(db, job_id: uuid.UUID) -> NetboxSyncResult:
 
         for device in devices:
             attributes = dict(device.attributes or {})
-            link = _stagewire_link(cfg["public_url"], job_id, device.id)
-            cf = _device_custom_fields(job_id, device.id, link, "ok")
+            link = _stagewire_link(cfg["public_url"], job_id=job_id, device_id=device.id)
+            cf = _device_custom_fields(job_id=job_id, device_id=device.id, link=link, status="ok")
+            existing = await nb.find_device(str(device.id))
+            if existing is None:
+                created_device = await nb.create_device(
+                    name=device.name or str(device.id),
+                    site_slug=cfg["site_slug"],
+                    device_type_id=int(cfg["device_type_id"] or 0),
+                    role_slug=cfg["device_role_slug"],
+                    status_slug=cfg["default_device_status"],
+                    tenant_slug=cfg["tenant_slug"] or None,
+                    custom_fields=cf,
+                )
+                attributes[ATTR_NETBOX_DEVICE_ID] = str(created_device["id"])
+                attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], created_device)
+                attributes[ATTR_NETBOX_LINK] = link
+                attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
+                created += 1
+            else:
+                await nb.update_device(
+                    int(existing["id"]),
+                    {"custom_fields": {**existing.get("custom_fields", {}), **cf}},
+                )
+                attributes[ATTR_NETBOX_DEVICE_ID] = str(existing["id"])
+                attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], existing)
+                attributes[ATTR_NETBOX_LINK] = link
+                attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
+                updated += 1
+            device.attributes = attributes
+    except RuntimeError as exc:
+        # NetBox client raises RuntimeError on any non-2xx; surface it as a clean
+        # result rather than a 500 so the UI can show the underlying NetBox error.
+        return NetboxSyncResult(ok=False, message=f"NetBox sync failed: {exc}")
+
+    await db.commit()
+    return NetboxSyncResult(
+        ok=True,
+        devices_created=created,
+        devices_updated=updated,
+        message=f"Synced {created} new and updated {updated} existing NetBox devices.",
+    )
+
+
+async def sync_venue(db, venue_id: uuid.UUID) -> NetboxSyncResult:
+    """Mirror a venue's Standard Base Rig into NetBox, creating devices on first sync.
+
+    A venue base rig is the same ``GraphDevice`` graph a job uses, scoped by
+    ``venue_id`` (with ``job_id IS NULL``). Mirroring it into NetBox follows the
+    exact same shape as ``sync_job``; the only differences are the scope filter and
+    the custom field we stamp (``stagewire_venue_id`` instead of ``stagewire_job_id``)
+    so a venue-synced device links back to the venue rather than a job. The device
+    back-reference (``stagewire_device_id``) is the same GraphDevice id either way,
+    so NetBox→Stagewire webhook conflict detection works for both.
+    """
+    cfg = await netbox_config.load_integration_config(db)
+    if not cfg["enabled"]:
+        return NetboxSyncResult(ok=False, message="NetBox integration is disabled.")
+    nb = await get_client(db)
+    if nb is None:
+        return NetboxSyncResult(ok=False, message="NetBox is not configured.")
+
+    # A device needs a site, a role and a device type to be created in NetBox. These
+    # come from the integration config (site/role set in Settings, device_type_id from
+    # provision). If any are missing, say so clearly instead of letting NetBox return a
+    # 400 that would otherwise surface as a 500.
+    if not (cfg["site_slug"] and cfg["device_role_slug"] and cfg["device_type_id"]):
+        return NetboxSyncResult(
+            ok=False,
+            message=(
+                "NetBox is missing required config (site, device role or device type). "
+                "Set them in Settings → NetBox and run Provision before syncing."
+            ),
+        )
+
+    # The base rig is every device scoped to the venue with no job (a device cloned
+    # onto a job keeps venue_id for editing but gains a job_id; the rig itself is the
+    # job_id IS NULL set). This is the venue counterpart to ``GraphDevice.job_id == job_id``.
+    result = await db.execute(
+        select(GraphDevice).where(GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None))
+    )
+    devices = result.scalars().all()
+    created = 0
+    updated = 0
+
+    try:
+        # Ensure custom fields exist and are valid for dcim.device (self-heals fields
+        # left stale by an older build), so device creation doesn't fail on them.
+        await nb.ensure_custom_fields()
+
+        for device in devices:
+            attributes = dict(device.attributes or {})
+            link = _stagewire_link(cfg["public_url"], venue_id=venue_id, device_id=device.id)
+            cf = _device_custom_fields(
+                venue_id=venue_id, device_id=device.id, link=link, status="ok"
+            )
             existing = await nb.find_device(str(device.id))
             if existing is None:
                 created_device = await nb.create_device(
@@ -230,8 +350,8 @@ async def assign_ip(
 
     # Ensure the device exists in NetBox first.
     netbox_device = await nb.find_device(str(device.id))
-    link = _stagewire_link(cfg["public_url"], job_id, device.id)
-    cf = _device_custom_fields(job_id, device.id, link, "ok")
+    link = _stagewire_link(cfg["public_url"], job_id=job_id, device_id=device.id)
+    cf = _device_custom_fields(job_id=job_id, device_id=device.id, link=link, status="ok")
     if netbox_device is None:
         if not cfg["site_slug"]:
             return NetboxAssignIpResult(ok=False, message="Set the NetBox site before syncing.")

@@ -33,6 +33,24 @@
         :label="t('reports.openReports')"
         @click="reportsOpen = true"
       />
+      <q-btn
+        v-if="netbox.isEnabled"
+        flat
+        no-caps
+        icon="sync"
+        :label="t('netbox.syncVenue')"
+        data-testid="venue-sync-netbox"
+        :loading="pushingNetbox"
+        @click="syncNetbox"
+      />
+    </div>
+
+    <div
+      v-if="netboxMessage"
+      class="q-mb-md"
+      :class="netboxError ? 'text-negative' : 'text-positive'"
+    >
+      {{ netboxMessage }}
     </div>
 
     <!-- The venue Standard Base Rig mirrors the job workspace's discipline tabs so a venue is set up
@@ -489,6 +507,7 @@ import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import { emptyCablePlan } from '@/utils/cables';
 import { useGraphStore } from '@/stores/graph';
+import { useNetboxStore } from '@/stores/netbox';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
@@ -509,6 +528,37 @@ const { t } = useI18n();
 // the identical rigging/power/lighting/video treatment a job does. Edits commit immediately through
 // the incremental graph routes — there is no separate "save" step.
 const graph = useGraphStore();
+// NetBox integration config (gates the "Sync base rig to NetBox" button and tells
+// us whether the venue base rig can be mirrored into NetBox IPAM/DCIM).
+const netbox = useNetboxStore();
+const pushingNetbox = ref(false);
+const netboxMessage = ref('');
+const netboxError = ref(false);
+
+// Mirror the venue's Standard Base Rig into NetBox, the venue counterpart to a
+// job's "Sync to NetBox". The button is hidden unless NetBox is configured.
+async function syncNetbox() {
+  pushingNetbox.value = true;
+  netboxMessage.value = '';
+  netboxError.value = false;
+  try {
+    const { data } = await netbox.syncVenue(venueId.value);
+    if (data?.ok) {
+      netboxMessage.value = t('netbox.syncOk', {
+        created: data.devices_created,
+        updated: data.devices_updated,
+      });
+    } else {
+      netboxError.value = true;
+      netboxMessage.value = data?.message || t('netbox.syncFailed');
+    }
+  } catch (err) {
+    netboxError.value = true;
+    netboxMessage.value = apiErrorText(err) || t('netbox.syncFailed');
+  } finally {
+    pushingNetbox.value = false;
+  }
+}
 
 const venueId = computed(() => route.params.venueId);
 // Scope the graph store to this venue synchronously, in setup and therefore before child components
@@ -632,6 +682,13 @@ async function load() {
   // Scope the graph store to this venue so every incremental graph call (devices, edges, rigging,
   // power) routes to /venues/{venueId}/graph and edits commit straight to the venue's rig.
   await graph.fetchGraph(venueId.value, 'venue');
+  // Refresh NetBox integration state so the "Sync base rig to NetBox" button shows
+  // only when the integration is configured (mirrors how job views gate it).
+  try {
+    await netbox.loadIntegration();
+  } catch {
+    /* netbox state stays default (disabled) if the request fails */
+  }
 }
 
 // The power panel mutates the venue's circuits/outlets; refresh the canvas layer and the

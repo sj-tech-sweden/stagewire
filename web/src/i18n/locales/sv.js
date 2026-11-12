@@ -1141,6 +1141,7 @@ export default {
     jobEnabled: "Spegla detta jobb till NetBox",
     jobHint: "När det är aktiverat speglas jobbets enheter till NetBox och kan tilldelas IP-adresser från NetBox IPAM.",
     syncJob: "Synka till NetBox",
+    syncVenue: "Synka basrigg till NetBox",
     syncOk: "NetBox-synk klar: {created} skapade, {updated} uppdaterade.",
     syncFailed: "NetBox-synk misslyckades",
   },

@@ -170,9 +170,11 @@ def client() -> NetboxClient:
 
 
 async def test_ensure_custom_fields_idempotent(client: NetboxClient) -> None:
+    # Four historical fields plus stagewire_venue_id (added for venue base-rig sync).
     created = await client.ensure_custom_fields()
-    assert len(created) == 4
-    # Second pass finds them already present (fake returns empty, so still 0 new).
+    assert len(created) == 5
+    assert "stagewire_venue_id" in created
+    # Second pass finds them already present (fake returns all, so still 0 new).
     again = await client.ensure_custom_fields()
     assert again == []
 

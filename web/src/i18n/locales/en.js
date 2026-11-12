@@ -1138,6 +1138,7 @@ export default {
     jobEnabled: "Mirror this job to NetBox",
     jobHint: "When enabled, this job's devices are mirrored into NetBox and can be assigned IPs from NetBox IPAM.",
     syncJob: "Sync to NetBox",
+    syncVenue: "Sync base rig to NetBox",
     syncOk: "NetBox sync done: {created} created, {updated} updated.",
     syncFailed: "NetBox sync failed",
   },

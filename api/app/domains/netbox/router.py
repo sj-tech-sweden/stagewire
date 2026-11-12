@@ -146,6 +146,14 @@ async def sync_job(
     return await service.sync_job(db, job_id)
 
 
+@router.post("/sync-venue/{venue_id}", response_model=NetboxSyncResult)
+async def sync_venue(
+    venue_id: uuid.UUID, db=Depends(get_db), _=Depends(require_admin)
+) -> NetboxSyncResult:
+    """Mirror a venue's Standard Base Rig into NetBox (see service.sync_venue)."""
+    return await service.sync_venue(db, venue_id)
+
+
 @router.get("/available-ips", response_model=list[NetboxAvailableIp])
 async def available_ips(
     prefix: str = Query(..., description="CIDR prefix to draw available addresses from"),

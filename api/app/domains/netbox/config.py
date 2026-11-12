@@ -20,8 +20,13 @@ NETBOX_INTEGRATION_KEY = "netbox_integration"
 
 # Custom fields Stagewire writes onto NetBox objects so the two systems can find
 # each other. ``stagewire_link`` is a URL-type field NetBox renders as a clickable
-# link back into the exact Stagewire job/device view.
+# link back into the exact Stagewire job/device view. A device synced from a job
+# carries ``stagewire_job_id``; one synced from a venue base rig carries
+# ``stagewire_venue_id`` — exactly one of the two is ever set, and both point at
+# the same ``stagewire_device_id`` (the GraphDevice id) so webhook conflict
+# detection works regardless of which scope synced it.
 NETBOX_CF_JOB_ID = "stagewire_job_id"
+NETBOX_CF_VENUE_ID = "stagewire_venue_id"
 NETBOX_CF_DEVICE_ID = "stagewire_device_id"
 NETBOX_CF_SYNC_STATUS = "stagewire_sync_status"
 NETBOX_CF_LINK = "stagewire_link"

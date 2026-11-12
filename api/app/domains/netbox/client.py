@@ -26,6 +26,7 @@ from app.domains.netbox.config import (
     NETBOX_CF_JOB_ID,
     NETBOX_CF_LINK,
     NETBOX_CF_SYNC_STATUS,
+    NETBOX_CF_VENUE_ID,
     NETBOX_WEBHOOK_CONTENT_TYPES,
 )
 
@@ -146,6 +147,7 @@ class NetboxClient:
         """
         defined = [
             (NETBOX_CF_JOB_ID, "text", "Stagewire production job ID"),
+            (NETBOX_CF_VENUE_ID, "text", "Stagewire venue base-rig ID"),
             (NETBOX_CF_DEVICE_ID, "text", "Stagewire graph device ID"),
             (NETBOX_CF_SYNC_STATUS, "text", "Stagewire sync status (ok/conflict/error)"),
             (NETBOX_CF_LINK, "url", "Link back to the Stagewire job/device view"),

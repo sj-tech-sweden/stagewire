@@ -52,6 +52,10 @@ export const useNetboxStore = defineStore('netbox', {
       const { data } = await api.post(`/netbox/sync-job/${jobId}`, {});
       return data;
     },
+    async syncVenue(venueId) {
+      const { data } = await api.post(`/netbox/sync-venue/${venueId}`, {});
+      return data;
+    },
     async queryIps(prefix) {
       if (!prefix) return [];
       this.loading = true;
