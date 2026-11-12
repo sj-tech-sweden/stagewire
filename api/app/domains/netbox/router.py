@@ -17,6 +17,7 @@ from app.core.db import get_db
 from app.domains.auth.deps import get_current_user, require_admin
 from app.domains.netbox import config as netbox_config
 from app.domains.netbox import service
+from app.domains.netbox.client import NetboxClient
 from app.domains.netbox.schemas import (
     NetboxAssignIpRequest,
     NetboxAssignIpResult,
@@ -83,11 +84,15 @@ async def test_netbox_integration(db=Depends(get_db), _=Depends(require_admin)) 
         return NetboxTestResult(ok=False, detail="No API token or base URL configured")
     try:
         start = time.monotonic()
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{cfg['base_url'].rstrip('/')}/api/status/",
-                headers={"Authorization": f"Token {cfg['api_token']}"},
-            )
+        # Build the client explicitly so the Authorization header is correct for
+        # NetBox 4.7 (v2 `Bearer nbt_<key>.<token>`). The legacy v1 `Token
+        # <token>` scheme is rejected, and we must not double-prefix a token that
+        # already carries a `Bearer ` prefix (as the seed script emits).
+        nb = NetboxClient(base_url=cfg["base_url"], token=cfg["api_token"])
+        async with nb._client() as client:
+            # /api/status/ requires authentication in NetBox 4.7, so this call
+            # also validates the token, not just connectivity.
+            resp = await client.get("/api/status/")
         latency = int((time.monotonic() - start) * 1000)
         if resp.status_code != 200:
             return NetboxTestResult(
@@ -96,11 +101,8 @@ async def test_netbox_integration(db=Depends(get_db), _=Depends(require_admin)) 
                 latency_ms=latency,
                 detail=f"NetBox status check failed: HTTP {resp.status_code}",
             )
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            auth_resp = await client.get(
-                f"{cfg['base_url'].rstrip('/')}/api/dcim/devices/?limit=1",
-                headers={"Authorization": f"Token {cfg['api_token']}"},
-            )
+        async with nb._client() as client:
+            auth_resp = await client.get("/api/dcim/devices/?limit=1")
         if auth_resp.status_code in (401, 403):
             return NetboxTestResult(
                 ok=False,
