@@ -715,7 +715,7 @@
               icon="search"
               :label="t('workspace.network.netboxQuery')"
               :loading="netboxQuerying"
-              @click="queryNetboxIps"
+              @click="queryNetboxIps()"
             />
             <q-select
               v-if="netbox.availableIps.length"
@@ -723,8 +723,11 @@
               class="col"
               dense
               outlined
+              emit-value
+              map-options
               :options="netboxIpOptions"
               :label="t('workspace.network.netboxAvailable')"
+              data-testid="network-netbox-ip"
             />
             <q-btn
               dense
