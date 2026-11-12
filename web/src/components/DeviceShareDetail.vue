@@ -54,36 +54,13 @@
 
     <!-- Stockwire inventory asset bound to this physical device (read-only reference). -->
     <section
-      v-if="boundAsset.id"
+      v-if="boundAsset.isBound"
       class="q-mb-sm"
     >
       <div class="text-caption text-grey-5 text-uppercase">
         {{ t('workspace.bind.title') }}
       </div>
-      <div
-        v-if="boundAsset.code"
-        class="text-caption"
-      >
-        <span class="text-grey-5">{{ t('workspace.bind.code') }}:</span> {{ boundAsset.code }}
-      </div>
-      <div
-        v-if="boundAsset.tag"
-        class="text-caption"
-      >
-        <span class="text-grey-5">{{ t('workspace.bind.tag') }}:</span> {{ boundAsset.tag }}
-      </div>
-      <div
-        v-if="boundAsset.serial"
-        class="text-caption"
-      >
-        <span class="text-grey-5">{{ t('workspace.bind.serial') }}:</span> {{ boundAsset.serial }}
-      </div>
-      <div
-        v-if="boundAsset.description"
-        class="text-caption"
-      >
-        {{ boundAsset.description }}
-      </div>
+      <StockwireAssetSummary :asset="boundAsset" />
     </section>
 
     <!-- Power: how the device draws power (inlet / phase where known). -->
@@ -142,18 +119,57 @@
         <span v-if="port.channels">· {{ port.channels }}ch</span>
       </div>
     </section>
+
+    <section
+      v-if="connections.length"
+      class="q-mb-sm"
+      data-testid="share-patch-points"
+    >
+      <div class="text-caption text-grey-5 text-uppercase">
+        {{ t('workspace.existingConnections') }}
+      </div>
+      <div
+        v-for="connection in connections"
+        :key="connection.id"
+        class="text-caption"
+      >
+        {{ connection.from }} <span class="text-grey-6">{{ connection.fromPort }}</span>
+        → {{ connection.to }} <span class="text-grey-6">{{ connection.toPort }}</span>
+        <span
+          v-if="connection.routeLabel"
+          class="text-grey-5"
+        >
+          · {{ connection.routeLabel }}
+        </span>
+      </div>
+    </section>
+
+    <q-btn
+      flat
+      dense
+      no-caps
+      color="primary"
+      icon="open_in_new"
+      :label="t('workspace.openDevice')"
+      data-testid="share-detail-inspect"
+      @click="$emit('inspect')"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { powerInletLabel } from '@/utils/workspace';
+import StockwireAssetSummary from '@/components/StockwireAssetSummary.vue';
+import { edgeRows, powerInletLabel, stockwireAssetOf } from '@/utils/workspace';
 
 const { t } = useI18n();
 const props = defineProps({
   device: { type: Object, required: true },
+  devices: { type: Array, default: () => [] },
+  edges: { type: Array, default: () => [] },
 });
+defineEmits(['inspect']);
 
 const attrs = computed(() => props.device.attributes || {});
 
@@ -180,15 +196,14 @@ const dmx = computed(() => {
   return { universe, start, footprint };
 });
 
-const boundAsset = computed(() => {
-  const a = attrs.value;
-  const code = a.stockwire_asset_code || a.stockwire_asset_id || null;
-  return {
-    id: code,
-    code,
-    tag: a.stockwire_asset_tag || null,
-    serial: a.stockwire_asset_serial || null,
-    description: a.stockwire_asset_description || null,
-  };
-});
+const boundAsset = computed(() => stockwireAssetOf(props.device));
+const connections = computed(() =>
+  edgeRows(
+    props.edges.filter(
+      (edge) =>
+        edge.src_device_id === props.device.id || edge.dst_device_id === props.device.id,
+    ),
+    props.devices,
+  ),
+);
 </script>

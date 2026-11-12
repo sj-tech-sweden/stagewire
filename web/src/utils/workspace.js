@@ -2,6 +2,33 @@ export const DOMAINS = ['audio', 'lighting', 'video', 'power'];
 
 export const DOMAIN_SIGNAL = { audio: 'audio', lighting: 'dmx', video: 'video', power: 'power' };
 
+export function stockwireAssetOf(device) {
+  const attributes = device?.attributes || {};
+  // Read the old attribute for existing bindings; new writes use stockwire_device_id.
+  const canonicalId = device?.stockwire_device_id || null;
+  const code =
+    attributes.stockwire_asset_code ||
+    attributes.stockwire_asset_id ||
+    canonicalId ||
+    null;
+  const tag = attributes.stockwire_asset_tag || null;
+  const serial = attributes.stockwire_asset_serial || null;
+  const barcode = attributes.stockwire_asset_barcode || null;
+  const qrCode = attributes.stockwire_asset_qr_code || null;
+  const rfid = attributes.stockwire_asset_rfid || null;
+  return {
+    isBound: Boolean(canonicalId || code || tag || serial || barcode || qrCode || rfid),
+    canonicalId: canonicalId == null ? null : String(canonicalId),
+    code,
+    tag,
+    serial,
+    barcode,
+    qrCode,
+    rfid,
+    description: attributes.stockwire_asset_description || null,
+  };
+}
+
 export const SIGNAL_COLOR = {
   audio: '#35A853',
   dmx: '#F2C037',
@@ -89,20 +116,28 @@ export function deviceFromProduct(product, { parentId = null } = {}) {
 
 export function edgeRows(edges, devices) {
   const byId = new Map(devices.map((d) => [d.id, d]));
-  return edges.map((e) => ({
-    id: e.id,
-    signal: e.signal,
-    srcId: e.src_device_id,
-    dstId: e.dst_device_id,
-    from: byId.get(e.src_device_id)?.name || '?',
-    fromPort: e.src_port,
-    to: byId.get(e.dst_device_id)?.name || '?',
-    toPort: e.dst_port,
-    channels: e.channels,
-    phase: e.phase,
-    cableLabel: e.cable_label,
-    revision: e.revision,
-  }));
+  return edges.map((e) => {
+    const source = byId.get(e.src_device_id);
+    const destination = byId.get(e.dst_device_id);
+    const attributes = e.attributes || {};
+    return {
+      id: e.id,
+      signal: e.signal,
+      srcId: e.src_device_id,
+      dstId: e.dst_device_id,
+      from: source?.name || '?',
+      fromPort: portLabelOf(source, e.src_port, attributes.src_socket || null),
+      to: destination?.name || '?',
+      toPort: portLabelOf(destination, e.dst_port, attributes.dst_socket || null),
+      patchLabel: attributes.patch_label || '',
+      connector: attributes.connector || '',
+      routeLabel: [attributes.patch_label, attributes.connector].filter(Boolean).join(' · '),
+      channels: e.channels,
+      phase: e.phase,
+      cableLabel: e.cable_label,
+      revision: e.revision,
+    };
+  });
 }
 
 export function layerOf(device) {
@@ -244,7 +279,10 @@ export function chainDevices(node, edges, devices) {
   for (const edge of edges) {
     const attrs = edge.attributes || {};
     if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
-    if (attrs.first_point) {
+    if (node.kind === 'channel') {
+      const deviceId = edge.src_device_id === node.id ? edge.dst_device_id : edge.src_device_id;
+      steps.push({ position: attrs.position || 0, device: byId.get(deviceId) });
+    } else if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, device: byId.get(edge.src_device_id) });
     } else {
       steps.push({ position: attrs.position || 0, device: byId.get(edge.dst_device_id) });
@@ -259,7 +297,10 @@ export function chainSteps(node, edges, devices) {
   for (const edge of edges) {
     const attrs = edge.attributes || {};
     if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
-    if (attrs.first_point) {
+    if (node.kind === 'channel') {
+      const deviceId = edge.src_device_id === node.id ? edge.dst_device_id : edge.src_device_id;
+      steps.push({ position: attrs.position || 0, name: names.get(deviceId) });
+    } else if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, name: names.get(edge.src_device_id) });
     } else {
       steps.push({ position: attrs.position || 0, name: names.get(edge.dst_device_id) });
@@ -393,14 +434,26 @@ export function splitSocket(value) {
 
 // The cables a node has outside its patch chain (drawn in the inspector, not the chain editor), one
 // line per cable, read from the graph edges: the node's own port, the other device and its port.
+function mixerForChannel(channel, devices) {
+  const listId = channel?.kind === 'channel' ? channel.attributes?.list_id : null;
+  return listId
+    ? devices.find(
+        (device) =>
+          isMixerDevice(device) && String(device.sound_list_id) === String(listId),
+      )
+    : null;
+}
+
 export function directConnections(node, edges, devices) {
   if (!node) return [];
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const ownerMixer = mixerForChannel(node, devices);
   return edges
     .filter(
       (e) =>
         FEED_SIGNALS.has(e.signal) &&
         !e.attributes?.chain &&
+        !(ownerMixer && e.src_device_id === node.id && e.dst_device_id === ownerMixer.id) &&
         (e.src_device_id === node.id || e.dst_device_id === node.id),
     )
     .map((e) => {
@@ -424,95 +477,208 @@ export function directConnections(node, edges, devices) {
 export function patchSummary(node, edges, devices) {
   const direct = directConnections(node, edges, devices);
   const chain = chainSteps(node, edges, devices);
+  if (node.kind === 'channel') {
+    const byId = new Map(devices.map((d) => [d.id, d]));
+    const sourceId = node.attributes?.source_device_id;
+    const source = byId.get(sourceId)?.name || node.attributes?.device || '';
+    const upstream = source
+      ? [source]
+      : direct.filter((connection) => connection.incoming).map((connection) => connection.other);
+    const inputPath =
+      upstream.length || chain.length ? [...upstream, ...chain, node.name].join(' → ') : '';
+    const outputPaths = direct
+      .filter((connection) => !connection.incoming)
+      .map((connection) => `${node.name} → ${connection.other}`);
+    return [inputPath, ...outputPaths].filter(Boolean).join(' / ');
+  }
   if (!direct.length) return chain.join(' → ');
   const upstream = direct.filter((d) => d.incoming).map((d) => d.other);
   const downstream = direct.filter((d) => !d.incoming).map((d) => d.other);
   return [...upstream, node.name, ...chain, ...downstream].join(' → ');
 }
 
-// Upstream feed chains into a node over audio/data cables, as root-to-leaf arrays of devices. A
-// chain ends at the node's direct feeder (the device whose cable lands on it) or further up the
-// network when a switch/router sits between. Cycles and virtual nodes end a chain.
-function feedChains(node, devices, edges, byId, depth = 0, visited = new Set([node.id])) {
-  const feeds = edges.filter(
-    (e) =>
-      FEED_SIGNALS.has(e.signal) &&
-      e.dst_device_id === node.id &&
-      !visited.has(e.src_device_id) &&
-      byId.has(e.src_device_id),
-  );
-  if (!feeds.length || depth > 8) return [];
-  const chains = [];
-  for (const e of feeds) {
-    const src = byId.get(e.src_device_id);
-    const step = { device: src, edge: e };
-    const deeper = isVirtual(src) ? [] : feedChains(src, devices, edges, byId, depth + 1, new Set([...visited, src.id]));
-    if (!deeper.length) chains.push([step]);
-    else for (const chain of deeper) chains.push([...chain, step]);
-  }
-  return chains;
-}
-
-// Direct downstream cables out of a node that are not patch-chain edges (the chain editor owns
-// those): an inspector connection from a channel to a device, followed over audio/data.
-function directDownstream(node, edges, byId, depth = 0, visited = new Set([node.id])) {
-  if (depth > 8) return [];
-  return edges
-    .filter(
-      (e) =>
-        FEED_SIGNALS.has(e.signal) &&
-        e.src_device_id === node.id &&
-        !(e.attributes && e.attributes.chain) &&
-        !visited.has(e.dst_device_id) &&
-        byId.has(e.dst_device_id),
-    )
-    .map((e) => {
-      const dst = byId.get(e.dst_device_id);
-      return {
-        id: `direct-${e.id}`,
-        device_id: dst.id,
-        label: dst.name,
-        kind: 'device',
-        in_port: portLabelOf(dst, e.dst_port, e.attributes?.dst_socket || null),
-        out_port: portLabelOf(node, e.src_port),
-        connector: '',
-        children: isVirtual(dst) ? [] : directDownstream(dst, edges, byId, depth + 1, new Set([...visited, dst.id])),
-      };
-    });
-}
-
-// The signal flow of a channel as a tree the flow diagram draws left to right: each upstream feed
-// chain (the furthest source first) ends at the channel, whose children are its patch chain plus any
-// direct downstream cables. `steps` is the chain-editor form (chainForm), which the patch chain is
-// built from; inspector cables are drawn from the graph edges so the flow matches what was connected.
-export function channelFlowTree(channel, steps, edges, devices, sourceLabel) {
+// The channel's selected source and explicit patch points define its input route. Other cables
+// connected to the channel remain separate branches; a physical device does not imply port routing.
+export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []) {
   const byId = new Map(devices.map((d) => [d.id, d]));
-  const base = flowTree(sourceLabel, steps, devices);
-  const source = base[0];
-  if (!source) return base;
-  source.children = [...source.children, ...directDownstream(channel, edges, byId)];
-  const chains = feedChains(channel, devices, edges, byId);
-  if (!chains.length) return [source];
-  return chains.map((chain, index) => {
-    // the channel node is shared by every feed, so each copy gets its own id and the downstream
-    // children are drawn under the first copy only
-    const node = index === 0 ? source : { ...source, id: `${source.id}-feed-${index}`, children: [] };
-    // `chain` runs furthest source first, ending at the direct feeder, so wrapping from the last
-    // step outwards nests each device under the one upstream of it, with the channel at the end.
-    return chain.reduceRight(
-      (child, { device, edge }) => ({
-        id: `feed-${edge.id}`,
+  const sourceId = channel.attributes?.source_device_id;
+  const ownerMixer = mixerForChannel(channel, devices);
+  const pointEdges = edges.filter((edge) => edge.attributes?.chain === channel.id);
+  const orderedPointEdges = [...pointEdges].sort(
+    (a, b) => (a.attributes?.position || 0) - (b.attributes?.position || 0),
+  );
+  const pointEdgeFor = (index) => {
+    const point = steps[index];
+    const nextId = steps[index + 1]?.device_id || channel.id;
+    const edgeAtPosition = orderedPointEdges[index];
+    if (
+      edgeAtPosition?.src_device_id === point.device_id &&
+      edgeAtPosition?.dst_device_id === nextId
+    ) {
+      return edgeAtPosition;
+    }
+    return pointEdges.find(
+      (edge) => edge.src_device_id === point.device_id && edge.dst_device_id === nextId,
+    );
+  };
+  const sourceEdge = edges.find(
+    (edge) =>
+      edge.signal === 'audio' &&
+      ((edge.attributes?.channel_source &&
+        String(edge.attributes.channel_id) === String(channel.id)) ||
+        (sourceId &&
+          edge.src_device_id === sourceId &&
+          [steps[0]?.device_id, channel.id].includes(edge.dst_device_id))),
+  ) || edges.find(
+    (edge) =>
+      steps.length > 0 &&
+      FEED_SIGNALS.has(edge.signal) &&
+      edge.dst_device_id === steps[0].device_id &&
+      !edge.attributes?.chain &&
+      byId.has(edge.src_device_id) &&
+      !steps.some((step) => step.device_id === edge.src_device_id),
+  );
+  const sourceDevice = byId.get(sourceId) || byId.get(sourceEdge?.src_device_id);
+  const incomingEdges = edges.filter(
+    (edge) =>
+      FEED_SIGNALS.has(edge.signal) &&
+      edge.dst_device_id === channel.id &&
+      !edge.attributes?.chain &&
+      byId.has(edge.src_device_id),
+  );
+  const directFeeds =
+    steps.length || sourceDevice
+      ? []
+      : incomingEdges.map((edge) => ({ edge, device: byId.get(edge.src_device_id) }));
+  const endpoint = (id, edge = null) => ({
+    id,
+    device_id: channel.id,
+    label: sourceLabel || channel.name,
+    kind: 'channel',
+    in_port: edge
+      ? portLabelOf(channel, edge.dst_port, edge.attributes?.dst_socket || null)
+      : '',
+    out_port: '',
+    connector: steps.at(-1)?.connector || channel.attributes?.input_type || '',
+    children: [],
+  });
+  const routes = [];
+  if (steps.length || sourceDevice) {
+    const finalEdge = steps.length ? pointEdgeFor(steps.length - 1) : sourceEdge;
+    let route = endpoint(`channel-${channel.id}`, finalEdge);
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      const step = steps[index];
+      const device = byId.get(step.device_id);
+      const incoming = index === 0 ? sourceEdge : pointEdgeFor(index - 1);
+      const outgoing = pointEdgeFor(index);
+      route = {
+        id: `channel-step-${channel.id}-${index}`,
+        device_id: step.device_id || null,
+        label: device?.name || '?',
+        kind: 'device',
+        in_port:
+          incoming?.dst_device_id === device?.id
+            ? portLabelOf(device, incoming.dst_port, incoming.attributes?.dst_socket || null)
+            : step.in_port || '',
+        out_port:
+          outgoing?.src_device_id === device?.id
+            ? portLabelOf(device, outgoing.src_port)
+            : step.out_port || '',
+        connector: step.connector || '',
+        patch_label: step.patch_label || '',
+        children: [route],
+      };
+    }
+    if (sourceDevice && sourceDevice.id !== steps[0]?.device_id) {
+      route = {
+        id: `channel-source-${channel.id}`,
+        device_id: sourceDevice.id,
+        label: sourceDevice.name,
+        kind: 'source',
+        in_port: '',
+        out_port:
+          sourceEdge?.src_device_id === sourceDevice.id
+            ? portLabelOf(sourceDevice, sourceEdge.src_port)
+            : '',
+        connector: '',
+        children: [route],
+      };
+    }
+    routes.push(route);
+  } else {
+    routes.push(
+      ...directFeeds.map(({ edge, device }, index) => ({
+        id: `channel-feed-${edge.id}`,
         device_id: device.id,
         label: device.name,
-        kind: 'device',
+        kind: 'source',
         in_port: '',
         out_port: portLabelOf(device, edge.src_port),
         connector: '',
-        children: [child],
-      }),
-      node,
+        children: [
+          endpoint(`channel-${channel.id}-feed-${index}`, edge),
+        ],
+      })),
     );
-  });
+  }
+  for (const edge of edges.filter(
+    (item) =>
+      FEED_SIGNALS.has(item.signal) &&
+      item.src_device_id === channel.id &&
+      item.dst_device_id !== ownerMixer?.id &&
+      !item.attributes?.chain &&
+      byId.has(item.dst_device_id),
+  )) {
+    const destination = byId.get(edge.dst_device_id);
+    routes.push({
+      id: `channel-output-${edge.id}`,
+      device_id: channel.id,
+      label: sourceLabel || channel.name,
+      kind: 'channel',
+      in_port: '',
+      out_port: portLabelOf(channel, edge.src_port),
+      connector: '',
+      children: [
+        {
+          id: `channel-output-device-${edge.id}`,
+          device_id: destination.id,
+          label: destination.name,
+          kind: 'device',
+          in_port: portLabelOf(destination, edge.dst_port, edge.attributes?.dst_socket || null),
+          out_port: '',
+          connector: edge.attributes?.connector || '',
+          patch_label: edge.attributes?.patch_label || '',
+          children: [],
+        },
+      ],
+    });
+  }
+  return routes.length ? routes : [endpoint(`channel-${channel.id}`)];
+}
+
+// Return only the channel routes that actually contain a device. A gear node may be used by
+// several channels, so each matching channel keeps its own diagram instead of joining nearby
+// graph edges into an implied signal path.
+export function channelFlowsForDevice(deviceId, devices, edges) {
+  if (!deviceId) return [];
+  return devices
+    .filter((device) => device.kind === 'channel')
+    .flatMap((channel) => {
+      const routes = channelFlowTree(
+        channel,
+        edges,
+        devices,
+        channel.name,
+        chainForm(channel, edges, devices),
+      );
+      const containsDevice = (nodes) =>
+        nodes.some(
+          (node) =>
+            node.device_id === deviceId ||
+            containsDevice(node.children || []),
+        );
+      return containsDevice(routes) ? [{ channel, routes }] : [];
+    });
 }
 
 export const videoListsOf = (devices) =>
@@ -571,7 +737,14 @@ export function chainForm(node, edges, devices) {
     const point = attrs.first_point || attrs;
     byPos.push({
       position: point.position || 0,
-      device_id: attrs.first_point ? edge.src_device_id : edge.dst_device_id,
+      device_id:
+        node.kind === 'channel'
+          ? edge.src_device_id === node.id
+            ? edge.dst_device_id
+            : edge.src_device_id
+          : attrs.first_point
+            ? edge.src_device_id
+            : edge.dst_device_id,
       connector: point.connector || '',
       patch_label: point.patch_label || '',
       bus_connector: point.bus_connector || '',
@@ -1053,6 +1226,7 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
     in_port: step.in_port || step.input_port || '',
     out_port: step.out_port || step.source_port || '',
     connector: step.connector || '',
+    patch_label: step.patch_label || '',
     children: [],
   }));
   const roots = [];

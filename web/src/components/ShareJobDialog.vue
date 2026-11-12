@@ -23,6 +23,17 @@
           {{ t('workspace.share.dialogHint') }}
         </p>
 
+        <q-toggle
+          v-model="allowAssetBinding"
+          :label="t('workspace.share.allowAssetBinding')"
+          class="q-mb-sm"
+          :disable="loading"
+          data-testid="share-allow-asset-binding"
+        />
+        <div class="text-caption text-grey-6 q-mb-sm">
+          {{ t('workspace.share.permissionLinkWarning') }}
+        </div>
+
         <div
           v-if="error"
           class="text-negative text-caption q-mb-sm"
@@ -48,6 +59,7 @@
         <q-input
           :model-value="link"
           readonly
+          :disable="loading || !link"
           dense
           outlined
           class="q-mb-sm"
@@ -59,6 +71,7 @@
               round
               icon="content_copy"
               :label="$q.screen.lt.sm ? '' : t('workspace.share.copyLink')"
+              :disable="loading || !link"
               data-testid="share-copy"
               @click="copy"
             />
@@ -93,16 +106,41 @@ const loading = ref(false);
 const error = ref('');
 const link = ref('');
 const qrDataUrl = ref('');
+const allowAssetBinding = ref(false);
+let mintGeneration = 0;
+let restoringPreference = false;
+
+const preferenceKey = () => `sw_share_asset_binding:${props.jobId}`;
 
 watch(
-  () => props.modelValue,
-  async (open) => {
-    if (!open) return;
-    await mint();
+  () => [props.modelValue, props.jobId],
+  async ([open]) => {
+    if (!open) {
+      mintGeneration += 1;
+      loading.value = false;
+      return;
+    }
+    link.value = '';
+    qrDataUrl.value = '';
+    restoringPreference = true;
+    allowAssetBinding.value = localStorage.getItem(preferenceKey()) === 'true';
+    restoringPreference = false;
+    await mint(allowAssetBinding.value);
   },
 );
 
-async function mint() {
+watch(
+  allowAssetBinding,
+  (enabled) => {
+    if (restoringPreference) return;
+    localStorage.setItem(preferenceKey(), String(enabled));
+    if (props.modelValue) void mint(enabled);
+  },
+  { flush: 'sync' },
+);
+
+async function mint(canBindAssets) {
+  const generation = ++mintGeneration;
   loading.value = true;
   error.value = '';
   qrDataUrl.value = '';
@@ -111,16 +149,22 @@ async function mint() {
     // The link carries the creator's current UI locale, so a crew member opens it in that
     // language regardless of their own device/browser default (see the share token + mobile-view).
     const { data } = await api.post(`/jobs/${props.jobId}/share`, null, {
-      params: { locale: i18n.global.locale.value },
+      params: {
+        locale: i18n.global.locale.value,
+        allow_asset_binding: canBindAssets,
+      },
     });
+    if (generation !== mintGeneration) return;
     // The app uses history-mode routing, so the share link is a normal path (not a hash).
     const url = `${window.location.origin}/jobs/${props.jobId}/view?token=${encodeURIComponent(data.token)}`;
+    const qr = await QRCode.toDataURL(url, { width: 240, margin: 1 });
+    if (generation !== mintGeneration) return;
     link.value = url;
-    qrDataUrl.value = await QRCode.toDataURL(url, { width: 240, margin: 1 });
+    qrDataUrl.value = qr;
   } catch {
-    error.value = t('workspace.share.invalidOrExpired');
+    if (generation === mintGeneration) error.value = t('workspace.share.invalidOrExpired');
   } finally {
-    loading.value = false;
+    if (generation === mintGeneration) loading.value = false;
   }
 }
 

@@ -60,12 +60,14 @@ async def test_lists_channels_and_points_are_nodes_and_their_edges_follow_the_po
             f"channels/{ch['id']}/patch-points", {"device_id": desk["id"], "position": 1}
         )
         edges = [e for e in (await _graph(client, h, api))["edges"] if e["signal"] == "audio"]
-        assert [
-            e["attributes"]["point_id"]
-            for e in sorted(edges, key=lambda e: e["attributes"]["position"])
-        ] == [
+        ordered = sorted(edges, key=lambda e: e["attributes"]["position"])
+        assert [e["attributes"]["point_id"] for e in ordered] == [
             first["id"],
             second["id"],
+        ]
+        assert [(e["src_device_id"], e["dst_device_id"]) for e in ordered] == [
+            (box["id"], desk["id"]),
+            (desk["id"], ch["id"]),
         ]
         # a point edit is the point's own revision; a stale one is a conflict
         res = await client.patch(
@@ -97,6 +99,76 @@ async def test_lists_channels_and_points_are_nodes_and_their_edges_follow_the_po
         )
         assert res.status_code == 204
         assert (await client.delete(f"{api}/devices/{box['id']}", headers=h)).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_channel_source_and_patch_points_form_one_upstream_path(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        mic = (
+            await client.post(
+                f"{api}/graph/devices",
+                json={
+                    "domain": "audio",
+                    "kind": "mic",
+                    "name": "Mic",
+                    "ports": [
+                        {
+                            "id": "out-xlr3",
+                            "direction": "out",
+                            "signal": "audio",
+                            "connector": "xlr3",
+                        }
+                    ],
+                },
+                headers=h,
+            )
+        ).json()
+        old_edge = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": mic["id"],
+                "src_port": "out-xlr3",
+                "dst_device_id": ch["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert old_edge.status_code == 201, old_edge.text
+        channel_node = next(
+            node for node in (await _graph(client, h, api))["devices"] if node["id"] == ch["id"]
+        )
+        updated = await client.patch(
+            f"{api}/graph/devices/{ch['id']}",
+            json={
+                "attributes": {"source_device_id": mic["id"]},
+                "expected_revision": channel_node["revision"],
+            },
+            headers=h,
+        )
+        assert updated.status_code == 200, updated.text
+        await post(
+            f"channels/{ch['id']}/patch-points", {"device_id": box["id"], "connector": "XLR"}
+        )
+        await post(f"channels/{ch['id']}/patch-points", {"device_id": desk["id"], "position": 1})
+
+        edges = (await _graph(client, h, api))["edges"]
+        source = next(e for e in edges if e["attributes"].get("channel_source"))
+        assert (source["src_device_id"], source["dst_device_id"]) == (mic["id"], box["id"])
+        assert not any(
+            e["src_device_id"] == mic["id"] and e["dst_device_id"] == ch["id"] for e in edges
+        )
+        ordered = sorted(
+            (e for e in edges if e["attributes"].get("chain") == ch["id"]),
+            key=lambda e: e["attributes"]["position"],
+        )
+        assert [(e["src_device_id"], e["dst_device_id"]) for e in ordered] == [
+            (box["id"], desk["id"]),
+            (desk["id"], ch["id"]),
+        ]
 
 
 @pytest.mark.asyncio

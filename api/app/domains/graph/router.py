@@ -43,6 +43,18 @@ router = APIRouter(
 )
 
 MAX_BATCH = 200
+STOCKWIRE_ASSET_ATTRIBUTES = frozenset(
+    {
+        "stockwire_asset_id",
+        "stockwire_asset_code",
+        "stockwire_asset_tag",
+        "stockwire_asset_serial",
+        "stockwire_asset_barcode",
+        "stockwire_asset_qr_code",
+        "stockwire_asset_rfid",
+        "stockwire_asset_description",
+    }
+)
 
 
 async def get_stockwire_client(db: AsyncSession = Depends(get_db)) -> StockwireClient:
@@ -70,6 +82,14 @@ async def _device(db: AsyncSession, job_id: UUID, device_id: UUID) -> GraphDevic
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
     return device
+
+
+def _require_physical_asset_target(device: GraphDevice) -> None:
+    if not devices_native.is_physical_gear(device):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Stockwire assets can only be linked to physical gear",
+        )
 
 
 async def _edge(db: AsyncSession, job_id: UUID, edge_id: UUID) -> ConnectionEdge:
@@ -182,6 +202,10 @@ async def update_device(
             device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
         ),
     )
+    if "stockwire_device_id" in data or STOCKWIRE_ASSET_ATTRIBUTES.intersection(
+        (data.get("attributes") or {}).keys()
+    ):
+        _require_physical_asset_target(device)
 
     async def apply() -> GraphDevice:
         for key, value in mirror.merged_attributes(device, data).items():
@@ -221,50 +245,120 @@ async def bind_stockwire_asset(
     device_id: UUID,
     payload: schemas.AssetBind,
     db: AsyncSession = Depends(get_db),
-) -> GraphDevice:
-    """Bind a physical Stockwire inventory asset to this Stagewire device/patch node.
+) -> dict:
+    return await bind_asset_for_job(db, job_id, device_id, payload, payload.expected_revision)
 
-    The scanned or typed code is always recorded locally as ``stockwire_asset_id``. When the
-    Stockwire integration is enabled, the code is first resolved against the inventory so the
-    asset's tag/serial/description are captured too; resolution failures never block the bind.
-    The updated device is pushed to every connected client in real time.
-    """
+
+@router.delete("/devices/{device_id}/asset-binding", response_model=schemas.GraphDeviceRead)
+async def unbind_stockwire_asset(
+    job_id: UUID,
+    device_id: UUID,
+    expected_revision: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await unbind_asset_for_job(db, job_id, device_id, expected_revision)
+
+
+async def bind_asset_for_job(
+    db: AsyncSession,
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AssetBind,
+    expected_revision: int,
+) -> dict:
+    """Bind a physical Stockwire asset and publish the updated device to job subscribers."""
     device = await _device(db, job_id, device_id)
+    _require_physical_asset_target(device)
     resolved = None
     cfg = await load_integration_config(db)
     if cfg.get("enabled"):
         client = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
-        resolved = await client.resolve_asset(payload.code)
+        resolved = await client.resolve_asset(payload.asset_id or payload.code)
+    if (
+        payload.asset_id
+        and device.stockwire_product_id
+        and resolved
+        and resolved.get("product_id") is not None
+        and str(resolved["product_id"]) != str(device.stockwire_product_id)
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Selected Stockwire asset does not belong to the linked product",
+        )
 
     attrs = dict(device.attributes or {})
-    # The canonical Stockwire asset id (when resolution succeeds) is kept on stockwire_asset_id,
-    # but the raw scanned/typed code is always recorded on stockwire_asset_code. The crew view
-    # looks devices up by the code the user actually scans, so both must be present for the
-    # scan-to-locate feature to work whether or not the integration is enabled.
-    attrs["stockwire_asset_id"] = (
-        resolved.get("asset_id") if resolved and resolved.get("asset_id") else payload.code
-    )
+    # Older bindings stored the canonical ID (or an unresolved scan code) in attributes.
+    # Remove that duplicate when rewriting so the top-level field is the only current ID.
+    attrs.pop("stockwire_asset_id", None)
     attrs["stockwire_asset_code"] = payload.code
-    if resolved:
-        if resolved.get("asset_tag"):
-            attrs["stockwire_asset_tag"] = resolved["asset_tag"]
-        if resolved.get("serial_number"):
-            attrs["stockwire_asset_serial"] = resolved["serial_number"]
-        if resolved.get("description"):
-            attrs["stockwire_asset_description"] = resolved["description"]
-    else:
-        if payload.tag:
-            attrs["stockwire_asset_tag"] = payload.tag
-        if payload.serial:
-            attrs["stockwire_asset_serial"] = payload.serial
-        if payload.description:
-            attrs["stockwire_asset_description"] = payload.description
+    attrs["stockwire_asset_tag"] = (resolved or {}).get("asset_tag") or payload.tag
+    attrs["stockwire_asset_serial"] = (resolved or {}).get("serial_number") or payload.serial
+    attrs["stockwire_asset_barcode"] = (resolved or {}).get("barcode") or payload.barcode
+    attrs["stockwire_asset_qr_code"] = (resolved or {}).get("qr_code") or payload.qr_code
+    attrs["stockwire_asset_rfid"] = (resolved or {}).get("rfid") or payload.rfid
+    attrs["stockwire_asset_description"] = (resolved or {}).get(
+        "description"
+    ) or payload.description
 
-    device.attributes = attrs
-    await db.commit()
-    await db.refresh(device)
+    async def apply() -> GraphDevice:
+        device.attributes = attrs
+        # This is the single canonical inventory ID used by catalog/case integrations. Keep raw
+        # scans in stockwire_asset_code instead of putting an unverified code in this field.
+        device.stockwire_device_id = (
+            str(resolved["asset_id"]) if resolved and resolved.get("asset_id") else payload.asset_id
+        )
+        await db.commit()
+        await db.refresh(device)
+        return device
+
+    device = await run_versioned_write(
+        db,
+        device,
+        expected_revision,
+        schemas.GraphDeviceRead,
+        apply,
+        lambda: db.get(GraphDevice, device_id),
+    )
     await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
-    return device
+    return _device_payload(device)
+
+
+async def unbind_asset_for_job(
+    db: AsyncSession, job_id: UUID, device_id: UUID, expected_revision: int
+) -> dict:
+    """Clear a device's local Stockwire asset link and publish the updated device."""
+    device = await _device(db, job_id, device_id)
+    _require_physical_asset_target(device)
+    attrs = dict(device.attributes or {})
+    for key in (
+        "stockwire_asset_id",
+        "stockwire_asset_code",
+        "stockwire_asset_tag",
+        "stockwire_asset_serial",
+        "stockwire_asset_barcode",
+        "stockwire_asset_qr_code",
+        "stockwire_asset_rfid",
+        "stockwire_asset_description",
+    ):
+        attrs[key] = None
+
+    async def apply() -> GraphDevice:
+        device.attributes = attrs
+        device.stockwire_device_id = None
+        await db.commit()
+        await db.refresh(device)
+        return device
+
+    device = await run_versioned_write(
+        db,
+        device,
+        expected_revision,
+        schemas.GraphDeviceRead,
+        apply,
+        lambda: db.get(GraphDevice, device_id),
+    )
+    await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
+    return _device_payload(device)
 
 
 @router.delete("/devices/{device_id}", status_code=204)

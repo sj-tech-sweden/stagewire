@@ -204,6 +204,14 @@ export const useGraphStore = defineStore('graph', {
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
+    async unbindStockwireAsset(jobId, id) {
+      const device = this.devices.find((item) => item.id === id);
+      const { data } = await api.delete(`${baseFor(this, jobId)}/devices/${id}/asset-binding`, {
+        params: { expected_revision: device?.revision },
+      });
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
     async trace(jobId, id, direction, signal) {
       const { data } = await api.get(`${baseFor(this, jobId)}/devices/${id}/trace`, {
         params: { direction, signal },

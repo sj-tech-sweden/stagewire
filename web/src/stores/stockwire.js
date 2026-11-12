@@ -61,6 +61,10 @@ export const useStockwireStore = defineStore('stockwire', {
       const { data } = await api.get(`/stockwire/products/${productId}`);
       return data;
     },
+    async getProductDevices(productId) {
+      const { data } = await api.get(`/stockwire/products/${productId}/devices`);
+      return data.items || [];
+    },
     // Minimum Stockwire stock per product across the job's date range vs what the job needs.
     async getJobAvailability(jobId) {
       const { data } = await api.get(`/stockwire/jobs/${jobId}/availability`);

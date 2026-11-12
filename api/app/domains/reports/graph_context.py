@@ -100,6 +100,8 @@ def _chain_points(node: Any, edges: list[Any]) -> list[dict]:
             continue
         if "first_point" in attrs:
             points.append({**attrs["first_point"], "device_id": str(edge.src_device_id)})
+        elif node.kind == "channel" and edge.src_device_id != node.id:
+            points.append({**attrs, "device_id": str(edge.src_device_id)})
         elif edge.dst_device_id != node.id:
             points.append({**attrs, "device_id": str(edge.dst_device_id)})
     return sorted(points, key=lambda p: p.get("position") or 0)

@@ -59,13 +59,17 @@ def decode_token(token: str) -> dict:
 
 
 def create_share_token(
-    job_id: str | int, *, ttl_minutes: int | None = None, locale: str | None = None
+    job_id: str | int,
+    *,
+    ttl_minutes: int | None = None,
+    locale: str | None = None,
+    can_bind_assets: bool = False,
 ) -> str:
-    """Mint a read-only, login-free share token for the day-of-show crew view.
+    """Mint a job-scoped, login-free share token for the day-of-show crew view.
 
-    The token carries only the job id and a ``view`` scope, so it can neither write
-    nor read anything outside that job. A logged-in user mints it; a crew member
-    then opens the mobile view with it and no session.
+    The token carries the job id and a ``view`` scope. Asset assignment is an explicit,
+    optional capability; when present it still permits writes only to that job's asset links.
+    A logged-in user mints it; a crew member then opens the mobile view with it and no session.
 
     ``locale`` (e.g. ``"en"`` / ``"sv"``) is embedded so the crew link itself carries
     the language the creator was using — a crew member opening the link sees the UI in
@@ -79,6 +83,8 @@ def create_share_token(
         "scope": "view",
         "iat": datetime.now(UTC),
     }
+    if can_bind_assets:
+        payload["can_bind_assets"] = True
     normalized_locale = _normalize_share_locale(locale)
     if normalized_locale:
         payload["locale"] = normalized_locale

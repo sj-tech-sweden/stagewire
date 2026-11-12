@@ -65,12 +65,11 @@ class StockwireClient:
             return response.json()
 
     async def resolve_asset(self, code: str) -> dict | None:
-        """Best-effort lookup of a physical inventory asset by its tag, serial, or id.
+        """Best-effort lookup of a physical inventory asset by any supported scan identifier.
 
-        Returns a normalized dict (asset_id, asset_tag, serial_number, description) or None.
-        The rental inventory list endpoint filters only by skip/limit (not by asset tag), so we
-        walk the pages until we find a match; a hard cap bounds the work. Any network/integration
-        failure is swallowed so that local binding still works offline.
+        The inventory list may filter by asset tag, which would hide barcode/QR/RFID matches, so
+        walk the unfiltered pages and compare all known identifiers locally. A hard cap bounds the
+        work; any network/integration failure leaves local binding available offline.
         """
         code = (code or "").strip()
         if not code:
@@ -78,27 +77,33 @@ class StockwireClient:
         cap = 2000  # don't scan an unbounded inventory inside a bind request
         skip = 0
         limit = 100
+        target = code.casefold()
+        identity_fields = ("asset_tag", "serial_number", "barcode", "qr_code", "rfid", "id")
         try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url, headers=self._headers(), timeout=10.0
-            ) as client:
+            async with self._client(timeout=10.0) as client:
                 while skip < cap:
                     resp = await client.get(
                         "/api/v1/inventory/devices",
-                        params={"asset_tag": code, "skip": skip, "limit": limit},
+                        params={"skip": skip, "limit": limit},
                     )
                     resp.raise_for_status()
                     data = resp.json()
                     items = data.get("items") or data.get("devices") or []
                     for item in items:
-                        tag = str(item.get("asset_tag") or "")
-                        serial = str(item.get("serial_number") or "")
-                        aid = str(item.get("id") or "")
-                        if code in (tag, serial, aid):
+                        identities = {
+                            str(item.get(field)).strip().casefold()
+                            for field in identity_fields
+                            if item.get(field) is not None
+                        }
+                        if target in identities:
                             return {
                                 "asset_id": item.get("id"),
+                                "product_id": item.get("product_id"),
                                 "asset_tag": item.get("asset_tag"),
                                 "serial_number": item.get("serial_number"),
+                                "barcode": item.get("barcode"),
+                                "qr_code": item.get("qr_code"),
+                                "rfid": item.get("rfid"),
                                 "description": item.get("description")
                                 or item.get("name")
                                 or item.get("product_name"),
@@ -172,11 +177,11 @@ class StockwireClient:
             response.raise_for_status()
             return response.json()
 
-    def _client(self) -> httpx.AsyncClient:
+    def _client(self, timeout: float = 15.0) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=self.base_url,
             headers=self._headers(),
-            timeout=15.0,
+            timeout=timeout,
             transport=self._transport,
         )
 
@@ -419,6 +424,11 @@ class StockwireClient:
             }
             for child in children
         ]
+
+    async def list_product_devices(self, product_id: int | str) -> list[dict]:
+        """Return physical inventory devices that belong to one Stockwire product."""
+        rows = await self._all_pages("/api/v1/inventory/devices", {})
+        return [row for row in rows if str(row.get("product_id")) == str(product_id)]
 
     async def get_product(self, product_id: int | str) -> dict:
         async with httpx.AsyncClient(

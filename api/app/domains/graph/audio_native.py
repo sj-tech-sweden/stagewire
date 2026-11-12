@@ -17,9 +17,10 @@ A patch point is a dict in the node's ``points``: ``point_id`` (legacy id or a n
 *node id* of the device), ``revision`` (the point's own, for the legacy API's optimistic writes)
 and, for an output, ``parent_id`` (a point id), ``parallel`` and ``bus_connector``.
 
-The edges the web app draws (channel -> devices, console -> bus -> devices) are derived from the
+The edges the web app draws (devices -> channel, console -> bus -> devices) are derived from the
 points by ``sync_edges``, run by every sync through the sync's ``edge()`` so they keep their ids and
-are pruned like every mirrored edge; the legacy ids in the edge refs are the point ids.
+are pruned like every mirrored edge; the legacy ids in the edge refs are the point ids. A channel's
+selected source is also a derived edge, so source and patch-chain edits share one graph path.
 
 The ``*_row`` functions return objects shaped like the old ORM rows (with ``patch_points`` /
 ``points`` / ``channels`` / ``outputs`` nested), so the audio service, router, exports and reports
@@ -900,33 +901,94 @@ async def edge_delete(db: AsyncSession, edge: ConnectionEdge) -> GraphDevice | N
 
 
 async def sync_edges(builder) -> None:
-    """Draw the patch edges from the points of the native channel and output nodes.
+    """Draw channel input paths and output chains from their native nodes.
 
     ``builder`` is the running ``Backfill``: the edges go through its ``edge()`` (refs = the point
     ids, as the old rows' ids were), so they are diffed, keep their ids and are pruned when their
-    point is gone. A point whose device has no node is skipped (as a missing device always was).
+    point is gone. Channel patch points run toward the channel endpoint; output chains retain their
+    console-outward direction. A point whose device has no node is skipped (as a missing device
+    always was).
     """
     nodes = await job_nodes(builder.db, builder.job_id)
     by_id = {n.id: n for n in (*nodes, *builder.devices.values())}
     for node in _of_kind(nodes, CHANNEL):
-        prev, prev_port = node, "out"
         number = (node.attributes or {}).get("channel_number")
+        points = []
         for point in _sorted(node):
             target = by_id.get(_uuid(point.get("device_id")))
             if target is None or target.legacy_ref is None:
                 builder.result.notes.append(f"patch point {point['point_id']}: device missing")
                 continue
+            points.append((point, target))
+
+        # Older workspaces stored this as an unreferenced mic->channel edge. Replace that edge
+        # with the derived relation below when the linked source is still selected.
+        source_id = _uuid((node.attributes or {}).get("source_device_id"))
+        source = by_id.get(source_id)
+        if source is not None and source.id != node.id:
+            old_edges = (
+                await builder.db.scalars(
+                    select(ConnectionEdge).where(
+                        ConnectionEdge.job_id == builder.job_id,
+                        ConnectionEdge.signal == "audio",
+                        ConnectionEdge.src_device_id == source.id,
+                        ConnectionEdge.dst_device_id == node.id,
+                    )
+                )
+            ).all()
+            for edge in old_edges:
+                if not (edge.attributes or {}).get("legacy_ref"):
+                    await builder.db.delete(edge)
+                    builder.result.removed_edges.append(edge.id)
+                    builder.result.removed += 1
+
+            out_port = next(
+                (
+                    port
+                    for port in (source.ports or [])
+                    if port.get("direction") == "out"
+                    and "xlr" in (port.get("connector") or "").lower()
+                    and port.get("signal") in (None, "audio")
+                ),
+                None,
+            )
+            if out_port is not None:
+                first = points[0] if points else None
+                first_connector = first[0].get("connector") if first else ""
+                destination = first[1] if first else node
+                builder.edge(
+                    f"channel_sources:{node.id}",
+                    "audio",
+                    source,
+                    out_port["id"],
+                    destination,
+                    builder.port(destination, "in", "audio", first_connector or ""),
+                    attributes={"channel_id": str(node.id), "channel_source": True},
+                )
+
+        for index, (point, source_step) in enumerate(points):
+            destination = points[index + 1][1] if index + 1 < len(points) else node
+            destination_connector = (
+                points[index + 1][0].get("connector")
+                if index + 1 < len(points)
+                else (node.attributes or {}).get("input_type")
+            )
             row = _ns(point)
             builder.edge(
                 f"channel_patch_points:{point['point_id']}",
                 "audio",
-                prev,
-                prev_port,
-                target,
-                builder.port(target, "in", "audio", row.connector),
-                attributes={"channel_number": number, **_point_attrs(row, node)},
+                source_step,
+                builder.port(source_step, "out", "audio", destination_connector or ""),
+                destination,
+                builder.port(destination, "in", "audio", destination_connector or ""),
+                attributes={
+                    "channel_number": number,
+                    "cable_point_id": (
+                        str(points[index + 1][0]["point_id"]) if index + 1 < len(points) else None
+                    ),
+                    **_point_attrs(row, node),
+                },
             )
-            prev, prev_port = target, builder.port(target, "out", "audio", row.connector)
     for bus in _of_kind(nodes, OUTPUT):
         chain = [_ns(p) for p in _sorted(bus) if by_id.get(_uuid(p.get("device_id"))) is not None]
         by_point = {p.id: p for p in chain}

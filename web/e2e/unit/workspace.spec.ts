@@ -30,6 +30,7 @@ import {
   videoChainForm,
   videoChainNames,
   videoRowsOf,
+  stockwireAssetOf,
   addConnector,
   outputPointOptions,
   cableFor,
@@ -42,6 +43,8 @@ import {
   powerTreeRows,
   outputsLabel,
   loadStatusColor,
+  channelFlowsForDevice,
+  channelFlowTree,
   longFeeds,
   cordFor,
   POWER_INLETS,
@@ -89,10 +92,26 @@ test('a catalog product becomes a device bound to its Stockwire product', () => 
 
 test('edge rows resolve device names and survive a missing device', () => {
   const rows = edgeRows(
-    [{ id: 'e', signal: 'audio', src_device_id: 'a', src_port: 'out', dst_device_id: 'x', dst_port: 'in', channels: 1, revision: 2 }],
+    [{
+      id: 'e',
+      signal: 'audio',
+      src_device_id: 'a',
+      src_port: 'out',
+      dst_device_id: 'x',
+      dst_port: 'in',
+      channels: 1,
+      revision: 2,
+      attributes: { patch_label: 'Stage left', connector: 'XLR3' },
+    }],
     [{ id: 'a', name: 'Mic' }],
   );
-  expect(rows[0]).toMatchObject({ from: 'Mic', to: '?', revision: 2 });
+  expect(rows[0]).toMatchObject({
+    from: 'Mic',
+    to: '?',
+    revision: 2,
+    patchLabel: 'Stage left',
+    connector: 'XLR3',
+  });
 });
 
 test('layer toggles hide a domain but never hide uncategorised devices', () => {
@@ -197,16 +216,76 @@ const names = [
 ];
 
 test('a channel chain reads in order and rebuilds into the dialog form', () => {
+  const channel = { id: 'ch', name: 'Vox', kind: 'channel' };
   const edges = [
-    { src_device_id: 'ch', dst_device_id: 'desk', attributes: { chain: 'ch', position: 1, connector: 'Dante' } },
-    { src_device_id: 'ch', dst_device_id: 'box', attributes: { chain: 'ch', position: 0, connector: 'XLR', patch_label: 'In 3' } },
+    { src_device_id: 'box', dst_device_id: 'desk', signal: 'audio', attributes: { chain: 'ch', position: 0, connector: 'XLR', patch_label: 'In 3' } },
+    { src_device_id: 'desk', dst_device_id: 'ch', signal: 'audio', attributes: { chain: 'ch', position: 1, connector: 'Dante' } },
     { src_device_id: 'x', dst_device_id: 'amp', attributes: { chain: 'other', position: 0 } },
   ];
-  expect(chainSteps({ id: 'ch' }, edges, names)).toEqual(['Stagebox', 'Desk']);
-  expect(chainForm({ id: 'ch' }, edges, names)).toEqual([
+  expect(chainSteps(channel, edges, names)).toEqual(['Stagebox', 'Desk']);
+  const form = chainForm(channel, edges, names);
+  expect(form).toEqual([
     { device_id: 'box', connector: 'XLR', patch_label: 'In 3', in_port: '', out_port: '', notes: '', parent_index: null },
     { device_id: 'desk', connector: 'Dante', patch_label: '', in_port: '', out_port: '', notes: '', parent_index: null },
   ]);
+  const mic = { id: 'mic', name: 'Mic' };
+  const flow = channelFlowTree(
+    channel,
+    [{ src_device_id: 'mic', dst_device_id: 'box', signal: 'audio' }, ...edges],
+    [...names, channel, mic],
+    'Vox',
+    form,
+  )[0];
+  expect([
+    flow.label,
+    flow.children[0].label,
+    flow.children[0].children[0].label,
+    flow.children[0].children[0].children[0].label,
+  ])
+    .toEqual(['Mic', 'Stagebox', 'Desk', 'Vox']);
+  expect(flow.children[0].children[0].children[0].kind).toBe('channel');
+
+  const legacyFlow = channelFlowTree(
+    channel,
+    [
+      { src_device_id: 'ch', dst_device_id: 'desk', attributes: { chain: 'ch', position: 1 } },
+      { src_device_id: 'ch', dst_device_id: 'box', attributes: { chain: 'ch', position: 0 } },
+    ],
+    [...names, channel],
+    'Vox',
+    form,
+  )[0];
+  expect([legacyFlow.label, legacyFlow.children[0].label, legacyFlow.children[0].children[0].label])
+    .toEqual(['Stagebox', 'Desk', 'Vox']);
+});
+
+test('a Stockwire asset summary keeps the scanned code separate from its canonical id', () => {
+  expect(
+    stockwireAssetOf({
+      stockwire_device_id: '42',
+      attributes: {
+        stockwire_asset_code: 'TAG-42',
+        stockwire_asset_tag: 'TAG-42',
+        stockwire_asset_serial: 'SN-42',
+        stockwire_asset_barcode: 'BAR-42',
+        stockwire_asset_qr_code: 'QR-42',
+        stockwire_asset_rfid: 'RFID-42',
+      },
+    }),
+  ).toEqual({
+    isBound: true,
+    canonicalId: '42',
+    code: 'TAG-42',
+    tag: 'TAG-42',
+    serial: 'SN-42',
+    barcode: 'BAR-42',
+    qrCode: 'QR-42',
+    rfid: 'RFID-42',
+    description: null,
+  });
+  expect(stockwireAssetOf({ stockwire_device_id: 'legacy-asset-id' }).code).toBe(
+    'legacy-asset-id',
+  );
 });
 
 test('an output chain starts at the console and keeps its branches', () => {
@@ -339,6 +418,17 @@ test('library modes are found by type name and bring their footprint', () => {
   expect(modesForType(types, 'Unknown')).toEqual([]);
   expect(modesForType(types, null)).toEqual([]);
   expect(modeAttributes(types[0].modes[0])).toEqual({ channel_mode: '16ch', footprint: 16 });
+});
+
+test('a legacy Stockwire asset ID attribute remains readable', () => {
+  expect(
+    stockwireAssetOf({
+      attributes: {
+        stockwire_asset_id: 'LEGACY-42',
+        stockwire_asset_code: 'OLD-TAG',
+      },
+    }),
+  ).toMatchObject({ isBound: true, canonicalId: null, code: 'OLD-TAG' });
 });
 
 test('only a universe skips the edge that feeds it: other chains keep every step', () => {
@@ -499,6 +589,61 @@ test('a chain becomes a flow tree: a line of devices, with branches and separate
   const roots = flowTree('Out', [{ device_id: 'a' }, { device_id: 'b' }], devices, { separateRoots: true });
   expect(roots[0].children.map((n) => n.label)).toEqual(['Stagebox', 'Console']);
   expect(flowTree('', [{ device_id: 'a' }], devices)[0].label).toBe('Stagebox');
+});
+
+test('a device signal flow includes each matching channel route without unrelated graph edges', () => {
+  const devices = [
+    { id: 'mic-1', name: 'Mic 1', kind: 'mic' },
+    { id: 'mic-2', name: 'Mic 2', kind: 'mic' },
+    { id: 'stagebox', name: 'Stagebox', kind: 'stagebox' },
+    { id: 'channel-1', name: 'Ch 1', kind: 'channel', attributes: { source_device_id: 'mic-1' } },
+    { id: 'channel-2', name: 'Ch 2', kind: 'channel', attributes: { source_device_id: 'mic-2' } },
+    { id: 'wedge', name: 'Wedge', kind: 'speaker' },
+  ];
+  const edges = [
+    {
+      src_device_id: 'mic-1',
+      src_port: 'out',
+      dst_device_id: 'stagebox',
+      dst_port: 'in',
+      signal: 'audio',
+    },
+    {
+      src_device_id: 'stagebox',
+      dst_device_id: 'channel-1',
+      attributes: { chain: 'channel-1', position: 0, patch_label: 'Vocal 1', connector: 'XLR3' },
+    },
+    {
+      src_device_id: 'mic-2',
+      dst_device_id: 'stagebox',
+      signal: 'audio',
+    },
+    {
+      src_device_id: 'stagebox',
+      dst_device_id: 'channel-2',
+      attributes: { chain: 'channel-2', position: 0, patch_label: 'Vocal 2' },
+    },
+    {
+      src_device_id: 'stagebox',
+      src_port: 'out',
+      dst_device_id: 'wedge',
+      attributes: { patch_label: 'Unrelated cable' },
+    },
+  ];
+
+  const flows = channelFlowsForDevice('stagebox', devices, edges);
+  const labels = (nodes) => nodes.flatMap((node) => [node.label, ...labels(node.children || [])]);
+  expect(flows.map(({ channel }) => channel.id)).toEqual(['channel-1', 'channel-2']);
+  expect(labels(flows.flatMap(({ routes }) => routes))).toEqual([
+    'Mic 1',
+    'Stagebox',
+    'Ch 1',
+    'Mic 2',
+    'Stagebox',
+    'Ch 2',
+  ]);
+  expect(labels(flows.flatMap(({ routes }) => routes))).not.toContain('Wedge');
+  expect(flows[0].routes[0].children[0].patch_label).toBe('Vocal 1');
 });
 
 test('the lead a device needs follows its power inlet and the outlet it is plugged into', () => {

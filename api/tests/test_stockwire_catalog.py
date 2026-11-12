@@ -27,7 +27,16 @@ PRODUCTS = [
     },
 ]
 DEVICES = [
-    {"id": 10, "product_id": 1, "case_device_id": None},
+    {
+        "id": 10,
+        "product_id": 1,
+        "case_device_id": None,
+        "asset_tag": "196-001",
+        "serial_number": "SN-10",
+        "barcode": "1100521",
+        "qr_code": "196-001",
+        "rfid": "RFID-10",
+    },
     {"id": 11, "product_id": 2, "case_device_id": 99},
     {"id": 12, "product_id": 3, "case_device_id": 99},
     {"id": 13, "product_id": 1, "case_device_id": 5},
@@ -236,6 +245,25 @@ async def test_case_children_are_selected_client_side_with_product_summary():
     assert [c["id"] for c in children] == [11, 12]
     assert children[0]["product"]["name"] == "e935"
     assert await client().list_child_devices(12345) == []
+
+
+@pytest.mark.asyncio
+async def test_product_devices_are_selected_separately_from_case_children():
+    devices = await client().list_product_devices(1)
+    assert [device["id"] for device in devices] == [10, 13, 5]
+    assert all(str(device["product_id"]) == "1" for device in devices)
+
+
+@pytest.mark.asyncio
+async def test_resolve_asset_matches_barcode_qr_code_tag_and_id():
+    sw = client()
+    for code in ("1100521", "196-001", "SN-10", "RFID-10", "10"):
+        asset = await sw.resolve_asset(code)
+        assert asset is not None
+        assert asset["asset_id"] == 10
+        assert asset["barcode"] == "1100521"
+        assert asset["qr_code"] == "196-001"
+        assert asset["rfid"] == "RFID-10"
 
 
 @pytest.mark.asyncio

@@ -1394,71 +1394,25 @@ async function setSource(node, pick) {
     if (!isRevisionConflict(err)) failed(err);
     return;
   }
-  await removeOrphanedSource(node, previous, nextId);
-  // A mic (passive source with a default XLR-out) wired as a channel's source is auto-patched to that
-  // channel: its XLR output feeds the channel's input. The destination connector is the channel's real
-  // input type — XLR on an analogue desk, or Dante/AES50/MADI/Slink when the signal reaches the mixer
-  // digitally. We drop any edge the previous source had into this channel so a re-patch never leaves a
-  // stale cable; the new edge is graph-only (no legacy_ref), so the audio sync never prunes it.
-  if (nextId) {
-    const device = graph.devices.find((d) => d.id === nextId);
-    await autoConnectSourceToChannel(node, device, previous);
-  } else if (previous) {
+  if (previous && previous.id !== nextId) {
     await clearSourceEdge(node, previous);
   }
+  await removeOrphanedSource(node, previous, nextId);
 }
 
-// Remove the audio edge a source device had into a given channel (used when the source is cleared or
-// re-pointed), so the patch table never shows a cable from a mic that no longer feeds this channel.
+// Remove only a legacy frontend-owned source edge; current source edges are mirrored from the
+// channel's source attribute and are reconciled by backend graph sync.
 async function clearSourceEdge(channel, previous) {
   const stale = graph.edges.find(
     (e) =>
       e.signal === 'audio' &&
       e.src_device_id === previous.id &&
-      e.dst_device_id === channel.id,
+      e.dst_device_id === channel.id &&
+      !(e.attributes || {}).legacy_ref,
   );
   if (!stale) return;
   try {
     await graph.deleteEdge(contextId.value, stale.id);
-  } catch (err) {
-    if (!isRevisionConflict(err)) failed(err);
-  }
-}
-
-// Auto-patch a mic (passive source carrying a default XLR output) to the channel it is sourced from.
-// The source port is the mic's XLR out; the destination port is the channel's actual input connector.
-async function autoConnectSourceToChannel(channel, source, previous) {
-  if (!source) return;
-  const outPort = (source.ports || []).find(
-    (p) => p.direction === 'out' && /xlr/i.test(p.connector || ''),
-  );
-  if (!outPort) return;
-  if (previous) await clearSourceEdge(channel, previous);
-  if (
-    graph.edges.some(
-      (e) =>
-        e.signal === 'audio' &&
-        e.src_device_id === source.id &&
-        e.dst_device_id === channel.id,
-    )
-  )
-    return;
-  try {
-    await graph.createEdge(
-      contextId.value,
-      {
-        signal: 'audio',
-        src_device_id: source.id,
-        src_port: outPort.id || 'xlr3',
-        // The channel is the true end of the chain: terminate on its `in` port (added so a
-        // normal, non-forced edge can land on a channel). `force` still bypasses any residual
-        // connector/cycle checks for odd digital hybrids.
-        dst_device_id: channel.id,
-        dst_port: 'in',
-        channels: 1,
-      },
-      { force: true },
-    );
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -1536,7 +1490,7 @@ function openFlow(node, kind) {
   // inspector, so the diagram matches the connections; outputs keep the patch chain only.
   flowSteps.value =
     kind === "channel"
-      ? channelFlowTree(node, steps, graph.edges, graph.devices, node.name)
+      ? channelFlowTree(node, graph.edges, graph.devices, node.name, steps)
       : flowTree(node.name, steps, graph.devices);
   flowOpen.value = true;
 }

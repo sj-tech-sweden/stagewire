@@ -60,16 +60,21 @@ class GraphDeviceUpdate(BaseModel):
 
 
 class AssetBind(BaseModel):
-    """Bind a scanned/typed Stockwire inventory code to a Stagewire device.
+    """Bind a scanned/typed code or a selected Stockwire inventory asset.
 
-    Resolution against the Stockwire API is best-effort (see the binding endpoint); the raw
-    ``code`` is always stored locally as ``stockwire_asset_id`` so the link survives offline.
+    Resolution against Stockwire is best-effort; the raw ``code`` is always kept separately for
+    crew scan lookup. ``asset_id`` identifies a picker selection when present.
     """
 
     code: str = Field(min_length=1, max_length=255)
+    asset_id: str | None = Field(default=None, max_length=255)
     tag: str | None = None
     serial: str | None = None
+    barcode: str | None = None
+    qr_code: str | None = None
+    rfid: str | None = None
     description: str | None = None
+    expected_revision: int = Field(ge=1)
 
 
 class GraphDeviceRead(GraphDeviceBase):

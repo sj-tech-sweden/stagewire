@@ -110,13 +110,72 @@ test('the channel flow shows the upstream feed and the inspector cable it was co
     edge('feed2', 'sw', 'p2', 'ch2', 'in', 'data'),
     edge('direct', 'ch2', 'out', 'box', 'in-xlr3', 'audio'),
   ];
-  const tree = channelFlowTree(devices[3], [], edges, devices, 'Ch 2');
-  expect(tree).toHaveLength(1);
+  const tree = channelFlowTree(devices[3], edges, devices, 'Ch 2');
+  expect(tree).toHaveLength(2);
   const labels = (nodes) => nodes.flatMap((n) => [n.label, ...labels(n.children || [])]);
   const all = labels(tree);
   expect(all).toContain('Stagebox');
   expect(all).toContain('Switch');
   expect(all).toContain('Ch 2');
+});
+
+test('a channel patch summary reads upstream devices through the channel endpoint', () => {
+  const channelNode = channel('ch2', 2);
+  const edges = [
+    edge('source', 'box', 'out-dante', 'sw', 'p1', 'audio', {
+      attributes: { chain: 'ch2', position: 0 },
+    }),
+    edge('endpoint', 'sw', 'p2', 'ch2', 'in', 'audio', {
+      attributes: { chain: 'ch2', position: 1 },
+    }),
+  ];
+  expect(patchSummary(channelNode, edges, devices)).toBe('Stagebox → Switch → Ch 2');
+});
+
+test('a channel input and its direct outputs stay separate and preserve explicit connector routes', () => {
+  const channelNode = {
+    ...channel('ch2', 2),
+    attributes: { list_id: 'list', source_device_id: 'mic' },
+  };
+  const console = { ...mixer, name: 'CQ18T' };
+  const mic = { id: 'mic', name: 'Mic', ports: [{ id: 'out', direction: 'out' }] };
+  const box = {
+    id: 'box',
+    name: 'Stagebox',
+    ports: [
+      { id: 'mic-in', direction: 'in', connector: 'XLR3' },
+      { id: 'desk-out', direction: 'out', connector: 'Dante' },
+      { id: 'channel-out', direction: 'out', connector: 'XLR3' },
+    ],
+  };
+  const speaker = { id: 'speaker', name: 'Wedge' };
+  const unrelated = { id: 'unrelated', name: 'Unrelated mixer' };
+  const allDevices = [console, ...devices.slice(1), mic, box, speaker, unrelated];
+  const edges = [
+    edge('source', 'mic', 'out', 'box', 'mic-in', 'audio', {
+      attributes: { channel_source: true, channel_id: 'ch2' },
+    }),
+    edge('chain', 'box', 'channel-out', 'ch2', 'in', 'audio', {
+      attributes: { chain: 'ch2', position: 0, patch_label: 'Vox in' },
+    }),
+    edge('other-port', 'box', 'desk-out', 'unrelated', 'in', 'audio'),
+    edge('output', 'ch2', 'out', 'speaker', 'in', 'audio'),
+    edge('mixer-owner', 'ch2', 'out', 'mixer', 'in', 'audio'),
+  ];
+  const summary = patchSummary(channelNode, edges, allDevices);
+  expect(summary).toBe('Mic → Stagebox → Ch 2 / Ch 2 → Wedge');
+  expect(directConnections(channelNode, edges, allDevices).map((connection) => connection.other))
+    .not.toContain('CQ18T');
+
+  const tree = channelFlowTree(channelNode, edges, allDevices, 'Ch 2', [
+    { device_id: 'box', patch_label: 'Vox in' },
+  ]);
+  expect(tree).toHaveLength(2);
+  expect(tree[0].children[0].out_port).toBe('XLR3 out');
+  expect(tree[0].children[0].children[0].in_port).toBe('in');
+  expect(tree[1].children[0].label).toBe('Wedge');
+  expect(JSON.stringify(tree)).not.toContain('Unrelated mixer');
+  expect(JSON.stringify(tree)).not.toContain('CQ18T');
 });
 
 test('a multi-channel input port is offered as one socket per physical input', () => {

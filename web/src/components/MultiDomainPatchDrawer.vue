@@ -77,6 +77,9 @@
                 {{ item.channels }} ch
                 <span v-if="item.phase"> · {{ item.phase }}</span>
                 <span v-if="item.cableLabel"> · {{ item.cableLabel }}</span>
+                <span v-if="item.routeLabel">
+                  · {{ item.routeLabel }}
+                </span>
               </div>
               <div
                 v-for="issue in issuesFor(item.id)"
@@ -258,6 +261,12 @@ const columns = computed(() => [
   { name: 'fromPort', label: '', field: 'fromPort', align: 'left' },
   { name: 'to', label: t('workspace.colTo'), field: 'to', align: 'left' },
   { name: 'toPort', label: '', field: 'toPort', align: 'left' },
+  {
+    name: 'patchLabel',
+    label: t('workspace.colPatchLabel'),
+    field: 'routeLabel',
+    align: 'left',
+  },
   { name: 'channels', label: t('workspace.colChannels'), field: 'channels', align: 'right' },
   ...(tab.value === 'power'
     ? [{ name: 'phase', label: t('workspace.colPhase'), field: 'phase', align: 'left' }]

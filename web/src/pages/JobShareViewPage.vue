@@ -34,7 +34,12 @@
               name="visibility"
               size="1rem"
               class="q-mr-xs"
-            />{{ t('workspace.share.readOnly') }}
+            />
+            {{
+              canBindAssets
+                ? t('workspace.share.assetAssignmentEnabled')
+                : t('workspace.share.readOnly')
+            }}
           </div>
         </div>
         <q-chip
@@ -141,7 +146,12 @@
               </template>
 
               <div class="q-pa-sm bg-grey-9">
-                <DeviceShareDetail :device="device" />
+                <DeviceShareDetail
+                  :device="device"
+                  :devices="devices"
+                  :edges="edges"
+                  @inspect="inspectId = device.id"
+                />
               </div>
             </q-expansion-item>
             <div
@@ -188,6 +198,10 @@
                 readonly
                 :job-id="jobId"
                 :device="selectedPlaced"
+                :graph-data="shareGraph"
+                :share-token="token"
+                :can-bind-assets="canBindAssets"
+                @asset-bound="updateSharedDevice"
                 @select="(id) => { selectedId = id; tab = 'patch'; }"
               />
             </div>
@@ -200,25 +214,39 @@
           </div>
         </q-tab-panel>
 
-        <!-- Scan view: multi-input capture (camera QR/barcode, NFC, keyboard wedge). The
-             crew view is read-only, so a scan looks up the matched device rather than editing. -->
+        <!-- Scan view: multi-input capture (camera QR/barcode, NFC, keyboard wedge). A match
+             opens its read-only inspector instead of changing any device data. -->
         <q-tab-panel
           name="scan"
           class="q-pa-sm"
         >
           <ScanCapture
-            :active="tab === 'scan'"
+            :active="tab === 'scan' && !inspectId"
             data-testid="share-scan"
             @captured="onScanned"
           />
           <q-banner
             v-if="lastScan"
             class="rounded-borders q-mt-md"
-            :class="matchedDevice ? 'bg-positive text-white' : 'bg-warning text-dark'"
+            :class="
+              matchedDevice
+                ? 'bg-positive text-white'
+                : matchedDevices.length > 1
+                  ? 'bg-info text-white'
+                  : 'bg-warning text-dark'
+            "
             data-testid="share-scan-result"
           >
             <template #avatar>
-              <q-icon :name="matchedDevice ? 'check_circle' : 'warning'" />
+              <q-icon
+                :name="
+                  matchedDevice
+                    ? 'check_circle'
+                    : matchedDevices.length > 1
+                      ? 'groups'
+                      : 'warning'
+                "
+              />
             </template>
             <div class="text-caption text-grey-5">
               {{ t('workspace.scan.scanned') }}
@@ -233,12 +261,41 @@
               {{ t('workspace.scan.matched', { name: matchedDevice.name }) }}
             </div>
             <div
+              v-else-if="matchedDevices.length > 1"
+              class="text-caption"
+            >
+              {{ t('workspace.scan.multipleMatches', { count: matchedDevices.length }) }}
+            </div>
+            <div
               v-else
               class="text-caption"
             >
               {{ t('workspace.scan.noMatch') }}
             </div>
           </q-banner>
+          <q-list
+            v-if="!matchedDevice && matchedDevices.length > 1"
+            separator
+            class="q-mt-sm"
+            data-testid="share-scan-candidates"
+          >
+            <q-item
+              v-for="device in matchedDevices"
+              :key="device.id"
+              clickable
+              v-ripple
+              :data-testid="`scan-match-${device.id}`"
+              @click="selectScannedDevice(device)"
+            >
+              <q-item-section>
+                <q-item-label>{{ device.name }}</q-item-label>
+                <q-item-label caption>{{ scanCandidateDetails(device) }}</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-icon name="chevron_right" />
+              </q-item-section>
+            </q-item>
+          </q-list>
         </q-tab-panel>
         <!-- Patch-list view: the full multi-domain patch table, read-only. Tapping a
              device name selects it (and opens its inspector below) so a crew member can
@@ -262,6 +319,10 @@
               readonly
               :job-id="jobId"
               :device="selected"
+              :graph-data="shareGraph"
+              :share-token="token"
+              :can-bind-assets="canBindAssets"
+              @asset-bound="updateSharedDevice"
               @select="(id) => { selectedId = id; tab = 'patch'; }"
             />
           </div>
@@ -282,6 +343,10 @@
             readonly
             :job-id="jobId"
             :device="inspectDevice"
+            :graph-data="shareGraph"
+            :share-token="token"
+            :can-bind-assets="canBindAssets"
+            @asset-bound="updateSharedDevice"
             @select="(id) => (inspectId = id)"
           />
         </q-card>
@@ -350,11 +415,25 @@ function handleSocketEvent(event) {
   } else if (event.type === 'graph.device.delete' || event.type === 'device.delete') {
     const id = typeof event.payload === 'object' && event.payload ? event.payload.id : event.payload;
     devices.value = devices.value.filter((d) => d.id !== id);
+  } else if (event.type === 'graph.edge.upsert') {
+    const payload = event.payload;
+    const idx = edges.value.findIndex((edge) => edge.id === payload.id);
+    if (idx === -1) edges.value.push(payload);
+    else edges.value[idx] = payload;
+  } else if (event.type === 'graph.edge.delete') {
+    const id = typeof event.payload === 'object' && event.payload ? event.payload.id : event.payload;
+    edges.value = edges.value.filter((edge) => edge.id !== id);
   }
+}
+
+function updateSharedDevice(device) {
+  const idx = devices.value.findIndex((item) => item.id === device.id);
+  if (idx !== -1) devices.value[idx] = device;
 }
 
 const loaded = ref(false);
 const error = ref(false);
+const canBindAssets = ref(false);
 const job = ref({ title: '' });
 const devices = ref([]);
 const tab = ref('list');
@@ -362,7 +441,9 @@ const search = ref('');
 const selectedId = ref(null);
 const lastScan = ref('');
 const matchedDevice = ref(null);
+const matchedDevices = ref([]);
 const edges = ref([]);
+const shareGraph = computed(() => ({ devices: devices.value, edges: edges.value }));
 // The device list offers a quick day-of-show summary (DeviceShareDetail) on expand; a crew member
 // can also open the full read-only inspector for any listed device from the list itself.
 const inspectId = ref(null);
@@ -444,6 +525,7 @@ async function load() {
     job.value = data.job;
     devices.value = data.graph.devices;
     edges.value = data.graph.edges || [];
+    canBindAssets.value = data.can_bind_assets === true;
     // Apply the link's locale before the view renders so the crew member sees the UI in the
     // language the creator shared it in, not their own browser default.
     if (data.locale) applyLocale(data.locale);
@@ -465,27 +547,65 @@ onMounted(() => {
   if (tab.value === 'map') nextTick(fitMap);
 });
 
-// The crew view is read-only: a scan looks up (rather than edits) the device whose bound
-// Stockwire asset, product id, or name matches the captured code.
+// Scanning looks up (rather than edits) gear by bound asset, Stockwire product, or name. If a
+// shared product identifier matches several pieces of gear, require an explicit crew choice.
 function onScanned(value) {
   lastScan.value = value;
-  const q = String(value).toLowerCase();
-  const match = gear.value.find((d) => {
-    const a = d.attributes || {};
-    return (
-      a.stockwire_asset_code === value ||
-      a.stockwire_asset_id === value ||
-      d.stockwire_asset_id === value ||
-      a.stockwire_product_id === value ||
-      d.stockwire_product_id === value ||
-      d.name.toLowerCase().includes(q)
-    );
-  });
-  matchedDevice.value = match || null;
-  // Keep the scan feedback visible (don't jump tabs); still select the device so the stage
-  // map highlights it if the crew member switches to the map tab.
-  if (match) {
-    selectedId.value = match.id;
+  const q = String(value).trim().toLowerCase();
+  if (!q) {
+    matchedDevice.value = null;
+    matchedDevices.value = [];
+    return;
   }
+  const matches = gear.value.filter((d) => {
+    const a = d.attributes || {};
+    const identifiers = [
+      d.stockwire_device_id,
+      a.stockwire_asset_code,
+      a.stockwire_asset_tag,
+      a.stockwire_asset_serial,
+      a.stockwire_asset_barcode,
+      a.stockwire_asset_qr_code,
+      a.stockwire_asset_rfid,
+      a.stockwire_asset_id, // legacy records only; new bindings use the top-level ID
+      a.stockwire_product_id,
+      d.stockwire_product_id,
+    ];
+    return identifiers.some((identifier) => String(identifier ?? '').trim().toLowerCase() === q);
+  });
+  const candidates =
+    matches.length > 0
+      ? matches
+      : gear.value.filter((device) => device.name.toLowerCase().includes(q));
+  matchedDevices.value = candidates;
+  matchedDevice.value = candidates.length === 1 ? candidates[0] : null;
+  // Keep the scan view underneath the inspector so closing it returns the crew member to scanning.
+  if (matchedDevice.value) {
+    openScannedDevice(matchedDevice.value);
+  }
+}
+
+function selectScannedDevice(device) {
+  matchedDevice.value = device;
+  openScannedDevice(device);
+}
+
+function openScannedDevice(device) {
+  selectedId.value = device.id;
+  inspectId.value = device.id;
+}
+
+function scanCandidateDetails(device) {
+  const attributes = device.attributes || {};
+  return (
+    [
+      attributes.stockwire_asset_tag,
+      attributes.stockwire_asset_serial,
+      attributes.stockwire_asset_code,
+      device.stockwire_product_name,
+    ]
+      .filter(Boolean)
+      .join(' · ') || `${device.domain} · ${device.kind}`
+  );
 }
 </script>

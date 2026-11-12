@@ -24,6 +24,7 @@ FIXTURE_ATTRS = (
 # point id, the element and role, the plugged device). Some are historical table names; they are
 # stored in edges, so they are kept.
 MIRRORED_EDGE_TABLES = {
+    "channel_sources",
     "channel_patch_points",
     "output_patch_points",
     "channel_list_outputs",
@@ -236,8 +237,8 @@ class Backfill:
         for edge in gone:
             await self.db.delete(edge)
         await self.db.flush()
-        self.result.removed_edges = [e.id for e in gone]
-        self.result.removed = len(gone)
+        self.result.removed_edges.extend(e.id for e in gone)
+        self.result.removed += len(gone)
 
     async def plot_elements(self) -> None:
         """Plot elements are graph nodes (plot_native.py); the sync draws their link edges."""

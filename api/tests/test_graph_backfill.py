@@ -71,10 +71,10 @@ async def test_backfill_maps_legacy_rows_and_is_idempotent(auth_headers):
         }
         assert stagebox["attributes"]["power_w"] == 120
 
-        mic = next(d for d in graph["devices"] if d["name"] == "Mic 1")
+        channel = next(d for d in graph["devices"] if d["name"] == "Mic 1")
         trace = await client.get(
-            f"{g}/devices/{mic['id']}/trace",
-            params={"direction": "downstream", "signal": "audio"},
+            f"{g}/devices/{channel['id']}/trace",
+            params={"direction": "upstream", "signal": "audio"},
             headers=auth_headers,
         )
         assert [h["depth"] for h in trace.json()["hops"]] == [1, 2]

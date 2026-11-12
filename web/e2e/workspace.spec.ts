@@ -1,4 +1,4 @@
-import { test, expect, APIRequestContext, Page } from '@playwright/test';
+import { test, expect, APIRequestContext, Locator, Page } from '@playwright/test';
 import { ensureAdmin, login, enableStockwire, setStockwireEnabled, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
@@ -18,6 +18,15 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
 
 const dataRows = (page: Page) =>
   page.getByTestId('workspace-table').locator('tbody tr').filter({ has: page.locator('input') });
+
+async function rowWithInputValue(table: Locator, value: string) {
+  const rows = table.locator('tbody tr:has(input)');
+  for (let index = 0; index < (await rows.count()); index += 1) {
+    const row = rows.nth(index);
+    if ((await row.locator('input').first().inputValue()) === value) return row;
+  }
+  throw new Error(`No workspace row has an input with value "${value}"`);
+}
 
 // Fit the plot and read the zoom it settled on, so pixel positions can be derived from cm.
 async function fittedZoom(page: Page) {
@@ -1970,8 +1979,12 @@ test('each device box in the show flow and each step in the edit flow has an edi
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
   // show flow: the box opens the device in the inspector and the flow closes
-  await page.getByRole('button', { name: /show signal flow|visa signalväg|flow/i }).first().click();
-  await page.getByTestId('flow-edit-device').first().click();
+  await page.getByTestId('show-flow').first().click();
+  await page
+    .locator('.dmx-flow-node')
+    .filter({ hasText: 'Stagebox F' })
+    .getByTestId('flow-edit-device')
+    .click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox F');
 
   // edit flow: a step opens the device dialog on top of the chain dialog
@@ -2020,7 +2033,7 @@ test('replacing or clearing a source removes the device it created, but not one 
   await expect.poll(names).toEqual(['Mic B']);
   // Mic B is also the second channel's source, so clearing the first keeps it
   await pick(1, 'Mic B');
-  await page.getByRole('button', { name: 'Clear' }).first().click();
+  await page.getByRole('button', { name: /clear|rensa/i }).first().click();
   await expect(page.getByTestId('open-source-device')).toHaveCount(1);
   expect(await names()).toEqual(['Mic B']);
   void second;
@@ -2050,14 +2063,14 @@ test('on a phone every channel is a card with its kind, source, stand, connector
 
   // the summary line says what is set without opening anything
   const card = page.getByTestId('channel-card').first();
-  await expect(card).toContainText('Wireless');
+  await expect(card).toContainText(/wireless|trådlöst/i);
   await expect(card).toContainText('48V');
   await expect(card).toContainText('Boom');
 
   // the same editors as the table are under Details
   await card.getByTestId('channel-card-details').click();
-  await card.getByLabel(/bodypack|beltpack/i).fill('Shure P10T');
-  await card.getByLabel(/bodypack|beltpack/i).press('Enter');
+  await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).fill('Shure P10T');
+  await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).press('Enter');
   await expect.poll(async () => (await node()).attributes.wireless_pack).toBe('Shure P10T');
   await card.getByLabel(/notes|anteckningar/i).last().fill('Hand over at soundcheck');
   await card.getByLabel(/notes|anteckningar/i).last().press('Tab');
@@ -2499,10 +2512,9 @@ test('a mixer lists its channels and opens one as its own device', async ({ page
   const jobId = (await post(request, headers, '/jobs', { title: `E2E MixerCh ${Date.now()}` })).id as string;
   const g = `/jobs/${jobId}/graph`;
   const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
-  const mixer = await post(request, headers, `${g}/devices`, {
-    domain: 'audio',
+  await post(request, headers, `${g}/audio-devices`, {
     name: 'Console FOH',
-    kind: 'mixer',
+    device_type: 'mixer',
     sound_list_id: list.id,
   });
   await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
@@ -2511,10 +2523,7 @@ test('a mixer lists its channels and opens one as its own device', async ({ page
   // <input> value (not text), so locate the row via that input and click a non-input cell.
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
-  const mixerRow = page
-    .getByTestId('workspace-table')
-    .locator('tbody tr')
-    .filter({ has: page.getByDisplayValue('Console FOH') });
+  const mixerRow = await rowWithInputValue(page.getByTestId('workspace-table'), 'Console FOH');
   await mixerRow.locator('td').nth(1).click();
 
   // The mixer's channels are surfaced as their own entities (subdevices), not buried ports.
@@ -2553,10 +2562,7 @@ test('the connect-to-device picker offers real gear only, not channels or buses'
 
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
-  const mixerRow = page
-    .getByTestId('workspace-table')
-    .locator('tbody tr')
-    .filter({ has: page.getByDisplayValue('FOH Mixer') });
+  const mixerRow = await rowWithInputValue(page.getByTestId('workspace-table'), 'FOH Mixer');
   await mixerRow.locator('td').nth(1).click();
 
   // Open the "to device" connection picker.
