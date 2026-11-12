@@ -81,7 +81,6 @@ class AudioChannelPatchBase(BaseModel):
     channel_number: int
     source_label: str = ""
     input_type: str | None = None
-    connector: str | None = None
     device: str | None = None
     stand_type: str = ""
     instrument_group: Literal[

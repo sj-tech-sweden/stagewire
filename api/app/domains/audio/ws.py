@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jwt import PyJWTError as JWTError
 
-from app.domains.auth.security import decode_token
+from app.domains.auth.security import decode_token, verify_share_token
 
 router = APIRouter()
 
@@ -55,12 +55,22 @@ async def publish_job_event(job_id, event_type: str, payload) -> None:
 async def job_ws(websocket: WebSocket, job_id: str) -> None:
     token = websocket.query_params.get("token")
     user_id = None
+    share_job_id = None
     if token:
         try:
             user_id = int(decode_token(token)["sub"])
         except (JWTError, KeyError, ValueError):
             user_id = None
-    if user_id is None:
+        # A logged-in session was not found — fall back to a read-only, view-scoped share token
+        # (used by the day-of-show crew mobile view, which has no user session).
+        if user_id is None:
+            try:
+                claims = verify_share_token(token)
+            except ValueError:
+                claims = None
+            if claims is not None and str(claims.get("job_id")) == str(job_id):
+                share_job_id = claims.get("job_id")
+    if user_id is None and share_job_id is None:
         await websocket.close(code=1008)
         return
 

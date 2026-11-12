@@ -70,3 +70,25 @@ async def test_device_specs_endpoint_returns_the_normalised_product(auth_headers
             {"connector": "xlr3", "direction": "out", "count": 8, "signal": None}
         ]
         assert body["weight_kg"] == 9 and body["power_watts"] == 120 and body["outputs"] == 8
+
+
+@pytest.mark.asyncio
+async def test_product_devices_endpoint_lists_physical_assets(auth_headers, monkeypatch):
+    class Fake:
+        async def list_product_devices(self, product_id):
+            return [
+                {"id": "asset-1", "product_id": product_id, "asset_tag": "TAG-1"},
+                {"id": "asset-2", "product_id": product_id, "serial_number": "SN-2"},
+            ]
+
+    async def fake_client(db):
+        return Fake()
+
+    monkeypatch.setattr(stockwire_router, "_catalog_client", fake_client)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get(f"{BASE}/stockwire/products/77/devices", headers=auth_headers)
+        assert res.status_code == 200, res.text
+        assert res.json()["items"] == [
+            {"id": "asset-1", "product_id": "77", "asset_tag": "TAG-1"},
+            {"id": "asset-2", "product_id": "77", "serial_number": "SN-2"},
+        ]

@@ -156,8 +156,29 @@ async def test_venue_validate_returns_issues_for_invalid_edge(auth_headers):
         assert a.status_code == 201 and b.status_code == 201
         a_id, b_id = a.json()["id"], b.json()["id"]
 
-        # An audio edge on ports the devices lack is invalid; force it through so it is stored.
-        edge = await client.post(
+        # An audio edge on ports the devices lack is invalid. The API now refuses to store it even
+        # when forced, so write the row straight to the table, as legacy data arrives, and check
+        # that validation still reports it.
+        from uuid import UUID
+
+        from app.core import db as db_mod
+        from app.domains.graph.models import ConnectionEdge
+
+        async with db_mod.SessionLocal() as db:
+            db.add(
+                ConnectionEdge(
+                    venue_id=UUID(venue_id),
+                    signal="audio",
+                    src_device_id=UUID(a_id),
+                    src_port="out",
+                    dst_device_id=UUID(b_id),
+                    dst_port="in",
+                    channels=1,
+                )
+            )
+            await db.commit()
+
+        forced = await client.post(
             f"{BASE}/venues/{venue_id}/graph/edges",
             json={
                 "signal": "audio",
@@ -169,7 +190,7 @@ async def test_venue_validate_returns_issues_for_invalid_edge(auth_headers):
             params={"force": "true"},
             headers=auth_headers,
         )
-        assert edge.status_code == 201, edge.text
+        assert forced.status_code == 422, forced.text
 
         issues = await client.get(f"{BASE}/venues/{venue_id}/graph/validate", headers=auth_headers)
         assert issues.status_code == 200, issues.text

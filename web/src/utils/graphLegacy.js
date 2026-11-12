@@ -91,7 +91,9 @@ export function legacyViewFromGraph(devices, edges) {
       .filter((e) => !e.attributes.first_point)
       .map((e) => ({
         id: e.attributes.point_id,
-        device_id: deviceId(e.dst_device_id),
+        // Channel patch points label each edge's upstream device; output and video points label
+        // the downstream device because those chains run from their source/list toward the gear.
+        device_id: deviceId(node.kind === 'channel' ? e.src_device_id : e.dst_device_id),
         connector: e.attributes.connector || '',
         parent_id: e.attributes.parent_id || null,
         position: e.attributes.position,

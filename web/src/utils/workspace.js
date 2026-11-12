@@ -2,6 +2,33 @@ export const DOMAINS = ['audio', 'lighting', 'video', 'power'];
 
 export const DOMAIN_SIGNAL = { audio: 'audio', lighting: 'dmx', video: 'video', power: 'power' };
 
+export function stockwireAssetOf(device) {
+  const attributes = device?.attributes || {};
+  // Read the old attribute for existing bindings; new writes use stockwire_device_id.
+  const canonicalId = device?.stockwire_device_id || null;
+  const code =
+    attributes.stockwire_asset_code ||
+    attributes.stockwire_asset_id ||
+    canonicalId ||
+    null;
+  const tag = attributes.stockwire_asset_tag || null;
+  const serial = attributes.stockwire_asset_serial || null;
+  const barcode = attributes.stockwire_asset_barcode || null;
+  const qrCode = attributes.stockwire_asset_qr_code || null;
+  const rfid = attributes.stockwire_asset_rfid || null;
+  return {
+    isBound: Boolean(canonicalId || code || tag || serial || barcode || qrCode || rfid),
+    canonicalId: canonicalId == null ? null : String(canonicalId),
+    code,
+    tag,
+    serial,
+    barcode,
+    qrCode,
+    rfid,
+    description: attributes.stockwire_asset_description || null,
+  };
+}
+
 export const SIGNAL_COLOR = {
   audio: '#35A853',
   dmx: '#F2C037',
@@ -52,19 +79,33 @@ export function deviceFromProduct(product, { parentId = null } = {}) {
   const attributes = {};
   if (product.power_consumption_watts) attributes.power_w = Number(product.power_consumption_watts);
   if (product.weight_kg) attributes.weight_kg = Number(product.weight_kg);
+  const domain = domainForCategory(product.category);
   const inlet = String(product.specs?.power_inlet || '').trim().toLowerCase();
   if (inlet) attributes.power_inlet = inlet;
-  const domain = domainForCategory(product.category);
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+  // An explicit product spec (e.g. a powered speaker) wins; clearly-powered categories (amplifiers,
+  // active/powered boxes) are left for the user to set rather than assumed passive.
+  else if (domain === 'audio' && !/amplif|powered|active/i.test(String(product.category || '')))
+    attributes.power_inlet = 'none';
+  // The same passive source gear carries a single XLR output by default; an explicit product spec
+  // (its connectors or channel counts) still wins.
+  const specGroups = connectorGroupsFromProduct(product).map((g) => ({
+    ...g,
+    signal: g.signal || DOMAIN_SIGNAL[domain] || 'audio',
+  }));
+  if (
+    !specGroups.length &&
+    domain === 'audio' &&
+    !/amplif|powered|active|mixer|console|stagebox|split|patchbay/i.test(String(product.category || ''))
+  ) {
+    specGroups.push({ connector: 'xlr3', direction: 'out', count: 1, signal: 'audio' });
+  }
   return {
     domain,
     kind: product.category || '',
     name: product.name || product.sku || 'Item',
     attributes,
-    ports: portsFromGroups(
-      connectorGroupsFromProduct(product).map((g) => ({ ...g, signal: g.signal || DOMAIN_SIGNAL[domain] || 'audio' })),
-      [],
-      '',
-    ),
+    ports: portsFromGroups(specGroups, [], ''),
     case_parent_id: parentId,
     stockwire_product_id: product.id != null ? String(product.id) : null,
     stockwire_product_name: product.name || null,
@@ -75,20 +116,28 @@ export function deviceFromProduct(product, { parentId = null } = {}) {
 
 export function edgeRows(edges, devices) {
   const byId = new Map(devices.map((d) => [d.id, d]));
-  return edges.map((e) => ({
-    id: e.id,
-    signal: e.signal,
-    srcId: e.src_device_id,
-    dstId: e.dst_device_id,
-    from: byId.get(e.src_device_id)?.name || '?',
-    fromPort: e.src_port,
-    to: byId.get(e.dst_device_id)?.name || '?',
-    toPort: e.dst_port,
-    channels: e.channels,
-    phase: e.phase,
-    cableLabel: e.cable_label,
-    revision: e.revision,
-  }));
+  return edges.map((e) => {
+    const source = byId.get(e.src_device_id);
+    const destination = byId.get(e.dst_device_id);
+    const attributes = e.attributes || {};
+    return {
+      id: e.id,
+      signal: e.signal,
+      srcId: e.src_device_id,
+      dstId: e.dst_device_id,
+      from: source?.name || '?',
+      fromPort: portLabelOf(source, e.src_port, attributes.src_socket || null),
+      to: destination?.name || '?',
+      toPort: portLabelOf(destination, e.dst_port, attributes.dst_socket || null),
+      patchLabel: attributes.patch_label || '',
+      connector: attributes.connector || '',
+      routeLabel: [attributes.patch_label, attributes.connector].filter(Boolean).join(' · '),
+      channels: e.channels,
+      phase: e.phase,
+      cableLabel: e.cable_label,
+      revision: e.revision,
+    };
+  });
 }
 
 export function layerOf(device) {
@@ -230,7 +279,10 @@ export function chainDevices(node, edges, devices) {
   for (const edge of edges) {
     const attrs = edge.attributes || {};
     if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
-    if (attrs.first_point) {
+    if (node.kind === 'channel') {
+      const deviceId = edge.src_device_id === node.id ? edge.dst_device_id : edge.src_device_id;
+      steps.push({ position: attrs.position || 0, device: byId.get(deviceId) });
+    } else if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, device: byId.get(edge.src_device_id) });
     } else {
       steps.push({ position: attrs.position || 0, device: byId.get(edge.dst_device_id) });
@@ -245,7 +297,10 @@ export function chainSteps(node, edges, devices) {
   for (const edge of edges) {
     const attrs = edge.attributes || {};
     if (attrs.chain !== node.id || isUniverseSource(node, edge)) continue;
-    if (attrs.first_point) {
+    if (node.kind === 'channel') {
+      const deviceId = edge.src_device_id === node.id ? edge.dst_device_id : edge.src_device_id;
+      steps.push({ position: attrs.position || 0, name: names.get(deviceId) });
+    } else if (attrs.first_point) {
       steps.push({ position: attrs.first_point.position || 0, name: names.get(edge.src_device_id) });
     } else {
       steps.push({ position: attrs.position || 0, name: names.get(edge.dst_device_id) });
@@ -263,6 +318,368 @@ export const outputsOf = (devices, listId) =>
   devices
     .filter((d) => d.kind === 'output' && d.attributes?.list_id === listId)
     .sort((a, b) => a.position - b.position);
+
+// Signals that run over a cable a stagebox can reach the mixer on: audio (analog or Dante/AES50/
+// MADI over the network) and data (the ethernet switch fabric in between). Power, video, DMX and
+// plot links are not part of the path a mic signal takes to the console.
+const FEED_SIGNALS = new Set(['audio', 'data']);
+export const isStagebox = (d) =>
+  d.kind === 'digital_stagebox' ||
+  d.kind === 'analog_stagebox' ||
+  d.device_type === 'digital_stagebox' ||
+  d.device_type === 'analog_stagebox';
+export const isMixerDevice = (d) => d.kind === 'mixer' || d.device_type === 'mixer';
+
+// The stageboxes that reach a mixer, directly or indirectly: a stagebox patched into the mixer (or
+// one of its channels) with an audio cable, or through any chain of network gear (switches,
+// routers, computers) in between. The walk is undirected over audio/data edges, never expands into
+// virtual nodes (channels, buses) and never passes through another console, so a stagebox that
+// feeds a different mixer is not claimed by this one.
+export function feedingStageboxes(mixer, devices, edges) {
+  if (!mixer) return [];
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const listId = mixer.sound_list_id;
+  const start = new Set([mixer.id, ...channelsOf(devices, listId).map((c) => c.id)]);
+  const seen = new Set(start);
+  const queue = [...start];
+  const found = new Map();
+  while (queue.length) {
+    const id = queue.shift();
+    for (const e of edges) {
+      if (!FEED_SIGNALS.has(e.signal)) continue;
+      let next = null;
+      if (e.src_device_id === id) next = e.dst_device_id;
+      else if (e.dst_device_id === id) next = e.src_device_id;
+      if (!next || seen.has(next)) continue;
+      const dev = byId.get(next);
+      if (!dev) continue;
+      seen.add(next);
+      if (isStagebox(dev)) {
+        found.set(next, dev);
+        continue; // a stagebox is an end of the walk: its own inputs are the stage side
+      }
+      if (isVirtual(dev) || isMixerDevice(dev)) continue;
+      queue.push(next);
+    }
+  }
+  return [...found.values()];
+}
+
+// The physical inputs a channel can be fed from, as a strict dropdown: the mixer's own input ports
+// plus the input ports of every stagebox that reaches the mixer (feedingStageboxes). Each port
+// carrying a channel count expands into its individual physical sockets — an 8-channel XLR group
+// becomes "XLR in 1" … "XLR in 8" — so a channel maps to one specific physical input.
+export function mixerInputChoices(channel, devices, edges) {
+  const listId = channel?.attributes?.list_id;
+  if (!listId) return [];
+  const mixer = devices.find((d) => isMixerDevice(d) && d.sound_list_id === listId);
+  if (!mixer) return [];
+  const choices = [];
+  const seen = new Set();
+  const add = (label) => {
+    if (seen.has(label)) return;
+    seen.add(label);
+    choices.push({ label, value: label });
+  };
+  for (const dev of [mixer, ...feedingStageboxes(mixer, devices, edges)]) {
+    const tag = dev === mixer ? '' : ` (${dev.name})`;
+    for (const p of dev.ports || []) {
+      if (p.direction !== 'in') continue;
+      const conn = (p.connector || 'in').toUpperCase();
+      const n = Number(p.channels) || 1;
+      for (let i = 1; i <= n; i += 1) add(`${conn} in ${i}${tag}`);
+    }
+  }
+  return choices;
+}
+
+// The label a port shows in the signal flow: the port's own label when it has one, else its
+// connector ("XLR out"), never the raw generated id ("out-xlr3") alone.
+export function portLabelOf(device, portId, socket = null) {
+  const port = (device?.ports || []).find((p) => p.id === portId);
+  let label;
+  if (port?.label) label = port.label;
+  else if (port?.connector) label = `${port.connector.toUpperCase()} ${port.direction || ''}`.trim();
+  else label = portId || '';
+  return socket ? `${label} ${socket}` : label;
+}
+
+// A port with several channels is a row of physical sockets (XLR in 1 … XLR in 32). Each socket is
+// an option valued `<portId>#<n>`; a single-channel port stays one option valued by its id. Used
+// by the connect form, so a mic can be cabled to one specific input of a stagebox.
+export function socketOptions(device, direction) {
+  const options = [];
+  for (const p of device?.ports || []) {
+    if (p.direction !== direction) continue;
+    const count = Number(p.channels) || 1;
+    const conn = (p.connector || direction).toUpperCase();
+    if (count <= 1) {
+      options.push({ label: `${p.id}${p.connector ? ` (${p.connector})` : ''}`, value: p.id });
+      continue;
+    }
+    for (let i = 1; i <= count; i += 1) {
+      options.push({ label: `${conn} ${direction} ${i}`, value: `${p.id}#${i}` });
+    }
+  }
+  return options;
+}
+
+// Splits a socket option value into its port id and socket number (null for a plain port).
+export function splitSocket(value) {
+  const text = String(value ?? '');
+  const at = text.lastIndexOf('#');
+  if (at < 0) return { port: text, socket: null };
+  return { port: text.slice(0, at), socket: Number(text.slice(at + 1)) || null };
+}
+
+// The cables a node has outside its patch chain (drawn in the inspector, not the chain editor), one
+// line per cable, read from the graph edges: the node's own port, the other device and its port.
+function mixerForChannel(channel, devices) {
+  const listId = channel?.kind === 'channel' ? channel.attributes?.list_id : null;
+  return listId
+    ? devices.find(
+        (device) =>
+          isMixerDevice(device) && String(device.sound_list_id) === String(listId),
+      )
+    : null;
+}
+
+export function directConnections(node, edges, devices) {
+  if (!node) return [];
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const ownerMixer = mixerForChannel(node, devices);
+  return edges
+    .filter(
+      (e) =>
+        FEED_SIGNALS.has(e.signal) &&
+        !e.attributes?.chain &&
+        !(ownerMixer && e.src_device_id === node.id && e.dst_device_id === ownerMixer.id) &&
+        (e.src_device_id === node.id || e.dst_device_id === node.id),
+    )
+    .map((e) => {
+      const incoming = e.dst_device_id === node.id;
+      const other = byId.get(incoming ? e.src_device_id : e.dst_device_id);
+      const socket = e.attributes?.dst_socket || null;
+      const nodePort = incoming ? portLabelOf(node, e.dst_port, socket) : portLabelOf(node, e.src_port);
+      const otherPort = incoming
+        ? portLabelOf(other, e.src_port)
+        : portLabelOf(other, e.dst_port, socket);
+      const otherName = other?.name || '?';
+      const text = incoming
+        ? `${otherName} ${otherPort} → ${node.name} ${nodePort}`
+        : `${node.name} ${nodePort} → ${otherName} ${otherPort}`;
+      return { id: e.id, incoming, other: otherName, text };
+    });
+}
+
+// The Patch column: what the node is connected to, upstream feeds first, then its patch chain, then
+// cables out. A node with inspector cables includes its own name so the chain reads through it.
+export function patchSummary(node, edges, devices) {
+  const direct = directConnections(node, edges, devices);
+  const chain = chainSteps(node, edges, devices);
+  if (node.kind === 'channel') {
+    const byId = new Map(devices.map((d) => [d.id, d]));
+    const sourceId = node.attributes?.source_device_id;
+    const source = byId.get(sourceId)?.name || node.attributes?.device || '';
+    const upstream = source
+      ? [source]
+      : direct.filter((connection) => connection.incoming).map((connection) => connection.other);
+    const inputPath =
+      upstream.length || chain.length ? [...upstream, ...chain, node.name].join(' → ') : '';
+    const outputPaths = direct
+      .filter((connection) => !connection.incoming)
+      .map((connection) => `${node.name} → ${connection.other}`);
+    return [inputPath, ...outputPaths].filter(Boolean).join(' / ');
+  }
+  if (!direct.length) return chain.join(' → ');
+  const upstream = direct.filter((d) => d.incoming).map((d) => d.other);
+  const downstream = direct.filter((d) => !d.incoming).map((d) => d.other);
+  return [...upstream, node.name, ...chain, ...downstream].join(' → ');
+}
+
+// The channel's selected source and explicit patch points define its input route. Other cables
+// connected to the channel remain separate branches; a physical device does not imply port routing.
+export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []) {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const sourceId = channel.attributes?.source_device_id;
+  const ownerMixer = mixerForChannel(channel, devices);
+  const pointEdges = edges.filter((edge) => edge.attributes?.chain === channel.id);
+  const orderedPointEdges = [...pointEdges].sort(
+    (a, b) => (a.attributes?.position || 0) - (b.attributes?.position || 0),
+  );
+  const pointEdgeFor = (index) => {
+    const point = steps[index];
+    const nextId = steps[index + 1]?.device_id || channel.id;
+    const edgeAtPosition = orderedPointEdges[index];
+    if (
+      edgeAtPosition?.src_device_id === point.device_id &&
+      edgeAtPosition?.dst_device_id === nextId
+    ) {
+      return edgeAtPosition;
+    }
+    return pointEdges.find(
+      (edge) => edge.src_device_id === point.device_id && edge.dst_device_id === nextId,
+    );
+  };
+  const sourceEdge = edges.find(
+    (edge) =>
+      edge.signal === 'audio' &&
+      ((edge.attributes?.channel_source &&
+        String(edge.attributes.channel_id) === String(channel.id)) ||
+        (sourceId &&
+          edge.src_device_id === sourceId &&
+          [steps[0]?.device_id, channel.id].includes(edge.dst_device_id))),
+  ) || edges.find(
+    (edge) =>
+      steps.length > 0 &&
+      FEED_SIGNALS.has(edge.signal) &&
+      edge.dst_device_id === steps[0].device_id &&
+      !edge.attributes?.chain &&
+      byId.has(edge.src_device_id) &&
+      !steps.some((step) => step.device_id === edge.src_device_id),
+  );
+  const sourceDevice = byId.get(sourceId) || byId.get(sourceEdge?.src_device_id);
+  const incomingEdges = edges.filter(
+    (edge) =>
+      FEED_SIGNALS.has(edge.signal) &&
+      edge.dst_device_id === channel.id &&
+      !edge.attributes?.chain &&
+      byId.has(edge.src_device_id),
+  );
+  const directFeeds =
+    steps.length || sourceDevice
+      ? []
+      : incomingEdges.map((edge) => ({ edge, device: byId.get(edge.src_device_id) }));
+  const endpoint = (id, edge = null) => ({
+    id,
+    device_id: channel.id,
+    label: sourceLabel || channel.name,
+    kind: 'channel',
+    in_port: edge
+      ? portLabelOf(channel, edge.dst_port, edge.attributes?.dst_socket || null)
+      : '',
+    out_port: '',
+    connector: steps.at(-1)?.connector || channel.attributes?.input_type || '',
+    children: [],
+  });
+  const routes = [];
+  if (steps.length || sourceDevice) {
+    const finalEdge = steps.length ? pointEdgeFor(steps.length - 1) : sourceEdge;
+    let route = endpoint(`channel-${channel.id}`, finalEdge);
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      const step = steps[index];
+      const device = byId.get(step.device_id);
+      const incoming = index === 0 ? sourceEdge : pointEdgeFor(index - 1);
+      const outgoing = pointEdgeFor(index);
+      route = {
+        id: `channel-step-${channel.id}-${index}`,
+        device_id: step.device_id || null,
+        label: device?.name || '?',
+        kind: 'device',
+        in_port:
+          incoming?.dst_device_id === device?.id
+            ? portLabelOf(device, incoming.dst_port, incoming.attributes?.dst_socket || null)
+            : step.in_port || '',
+        out_port:
+          outgoing?.src_device_id === device?.id
+            ? portLabelOf(device, outgoing.src_port)
+            : step.out_port || '',
+        connector: step.connector || '',
+        patch_label: step.patch_label || '',
+        children: [route],
+      };
+    }
+    if (sourceDevice && sourceDevice.id !== steps[0]?.device_id) {
+      route = {
+        id: `channel-source-${channel.id}`,
+        device_id: sourceDevice.id,
+        label: sourceDevice.name,
+        kind: 'source',
+        in_port: '',
+        out_port:
+          sourceEdge?.src_device_id === sourceDevice.id
+            ? portLabelOf(sourceDevice, sourceEdge.src_port)
+            : '',
+        connector: '',
+        children: [route],
+      };
+    }
+    routes.push(route);
+  } else {
+    routes.push(
+      ...directFeeds.map(({ edge, device }, index) => ({
+        id: `channel-feed-${edge.id}`,
+        device_id: device.id,
+        label: device.name,
+        kind: 'source',
+        in_port: '',
+        out_port: portLabelOf(device, edge.src_port),
+        connector: '',
+        children: [
+          endpoint(`channel-${channel.id}-feed-${index}`, edge),
+        ],
+      })),
+    );
+  }
+  for (const edge of edges.filter(
+    (item) =>
+      FEED_SIGNALS.has(item.signal) &&
+      item.src_device_id === channel.id &&
+      item.dst_device_id !== ownerMixer?.id &&
+      !item.attributes?.chain &&
+      byId.has(item.dst_device_id),
+  )) {
+    const destination = byId.get(edge.dst_device_id);
+    routes.push({
+      id: `channel-output-${edge.id}`,
+      device_id: channel.id,
+      label: sourceLabel || channel.name,
+      kind: 'channel',
+      in_port: '',
+      out_port: portLabelOf(channel, edge.src_port),
+      connector: '',
+      children: [
+        {
+          id: `channel-output-device-${edge.id}`,
+          device_id: destination.id,
+          label: destination.name,
+          kind: 'device',
+          in_port: portLabelOf(destination, edge.dst_port, edge.attributes?.dst_socket || null),
+          out_port: '',
+          connector: edge.attributes?.connector || '',
+          patch_label: edge.attributes?.patch_label || '',
+          children: [],
+        },
+      ],
+    });
+  }
+  return routes.length ? routes : [endpoint(`channel-${channel.id}`)];
+}
+
+// Return only the channel routes that actually contain a device. A gear node may be used by
+// several channels, so each matching channel keeps its own diagram instead of joining nearby
+// graph edges into an implied signal path.
+export function channelFlowsForDevice(deviceId, devices, edges) {
+  if (!deviceId) return [];
+  return devices
+    .filter((device) => device.kind === 'channel')
+    .flatMap((channel) => {
+      const routes = channelFlowTree(
+        channel,
+        edges,
+        devices,
+        channel.name,
+        chainForm(channel, edges, devices),
+      );
+      const containsDevice = (nodes) =>
+        nodes.some(
+          (node) =>
+            node.device_id === deviceId ||
+            containsDevice(node.children || []),
+        );
+      return containsDevice(routes) ? [{ channel, routes }] : [];
+    });
+}
 
 export const videoListsOf = (devices) =>
   devices.filter((d) => d.kind === 'video_list').sort((a, b) => a.position - b.position);
@@ -320,7 +737,14 @@ export function chainForm(node, edges, devices) {
     const point = attrs.first_point || attrs;
     byPos.push({
       position: point.position || 0,
-      device_id: attrs.first_point ? edge.src_device_id : edge.dst_device_id,
+      device_id:
+        node.kind === 'channel'
+          ? edge.src_device_id === node.id
+            ? edge.dst_device_id
+            : edge.src_device_id
+          : attrs.first_point
+            ? edge.src_device_id
+            : edge.dst_device_id,
       connector: point.connector || '',
       patch_label: point.patch_label || '',
       bus_connector: point.bus_connector || '',
@@ -372,6 +796,24 @@ export const DEVICE_TYPES = [
 
 export const IO_DEVICE_TYPES = ['mixer', 'switcher', 'router', 'multiviewer'];
 export const CAMERA_TYPES = ['camera', 'ptz_camera'];
+
+// Audio gear that is actively powered (needs a mains inlet) versus passive source gear
+// (microphones, mic stands, DIs, instruments). Passive gear defaults to no power inlet.
+export const POWERED_AUDIO_TYPES = new Set([
+  'mixer',
+  'switcher',
+  'router',
+  'multiviewer',
+  'digital_stagebox',
+  'analog_stagebox',
+  'split',
+  'patchbay',
+  'converter',
+  'encoder',
+  'network',
+  'computer',
+  'recorder',
+]);
 
 export function signalForType(type) {
   if (type === 'fixture') return 'dmx';
@@ -574,10 +1016,24 @@ export function deviceCreateBody(form) {
     body.stockwire_product_id = form.stockwire_product_id;
     body.stockwire_product_name = form.stockwire_product_name;
   }
+  // A channel/video list that minted this device (e.g. an auto-created mixer) travels with it so
+  // the backend can link the gear back to the list and the frontend can find it again.
+  if (form.sound_list_id) body.sound_list_id = form.sound_list_id;
+  if (form.video_list_id) body.video_list_id = form.video_list_id;
   const map = { power_w: 'power_watts' };
   for (const key of [...NUMBER_FIELDS, ...TEXT_FIELDS]) {
     const value = form[key];
     if (value !== null && value !== '' && value !== undefined) body[map[key] || key] = value;
+  }
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default;
+  // only actively-powered audio boxes keep the inherited IEC C13 inlet. An explicit inlet (e.g. from
+  // a product spec) always wins.
+  if (
+    !body.power_inlet &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    body.power_inlet = 'none';
   }
   return body;
 }
@@ -735,6 +1191,24 @@ export function fillFormFromSpecs(form, product, specs) {
   if (specs.power_inlet) form.power_inlet = specs.power_inlet;
   if (specs.weight_kg) form.weight_kg = specs.weight_kg;
   if (specs.power_watts) form.power_w = specs.power_watts;
+  // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+  // An explicit product spec (e.g. a powered speaker) still wins over this default.
+  if (
+    !form.power_inlet &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    form.power_inlet = 'none';
+  }
+  // The same passive source gear carries a single XLR output by default so a patch has somewhere
+  // to start; an explicit product spec (its connectors or channel counts) always wins.
+  if (
+    !form.ports.length &&
+    signalForType(form.device_type) === 'audio' &&
+    !POWERED_AUDIO_TYPES.has(form.device_type)
+  ) {
+    form.ports = addConnector(form.ports, { connector: 'xlr3', direction: 'out', count: 1 });
+  }
   return form;
 }
 
@@ -752,6 +1226,7 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
     in_port: step.in_port || step.input_port || '',
     out_port: step.out_port || step.source_port || '',
     connector: step.connector || '',
+    patch_label: step.patch_label || '',
     children: [],
   }));
   const roots = [];

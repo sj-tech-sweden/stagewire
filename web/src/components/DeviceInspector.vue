@@ -1,5 +1,8 @@
 <template>
-  <div class="q-pa-md">
+  <div
+    class="q-pa-md"
+    :class="{ 'inspector-readonly': readonly }"
+  >
     <div class="text-subtitle1 q-mb-sm">
       {{ t('workspace.inspector') }}
     </div>
@@ -38,6 +41,21 @@
         :label="t('workspace.colNotes')"
         class="q-mb-sm"
         @change="(v) => save({ notes: v })"
+      />
+      <q-select
+        v-if="device.kind === 'channel'"
+        :model-value="device.attributes?.mixer_input || null"
+        dense
+        outlined
+        emit-value
+        map-options
+        clearable
+        :options="mixerInputOptions"
+        :label="t('workspace.colMixerInput')"
+        :hint="t('workspace.colMixerInputHint')"
+        class="q-mb-sm"
+        data-testid="inspector-channel-mixer-input"
+        @update:model-value="(v) => save({ attributes: { mixer_input: v || null } })"
       />
       <div
         v-if="pluggedNode"
@@ -261,6 +279,44 @@
         class="q-mb-md"
       />
 
+      <!-- A mixer's channels are their own entities (subdevices), not ports on the mixer. List them so
+           tapping one opens that channel's own inspector (cable flow, source, ports) — consistent with
+           the crew/patch views, which already treat a channel as its own device. -->
+      <div
+        v-if="mixerChannels.length"
+        class="q-mb-md"
+        data-testid="mixer-channels"
+      >
+        <div class="text-caption text-grey-5 text-uppercase q-mb-xs">
+          {{ t('workspace.channelsOfMixer') }}
+        </div>
+        <q-list
+          bordered
+          separator
+        >
+          <q-item
+            v-for="ch in mixerChannels"
+            :key="ch.id"
+            clickable
+            :data-testid="`mixer-channel-${ch.id}`"
+            @click="emit('select', ch.id)"
+          >
+            <q-item-section>
+              <q-item-label>{{ ch.name }}</q-item-label>
+              <q-item-label
+                v-if="ch.attributes?.source_label || ch.attributes?.device"
+                caption
+              >
+                {{ ch.attributes.source_label || ch.attributes.device }}
+              </q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <q-icon name="open_in_new" />
+            </q-item-section>
+          </q-item>
+        </q-list>
+      </div>
+
       <div
         v-if="(needsBookingRequest(device) || device.stockwire_request_status) && stockwire.isEnabled"
         class="q-mb-md"
@@ -282,11 +338,46 @@
         />
       </div>
 
+      <div
+        v-if="canShowAssetPanel"
+        class="q-mb-md"
+        data-testid="stockwire-asset-panel"
+      >
+        <div class="text-caption text-grey-5 text-uppercase q-mb-xs">
+          {{ t('workspace.bind.title') }}
+        </div>
+        <StockwireAssetSummary :asset="boundAsset" />
+        <div class="row q-gutter-sm">
+          <q-btn
+            v-if="canManageAssetLink"
+            color="primary"
+            no-caps
+            icon="link"
+            :label="boundAsset.isBound ? t('workspace.bind.change') : t('workspace.bind.bind')"
+            data-testid="bind-open"
+            data-readonly-allowed
+            @click="bindOpen = true"
+          />
+          <q-btn
+            v-if="boundAsset.isBound && canManageAssetLink"
+            flat
+            color="negative"
+            no-caps
+            icon="link_off"
+            :label="t('workspace.bind.unbind')"
+            data-testid="bind-unbind"
+            data-readonly-allowed
+            @click="unbind"
+          />
+        </div>
+      </div>
+
       <q-expansion-item
         dense
         default-opened
         icon="cable"
         :label="t('workspace.connect')"
+        data-testid="inspector-connect-section"
       >
         <div class="q-gutter-sm q-pa-sm">
           <q-select
@@ -295,7 +386,7 @@
             outlined
             emit-value
             map-options
-            :options="portOptions(device, 'out')"
+            :options="sourcePortOptions"
             :label="t('workspace.fromPort')"
           />
           <q-select
@@ -306,6 +397,7 @@
             map-options
             :options="otherDevices"
             :label="t('workspace.toDevice')"
+            data-testid="connect-to-device"
           />
           <q-select
             v-model="form.dstPort"
@@ -314,7 +406,7 @@
             emit-value
             map-options
             :disable="!form.dstId"
-            :options="portOptions(devicesById.get(form.dstId), 'in')"
+            :options="dstPortOptions"
             :label="t('workspace.toPort')"
           />
           <q-input
@@ -356,45 +448,110 @@
             data-testid="connect"
             @click="connect(false)"
           />
+          <div
+            v-if="deviceConnections.length"
+            class="q-mt-sm"
+            data-testid="inspector-connections"
+          >
+            <div class="text-caption text-grey-6 q-mb-xs">
+              {{ t('workspace.existingConnections') }}
+            </div>
+            <q-list
+              dense
+              bordered
+              separator
+            >
+              <q-item
+                v-for="c in deviceConnections"
+                :key="c.id"
+              >
+                <q-item-section>
+                  <div class="text-caption">
+                    {{ c.fromName }}
+                    <span class="text-grey-6">{{ c.fromPort }}</span>
+                    → {{ c.toName }}
+                    <span class="text-grey-6">{{ c.toPort }}</span>
+                  </div>
+                  <div
+                    v-if="c.patchLabel || c.connector"
+                    class="text-caption text-grey-5"
+                  >
+                    {{ [c.patchLabel, c.connector].filter(Boolean).join(' · ') }}
+                  </div>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn
+                    v-if="!readonly"
+                    flat
+                    dense
+                    round
+                    icon="link_off"
+                    color="negative"
+                    :aria-label="t('workspace.removeConnection')"
+                    data-testid="remove-connection"
+                    @click="removeConnection(c.id)"
+                  />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </div>
         </div>
       </q-expansion-item>
 
       <q-expansion-item
-        v-for="dir in ['upstream', 'downstream']"
-        :key="dir"
+        v-if="readonly && graphData"
         dense
+        default-opened
         icon="timeline"
-        :label="dir === 'upstream' ? t('workspace.traceUp') : t('workspace.traceDown')"
-        @show="loadTrace(dir)"
+        :label="t('workspace.signalFlow')"
+        data-testid="inspector-signal-flow"
       >
         <div class="q-pa-sm">
-          <div
-            v-if="!traces[dir] || !traces[dir].hops.length"
-            class="text-grey-6"
-          >
-            {{ t('workspace.traceEmpty') }}
-          </div>
-          <q-list
-            v-else
-            dense
-          >
-            <q-item
-              v-for="hop in traces[dir].hops"
-              :key="hop.edge.id"
-            >
-              <q-item-section>
-                {{ '→ '.repeat(hop.depth) }}{{ devicesById.get(hop.device_id)?.name || '?' }}
-              </q-item-section>
-            </q-item>
-          </q-list>
-          <div
-            v-if="traces[dir]?.issues.length"
-            class="text-negative text-caption"
-          >
-            {{ t('workspace.traceIssues', { n: traces[dir].issues.length }) }}
-          </div>
+          <SignalFlowDiagram
+            :devices="graphDevices"
+            :edges="graphEdges"
+            :focus-id="device.id"
+          />
         </div>
       </q-expansion-item>
+      <template v-else>
+        <q-expansion-item
+          v-for="dir in ['upstream', 'downstream']"
+          :key="dir"
+          dense
+          icon="timeline"
+          :label="dir === 'upstream' ? t('workspace.traceUp') : t('workspace.traceDown')"
+          @show="loadTrace(dir)"
+        >
+          <div class="q-pa-sm">
+            <div
+              v-if="!traces[dir] || !traces[dir].hops.length"
+              class="text-grey-6"
+            >
+              {{ t('workspace.traceEmpty') }}
+            </div>
+            <q-list
+              v-else
+              dense
+            >
+              <q-item
+                v-for="hop in traces[dir].hops"
+                :key="hop.edge.id"
+              >
+                <q-item-section>
+                  {{ '→ '.repeat(hop.depth) }}{{ devicesById.get(hop.device_id)?.name || '?' }}
+                </q-item-section>
+              </q-item>
+            </q-list>
+            <div
+              v-if="traces[dir]?.issues.length"
+              class="text-negative text-caption"
+            >
+              {{ t('workspace.traceIssues', { n: traces[dir].issues.length }) }}
+            </div>
+          </div>
+        </q-expansion-item>
+      </template>
 
       <q-expansion-item
         v-if="isNetworkedDomain"
@@ -484,35 +641,74 @@
     :device="device"
     :job-id="jobId"
   />
+  <BindStockwireDialog
+    v-model="bindOpen"
+    :job-id="jobId"
+    :device="device"
+    :share-token="shareToken"
+    :stockwire-product-id="stockwireProductId"
+    @bound="onAssetBound"
+  />
 </template>
 
 <script setup>
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, reactive, ref, watch } from 'vue';
+import axios from 'axios';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useStockwireStore } from '@/stores/stockwire';
+import { getApiBaseUrl } from '@/utils/runtime-config';
 import { legacyId } from '@/utils/graphLegacy';
-import { isPlotElement, isPowerNode, isVirtual, outputPointOptions } from '@/utils/workspace';
+import {
+  isPlotElement,
+  isPowerNode,
+  isVirtual,
+  isGear,
+  outputPointOptions,
+  channelsOf,
+  outputsOf,
+  mixerInputChoices,
+  socketOptions,
+  splitSocket,
+  portLabelOf,
+} from '@/utils/workspace';
 import PortUsage from '@/components/PortUsage.vue';
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
+import BindStockwireDialog from '@/components/BindStockwireDialog.vue';
+import StockwireAssetSummary from '@/components/StockwireAssetSummary.vue';
+import SignalFlowDiagram from '@/components/SignalFlowDiagram.vue';
 import { isSpeakerType } from '@/utils/plotObjects';
-import { DEVICE_BOX_CM, DOMAIN_SIGNAL, POWER_INLETS, needsBookingRequest } from '@/utils/workspace';
+import {
+  DEVICE_BOX_CM,
+  DOMAIN_SIGNAL,
+  POWER_INLETS,
+  needsBookingRequest,
+  stockwireAssetOf,
+} from '@/utils/workspace';
 
 const props = defineProps({
   jobId: { type: String, required: true },
   device: { type: Object, default: null },
+  // Read-only views disable editors; a share token may separately authorize asset binding.
+  readonly: { type: Boolean, default: false },
+  shareToken: { type: String, default: '' },
+  canBindAssets: { type: Boolean, default: false },
+  graphData: { type: Object, default: null },
 });
-const emit = defineEmits(['request-booking', 'remove']);
+const emit = defineEmits(['request-booking', 'remove', 'select', 'asset-bound']);
 
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const stagePlot = useStagePlotStore();
 const stockwire = useStockwireStore();
+const shareApi = axios.create({ baseURL: `${getApiBaseUrl()}/api/v1` });
+const graphDevices = computed(() => props.graphData?.devices || graph.devices);
+const graphEdges = computed(() => props.graphData?.edges || graph.edges);
 
 // A plot object links to a channel (a performer's name goes onto it) and to a device (the
 // microphone or other gear they use). Links are set by legacy id, through the plot store.
@@ -521,13 +717,13 @@ const elementLinks = computed(() => {
   return stagePlot.elements.find((e) => e.id === legacyId(props.device)) || {};
 });
 const channelOptions = computed(() =>
-  graph.devices
+  graphDevices.value
     .filter((d) => d.kind === 'channel')
     .sort((a, b) => (a.attributes.channel_number || 0) - (b.attributes.channel_number || 0))
     .map((d) => ({ value: legacyId(d), label: `${d.attributes.channel_number || ''} ${d.name}`.trim() })),
 );
 const gearOptions = computed(() =>
-  graph.devices
+  graphDevices.value
     .filter((d) => !isVirtual(d) && !isPlotElement(d))
     .map((d) => ({ value: legacyId(d), label: d.name })),
 );
@@ -537,14 +733,21 @@ const isSpeaker = computed(() => isSpeakerType(props.device?.attributes?.element
 const isCameraOrProjector = computed(() =>
   ['camera', 'projector'].includes(props.device?.attributes?.element_type),
 );
-const outputPoints = computed(() => outputPointOptions(graph.devices, graph.edges));
+const outputPoints = computed(() => outputPointOptions(graphDevices.value, graphEdges.value));
+// A mixer owns a channel list: its channels are their own entities (subdevices of the mixer), not
+// buried ports. List them so the crew/editor can open a channel's own inspector from the mixer.
+const mixerChannels = computed(() =>
+  props.device?.sound_list_id
+    ? channelsOf(graphDevices.value, props.device.sound_list_id)
+    : [],
+);
 const videoInputOptions = computed(() =>
-  graph.devices
+  graphDevices.value
     .filter((d) => d.kind === 'video_input')
     .map((d) => ({ value: legacyId(d), label: `${d.attributes.input_number || ''} ${d.name}`.trim() })),
 );
 const lensOptions = computed(() =>
-  graph.devices
+  graphDevices.value
     .filter((d) => d.kind === 'lens')
     .map((d) => ({ value: legacyId(d), label: d.name })),
 );
@@ -554,7 +757,7 @@ const isPowerable = computed(
 );
 const linkedGear = computed(() =>
   elementLinks.value.linked_device_id
-    ? graph.devices.find((d) => d.legacy_ref === `device:${elementLinks.value.linked_device_id}`) || null
+    ? graphDevices.value.find((d) => d.legacy_ref === `device:${elementLinks.value.linked_device_id}`) || null
     : null,
 );
 async function setLinkedInlet(value) {
@@ -580,7 +783,7 @@ async function createDeviceForElement() {
 // Gear plugged into a power node shows where, and can be unplugged (the node keeps its other loads).
 const pluggedNode = computed(() =>
   props.device?.attributes?.power_node_id
-    ? graph.devices.find((d) => d.id === props.device.attributes.power_node_id) || null
+    ? graphDevices.value.find((d) => d.id === props.device.attributes.power_node_id) || null
     : null,
 );
 async function unplug() {
@@ -588,6 +791,30 @@ async function unplug() {
     await graph.assignLoad(props.jobId, props.device.id, { power_node_id: null });
   } catch (err) {
     $q.notify({ type: 'negative', message: apiErrorText(err) });
+  }
+}
+
+// Unbinding clears both the bound asset and its mirrored Stockwire device ID; no rental allocation is released.
+async function unbind() {
+  try {
+    const updated = props.shareToken
+      ? (
+          await shareApi.delete(
+            `/jobs/${props.jobId}/devices/${props.device.id}/asset-binding`,
+            {
+              params: {
+                token: props.shareToken,
+                expected_revision: props.device.revision,
+              },
+            },
+          )
+        ).data
+      : await graph.unbindStockwireAsset(props.jobId, props.device.id);
+    emit('asset-bound', updated);
+  } catch (err) {
+    if (props.shareToken || !isRevisionConflict(err)) {
+      $q.notify({ type: 'negative', message: apiErrorText(err) });
+    }
   }
 }
 
@@ -601,6 +828,33 @@ async function linkElement(links) {
 const form = reactive({ srcPort: null, dstId: null, dstPort: null, channels: 1 });
 const rejected = ref([]);
 const traces = reactive({ upstream: null, downstream: null });
+// The device's own connections, so the connect section shows what is already patched to it
+// (a freshly made connection appears here immediately, without opening the trace).
+const deviceConnections = computed(() => {
+  const id = props.device?.id;
+  if (!id) return [];
+  return graphEdges.value
+    .filter((e) => e.src_device_id === id || e.dst_device_id === id)
+    .map((e) => {
+      const isSrc = e.src_device_id === id;
+      const otherId = isSrc ? e.dst_device_id : e.src_device_id;
+      const other = devicesById.value.get(otherId);
+      const otherName = other?.name || otherId;
+      const socket = e.attributes?.dst_socket || null;
+      const srcName = isSrc ? props.device.name : otherName;
+      const dstName = isSrc ? otherName : props.device.name;
+      return {
+        id: e.id,
+        signal: e.signal,
+        fromName: srcName,
+        fromPort: portLabelOf(isSrc ? props.device : other, e.src_port),
+        toName: dstName,
+        toPort: portLabelOf(isSrc ? other : props.device, e.dst_port, socket),
+        patchLabel: e.attributes?.patch_label || '',
+        connector: e.attributes?.connector || '',
+      };
+    });
+});
 
 // AVL signal domains (audio/video/lighting) carry IP-networked control gear; power and
 // rigging nodes don't, so the Network & Control panel is hidden for them.
@@ -617,6 +871,11 @@ const isNetworkedDomain = computed(() =>
 // Snapshot of the device's attribute bag; new keys (network_*) are merged in by the
 // shallow-merge update path, so sibling keys are never clobbered by a single-field edit.
 const attrs = computed(() => props.device?.attributes || {});
+// Strict dropdown of the physical inputs a channel can be fed from: the mixer's inputs plus any
+// stagebox patched into that mixer (see mixerInputChoices in workspace.js).
+const mixerInputOptions = computed(() =>
+  mixerInputChoices(props.device, graphDevices.value, graphEdges.value),
+);
 const deviceIpWebUi = computed(() => {
   const ip = props.device?.attributes?.network_ip;
   return ip ? `http://${ip}` : null;
@@ -625,15 +884,84 @@ const deviceIpWebUi = computed(() => {
 // Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
 // power, camera specs. It opens from here so any device reached through the inspector can use it.
 const detailsOpen = ref(false);
-const canEditDetails = computed(
-  () => props.device && !isPlotElement(props.device) && !isPowerNode(props.device) && !isVirtual(props.device),
+const bindOpen = ref(false);
+const stockwireProductId = computed(
+  () => props.device?.stockwire_product_id || props.device?.attributes?.stockwire_product_id || null,
 );
-const devicesById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
+// The bound Stockwire inventory asset, if any, surfaced from the device's attribute bag.
+const boundAsset = computed(() => {
+  // Show the scanned/typed code (stockwire_asset_code) to the user, not the resolved
+  // Stockwire DB id — that's what a crew member will scan to locate this device.
+  return stockwireAssetOf(props.device);
+});
+const canEditDetails = computed(
+  () =>
+    props.device &&
+    !props.readonly &&
+    !isPlotElement(props.device) &&
+    !isPowerNode(props.device) &&
+    !isVirtual(props.device),
+);
+const canShowAssetPanel = computed(() => Boolean(props.device && isGear(props.device)));
+const canManageAssetLink = computed(
+  () => canEditDetails.value || (props.readonly && props.canBindAssets && canShowAssetPanel.value),
+);
+function onAssetBound(device) {
+  emit('asset-bound', device);
+}
+const devicesById = computed(() => new Map(graphDevices.value.map((d) => [d.id, d])));
+const isMixer = (d) => d && (d.kind === 'mixer' || d.device_type === 'mixer');
+// Connection targets are real gear only: channels, buses (channel lists), outputs, DMX/video
+// virtual nodes, plot elements and power nodes are not endpoints you patch *into*, so offering
+// them in the "to device" picker would let a user wire a cable to a non-device (a channel appears
+// as its own entity elsewhere, but it is never a connection target).
 const otherDevices = computed(() =>
-  graph.devices
-    .filter((d) => d.id !== props.device?.id)
+  graphDevices.value
+    .filter((d) => d.id !== props.device?.id && isGear(d))
     .map((d) => ({ label: d.name, value: d.id })),
 );
+// Source ("from") ports: the device's own out-ports, plus — when this device is a mixer — each of
+// its channels and output buses as a selectable source. A `node:<id>` value means the edge leaves
+// that sub-node's `out` port (so you can send from a specific channel, not just the mixer's jack).
+const sourcePortOptions = computed(() => {
+  const base = portOptions(props.device, 'out');
+  if (!isMixer(props.device)) return base;
+  const listId = props.device.sound_list_id;
+  const subs = [
+    ...channelsOf(graphDevices.value, listId).map((ch) => ({
+      // the physical mixer input a channel is fed from is part of the signal flow, so surface it
+      label: `${ch.name}${ch.attributes?.mixer_input ? ` (${ch.attributes.mixer_input})` : ""} · channel out`,
+      value: `node:${ch.id}`,
+    })),
+    ...outputsOf(graphDevices.value, listId).map((o) => ({
+      label: `${o.name} · bus out`,
+      value: `node:${o.id}`,
+    })),
+  ];
+  return [...base, ...subs];
+});
+// Destination ("to") ports: when the chosen gear is a mixer, offer its channels as the targets —
+// each ends on the channel's `in` port, which is the *true end of the signal chain* (a mic or a
+// digital stagebox terminates on the channel, not on the mixer's physical jack). Generic in-ports
+// of the mixer are still offered for the rare direct-to-jack case.
+const dstDevice = computed(() => devicesById.value.get(form.dstId));
+const dstPortOptions = computed(() => {
+  const d = dstDevice.value;
+  if (!d) return [];
+  if (!isMixer(d)) return socketOptions(d, 'in');
+  const listId = d.sound_list_id;
+  const subs = channelsOf(graphDevices.value, listId).map((ch) => ({
+    // the physical mixer input a channel is fed from is part of the signal flow, so surface it
+    label: `${ch.name}${ch.attributes?.mixer_input ? ` (${ch.attributes.mixer_input})` : ""} · channel in`,
+    value: `node:${ch.id}`,
+  }));
+  return [...subs, ...socketOptions(d, 'in')];
+});
+function resolveNodeRef(ref) {
+  // `node:<id>` selects a sub-node (channel/bus) of a mixer; plain ids stay as the device/port.
+  if (typeof ref === 'string' && ref.startsWith('node:')) return { id: ref.slice(5), port: null };
+  return { id: null, port: ref };
+}
 const statusLabel = computed(() => {
   const status = props.device?.stockwire_request_status;
   if (status === 'failed') return t('workspace.requestFailed');
@@ -658,10 +986,35 @@ watch(
 );
 
 async function loadTrace(direction) {
+  if (props.graphData) {
+    const visited = new Set([props.device.id]);
+    const queue = [{ id: props.device.id, depth: 0 }];
+    const hops = [];
+    while (queue.length) {
+      const current = queue.shift();
+      const adjacent = graphEdges.value.filter((edge) =>
+        direction === 'upstream'
+          ? edge.dst_device_id === current.id
+          : edge.src_device_id === current.id,
+      );
+      for (const edge of adjacent) {
+        const deviceId =
+          direction === 'upstream' ? edge.src_device_id : edge.dst_device_id;
+        if (visited.has(deviceId)) continue;
+        visited.add(deviceId);
+        const depth = current.depth + 1;
+        hops.push({ edge, depth, device_id: deviceId });
+        queue.push({ id: deviceId, depth });
+      }
+    }
+    traces[direction] = { hops, issues: [] };
+    return;
+  }
   traces[direction] = await graph.trace(props.jobId, props.device.id, direction);
 }
 
 async function save(changes) {
+  if (props.readonly) return;
   try {
     await graph.updateDevice(props.jobId, props.device.id, changes);
   } catch (err) {
@@ -673,25 +1026,62 @@ async function save(changes) {
 
 async function connect(force) {
   const src = props.device;
-  const port = (src.ports || []).find((p) => p.id === form.srcPort);
+  // A `node:<id>` source/destination means the edge terminates on a mixer sub-node (a channel or
+  // output bus) rather than the mixer itself — the channel being the true endpoint of the chain.
+  const srcRef = resolveNodeRef(form.srcPort);
+  const dstRef = resolveNodeRef(form.dstPort);
+  // A socket ("in-xlr3#5") lands on one physical input of a multi-channel port: the port is the
+  // id before the `#`, and the socket travels on the edge so validation can check it.
+  const dstSplit = dstRef.port ? splitSocket(dstRef.port) : { port: null, socket: null };
+  const srcDeviceId = srcRef.id ?? src.id;
+  const srcPortId = srcRef.port ?? 'out';
+  const dstDeviceId = dstRef.id ?? form.dstId;
+  const dstPortId = dstSplit.port ?? 'in';
+  const port =
+    (devicesById.value.get(srcDeviceId)?.ports || []).find((p) => p.id === srcPortId) ||
+    (src.ports || []).find((p) => p.id === srcPortId);
   try {
     await graph.createEdge(
       props.jobId,
       {
         signal: port?.signal || DOMAIN_SIGNAL[src.domain] || 'audio',
-        src_device_id: src.id,
-        src_port: form.srcPort,
-        dst_device_id: form.dstId,
-        dst_port: form.dstPort,
+        src_device_id: srcDeviceId,
+        src_port: srcPortId,
+        dst_device_id: dstDeviceId,
+        dst_port: dstPortId,
         channels: form.channels || 1,
+        attributes: dstSplit.socket ? { dst_socket: dstSplit.socket } : {},
       },
       { force },
     );
     rejected.value = [];
+    // reset the form so the new edge shows in the connection list below rather than lingering
+    Object.assign(form, { srcPort: null, dstId: null, dstPort: null, channels: 1 });
   } catch (err) {
     const detail = err.response?.data?.detail;
     if (detail?.code === 'invalid_connection') rejected.value = detail.issues;
     else $q.notify({ type: 'negative', message: typeof detail === 'string' ? detail : err.message });
   }
 }
+
+async function removeConnection(edgeId) {
+  if (props.readonly) return;
+  try {
+    await graph.deleteEdge(props.jobId, edgeId);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  }
+}
 </script>
+
+<style scoped>
+/* Read-only crew view keeps editors inert and hides actions except those explicitly authorized
+   by the share token, such as Stockwire asset binding. */
+.inspector-readonly :deep(.q-field) {
+  pointer-events: none;
+}
+.inspector-readonly :deep(.q-btn:not([data-readonly-allowed])) {
+  display: none !important;
+}
+</style>
+

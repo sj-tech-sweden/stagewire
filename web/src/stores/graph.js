@@ -7,6 +7,8 @@ import {
   deviceTypeFromCategory,
   fillFormFromSpecs,
   isVirtual,
+  POWERED_AUDIO_TYPES,
+  signalForType,
 } from '@/utils/workspace';
 
 const base = (jobId) => `/jobs/${jobId}/graph`;
@@ -116,7 +118,7 @@ export const useGraphStore = defineStore('graph', {
         'graph.edge.upsert',
       );
     },
-    async versionedPatch(url, entityType, ids, changes, start, eventType, retried = false) {
+    async versionedPatch(url, entityType, ids, changes, start, eventType, attempt = 0) {
       try {
         const { data } = await api.patch(url, {
           ...changes,
@@ -130,8 +132,14 @@ export const useGraphStore = defineStore('graph', {
         const current = error.response.data.detail.current;
         this.applyRealtimeEvent({ type: eventType, payload: current });
         const { merged, conflicts } = threeWayMerge(start, changes, current);
-        if (conflicts.length === 0 && !retried) {
-          return this.versionedPatch(url, entityType, ids, merged, current, eventType, true);
+        // An empty conflict list means the user's edit did not actually collide with the
+        // server's row — it was only an optimistic-concurrency race (typically two rapid
+        // field edits on the same device firing before the first response lands). Never open
+        // the conflict dialog for that; retry against the latest row instead, bounded so a
+        // pathological storm of concurrent editors cannot loop forever.
+        if (conflicts.length === 0) {
+          if (attempt >= 5) return current;
+          return this.versionedPatch(url, entityType, ids, merged, current, eventType, attempt + 1);
         }
         this.conflict = { entityType, ids, base: start, draft: changes, current, conflicts };
         throw error;
@@ -185,6 +193,22 @@ export const useGraphStore = defineStore('graph', {
     },
     async requestStockwireBooking(jobId, id) {
       const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/request-stockwire`);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    // Binds a physical Stockwire inventory asset to this device. The server records the code
+    // locally (so the link survives offline) and, when the integration is enabled, resolves
+    // tag/serial/description. The returned device is applied as a realtime upsert event.
+    async bindStockwireAsset(jobId, id, payload) {
+      const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/bind-asset`, payload);
+      this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
+      return data;
+    },
+    async unbindStockwireAsset(jobId, id) {
+      const device = this.devices.find((item) => item.id === id);
+      const { data } = await api.delete(`${baseFor(this, jobId)}/devices/${id}/asset-binding`, {
+        params: { expected_revision: device?.revision },
+      });
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
       return data;
     },
@@ -317,6 +341,15 @@ export const useGraphStore = defineStore('graph', {
       const form = deviceForm(null);
       form.device_type = deviceTypeFromCategory(product.category);
       fillFormFromSpecs(form, product, specs);
+      // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
+      // An explicit product spec (e.g. a powered speaker) still wins over this default.
+      if (
+        !form.power_inlet &&
+        signalForType(form.device_type) === 'audio' &&
+        !POWERED_AUDIO_TYPES.has(form.device_type)
+      ) {
+        form.power_inlet = 'none';
+      }
       form.name = form.name || product.name;
       return this.createAudioDevice(jobId, deviceCreateBody(form));
     },

@@ -3,6 +3,7 @@ from types import SimpleNamespace as NS
 import app.main  # noqa: F401  (registers every model before the test schema is built)
 from app.domains.reports.cable_routing import (
     _inside_length,
+    derive_cables_from_graph,
     element_centre,
     route_cable,
     routed_cable_paths,
@@ -116,6 +117,66 @@ def test_routed_cables_come_from_channels_and_video_inputs_in_stage_coordinates(
     assert by_key["src:mic"]["points"][0] == (0, 200)
     assert by_key["src:mic"]["points"][-1] == (900, 200)
     assert by_key["src:cam"]["points"][-1] == (700, 400)
+
+
+def test_graph_channel_source_uses_its_plot_element_once_when_one_is_linked():
+    element = NS(
+        id="element",
+        kind="plot_element",
+        attributes={"element_type": "microphone", "legacy_id": "mic-element"},
+        canvas_x_cm=0,
+        canvas_y_cm=0,
+        canvas_rotation=0,
+        created_at="2025-01-01",
+    )
+    mic = NS(id="mic-device", kind="mic", attributes={}, created_at="2025-01-01")
+    stagebox = NS(id="stagebox", kind="stagebox", attributes={}, created_at="2025-01-01")
+    channel = NS(id="channel", kind="channel", attributes={}, created_at="2025-01-01")
+    links = [
+        NS(
+            id="channel-link",
+            signal="link",
+            src_device_id="element",
+            dst_device_id="channel",
+            attributes={"role": "channel"},
+        ),
+        NS(
+            id="device-link",
+            signal="link",
+            src_device_id="element",
+            dst_device_id="mic-device",
+            attributes={"role": "device"},
+        ),
+    ]
+    edges = [
+        *links,
+        NS(
+            id="source",
+            signal="audio",
+            src_device_id="mic-device",
+            dst_device_id="stagebox",
+            attributes={"channel_source": True, "channel_id": "channel"},
+        ),
+        NS(
+            id="patch",
+            signal="audio",
+            src_device_id="stagebox",
+            dst_device_id="channel",
+            attributes={"chain": "channel", "point_id": "point-1", "position": 0},
+        ),
+    ]
+
+    cables = derive_cables_from_graph([element, mic, stagebox, channel], edges)
+    assert [(c.key, c.from_element_id, c.from_device_id, c.to_device_id) for c in cables] == [
+        ("src:mic-element", "element", None, "stagebox")
+    ]
+
+    cables_without_element_link = derive_cables_from_graph(
+        [element, mic, stagebox, channel], edges[1:]
+    )
+    assert [(c.key, c.from_device_id, c.to_device_id) for c in cables_without_element_link] == [
+        ("source", "mic-device", "stagebox")
+    ]
 
 
 def test_hidden_cables_are_left_out():

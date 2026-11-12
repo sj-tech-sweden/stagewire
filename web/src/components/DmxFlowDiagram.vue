@@ -148,10 +148,12 @@ function subLabel(node) {
   const bits = [];
   if (node.kind === 'fixture') bits.push(t('dmxChain.kindFixture'));
   else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
+  else if (node.kind === 'channel') bits.push(t('workspace.channel'));
   else bits.push(t('dmxChain.kindDevice'));
   if (node.in_port) bits.push(`in ${node.in_port}`);
   if (node.out_port) bits.push(`out ${node.out_port}`);
   if (node.connector) bits.push(node.connector);
+  if (node.patch_label) bits.push(node.patch_label);
   return bits.join(' · ') || '—';
 }
 
@@ -202,7 +204,7 @@ const layout = computed(() => {
         y1: nodeY(rec.ry),
         x2: nodeX(childRec.depth),
         y2: nodeY(childRec.ry),
-        label: c.connector || c.in_port || '',
+        label: [c.patch_label, c.connector, c.in_port].filter(Boolean).join(' · '),
       });
     }
   }

@@ -38,6 +38,19 @@ from app.domains.graph.ids import public_id
 from app.domains.graph.models import ConnectionEdge, GraphDevice, scope_filter
 
 REF = "device:"
+NON_GEAR_KINDS = frozenset(
+    {
+        "channel",
+        "channel_list",
+        "output",
+        "video_list",
+        "video_input",
+        "video_destination",
+        "rigging_point",
+        "dmx_universe",
+        "plot_element",
+    }
+)
 SPEC_FIELDS = (
     "sensor_width_mm",
     "focal_min_mm",
@@ -86,6 +99,13 @@ CLEARABLE = {
 
 def is_device(node: GraphDevice | None) -> bool:
     return node is not None and bool(node.legacy_ref and node.legacy_ref.startswith(REF))
+
+
+def is_physical_gear(node: GraphDevice) -> bool:
+    """Whether a graph node represents gear that can carry a Stockwire asset link."""
+    return node.kind not in NON_GEAR_KINDS and not (
+        node.domain == "power" and node.kind in power_native.POWER_KINDS
+    )
 
 
 def _uuid(value) -> uuid.UUID | None:

@@ -30,7 +30,6 @@ async def _seed() -> tuple[str, str]:
             channel_number=1,
             source_label="Kick",
             input_type="microphone",
-            connector="XLR",
             device="Beta 91",
             stand_type="Short boom",
             phantom_power=True,

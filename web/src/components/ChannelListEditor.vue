@@ -186,7 +186,7 @@
       </div>
       <!-- On phones every channel is a card with the same editors as the table row: the header
            has the number, name and actions, the summary line says what is set, and "Details"
-           opens kind, source, stand, connector, 48V, stereo, wireless and notes. -->
+           opens kind, source, stand, mixer input, 48V, stereo, wireless and notes. -->
       <div
         v-if="$q.screen.lt.sm"
         class="column q-gutter-sm"
@@ -334,9 +334,18 @@
                 :hint="''"
                 @update:model-value="(p) => setStand(ch, p)"
               />
-              <ConnectorSelect
-                :model-value="ch.attributes.connector || ''"
-                @update:model-value="(v) => saveAttr(ch, 'connector', v)"
+              <q-select
+                :model-value="ch.attributes.mixer_input || null"
+                dense
+                outlined
+                emit-value
+                map-options
+                clearable
+                :options="mixerInputChoices(ch, graph.devices, graph.edges)"
+                :label="t('workspace.colMixerInput')"
+                :hint="t('workspace.colMixerInputHint')"
+                data-testid="channel-mixer-input"
+                @update:model-value="(v) => saveAttr(ch, 'mixer_input', v || null)"
               />
               <div class="row items-center">
                 <q-checkbox
@@ -519,15 +528,6 @@
             />
           </q-td>
         </template>
-        <template #body-cell-connector="slot">
-          <q-td :props="slot">
-            <ConnectorSelect
-              :model-value="slot.row.attributes.connector || ''"
-              borderless
-              @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
-            />
-          </q-td>
-        </template>
         <template #body-cell-stereo="slot">
           <q-td :props="slot">
             <q-checkbox
@@ -600,6 +600,15 @@
         </template>
         <template #body-cell-actions="slot">
           <q-td :props="slot">
+            <q-btn
+              flat
+              dense
+              round
+              icon="open_in_new"
+              :aria-label="t('workspace.openDevice')"
+              data-testid="open-channel-device"
+              @click="editDevice(slot.row)"
+            />
             <q-btn
               flat
               dense
@@ -731,6 +740,7 @@
       :venue-id="venueId"
       :title="chainTitle"
       :initial="chainInitial"
+      :direct="chainNode ? directLines(chainNode) : []"
       :devices="gear"
       :branching="chainKind === 'output'"
       :bus-channels="
@@ -845,6 +855,7 @@
 <script setup>
 import { apiErrorText } from "@/utils/errors";
 import { isRevisionConflict } from "@/utils/graph";
+import { deviceCreateBody, deviceForm, fillFormFromSpecs } from "@/utils/workspace";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
@@ -856,18 +867,20 @@ import { api } from "@/boot/api";
 import ListBulkDialog from "@/components/ListBulkDialog.vue";
 import MixerDialog from "@/components/MixerDialog.vue";
 import ChainFlowDialog from "@/components/ChainFlowDialog.vue";
-import ConnectorSelect from "@/components/ConnectorSelect.vue";
 import {
   chainForm,
   busChannelsFor,
   chainDevices,
-  chainSteps,
+  directConnections,
+  patchSummary,
   flowTree,
+  channelFlowTree,
   OUTPUT_MODES,
   channelsOf,
   isPlotElement,
   isOrphanedBySource,
   isVirtual,
+  mixerInputChoices,
   mixerSlotsToAdd,
   nextChannelNumber,
   outputsOf,
@@ -935,12 +948,6 @@ const columns = computed(() => [
     field: () => "",
     align: "left",
   },
-  {
-    name: "connector",
-    label: t("workspace.stepConnector"),
-    field: () => "",
-    align: "left",
-  },
   { name: "phantom_power", label: "48V", field: () => "", align: "center" },
   { name: "stereo", label: "ST", field: () => "", align: "center" },
   {
@@ -977,8 +984,9 @@ function ensureGraph() {
 }
 watch([contextId, contextKind], ensureGraph, { immediate: true });
 
-// One line saying what a channel has set, for the phone card: kind, source, stand, connector, 48V
-// and stereo, so the card shows the state without opening "Details".
+// One line saying what a channel has set, for the phone card: kind, source, stand, 48V and stereo,
+// so the card shows the state without opening "Details". The connector is the device's, not the
+// channel's, so it is not repeated here.
 const channelSummary = (ch) => {
   const a = ch.attributes;
   const side = stereoView(ch, channels.value);
@@ -986,15 +994,17 @@ const channelSummary = (ch) => {
     a.input_type ? t(`channels.type.${a.input_type}`) : "",
     sourceOf(ch)?.name,
     a.stand_type,
-    a.connector,
     a.phantom_power ? "48V" : "",
     side.linked ? `${t("channels.fieldStereo")} ${side.isL ? "L" : "R"}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
 };
-const chain = (node) =>
-  chainSteps(node, graph.edges, graph.devices).join(" → ");
+// The Patch column: the patch chain plus any cables made in the inspector (see patchSummary).
+const chain = (node) => patchSummary(node, graph.edges, graph.devices);
+// Cables to and from the node that are not in its patch chain, shown read-only in the chain dialog.
+const directLines = (node) =>
+  directConnections(node, graph.edges, graph.devices).map((d) => d.text);
 const failed = (err) =>
   $q.notify({ type: "negative", message: apiErrorText(err) });
 
@@ -1167,9 +1177,15 @@ function editDevice(device) {
 }
 const listMixers = computed(() => {
   const seen = new Map();
+  // The list's own auto-minted mixer device (linked by sound_list_id) is shown here even before any
+  // channel is actually patched into it.
+  const own = graph.devices.find(
+    (d) => (d.kind === "mixer" || d.device_type === "mixer") && d.sound_list_id === list.value.id,
+  );
+  if (own) seen.set(own.id, own);
   for (const channel of channels.value) {
     for (const device of chainDevices(channel, graph.edges, graph.devices)) {
-      if (device.kind === "mixer") seen.set(device.id, device);
+      if (device.kind === "mixer" || device.device_type === "mixer") seen.set(device.id, device);
     }
   }
   return [...seen.values()];
@@ -1178,6 +1194,10 @@ const listMixers = computed(() => {
 const mixerOpen = ref(false);
 // The mixer is stored on the list, which the server mirrors to the legacy list the Stockwire sync
 // reads. The list is then padded with empty inputs and outputs up to the mixer's size.
+//
+// We also keep a real, placeable mixer device in sync with that selection: setting a mixer mints one
+// (linked back to the list via `sound_list_id`) so it shows up in the gear list and can be dragged
+// onto the stage plot; clearing the mixer removes it again unless something is already patched to it.
 async function saveMixer({ product, inputs, buses }) {
   const wantInputs = Number(inputs) || 0;
   const wantBuses = Number(buses) || 0;
@@ -1209,6 +1229,53 @@ async function saveMixer({ product, inputs, buses }) {
         }),
       });
     }
+
+    const existing = graph.devices.find(
+      (d) =>
+        (d.kind === "mixer" || d.device_type === "mixer") &&
+        d.sound_list_id === list.value.id,
+    );
+    if (product) {
+      const name = product?.name || `${list.value.name} · Mixer`;
+      // The mixer device carries the product's inputs/outputs as ports so the stage plot shows
+      // its I/O; if the product spec says nothing we leave it empty (the list still reflects the
+      // channels/buses the user entered).
+      let ports = [];
+      if (product.id) {
+        try {
+          const { data: specs } = await api.get(`/stockwire/products/${product.id}/device-specs`);
+          const form = deviceForm(null);
+          form.device_type = "mixer";
+          fillFormFromSpecs(form, product, specs || {});
+          ports = form.ports;
+        } catch {
+          ports = [];
+        }
+      }
+      if (existing) {
+        const changes = { name };
+        if (ports.length) changes.ports = ports;
+        if (existing.name !== name || (ports.length && JSON.stringify(existing.ports) !== JSON.stringify(ports)))
+          await graph.updateDevice(contextId.value, existing.id, changes);
+      } else {
+        await graph.createAudioDevice(
+          contextId.value,
+          deviceCreateBody({
+            name,
+            device_type: "mixer",
+            notes: "",
+            ports,
+            sound_list_id: list.value.id,
+          }),
+        );
+      }
+    } else if (existing) {
+      const inUse = graph.edges.some(
+        (e) => e.src_device_id === existing.id || e.dst_device_id === existing.id,
+      );
+      if (!inUse) await graph.deleteDevice(contextId.value, existing.id);
+    }
+
     mixerOpen.value = false;
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
@@ -1327,7 +1394,28 @@ async function setSource(node, pick) {
     if (!isRevisionConflict(err)) failed(err);
     return;
   }
+  if (previous && previous.id !== nextId) {
+    await clearSourceEdge(node, previous);
+  }
   await removeOrphanedSource(node, previous, nextId);
+}
+
+// Remove only a legacy frontend-owned source edge; current source edges are mirrored from the
+// channel's source attribute and are reconciled by backend graph sync.
+async function clearSourceEdge(channel, previous) {
+  const stale = graph.edges.find(
+    (e) =>
+      e.signal === 'audio' &&
+      e.src_device_id === previous.id &&
+      e.dst_device_id === channel.id &&
+      !(e.attributes || {}).legacy_ref,
+  );
+  if (!stale) return;
+  try {
+    await graph.deleteEdge(contextId.value, stale.id);
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
+  }
 }
 
 // The channel no longer points at its old source device, so that device goes too unless something
@@ -1397,11 +1485,13 @@ const flowSteps = ref([]);
 function openFlow(node, kind) {
   chainNode.value = node;
   chainKind.value = kind;
-  flowSteps.value = flowTree(
-    node.name,
-    chainForm(node, graph.edges, graph.devices),
-    graph.devices,
-  );
+  const steps = chainForm(node, graph.edges, graph.devices);
+  // A channel's flow also shows what feeds it and the direct cables it was connected with in the
+  // inspector, so the diagram matches the connections; outputs keep the patch chain only.
+  flowSteps.value =
+    kind === "channel"
+      ? channelFlowTree(node, graph.edges, graph.devices, node.name, steps)
+      : flowTree(node.name, steps, graph.devices);
   flowOpen.value = true;
 }
 function editFromFlow() {

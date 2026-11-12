@@ -167,6 +167,14 @@
         data-testid="open-reports"
         @click="reportDialog = true"
       />
+      <q-btn
+        flat
+        no-caps
+        icon="share"
+        :label="t('workspace.share.openMobile')"
+        data-testid="open-share"
+        @click="shareOpen = true"
+      />
     </div>
 
     <q-tabs
@@ -599,6 +607,7 @@
             <WorkspaceCanvas
               class="full-width"
               :devices="canvasDevices"
+              :anchors="cableAnchors"
               :edges="canvasEdges"
               :selected-id="graph.selectedDeviceId"
               :zoom="zoom"
@@ -715,6 +724,7 @@
             :device="graph.selectedDevice"
             @request-booking="requestBooking"
             @remove="removeDevice"
+            @select="(id) => (graph.selectedDeviceId = id)"
           />
         </q-card>
       </div>
@@ -742,6 +752,7 @@
           :device="graph.selectedDevice"
           @request-booking="requestBooking"
           @remove="removeDevice"
+          @select="(id) => (graph.selectedDeviceId = id)"
         />
       </q-card>
     </q-dialog>
@@ -753,6 +764,10 @@
       :stockwire-job-id="job?.stockwire_job_id || null"
       :start-date="job?.start_date || null"
       :end-date="job?.end_date || null"
+    />
+    <ShareJobDialog
+      v-model="shareOpen"
+      :job-id="jobId"
     />
   </q-page>
 </template>
@@ -782,6 +797,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useJobSocket } from '@/composables/useJobSocket';
 import {
   PRODUCT_MIME,
+  channelsOf,
   deviceFromProduct,
   devicesShownAsElements,
   isPlotElement,
@@ -800,6 +816,7 @@ import DeviceEditor from '@/components/DeviceEditor.vue';
 import LightsEditor from '@/components/LightsEditor.vue';
 import VideoEditor from '@/components/VideoEditor.vue';
 import RiggingEditor from '@/components/RiggingEditor.vue';
+import ShareJobDialog from '@/components/ShareJobDialog.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import WorkspaceTable from '@/components/WorkspaceTable.vue';
 
@@ -871,6 +888,21 @@ const canvasDevices = computed(() =>
       d.canvas_y_cm != null,
   ),
 );
+// A device drawn on the plot as an element (its link edge) has no box of its own, so a cable to it
+// is anchored at the element's position: the element is returned under the device's id. These are
+// used only to place cable ends, never drawn as devices.
+const cableAnchors = computed(() => {
+  const byId = new Map(graph.devices.map((d) => [d.id, d]));
+  const anchors = [];
+  for (const e of graph.edges) {
+    if (e.signal !== 'link' || e.attributes?.role !== 'device') continue;
+    const element = byId.get(e.src_device_id);
+    const device = byId.get(e.dst_device_id);
+    if (!element || !device || element.canvas_x_cm == null || element.canvas_y_cm == null) continue;
+    anchors.push({ ...element, id: device.id });
+  }
+  return anchors;
+});
 // Gear is on the stage plot once it has a position. Anything else is offered as a chip to place,
 // so the canvas never shows gear that is not part of the plot.
 const unplacedGear = computed(() =>
@@ -889,9 +921,38 @@ const viewShapes = computed(() => {
   const byLegacy = new Map(graph.devices.map((d) => [legacyId(d), d]));
   return plotFrame.viewShapes(elements, (el) => byLegacy.get(el.linked_device_id)?.attributes || null);
 });
-const canvasEdges = computed(() =>
-  graph.edges.filter((e) => e.signal !== 'link' && layers[SIGNAL_LAYER[e.signal]] !== false),
-);
+// Channels are virtual nodes (no stage position) and are the true endpoint of a source signal, but
+// on the stage plot the physical connection lands on the mixer. So any edge that terminates on a
+// channel is drawn to the channel's parent mixer instead — a mic into channel 3 reads as mic -> mixer.
+const channelToMixer = computed(() => {
+  const listToMixer = new Map();
+  for (const d of graph.devices) {
+    if ((d.kind === 'mixer' || d.device_type === 'mixer') && d.sound_list_id) {
+      listToMixer.set(d.sound_list_id, d.id);
+    }
+  }
+  const map = new Map();
+  for (const d of graph.devices) {
+    if (d.kind !== 'channel') continue;
+    const listId = d.attributes?.list_id;
+    const mixerId = listId && listToMixer.get(listId);
+    if (mixerId) map.set(d.id, mixerId);
+  }
+  return map;
+});
+const canvasEdges = computed(() => {
+  const map = channelToMixer.value;
+  const out = [];
+  for (const e of graph.edges) {
+    if (e.signal === 'link') continue;
+    if (layers[SIGNAL_LAYER[e.signal]] === false) continue;
+    const src = map.get(e.src_device_id) ?? e.src_device_id;
+    const dst = map.get(e.dst_device_id) ?? e.dst_device_id;
+    if (src === dst) continue; // a resolved self-loop (channel->channel of one mixer) is not drawn
+    out.push({ ...e, src_device_id: src, dst_device_id: dst });
+  }
+  return out;
+});
 const inspectorOpen = computed(() => Boolean(graph.selectedDevice) || Boolean(selectedOutlet.value));
 
 const modeKey = `sw_ws_mode_${jobId}`;
@@ -997,12 +1058,24 @@ async function connectDevices({ srcId, dstId }) {
     $q.notify({ type: 'negative', message: t('workspace.noFreePorts', { from: src.name, to: dst.name }) });
     return;
   }
+  // When the destination is a mixer, terminate the edge on its first channel rather than the
+  // mixer's physical jack — the channel is the true end of the signal chain (a mic or a digital
+  // stagebox lands on the channel). Downstream the channel feeds the bus/PA as before.
+  let dstDeviceId = dstId;
+  let dstPortId = fit.dstPort;
+  if (fit.signal === 'audio' && dst && (dst.kind === 'mixer' || dst.device_type === 'mixer')) {
+    const chs = channelsOf(graph.devices, dst.sound_list_id);
+    if (chs.length) {
+      dstDeviceId = chs[0].id;
+      dstPortId = 'in';
+    }
+  }
   const payload = {
     signal: fit.signal,
     src_device_id: srcId,
     src_port: fit.srcPort,
-    dst_device_id: dstId,
-    dst_port: fit.dstPort,
+    dst_device_id: dstDeviceId,
+    dst_port: dstPortId,
     channels: 1,
   };
   try {
@@ -1098,6 +1171,7 @@ async function exportList(list, plugin) {
 
 const importInput = ref(null);
 const reportDialog = ref(false);
+const shareOpen = ref(false);
 const stageVenueOpen = ref(false);
 
 // Outlets belong to the venue. A job without a venue gets one (after a confirmation) made from its

@@ -77,6 +77,9 @@
                 {{ item.channels }} ch
                 <span v-if="item.phase"> · {{ item.phase }}</span>
                 <span v-if="item.cableLabel"> · {{ item.cableLabel }}</span>
+                <span v-if="item.routeLabel">
+                  · {{ item.routeLabel }}
+                </span>
               </div>
               <div
                 v-for="issue in issuesFor(item.id)"
@@ -86,7 +89,7 @@
                 {{ issue.message }}
               </div>
             </q-card-section>
-            <q-card-actions>
+            <q-card-actions v-if="!readonly">
               <q-btn
                 flat
                 dense
@@ -145,7 +148,9 @@
         </template>
         <template #body-cell-cableLabel="slot">
           <q-td :props="slot">
+            <span v-if="readonly">{{ slot.row.cableLabel }}</span>
             <q-input
+              v-else
               :model-value="slot.row.cableLabel"
               dense
               borderless
@@ -155,8 +160,9 @@
         </template>
         <template #body-cell-phase="slot">
           <q-td :props="slot">
+            <span v-if="readonly">{{ slot.row.phase }}</span>
             <q-select
-              v-if="slot.row.signal === 'power'"
+              v-else-if="slot.row.signal === 'power'"
               :model-value="slot.row.phase"
               dense
               borderless
@@ -215,6 +221,10 @@ const props = defineProps({
   graph: { type: Object, required: true },
   updateEdge: { type: Function, required: true },
   deleteEdge: { type: Function, required: true },
+  // Read-only mode (used by the crew/share view): the device-name links still
+  // select a device, but the cable-label and power-phase cells become display-only
+  // and the per-row delete action is hidden. No edge mutation can reach the parent.
+  readonly: { type: Boolean, default: false },
 });
 
 const TABS = [
@@ -251,13 +261,21 @@ const columns = computed(() => [
   { name: 'fromPort', label: '', field: 'fromPort', align: 'left' },
   { name: 'to', label: t('workspace.colTo'), field: 'to', align: 'left' },
   { name: 'toPort', label: '', field: 'toPort', align: 'left' },
+  {
+    name: 'patchLabel',
+    label: t('workspace.colPatchLabel'),
+    field: 'routeLabel',
+    align: 'left',
+  },
   { name: 'channels', label: t('workspace.colChannels'), field: 'channels', align: 'right' },
   ...(tab.value === 'power'
     ? [{ name: 'phase', label: t('workspace.colPhase'), field: 'phase', align: 'left' }]
     : []),
   { name: 'cableLabel', label: t('workspace.colCable'), field: 'cableLabel', align: 'left' },
   { name: 'issues', label: t('workspace.colIssues'), field: 'id', align: 'center' },
-  { name: 'actions', label: '', field: 'id', align: 'right' },
+  ...(props.readonly
+    ? []
+    : [{ name: 'actions', label: '', field: 'id', align: 'right' }]),
 ]);
 
 const issuesByEdge = computed(() => {
@@ -273,6 +291,7 @@ const issueCount = (signal) =>
   props.graph.edges.filter((e) => e.signal === signal && issuesFor(e.id).length).length;
 
 async function update(row, changes) {
+  if (props.readonly) return;
   try {
     await props.updateEdge(row.id, changes);
   } catch (err) {
@@ -283,6 +302,7 @@ async function update(row, changes) {
 }
 
 async function remove(row) {
+  if (props.readonly) return;
   try {
     await props.deleteEdge(row.id);
   } catch (err) {

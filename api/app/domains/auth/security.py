@@ -58,6 +58,62 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
 
 
+def create_share_token(
+    job_id: str | int,
+    *,
+    ttl_minutes: int | None = None,
+    locale: str | None = None,
+    can_bind_assets: bool = False,
+) -> str:
+    """Mint a job-scoped, login-free share token for the day-of-show crew view.
+
+    The token carries the job id and a ``view`` scope. Asset assignment is an explicit,
+    optional capability; when present it still permits writes only to that job's asset links.
+    A logged-in user mints it; a crew member then opens the mobile view with it and no session.
+
+    ``locale`` (e.g. ``"en"`` / ``"sv"``) is embedded so the crew link itself carries
+    the language the creator was using — a crew member opening the link sees the UI in
+    that language even on a phone whose browser defaults to something else. Unknown or
+    missing locales are dropped so the view falls back to its own default.
+    """
+    if ttl_minutes is None:
+        ttl_minutes = settings.share_token_ttl_minutes
+    payload: dict = {
+        "job_id": str(job_id),
+        "scope": "view",
+        "iat": datetime.now(UTC),
+    }
+    if can_bind_assets:
+        payload["can_bind_assets"] = True
+    normalized_locale = _normalize_share_locale(locale)
+    if normalized_locale:
+        payload["locale"] = normalized_locale
+    if ttl_minutes and ttl_minutes > 0:
+        payload["exp"] = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def _normalize_share_locale(locale: str | None) -> str | None:
+    """Accept only the app's supported display locales ('en', 'sv'); ignore the rest."""
+    if not locale:
+        return None
+    base = str(locale).strip().lower().split("-")[0].split("_")[0]
+    return base if base in {"en", "sv"} else None
+
+
+def verify_share_token(token: str) -> dict:
+    """Validate a share token; returns its claims or raises ``ValueError``."""
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except jwt.PyJWTError as exc:  # expired / tampered / malformed
+        raise ValueError("Invalid or expired share token") from exc
+    if claims.get("scope") != "view":
+        raise ValueError("Share token is not view-scoped")
+    if "job_id" not in claims:
+        raise ValueError("Share token is missing its job id")
+    return claims
+
+
 def _get_api_key_pepper() -> str:
     pepper = os.getenv("API_KEY_PEPPER")
     if pepper:

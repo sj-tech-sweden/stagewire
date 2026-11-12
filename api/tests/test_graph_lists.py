@@ -1,3 +1,6 @@
+import io
+import zipfile
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -244,3 +247,38 @@ async def test_a_channel_keeps_its_source_device_link_across_syncs(auth_headers)
         node = next(d for d in graph["devices"] if d["id"] == channel["id"])
         assert node["attributes"]["source_device_id"] == mic["id"]
         assert node["attributes"]["phantom_power"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_channel_has_no_connector_of_its_own(auth_headers):
+    """The connector now belongs to the device port and to patch points; a channel-level one was
+    redundant. It is dropped from the read model, the graph attributes, and the channel export,
+    while a patch point keeps its connector."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        list_id = (await client.post(f"{g}/lists", json={"name": "FOH"}, headers=h)).json()["id"]
+        res = await client.post(
+            f"{g}/lists/{list_id}/channels",
+            json={"source_label": "Kick", "connector": "XLR"},
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        node = res.json()
+        assert "connector" not in node["attributes"]
+        devices = (await client.get(g, headers=h)).json()["devices"]
+        stored = next(d for d in devices if d["id"] == node["id"])
+        assert "connector" not in stored["attributes"]
+
+        legacy = (await client.get(f"{BASE}/jobs/{job_id}/channel-lists", headers=h)).json()
+        assert "connector" not in legacy[0]["channels"][0]
+
+        csv = await client.get(
+            f"{g}/lists/{list_id}/export", params={"plugin": "generic_csv"}, headers=h
+        )
+        assert csv.status_code == 200, csv.text
+        with zipfile.ZipFile(io.BytesIO(csv.content)) as zf:
+            name = next(n for n in zf.namelist() if n.endswith("_inputs.csv"))
+            header = zf.read(name).decode().splitlines()[0]
+        assert "connector" not in header.lower()

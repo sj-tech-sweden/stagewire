@@ -1,0 +1,179 @@
+<template>
+  <q-dialog
+    :model-value="modelValue"
+    @update:model-value="(v) => emit('update:modelValue', v)"
+  >
+    <q-card style="width: 360px; max-width: 92vw">
+      <q-card-section class="row items-center">
+        <div class="text-h6">
+          {{ t('workspace.share.dialogTitle') }}
+        </div>
+        <q-space />
+        <q-btn
+          icon="close"
+          flat
+          round
+          dense
+          @click="emit('update:modelValue', false)"
+        />
+      </q-card-section>
+
+      <q-card-section>
+        <p class="text-caption text-grey-7 q-mt-none">
+          {{ t('workspace.share.dialogHint') }}
+        </p>
+
+        <q-toggle
+          v-model="allowAssetBinding"
+          :label="t('workspace.share.allowAssetBinding')"
+          class="q-mb-sm"
+          :disable="loading"
+          data-testid="share-allow-asset-binding"
+        />
+        <div class="text-caption text-grey-6 q-mb-sm">
+          {{ t('workspace.share.permissionLinkWarning') }}
+        </div>
+
+        <div
+          v-if="error"
+          class="text-negative text-caption q-mb-sm"
+        >
+          {{ error }}
+        </div>
+
+        <div class="text-center q-py-md">
+          <q-spinner
+            v-if="loading"
+            color="primary"
+            size="2rem"
+          />
+          <img
+            v-else-if="qrDataUrl"
+            :src="qrDataUrl"
+            alt="QR code"
+            style="width: 200px; height: 200px"
+            data-testid="share-qr"
+          >
+        </div>
+
+        <q-input
+          :model-value="link"
+          readonly
+          :disable="loading || !link"
+          dense
+          outlined
+          class="q-mb-sm"
+          data-testid="share-link"
+        >
+          <template #append>
+            <q-btn
+              flat
+              round
+              icon="content_copy"
+              :label="$q.screen.lt.sm ? '' : t('workspace.share.copyLink')"
+              :disable="loading || !link"
+              data-testid="share-copy"
+              @click="copy"
+            />
+          </template>
+        </q-input>
+        <div class="text-caption text-grey-6 text-center">
+          {{ t('workspace.share.qrHint') }}
+        </div>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
+</template>
+
+<script setup>
+import { ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { useQuasar } from 'quasar';
+import QRCode from 'qrcode';
+import { api } from '@/boot/api';
+import { i18n } from '@/i18n';
+
+const { t } = useI18n();
+const $q = useQuasar();
+
+const props = defineProps({
+  modelValue: { type: Boolean, default: false },
+  jobId: { type: String, required: true },
+});
+const emit = defineEmits(['update:modelValue']);
+
+const loading = ref(false);
+const error = ref('');
+const link = ref('');
+const qrDataUrl = ref('');
+const allowAssetBinding = ref(false);
+let mintGeneration = 0;
+let restoringPreference = false;
+
+const preferenceKey = () => `sw_share_asset_binding:${props.jobId}`;
+
+watch(
+  () => [props.modelValue, props.jobId],
+  async ([open]) => {
+    if (!open) {
+      mintGeneration += 1;
+      loading.value = false;
+      return;
+    }
+    link.value = '';
+    qrDataUrl.value = '';
+    restoringPreference = true;
+    allowAssetBinding.value = localStorage.getItem(preferenceKey()) === 'true';
+    restoringPreference = false;
+    await mint(allowAssetBinding.value);
+  },
+);
+
+watch(
+  allowAssetBinding,
+  (enabled) => {
+    if (restoringPreference) return;
+    localStorage.setItem(preferenceKey(), String(enabled));
+    if (props.modelValue) void mint(enabled);
+  },
+  { flush: 'sync' },
+);
+
+async function mint(canBindAssets) {
+  const generation = ++mintGeneration;
+  loading.value = true;
+  error.value = '';
+  qrDataUrl.value = '';
+  link.value = '';
+  try {
+    // The link carries the creator's current UI locale, so a crew member opens it in that
+    // language regardless of their own device/browser default (see the share token + mobile-view).
+    const { data } = await api.post(`/jobs/${props.jobId}/share`, null, {
+      params: {
+        locale: i18n.global.locale.value,
+        allow_asset_binding: canBindAssets,
+      },
+    });
+    if (generation !== mintGeneration) return;
+    // The app uses history-mode routing, so the share link is a normal path (not a hash).
+    const url = `${window.location.origin}/jobs/${props.jobId}/view?token=${encodeURIComponent(data.token)}`;
+    const qr = await QRCode.toDataURL(url, { width: 240, margin: 1 });
+    if (generation !== mintGeneration) return;
+    link.value = url;
+    qrDataUrl.value = qr;
+  } catch {
+    if (generation === mintGeneration) error.value = t('workspace.share.invalidOrExpired');
+  } finally {
+    if (generation === mintGeneration) loading.value = false;
+  }
+}
+
+async function copy() {
+  try {
+    await navigator.clipboard.writeText(link.value);
+    $q.notify({ type: 'positive', message: t('workspace.share.linkCopied') });
+  } catch {
+    $q.notify({ type: 'negative', message: t('workspace.share.copyLink') });
+  }
+}
+</script>

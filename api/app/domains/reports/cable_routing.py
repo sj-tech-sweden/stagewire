@@ -460,6 +460,8 @@ def _cable_key(edge: Any) -> str:
     """Keep the legacy patch point id as the key so saved cable routes keep matching."""
     attrs = edge.attributes or {}
     table, _, legacy_id = (attrs.get("legacy_ref") or "").partition(":")
+    if table == "channel_patch_points" and attrs.get("cable_point_id"):
+        return str(attrs["cable_point_id"])
     if table in LEGACY_KEY_TABLES and legacy_id:
         return legacy_id
     # video connections live only on the graph: their point id is the key (the legacy point id for
@@ -523,9 +525,46 @@ def derive_cables_from_graph(devices: list[Any], edges: list[Any]) -> list[Cable
     for edge in edges:
         into.setdefault(str(edge.dst_device_id), []).append(edge)
     cables: list[Cable] = []
+    for channel in (d for d in devices if d.kind == "channel"):
+        points = sorted(
+            (
+                edge
+                for edge in edges
+                if (edge.attributes or {}).get("chain") == str(channel.id)
+                and (edge.attributes or {}).get("point_id")
+            ),
+            key=lambda edge: (edge.attributes or {}).get("position") or 0,
+        )
+        if not points or str(points[0].src_device_id) == str(channel.id):
+            # Before the channel endpoint change, the first point edge itself started at the
+            # channel and emitted this source cable in the main loop below.
+            continue
+        linked = [e for e in elements if e.links.get("channel") == str(channel.id)]
+        mics = [e for e in linked if e.element_type in MIC_TYPES]
+        linked = mics or [e for e in linked if e.element_type == "performer"]
+        cables.extend(
+            Cable(
+                key=f"src:{element.legacy_id}",
+                from_element_id=element.node_id,
+                to_device_id=str(points[0].src_device_id),
+            )
+            for element in linked
+        )
     for edge in sorted(edges, key=lambda e: str(e.id)):
         if edge.signal not in ("audio", "video"):
             continue
+        edge_attrs = edge.attributes or {}
+        if edge_attrs.get("channel_source"):
+            linked = [
+                element
+                for element in elements
+                if element.links.get("channel") == str(edge_attrs.get("channel_id"))
+            ]
+            if any(element.element_type in MIC_TYPES for element in linked) or any(
+                element.element_type == "performer" for element in linked
+            ):
+                # The plot element already represents this source at its stage position.
+                continue
         src, dst = by_id.get(str(edge.src_device_id)), by_id.get(str(edge.dst_device_id))
         if src is None or dst is None or dst.kind in VIRTUAL_KINDS:
             continue

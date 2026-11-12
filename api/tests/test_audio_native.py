@@ -3,6 +3,8 @@
 The legacy endpoints and the graph endpoints write the same nodes; the patch edges are drawn from
 the points, and the ids other things hold (plot links, a device's sound list) stay valid."""
 
+from uuid import UUID
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -58,12 +60,14 @@ async def test_lists_channels_and_points_are_nodes_and_their_edges_follow_the_po
             f"channels/{ch['id']}/patch-points", {"device_id": desk["id"], "position": 1}
         )
         edges = [e for e in (await _graph(client, h, api))["edges"] if e["signal"] == "audio"]
-        assert [
-            e["attributes"]["point_id"]
-            for e in sorted(edges, key=lambda e: e["attributes"]["position"])
-        ] == [
+        ordered = sorted(edges, key=lambda e: e["attributes"]["position"])
+        assert [e["attributes"]["point_id"] for e in ordered] == [
             first["id"],
             second["id"],
+        ]
+        assert [(e["src_device_id"], e["dst_device_id"]) for e in ordered] == [
+            (box["id"], desk["id"]),
+            (desk["id"], ch["id"]),
         ]
         # a point edit is the point's own revision; a stale one is a conflict
         res = await client.patch(
@@ -95,6 +99,258 @@ async def test_lists_channels_and_points_are_nodes_and_their_edges_follow_the_po
         )
         assert res.status_code == 204
         assert (await client.delete(f"{api}/devices/{box['id']}", headers=h)).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_channel_source_and_patch_points_form_one_upstream_path(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        mic = (
+            await client.post(
+                f"{api}/graph/devices",
+                json={
+                    "domain": "audio",
+                    "kind": "mic",
+                    "name": "Mic",
+                    "ports": [
+                        {
+                            "id": "out-xlr3",
+                            "direction": "out",
+                            "signal": "audio",
+                            "connector": "xlr3",
+                        }
+                    ],
+                },
+                headers=h,
+            )
+        ).json()
+        old_edge = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": mic["id"],
+                "src_port": "out-xlr3",
+                "dst_device_id": ch["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert old_edge.status_code == 201, old_edge.text
+        channel_node = next(
+            node for node in (await _graph(client, h, api))["devices"] if node["id"] == ch["id"]
+        )
+        updated = await client.patch(
+            f"{api}/graph/devices/{ch['id']}",
+            json={
+                "attributes": {"source_device_id": mic["id"]},
+                "expected_revision": channel_node["revision"],
+            },
+            headers=h,
+        )
+        assert updated.status_code == 200, updated.text
+        await post(
+            f"channels/{ch['id']}/patch-points", {"device_id": box["id"], "connector": "XLR"}
+        )
+        await post(f"channels/{ch['id']}/patch-points", {"device_id": desk["id"], "position": 1})
+
+        edges = (await _graph(client, h, api))["edges"]
+        source = next(e for e in edges if e["attributes"].get("channel_source"))
+        assert (source["src_device_id"], source["dst_device_id"]) == (mic["id"], box["id"])
+        assert not any(
+            e["src_device_id"] == mic["id"] and e["dst_device_id"] == ch["id"] for e in edges
+        )
+        ordered = sorted(
+            (e for e in edges if e["attributes"].get("chain") == ch["id"]),
+            key=lambda e: e["attributes"]["position"],
+        )
+        assert [(e["src_device_id"], e["dst_device_id"]) for e in ordered] == [
+            (box["id"], desk["id"]),
+            (desk["id"], ch["id"]),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_a_channel_is_a_two_way_node_and_a_non_forced_edge_can_end_on_it(auth_headers):
+    """A channel is the true endpoint of the signal chain: it exposes both an `in` port (where a
+    source such as a mic or a digital stagebox terminates) and the existing `out` port (toward the
+    mix). Because the `in` port now exists, a normal (non-forced) audio edge can land on a channel
+    node rather than needing the legacy force-bypass used by the mic auto-connect path."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        # a second channel so we can patch one channel's output into another's input
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        nodes = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}
+        chan = nodes[ch["id"]]
+        # the channel node carries both an input and an output port
+        port_ids = {p["id"] for p in chan["ports"]}
+        assert {"in", "out"} <= port_ids
+        assert {p["direction"] for p in chan["ports"] if p["id"] == "in"} == {"in"}
+        assert {p["direction"] for p in chan["ports"] if p["id"] == "out"} == {"out"}
+
+        # a non-forced edge that terminates on the channel node's `in` port is accepted
+        res = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": ch["id"],
+                "src_port": "out",
+                "dst_device_id": ch2["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        edge = res.json()
+        assert edge["src_device_id"] == ch["id"] and edge["src_port"] == "out"
+        assert edge["dst_device_id"] == ch2["id"] and edge["dst_port"] == "in"
+
+
+@pytest.mark.asyncio
+async def test_a_mic_lands_on_one_socket_of_a_stagebox_and_a_socket_takes_one_cable(auth_headers):
+    """A multi-channel input port is a row of physical sockets. An edge names the socket it lands
+    on (attributes.dst_socket); a socket outside the port, or one already cabled, is refused even
+    when the connection is forced."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        stagebox = (
+            await client.post(
+                f"{api}/devices",
+                json={
+                    "name": "Stage",
+                    "device_type": "analog_stagebox",
+                    "ports": [{"direction": "in", "connector": "XLR3", "count": 32}],
+                },
+                headers=h,
+            )
+        ).json()
+        mic = (
+            await client.post(
+                f"{api}/devices",
+                json={
+                    "name": "SM58",
+                    "device_type": "other",
+                    "ports": [{"direction": "out", "connector": "XLR3", "count": 1}],
+                },
+                headers=h,
+            )
+        ).json()
+        devices = (await _graph(client, h, api))["devices"]
+        mic_node = next(d for d in devices if d["id"] == mic["id"])
+        assert mic_node["ports"][0]["id"] == "out-xlr3"
+
+        def cable(socket, force=False):
+            return client.post(
+                f"{api}/graph/edges",
+                json={
+                    "signal": "audio",
+                    "src_device_id": mic["id"],
+                    "src_port": "out-xlr3",
+                    "dst_device_id": stagebox["id"],
+                    "dst_port": "in-xlr3",
+                    "channels": 1,
+                    "attributes": {"dst_socket": socket},
+                },
+                headers=h,
+                params={"force": force},
+            )
+
+        res = await cable(5)
+        assert res.status_code == 201, res.text
+        assert res.json()["attributes"]["dst_socket"] == 5
+
+        taken = await cable(5, force=True)
+        assert taken.status_code == 422
+        assert taken.json()["detail"]["issues"][0]["code"] == "socket_in_use"
+
+        missing = await cable(33, force=True)
+        assert missing.status_code == 422
+        assert missing.json()["detail"]["issues"][0]["code"] == "socket_range"
+
+        # the mic has one output and is already cabled, so a second socket is refused on the source
+        second = await cable(6)
+        assert second.status_code == 422
+        assert second.json()["detail"]["issues"][0]["code"] == "port_in_use"
+
+
+@pytest.mark.asyncio
+async def test_connect_anyway_cannot_save_an_edge_to_a_port_the_device_does_not_have(auth_headers):
+    """A forced edge may bypass a connector or capacity mismatch, but never a port the device does
+    not have: that cable would show in the signal flow under a port name that is not on the device
+    (the "Ch 2 out-xlr3" case). The same forced edge to a real port is still accepted."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        bogus = {
+            "signal": "audio",
+            "src_device_id": ch2["id"],
+            "src_port": "out-xlr3",
+            "dst_device_id": ch["id"],
+            "dst_port": "in",
+            "channels": 1,
+        }
+        res = await client.post(f"{api}/graph/edges", json=bogus, headers=h, params={"force": True})
+        assert res.status_code == 422, res.text
+        assert res.json()["detail"]["issues"][0]["code"] == "unknown_port"
+
+        real = {**bogus, "src_port": "out"}
+        res = await client.post(f"{api}/graph/edges", json=real, headers=h, params={"force": True})
+        assert res.status_code == 201, res.text
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_channel_missing_the_in_port_is_normalised_and_still_accepts_an_edge(
+    auth_headers,
+):
+    """Channels created before the `in` port was introduced only stored an `out` port. The `in`
+    port must be derived at read/validation time (not trusted from the stored column), so such a
+    channel still validates as a connection endpoint and shows both ports in the graph."""
+    from app.core import db as db_mod
+    from app.domains.graph.models import GraphDevice
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+        # a second channel (fresh, has both ports) to use as the source of the edge
+        ch2 = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 2, "source_label": "Gtr"},
+        )
+        # simulate legacy data: strip the channel's stored `in` port
+        async with db_mod.SessionLocal() as db:
+            node = await db.get(GraphDevice, UUID(ch["id"]))
+            node.ports = [p for p in node.ports if p["id"] != "in"]
+            await db.commit()
+
+        # the graph read derives the missing `in` port
+        nodes = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}
+        assert {p["id"] for p in nodes[ch["id"]]["ports"]} == {"in", "out"}
+
+        # and a non-forced edge into the channel's `in` is accepted despite the stale storage
+        res = await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": ch2["id"],
+                "src_port": "out",
+                "dst_device_id": ch["id"],
+                "dst_port": "in",
+                "channels": 1,
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
 
 
 @pytest.mark.asyncio

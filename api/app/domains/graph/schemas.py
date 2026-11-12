@@ -59,6 +59,24 @@ class GraphDeviceUpdate(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class AssetBind(BaseModel):
+    """Bind a scanned/typed code or a selected Stockwire inventory asset.
+
+    Resolution against Stockwire is best-effort; the raw ``code`` is always kept separately for
+    crew scan lookup. ``asset_id`` identifies a picker selection when present.
+    """
+
+    code: str = Field(min_length=1, max_length=255)
+    asset_id: str | None = Field(default=None, max_length=255)
+    tag: str | None = None
+    serial: str | None = None
+    barcode: str | None = None
+    qr_code: str | None = None
+    rfid: str | None = None
+    description: str | None = None
+    expected_revision: int = Field(ge=1)
+
+
 class GraphDeviceRead(GraphDeviceBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +85,10 @@ class GraphDeviceRead(GraphDeviceBase):
     venue_id: UUID | None = None
     stockwire_request_status: str | None = None
     legacy_ref: str | None = None
+    # Stored on the node's ``attributes`` (not a column); surfaced here so the frontend can
+    # find the gear a channel/video list auto-minted (e.g. a mixer) and avoid creating duplicates.
+    sound_list_id: UUID | None = None
+    video_list_id: UUID | None = None
     created_at: datetime
     revision: int
 

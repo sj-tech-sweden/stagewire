@@ -43,6 +43,18 @@ router = APIRouter(
 )
 
 MAX_BATCH = 200
+STOCKWIRE_ASSET_ATTRIBUTES = frozenset(
+    {
+        "stockwire_asset_id",
+        "stockwire_asset_code",
+        "stockwire_asset_tag",
+        "stockwire_asset_serial",
+        "stockwire_asset_barcode",
+        "stockwire_asset_qr_code",
+        "stockwire_asset_rfid",
+        "stockwire_asset_description",
+    }
+)
 
 
 async def get_stockwire_client(db: AsyncSession = Depends(get_db)) -> StockwireClient:
@@ -51,7 +63,13 @@ async def get_stockwire_client(db: AsyncSession = Depends(get_db)) -> StockwireC
 
 
 def _as_dict(row: GraphDevice | ConnectionEdge) -> dict:
-    return {column.key: getattr(row, column.key) for column in row.__mapper__.column_attrs}
+    data = {column.key: getattr(row, column.key) for column in row.__mapper__.column_attrs}
+    # Channels are fixed-shape nodes: guarantee the `in`/`out` ports exist even on nodes stored
+    # before the `in` port was introduced, so edge validation and traces never reject a channel as
+    # a valid endpoint. Purely a read-time view — the ORM row is left untouched.
+    if getattr(row, "kind", None) == "channel" and isinstance(data.get("ports"), list):
+        data["ports"] = audio_native.normalize_channel_ports(data["ports"])
+    return data
 
 
 async def _require_job(db: AsyncSession, job_id: UUID) -> None:
@@ -64,6 +82,14 @@ async def _device(db: AsyncSession, job_id: UUID, device_id: UUID) -> GraphDevic
     if device is None or device.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
     return device
+
+
+def _require_physical_asset_target(device: GraphDevice) -> None:
+    if not devices_native.is_physical_gear(device):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Stockwire assets can only be linked to physical gear",
+        )
 
 
 async def _edge(db: AsyncSession, job_id: UUID, edge_id: UUID) -> ConnectionEdge:
@@ -91,15 +117,36 @@ async def _all_devices(db: AsyncSession, job_id: UUID) -> list[GraphDevice]:
     )
 
 
+async def read_job_graph(db: AsyncSession, job_id: UUID) -> schemas.GraphRead:
+    """Read-only projection of a job's device/edge graph.
+
+    Public entry point used by other domains (e.g. the share view) so they don't have to reach
+    into this router's private ``_all_devices``/``_all_edges`` helpers.
+    """
+    return schemas.GraphRead(
+        devices=[_device_payload(d) for d in await _all_devices(db, job_id)],
+        edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
+    )
+
+
 def _device_payload(device: GraphDevice) -> dict:
-    return schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+    payload = schemas.GraphDeviceRead.model_validate(device).model_dump(mode="json")
+    # ``sound_list_id`` / ``video_list_id`` live in the node's ``attributes`` dict, so the ORM
+    # object has no top-level column to read them from; copy them across for the frontend.
+    payload["sound_list_id"] = device.attributes.get("sound_list_id")
+    payload["video_list_id"] = device.attributes.get("video_list_id")
+    # Channels are fixed-shape nodes: guarantee the `in`/`out` ports exist even on nodes stored
+    # before the `in` port was introduced, so the frontend shows channels as valid endpoints.
+    if device.kind == "channel" and isinstance(payload.get("ports"), list):
+        payload["ports"] = audio_native.normalize_channel_ports(payload["ports"])
+    return payload
 
 
 @router.get("", response_model=schemas.GraphRead)
 async def get_graph(job_id: UUID, db: AsyncSession = Depends(get_db)) -> schemas.GraphRead:
     await _require_job(db, job_id)
     return schemas.GraphRead(
-        devices=[schemas.GraphDeviceRead.model_validate(d) for d in await _all_devices(db, job_id)],
+        devices=[_device_payload(d) for d in await _all_devices(db, job_id)],
         edges=[schemas.ConnectionEdgeRead.model_validate(e) for e in await _all_edges(db, job_id)],
     )
 
@@ -155,6 +202,10 @@ async def update_device(
             device, payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
         ),
     )
+    if "stockwire_device_id" in data or STOCKWIRE_ASSET_ATTRIBUTES.intersection(
+        (data.get("attributes") or {}).keys()
+    ):
+        _require_physical_asset_target(device)
 
     async def apply() -> GraphDevice:
         for key, value in mirror.merged_attributes(device, data).items():
@@ -185,7 +236,129 @@ async def update_device(
         lambda: db.get(GraphDevice, device_id),
     )
     await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
-    return device
+    return _device_payload(device)
+
+
+@router.post("/devices/{device_id}/bind-asset", response_model=schemas.GraphDeviceRead)
+async def bind_stockwire_asset(
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AssetBind,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await bind_asset_for_job(db, job_id, device_id, payload, payload.expected_revision)
+
+
+@router.delete("/devices/{device_id}/asset-binding", response_model=schemas.GraphDeviceRead)
+async def unbind_stockwire_asset(
+    job_id: UUID,
+    device_id: UUID,
+    expected_revision: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await unbind_asset_for_job(db, job_id, device_id, expected_revision)
+
+
+async def bind_asset_for_job(
+    db: AsyncSession,
+    job_id: UUID,
+    device_id: UUID,
+    payload: schemas.AssetBind,
+    expected_revision: int,
+) -> dict:
+    """Bind a physical Stockwire asset and publish the updated device to job subscribers."""
+    device = await _device(db, job_id, device_id)
+    _require_physical_asset_target(device)
+    resolved = None
+    cfg = await load_integration_config(db)
+    if cfg.get("enabled"):
+        client = StockwireClient(base_url=cfg["base_url"], token=cfg["api_key"])
+        resolved = await client.resolve_asset(payload.asset_id or payload.code)
+    if (
+        payload.asset_id
+        and device.stockwire_product_id
+        and resolved
+        and resolved.get("product_id") is not None
+        and str(resolved["product_id"]) != str(device.stockwire_product_id)
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Selected Stockwire asset does not belong to the linked product",
+        )
+
+    attrs = dict(device.attributes or {})
+    # Older bindings stored the canonical ID (or an unresolved scan code) in attributes.
+    # Remove that duplicate when rewriting so the top-level field is the only current ID.
+    attrs.pop("stockwire_asset_id", None)
+    attrs["stockwire_asset_code"] = payload.code
+    attrs["stockwire_asset_tag"] = (resolved or {}).get("asset_tag") or payload.tag
+    attrs["stockwire_asset_serial"] = (resolved or {}).get("serial_number") or payload.serial
+    attrs["stockwire_asset_barcode"] = (resolved or {}).get("barcode") or payload.barcode
+    attrs["stockwire_asset_qr_code"] = (resolved or {}).get("qr_code") or payload.qr_code
+    attrs["stockwire_asset_rfid"] = (resolved or {}).get("rfid") or payload.rfid
+    attrs["stockwire_asset_description"] = (resolved or {}).get(
+        "description"
+    ) or payload.description
+
+    async def apply() -> GraphDevice:
+        device.attributes = attrs
+        # This is the single canonical inventory ID used by catalog/case integrations. Keep raw
+        # scans in stockwire_asset_code instead of putting an unverified code in this field.
+        device.stockwire_device_id = (
+            str(resolved["asset_id"]) if resolved and resolved.get("asset_id") else payload.asset_id
+        )
+        await db.commit()
+        await db.refresh(device)
+        return device
+
+    device = await run_versioned_write(
+        db,
+        device,
+        expected_revision,
+        schemas.GraphDeviceRead,
+        apply,
+        lambda: db.get(GraphDevice, device_id),
+    )
+    await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
+    return _device_payload(device)
+
+
+async def unbind_asset_for_job(
+    db: AsyncSession, job_id: UUID, device_id: UUID, expected_revision: int
+) -> dict:
+    """Clear a device's local Stockwire asset link and publish the updated device."""
+    device = await _device(db, job_id, device_id)
+    _require_physical_asset_target(device)
+    attrs = dict(device.attributes or {})
+    for key in (
+        "stockwire_asset_id",
+        "stockwire_asset_code",
+        "stockwire_asset_tag",
+        "stockwire_asset_serial",
+        "stockwire_asset_barcode",
+        "stockwire_asset_qr_code",
+        "stockwire_asset_rfid",
+        "stockwire_asset_description",
+    ):
+        attrs[key] = None
+
+    async def apply() -> GraphDevice:
+        device.attributes = attrs
+        device.stockwire_device_id = None
+        await db.commit()
+        await db.refresh(device)
+        return device
+
+    device = await run_versioned_write(
+        db,
+        device,
+        expected_revision,
+        schemas.GraphDeviceRead,
+        apply,
+        lambda: db.get(GraphDevice, device_id),
+    )
+    await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
+    return _device_payload(device)
 
 
 @router.delete("/devices/{device_id}", status_code=204)
@@ -279,7 +452,7 @@ async def create_edge(
         _as_dict(dst),
         [_as_dict(e) for e in existing],
     )
-    if issues and not force:
+    if issues and (not force or topology.blocks_forced(issues)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -862,7 +1035,7 @@ async def create_edge_venue(
         _as_dict(dst),
         [_as_dict(e) for e in existing],
     )
-    if issues and not force:
+    if issues and (not force or topology.blocks_forced(issues)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={

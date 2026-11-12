@@ -5,6 +5,8 @@
     :class="{ 'hand-cursor': panning }"
     :data-zoom="zoom"
     :data-pan="`${Math.round(pan.x)},${Math.round(pan.y)}`"
+    :data-canvas-devices="devices.length"
+    :data-outlets="outlets.length"
     data-testid="workspace-canvas"
   >
     <v-stage
@@ -70,7 +72,7 @@
           <v-group
             v-for="outlet in outletMarks"
             :key="outlet.id"
-            :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y, draggable: !connectMode && !panning }"
+            :config="{ id: `outlet:${outlet.id}`, x: outlet.x, y: outlet.y, draggable: !props.readonly && !connectMode && !panning }"
             @dragend="(e) => onOutletDrop(outlet, e)"
             @click="emit('select-outlet', outlet.id)"
             @tap="emit('select-outlet', outlet.id)"
@@ -102,7 +104,7 @@
             x: (device.canvas_x_cm + origin.x) * zoom,
             y: (device.canvas_y_cm + origin.y) * zoom,
             rotation: device.canvas_rotation || 0,
-            draggable: !connectMode && !panning,
+            draggable: !props.readonly && !connectMode && !panning,
           }"
           @click="emit('select', device.id)"
           @tap="emit('select', device.id)"
@@ -170,12 +172,17 @@ const props = defineProps({
   audienceDrawing: { type: Boolean, default: false },
   devices: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
+  // Positions for cable ends that are not drawn as devices (a device shown as a plot element).
+  anchors: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
   zoom: { type: Number, default: 0.8 },
   deviceScale: { type: Number, default: 1 },
   // the hand tool (or Space) pans a map that is zoomed in beyond the standard fit
   hand: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
+  // read-only views (e.g. the crew share link) keep the same look and the tap-to-select
+  // interaction, but disable dragging gear, panning by hand, and cable linking.
+  readonly: { type: Boolean, default: false },
 });
 const emit = defineEmits(['select', 'move', 'connect', 'pan', 'move-outlet', 'select-outlet', 'draw-point', 'audience-point', 'reroute-point']);
 
@@ -192,7 +199,7 @@ const mapSize = computed(() => ({
   height: props.frame ? props.frame.height * props.zoom : 0,
 }));
 const zoomedIn = computed(() => Boolean(props.frame) && mapSize.value.width > hostWidth.value + 1);
-const panning = computed(() => props.hand && zoomedIn.value);
+const panning = computed(() => (props.hand || props.readonly) && zoomedIn.value);
 const viewportHeight = computed(() => Math.max(300, Math.round(window.innerHeight * 0.7)));
 const size = computed(() => {
   const minHeight = $q.screen.lt.sm ? 380 : 520;
@@ -387,7 +394,11 @@ const center = (device) => {
   const [x, y] = centerOf(device, props.zoom, props.deviceScale);
   return [x + origin.value.x * props.zoom, y + origin.value.y * props.zoom];
 };
-const placed = computed(() => new Map(props.devices.map((d) => [d.id, d])));
+// Cable ends resolve against the drawn devices and the element anchors; anchors come last so an
+// element's position wins where a device is only drawn through its element.
+const placed = computed(
+  () => new Map([...props.devices, ...props.anchors].map((d) => [d.id, d])),
+);
 const lines = computed(() =>
   props.edges
     .filter((e) => placed.value.has(e.src_device_id) && placed.value.has(e.dst_device_id))

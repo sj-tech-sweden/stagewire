@@ -1,4 +1,4 @@
-import { test, expect, APIRequestContext, Page } from '@playwright/test';
+import { test, expect, APIRequestContext, Locator, Page } from '@playwright/test';
 import { ensureAdmin, login, enableStockwire, setStockwireEnabled, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
@@ -18,6 +18,15 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
 
 const dataRows = (page: Page) =>
   page.getByTestId('workspace-table').locator('tbody tr').filter({ has: page.locator('input') });
+
+async function rowWithInputValue(table: Locator, value: string) {
+  const rows = table.locator('tbody tr:has(input)');
+  for (let index = 0; index < (await rows.count()); index += 1) {
+    const row = rows.nth(index);
+    if ((await row.locator('input').first().inputValue()) === value) return row;
+  }
+  throw new Error(`No workspace row has an input with value "${value}"`);
+}
 
 // Fit the plot and read the zoom it settled on, so pixel positions can be derived from cm.
 async function fittedZoom(page: Page) {
@@ -145,14 +154,22 @@ test('the inspector shows a Network & Control panel for AVL devices and hides it
 
   // Protocols are a multiselect; picking Dante persists the whole list.
   await page.getByTestId('network-protocols').click();
-  await page.locator('.q-menu .q-item', { hasText: 'Dante' }).click();
+  const danteItem = page.locator('.q-menu .q-item', { hasText: 'Dante' });
+  // Wait for the dropdown options to be ready before clicking, otherwise the click can land before
+  // the menu item is rendered (slower on a busy database, e.g. later in the suite) and the selection
+  // is silently dropped.
+  await danteItem.first().waitFor({ state: 'visible' });
+  await danteItem.first().click();
   // close the select popup
   await page.keyboard.press('Escape');
 
-  // Backend holds the AVL network metadata on the device attributes.
-  const graph = (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+  // Backend holds the AVL network metadata on the device attributes. Re-fetch on every poll tick
+  // (a single snapshot taken before the async saves settle would never observe the final state).
   await expect
-    .poll(async () => (await graph).devices.find((d: { id: string }) => d.id === mic.id).attributes)
+    .poll(async () => {
+      const g = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json();
+      return g.devices.find((d: { id: string }) => d.id === mic.id).attributes;
+    }, { timeout: 10_000 })
     .toMatchObject({ network_ip: '192.168.1.50', network_subnet: '255.255.255.0', network_vlan: 120, network_protocols: ['dante'] });
 
   // Switching to the power device hides the panel entirely.
@@ -422,6 +439,10 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
   await page.goto(`/jobs/${jobId}/workspace`);
   const canvas = page.getByTestId('workspace-canvas');
   await expect(canvas).toBeVisible();
+  // Wait for the graph to finish loading and render the element + box onto the canvas before
+  // dragging, otherwise the drag can land before the Konva node exists (slower graph load on a
+  // busier database, e.g. later in the suite).
+  await expect(canvas).toHaveAttribute('data-canvas-devices', '2');
   const area = (await canvas.boundingBox())!;
   const zoom = await fittedZoom(page);
   // element: top-left (100,100) cm, 100x50 cm -> 80x40 px; grab it near its middle
@@ -711,6 +732,17 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   const kind = `Neon plug ${String(Date.now()).slice(-5)}`;
   await page.keyboard.type(kind);
   await page.keyboard.press('Enter');
+  // Picking a brand-new connector is asynchronous: the field adds the kind to the shared list and
+  // only then commits the value to the step. Wait for that to land before saving, otherwise a slower
+  // (busy-database) run can save an empty connector while the kinds.add() roundtrip is still in flight.
+  await expect
+    .poll(async () => {
+      const kindsResp = (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as {
+        label: string;
+      }[];
+      return kindsResp.some((k) => k.label === kind);
+    })
+    .toBe(true);
   await page.getByTestId('chain-save').click();
   await expect(row.getByTestId('edit-video-chain')).toContainText('Switcher A');
   await row.getByTestId('show-video-flow').click();
@@ -1020,11 +1052,11 @@ test('power inlets show in the device list, a new power connector asks for its r
   await page.keyboard.type(label);
   await page.keyboard.press('Enter');
   await page.locator('input[data-autofocus="true"]').fill('30');
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
   await expect(page.locator('input[data-autofocus="true"]')).toHaveCount(1);
   await expect(page.locator('input[data-autofocus="true"]')).toHaveValue('1');
   await page.locator('input[data-autofocus="true"]').fill('1');
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
   const kinds = async () =>
     (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as {
       label: string;
@@ -1334,8 +1366,13 @@ test('an outlet is moved on the map and its position is edited in the venue powe
     ((await (await request.get(`${API_BASE}/api/v1/venues/${venue.id}/power-outlets`, { headers })).json()) as any[]).find((o) => o.id === outlet.id);
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('canvas-fit').click();
   const canvas = page.getByTestId('workspace-canvas');
+  await expect(canvas).toBeVisible();
+  // Wait for the venue's power outlets to finish loading and render their markers on the canvas
+  // before clicking, otherwise the click can land on empty canvas (slower outlet load on a busy
+  // database, e.g. later in the suite) and the outlet inspector never opens.
+  await expect(canvas).toHaveAttribute('data-outlets', '1');
+  await page.getByTestId('canvas-fit').click();
   const box = (await canvas.boundingBox())!;
   const zoom = Number(await canvas.getAttribute('data-zoom'));
   const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
@@ -1501,10 +1538,16 @@ test('cables are routed on the new map: settings, a drawn cableway and the cable
   const routeOf = async () => Object.values(((await plan()).routes || {}) as Record<string, any>)[0];
   await page.getByTestId('cable-reroute').click();
   await expect(page.getByTestId('reroute-bar')).toBeVisible();
+  // Re-fit now that the frame has fully loaded so the click coordinates match the rendered map: a
+  // late frame load in a busy-database run can leave the earlier fit stale, and the reroute clicks
+  // would then land off the stage and be ignored (no waypoints get added).
+  await page.getByTestId('canvas-fit').click();
   await canvas.scrollIntoViewIfNeeded();
   const area2 = (await canvas.boundingBox())!;
-  await page.mouse.click(area2.x + 400 * zoom, area2.y + 300 * zoom);
-  await page.mouse.click(area2.x + 600 * zoom, area2.y + 300 * zoom);
+  const zoom2 = Number(await canvas.getAttribute('data-zoom'));
+  await page.mouse.click(area2.x + 400 * zoom2, area2.y + 300 * zoom2);
+  await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(1);
+  await page.mouse.click(area2.x + 600 * zoom2, area2.y + 300 * zoom2);
   await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(2);
   expect((await routeOf()).mode).toBe('manual');
   await page.getByTestId('reroute-undo').click();
@@ -1936,8 +1979,12 @@ test('each device box in the show flow and each step in the edit flow has an edi
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
   // show flow: the box opens the device in the inspector and the flow closes
-  await page.getByRole('button', { name: /show signal flow|visa signalväg|flow/i }).first().click();
-  await page.getByTestId('flow-edit-device').first().click();
+  await page.getByTestId('show-flow').first().click();
+  await page
+    .locator('.dmx-flow-node')
+    .filter({ hasText: 'Stagebox F' })
+    .getByTestId('flow-edit-device')
+    .click();
   await expect(page.getByTestId('inspector-name')).toHaveValue('Stagebox F');
 
   // edit flow: a step opens the device dialog on top of the chain dialog
@@ -1966,10 +2013,18 @@ test('replacing or clearing a source removes the device it created, but not one 
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
 
   const pick = async (row: number, name: string) => {
-    await page.getByTestId('source-picker').nth(row).click();
+    const picker = page.getByTestId('source-picker').nth(row);
+    // The picker only exists once the channel list has rendered in sound mode; wait for it before
+    // interacting (slower render on a busy database can otherwise leave the click hanging).
+    await picker.waitFor({ state: 'visible' });
+    await picker.click();
     await page.keyboard.type(name);
-    // not the "use as typed" row: the device already in the job
-    await page.locator('.q-menu .q-item', { hasText: `${name} ·` }).click();
+    // not the "use as typed" row: the device already in the job. Wait for the dropdown row to be
+    // ready before clicking, otherwise the click can land before it renders (slower on a busy
+    // database) and the source is never assigned.
+    const item = page.locator('.q-menu .q-item', { hasText: `${name} ·` });
+    await item.first().waitFor({ state: 'visible' });
+    await item.first().click();
   };
   await pick(0, 'Mic A');
   await expect(page.getByTestId('open-source-device')).toHaveCount(1);
@@ -1978,7 +2033,7 @@ test('replacing or clearing a source removes the device it created, but not one 
   await expect.poll(names).toEqual(['Mic B']);
   // Mic B is also the second channel's source, so clearing the first keeps it
   await pick(1, 'Mic B');
-  await page.getByRole('button', { name: 'Clear' }).first().click();
+  await page.getByRole('button', { name: /clear|rensa/i }).first().click();
   await expect(page.getByTestId('open-source-device')).toHaveCount(1);
   expect(await names()).toEqual(['Mic B']);
   void second;
@@ -2008,14 +2063,14 @@ test('on a phone every channel is a card with its kind, source, stand, connector
 
   // the summary line says what is set without opening anything
   const card = page.getByTestId('channel-card').first();
-  await expect(card).toContainText('Wireless');
+  await expect(card).toContainText(/wireless|trådlöst/i);
   await expect(card).toContainText('48V');
   await expect(card).toContainText('Boom');
 
   // the same editors as the table are under Details
   await card.getByTestId('channel-card-details').click();
-  await card.getByLabel(/bodypack|beltpack/i).fill('Shure P10T');
-  await card.getByLabel(/bodypack|beltpack/i).press('Enter');
+  await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).fill('Shure P10T');
+  await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).press('Enter');
   await expect.poll(async () => (await node()).attributes.wireless_pack).toBe('Shure P10T');
   await card.getByLabel(/notes|anteckningar/i).last().fill('Hand over at soundcheck');
   await card.getByLabel(/notes|anteckningar/i).last().press('Tab');
@@ -2124,4 +2179,401 @@ test('when the stockwire integration is disabled, every stockwire control is hid
   await page.goto('/settings');
   await expect(page.getByTestId('settings-tab-stockwire')).toBeVisible();
 });
+
+test('passive source gear (microphones, mic stands) defaults to No power inlet', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Passive power ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 58, name: 'Mic 58', sku: 'M58', category: 'Microphones' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/58/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 58,
+        name: 'Mic 58',
+        connector_groups: [{ connector: 'xlr3', direction: 'in', count: 1, signal: 'audio' }],
+        weight_kg: 0.3,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-from-stockwire').click();
+  await page.keyboard.type('mic');
+  await page.locator('.q-menu .q-item', { hasText: 'Mic 58' }).click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Mic 58');
+  // No power inlet spec on the product -> passive source gear defaults to No power.
+  await expect(page.getByTestId('power-inlet')).toHaveValue('No power (passive)');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as {
+      name: string;
+      power_inlet: string;
+    }[];
+  await expect
+    .poll(async () => (await legacy()).find((d) => d.name === 'Mic 58')?.power_inlet, { timeout: 20000 })
+    .toBe('none');
+});
+
+test('powered audio gear keeps its power inlet from the product spec', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Powered power ${Date.now()}` })).id as string;
+  await page.route('**/api/v1/stockwire/products?*', (route) =>
+    route.fulfill({ json: { items: [{ id: 59, name: 'Active Speaker', sku: 'AS', category: 'Speakers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/products/59/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 59,
+        name: 'Active Speaker',
+        connector_groups: [{ connector: 'xlr3', direction: 'in', count: 1, signal: 'audio' }],
+        power_inlet: 'iec_c13',
+        power_watts: 350,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^devices$|^enheter$/i).click();
+  await page.getByTestId('new-device').click();
+  await page.getByTestId('device-from-stockwire').click();
+  await page.keyboard.type('active');
+  await page.locator('.q-menu .q-item', { hasText: 'Active Speaker' }).click();
+  await expect(page.getByTestId('device-name')).toHaveValue('Active Speaker');
+  await expect(page.getByTestId('power-inlet')).toHaveValue('IEC C13');
+  await page.getByTestId('device-save').click();
+
+  const legacy = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as {
+      name: string;
+      power_inlet: string;
+    }[];
+  await expect
+    .poll(async () => (await legacy()).find((d) => d.name === 'Active Speaker')?.power_inlet, { timeout: 20000 })
+    .toBe('iec_c13');
+});
+
+test('setting a mixer auto-creates a placeable mixer device linked to the channel list', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // Enable the integration BEFORE the SPA loads, so the stockwire picker (v-if on isEnabled) is present.
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer auto ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 77, name: 'Yamaha QL1', sku: 'QL1', category: 'Mixers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/categories*', (route) => route.fulfill({ json: { items: [], total: 0 } }));
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-picker').click();
+  await page.keyboard.type('yamaha');
+  await page.locator('.q-menu .q-item', { hasText: 'Yamaha QL1' }).click();
+  await page.getByTestId('mixer-inputs').fill('6');
+  await page.getByTestId('mixer-buses').fill('2');
+  await page.getByTestId('mixer-save').click();
+
+  // A mixer device is minted and linked back to the list (so it is not recreated); it starts
+  // unplaced, i.e. it shows in the gear list and can be dragged onto the map.
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { id: string; name: string; kind: string; sound_list_id: string | null; canvas_x_cm: number | null }[];
+    };
+  await expect
+    .poll(async () => (await graph()).devices.find((d) => d.kind === 'mixer' && d.sound_list_id === lst.id), { timeout: 20000 })
+    .toBeTruthy();
+  await expect
+    .poll(async () => (await graph()).devices.find((d) => d.kind === 'mixer')?.canvas_x_cm, { timeout: 20000 })
+    .toBeNull();
+  // Saving the mixer again must not mint a second device (regression: the link must survive the
+  // create response so the re-save finds the existing one instead of duplicating it).
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-save').click();
+  await expect
+    .poll(async () => (await graph()).devices.filter((d) => d.kind === 'mixer' && d.sound_list_id === lst.id).length, { timeout: 20000 })
+    .toBe(1);
+});
+
+test('setting a mixer imports its I/O ports from the Stockwire product spec', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mixer ports ${Date.now()}` })).id as string;
+  const lst = await post(request, headers, `/jobs/${jobId}/graph/lists`, { name: 'FOH' });
+  await page.route('**/api/v1/stockwire/own-products*', (route) =>
+    route.fulfill({ json: { items: [{ id: 77, name: 'Yamaha QL1', sku: 'QL1', category: 'Mixers' }], total: 1 } }),
+  );
+  await page.route('**/api/v1/stockwire/categories*', (route) => route.fulfill({ json: { items: [], total: 0 } }));
+  // The product's device spec carries its inputs and outputs as connector groups.
+  await page.route('**/api/v1/stockwire/products/77/device-specs', (route) =>
+    route.fulfill({
+      json: {
+        id: 77,
+        name: 'Yamaha QL1',
+        connector_groups: [
+          { connector: 'xlr3', direction: 'in', count: 16, signal: 'audio' },
+          { connector: 'xlr3', direction: 'out', count: 8, signal: 'audio' },
+        ],
+        power_inlet: 'iec_c13',
+        weight_kg: 22,
+        power_watts: 180,
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+  await page.getByTestId('set-mixer').first().click();
+  await expect(page.getByTestId('mixer-dialog')).toBeVisible();
+  await page.getByTestId('mixer-picker').click();
+  await page.keyboard.type('yamaha');
+  await page.locator('.q-menu .q-item', { hasText: 'Yamaha QL1' }).click();
+  await page.getByTestId('mixer-inputs').fill('6');
+  await page.getByTestId('mixer-buses').fill('2');
+  await page.getByTestId('mixer-save').click();
+
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { kind: string; sound_list_id: string | null; ports: { connector: string; direction: string }[] }[];
+    };
+  await expect
+    .poll(async () => {
+      const mixer = (await graph()).devices.find((d) => d.kind === 'mixer' && d.sound_list_id === lst.id);
+      if (!mixer) return false;
+      const keys = mixer.ports.map((p) => `${p.connector}:${p.direction}`);
+      return keys.includes('xlr3:in') && keys.includes('xlr3:out');
+    }, { timeout: 20000 })
+    .toBe(true);
+});
+
+test('a passive source like a microphone gets one default XLR out port from the catalog', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Mic default ${Date.now()}` })).id as string;
+  // A passive mic in the rental catalog carries no connectors of its own, so it should default to one XLR out.
+  await page.route('**/api/v1/stockwire/catalog/search*', (route) =>
+    route.fulfill({
+      json: {
+        items: [{ id: 201, name: 'SM58', sku: 'SM58', category: 'Microphones', manufacturer: 'Shure', available_qty: 3 }],
+        total: 1,
+        facets: { category: { Microphones: 1 }, manufacturer: { Shure: 1 } },
+      },
+    }),
+  );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('open-catalog').click();
+  await expect(page.getByTestId('catalog-search')).toBeVisible();
+  await page.getByTestId('catalog-item').first().click();
+  await page.getByTestId('catalog-add').click();
+
+  const graph = async () =>
+    (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as {
+      devices: { name: string; ports: { connector: string; direction: string }[] }[];
+    };
+  await expect
+    .poll(async () => {
+      const mic = (await graph()).devices.find((d) => d.name === 'SM58');
+      if (!mic) return false;
+      const keys = mic.ports.map((p) => `${p.connector}:${p.direction}`);
+      return keys.length === 1 && keys[0] === 'xlr3:out';
+    }, { timeout: 20000 })
+    .toBe(true);
+});
+
+test('assigning a mic as a channel source auto-patches its XLR-out to the channel input', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The source picker (StockwireProductPicker) only renders when the integration is enabled, so the
+  // UI under test exists; enable it explicitly rather than relying on global state.
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E AutoPatch ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  // The channel's input is digital (Dante): per the crew-view design, a channel-list input reaches
+  // the mixer even when it arrives by Dante/AES50/MADI/Slink, so the auto-edge's destination port is
+  // the channel's actual input type, not a hard-coded analogue XLR.
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, {
+    source_label: 'Vox',
+    connector: 'dante',
+  });
+  // A passive mic with a default XLR output to feed the channel from.
+  const mic = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Lead Mic',
+    kind: 'mic',
+    ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 1 }],
+  });
+
+  const graphOf = async () =>
+    (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  const channelNode = async () =>
+    (await graphOf()).devices.find((d: any) => d.id === channel.id) as any;
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  // pick the mic as the channel's source via the in-job device picker
+  const picker = page.getByTestId('source-picker');
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  await page.keyboard.type('Lead Mic');
+  // select the in-job device, not the "use as typed" freetext row
+  const item = page.locator('.q-menu .q-item', { hasText: 'Lead Mic ·' });
+  await item.first().waitFor({ state: 'visible' });
+  await item.first().click();
+
+  // the source is linked (existing behaviour) ...
+  await expect.poll(async () => (await channelNode()).attributes.source_device_id).toBe(mic.id);
+  // ... and the mic's XLR-out is auto-patched into the channel's real input connector.
+  await expect
+    .poll(async () => {
+      const edge = (await graphOf()).edges.find(
+        (e: any) =>
+          e.signal === 'audio' &&
+          e.src_device_id === mic.id &&
+          e.dst_device_id === channel.id,
+      );
+      if (!edge) return null;
+      return { src_port: edge.src_port, dst_port: edge.dst_port };
+    })
+    .toMatchObject({ src_port: expect.stringMatching(/xlr/i), dst_port: 'in' });
+
+  // re-patching to a different mic re-points the cable rather than stacking a second one
+  const mic2 = await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Second Mic',
+    kind: 'mic',
+    ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 1 }],
+  });
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  await page.keyboard.type('Second Mic');
+  const item2 = page.locator('.q-menu .q-item', { hasText: 'Second Mic ·' });
+  await item2.first().waitFor({ state: 'visible' });
+  await item2.first().click();
+  await expect
+    .poll(async () => {
+      const edges = (await graphOf()).edges.filter(
+        (e: any) =>
+          e.signal === 'audio' &&
+          e.dst_device_id === channel.id,
+      );
+      return edges.map((e: any) => e.src_device_id).sort();
+    })
+    .toEqual([mic2.id].sort());
+});
+
+test('a channel opens its own inspector from the channel-list editor', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E ChInspect ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  const channel = await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+
+  // The channel is its own entity: opening it from the editor must show the channel's own
+  // inspector (name, not a port of the mixer), consistent with the crew/patch views.
+  const channelName = async () =>
+    ((((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d: any) => d.id === channel.id,
+    ) as any).name;
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await page.getByTestId('open-channel-device').click();
+  await expect(page.getByTestId('inspector-name')).toHaveValue(await channelName());
+});
+
+test('a mixer lists its channels and opens one as its own device', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E MixerCh ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/audio-devices`, {
+    name: 'Console FOH',
+    device_type: 'mixer',
+    sound_list_id: list.id,
+  });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Vox' });
+
+  // Find and select the mixer in the workspace so its inspector opens. The name lives in an
+  // <input> value (not text), so locate the row via that input and click a non-input cell.
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  const mixerRow = await rowWithInputValue(page.getByTestId('workspace-table'), 'Console FOH');
+  await mixerRow.locator('td').nth(1).click();
+
+  // The mixer's channels are surfaced as their own entities (subdevices), not buried ports.
+  const channels = page.getByTestId('mixer-channels');
+  await expect(channels).toBeVisible();
+  const chItem = channels.getByText('Vox').first();
+  await chItem.click();
+
+  // Clicking a channel opens that channel's own inspector.
+  await expect(page.getByTestId('inspector-name')).toHaveValue(
+    ((((await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any).devices as any[]).find(
+      (d: any) => d.kind === 'channel',
+    ) as any).name,
+  );
+});
+
+test('the connect-to-device picker offers real gear only, not channels or buses', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enableStockwire(request);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E ConnectTargets ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  // A mixer this device connects *from*, a second piece of real gear (valid target), and a
+  // channel + a bus (virtual nodes that must NOT appear as patch targets).
+  await post(request, headers, `${g}/devices`, { domain: 'audio', name: 'FOH Mixer', kind: 'mixer' });
+  await post(request, headers, `${g}/devices`, { domain: 'audio', name: 'Wedge L', kind: 'speaker' });
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { source_label: 'Ch 1' });
+  await post(request, headers, `${g}/devices`, {
+    domain: 'audio',
+    name: 'Bus 1',
+    kind: 'channel_list',
+    attributes: { list_id: list.id },
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  const mixerRow = await rowWithInputValue(page.getByTestId('workspace-table'), 'FOH Mixer');
+  await mixerRow.locator('td').nth(1).click();
+
+  // Open the "to device" connection picker.
+  await page.getByTestId('connect-to-device').click();
+  const menu = page.locator('.q-menu');
+  // Real gear is offered...
+  await expect(menu.getByText('Wedge L')).toBeVisible();
+  // ...and it is the ONLY option: the source mixer (FOH Mixer), the channel (Ch 1) and the bus
+  // (Bus 1) are all excluded — channels/buses are virtual nodes, never patch targets.
+  await expect(menu.locator('.q-item')).toHaveCount(1);
+});
+
+
 

@@ -162,7 +162,6 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
             json={
                 "channel_number": 1,
                 "source_label": "Lead vocal",
-                "connector": "XLR",
                 "performer_name": "Alex Presenter",
                 "wireless_pack": "Beltpack 2",
                 "wireless_frequency_mhz": 518.125,
@@ -750,7 +749,6 @@ def test_positioned_tables_continue_on_following_pages():
             "source_label": f"Channel {index + 1}",
             "input_type": "",
             "device": "",
-            "connector": "XLR",
             "phantom_power": False,
             "notes": "",
         }
