@@ -140,10 +140,14 @@ class NetboxClient:
                 "POST",
                 "/api/extras/custom-fields/",
                 json={
+                    "name": key,
                     "key": key,
                     "label": f"Stagewire {key}",
                     "type": ftype,
-                    "content_types": NETBOX_CF_CONTENT_TYPES,
+                    # NetBox 4.7 renamed this field from `content_types` to
+                    # `object_types` for custom fields; the old name is rejected
+                    # (HTTP 400 "object_types: This field is required").
+                    "object_types": NETBOX_CF_CONTENT_TYPES,
                     "description": description,
                 },
             )
