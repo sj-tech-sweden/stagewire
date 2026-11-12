@@ -23,13 +23,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Postgres rejects `DEFAULT 0` (integer) for a boolean column — it needs a
+    # boolean literal. sa.false() renders as `false` on Postgres and `0` on
+    # SQLite, so it is correct for both.
     op.add_column(
         "production_jobs",
         sa.Column(
             "netbox_enabled",
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text("0"),
+            server_default=sa.false(),
         ),
     )
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,7 +55,7 @@ class ProductionJob(Base):
     # enabled; this lets individual jobs opt out (or in) of device mirroring and
     # IP assignment even when NetBox is configured globally.
     netbox_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False, server_default="0"
+        Boolean, default=False, nullable=False, server_default=false()
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()

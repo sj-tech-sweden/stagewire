@@ -2,7 +2,8 @@
 #
 # This is intentionally a SEPARATE compose file from the main `docker-compose.yml`
 # so a NetBox instance only runs when you opt into it. It uses its own Postgres
-# (5434) and Redis (6381) so it never collides with Stagewire's stack (5433/6380).
+# (5434) and Valkey (6381) so it never collides with Stagewire's stack (5433/6380).
+# Valkey is wire-compatible with Redis, so NetBox's REDIS_* settings just point at it.
 #
 # NetBox is the IPAM/DCIM source of truth; Stagewire talks to it over HTTP. From a
 # Stagewire container the callback URL (for webhooks) must use
@@ -18,7 +19,7 @@
 # First login in the browser: http://localhost:8000  (admin / admin)
 services:
   netbox-db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: stagewire-netbox-db
     restart: unless-stopped
     environment:
@@ -35,16 +36,16 @@ services:
       timeout: 5s
       retries: 10
 
-  netbox-redis:
-    image: redis:7-alpine
-    container_name: stagewire-netbox-redis
+  netbox-valkey:
+    image: valkey/valkey:9-alpine
+    container_name: stagewire-netbox-valkey
     restart: unless-stopped
     ports:
       - "6381:6379"
     volumes:
-      - netbox-redis-data:/data
+      - netbox-valkey-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -56,18 +57,20 @@ services:
     depends_on:
       netbox-db:
         condition: service_healthy
-      netbox-redis:
+      netbox-valkey:
         condition: service_healthy
     environment:
-      # NetBox expects these (the docker image treats them as required).
+      # NetBox expects these (the docker image treats them as required). The names
+      # are NetBox's own REDIS_* convention; the backing service is Valkey, which
+      # speaks the Redis protocol.
       ALLOWED_HOSTS: "localhost,127.0.0.1,host.docker.internal,netbox"
       DB_HOST: netbox-db
       DB_NAME: netbox
       DB_USER: netbox
       DB_PASSWORD: netbox
-      REDIS_HOST: netbox-redis
+      REDIS_HOST: netbox-valkey
       REDIS_PORT: "6379"
-      REDIS_CACHE_HOST: netbox-redis
+      REDIS_CACHE_HOST: netbox-valkey
       REDIS_CACHE_PORT: "6379"
       SECRET_KEY: "dev-only-insecure-stagewire-netbox-secret-change-me"
       SUPERUSER_NAME: admin
@@ -91,4 +94,4 @@ services:
 
 volumes:
   netbox-db-data:
-  netbox-redis-data:
+  netbox-valkey-data:
