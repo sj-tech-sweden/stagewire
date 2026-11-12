@@ -1213,6 +1213,12 @@ watch(
     rejected.value = [];
     traces.upstream = null;
     traces.downstream = null;
+    // The VLAN/subnet picks are local to the device being edited; clear them so
+    // a freshly opened device doesn't show the previous device's selection. The
+    // stored `network_prefix` (the real source of truth) is untouched.
+    selectedVlanId.value = null;
+    selectedPrefixId.value = null;
+    netbox.prefixes = [];
   },
 );
 
