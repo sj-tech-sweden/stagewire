@@ -145,6 +145,76 @@ async def test_netbox_assign_ip_routes_to_service(auth_headers, monkeypatch) -> 
         fake.assert_awaited_once()
 
 
+async def test_netbox_assign_ip_venue_scoped(auth_headers, monkeypatch) -> None:
+    """assign_ip works for a venue base-rig device: the NetBox object + link carry
+    stagewire_venue_id (not job_id) and the realtime event goes to the venue room.
+    """
+    from app.domains.netbox import service as nb_service
+    from app.domains.netbox.client import NetboxClient
+
+    venue_id, device_id = await _seed_venue_and_device()
+    async with db_mod.SessionLocal() as db:
+        await netbox_config.save_integration_config(
+            db,
+            enabled=True,
+            base_url="http://netbox",
+            api_token="tok",
+            site_slug="hq",
+            device_role_slug="stagewire",
+            device_type_id=1,
+            public_url="http://stagewire",
+        )
+
+    # A venue-synced device already exists in NetBox, so assign_ip should find it
+    # (no create) and draw an available IP from the given prefix.
+    fake_client = AsyncMock(spec=NetboxClient)
+    fake_client.find_device = AsyncMock(
+        return_value={
+            "id": 7,
+            "custom_fields": {
+                "stagewire_device_id": device_id,
+                "stagewire_venue_id": venue_id,
+            },
+        }
+    )
+    fake_client.find_prefix = AsyncMock(return_value={"id": 5})
+    fake_client.available_ips = AsyncMock(return_value=[{"address": "10.0.0.9/24"}])
+    fake_client.create_ip = AsyncMock(return_value={"id": 22})
+    monkeypatch.setattr(nb_service, "get_client", AsyncMock(return_value=fake_client))
+
+    captured: dict = {}
+
+    async def _capture_venue(venue_id_arg, event_type, payload):
+        captured["venue_id"] = venue_id_arg
+        captured["event_type"] = event_type
+        captured["payload"] = payload
+
+    monkeypatch.setattr(nb_service, "publish_venue_event", _capture_venue)
+    # Ensure the job path is NOT taken for a venue device.
+    monkeypatch.setattr(nb_service, "publish_job_event", AsyncMock())
+
+    async with db_mod.SessionLocal() as db:
+        result = await nb_service.assign_ip(
+            db, venue_id=uuid.UUID(venue_id), device_id=uuid.UUID(device_id), prefix="10.0.0.0/24"
+        )
+        assert result.ok is True
+        assert result.ip == "10.0.0.9"
+
+        # The local device records the assigned IP and ok status.
+        dev = (
+            await db.execute(select(GraphDevice).where(GraphDevice.id == uuid.UUID(device_id)))
+        ).scalar_one()
+        assert dev.attributes["network_ip"] == "10.0.0.9"
+        assert dev.attributes["netbox_sync_status"] == "ok"
+
+    # Realtime broadcast targeted the venue room, not a job room.
+    assert captured["venue_id"] == uuid.UUID(venue_id)
+    assert captured["event_type"] == "graph.device.netbox"
+    assert captured["payload"]["venue_id"] == venue_id
+    # The NetBox link built for this device points at the venue view, not a job.
+    fake_client.find_device.assert_awaited()
+
+
 async def test_netbox_list_vlans_and_prefixes(auth_headers, monkeypatch) -> None:
     from app.domains.netbox import service as nb_service
     from app.domains.netbox.client import NetboxClient

@@ -304,20 +304,36 @@ class NetboxClient:
         # ``available-ips`` is a GET that returns available addresses (no ids yet).
         return await self._results(f"/api/ipam/prefixes/{prefix_id}/available-ips/")
 
+    async def ensure_device_interface(self, device_id: int, name: str = "stagewire") -> int:
+        # NetBox 4.x assigns IP addresses to interfaces, not directly to devices, so a
+        # mirrored device needs a dedicated interface to carry its Stagewire IP. Reuse
+        # an existing one (idempotent) rather than piling up interfaces on every assign.
+        rows = await self._results("/api/dcim/interfaces/", params={"device_id": device_id})
+        if rows:
+            return int(rows[0]["id"])
+        created = await self._request(
+            "POST",
+            "/api/dcim/interfaces/",
+            json={"device": device_id, "name": name, "type": "other"},
+        )
+        return int(created["id"])
+
     async def create_ip(
         self,
         *,
         address: str,
-        device_id: int,
+        interface_id: int,
         custom_fields: dict,
         description: str | None = None,
         status: str = "active",
     ) -> dict:
+        # NetBox 4.7 rejects `assigned_object_type: dcim.device`; IPs attach to an
+        # interface on the device, which ensure_device_interface guarantees exists.
         body: dict = {
             "address": address,
             "status": status,
-            "assigned_object_type": "dcim.device",
-            "assigned_object_id": device_id,
+            "assigned_object_type": "dcim.interface",
+            "assigned_object_id": interface_id,
             "custom_fields": custom_fields,
         }
         if description:

@@ -105,6 +105,17 @@ def _fake_netbox_handler(request: httpx.Request) -> httpx.Response:
             )
         if path == "/api/ipam/prefixes/5/available-ips/":
             return httpx.Response(200, json=[{"address": "10.0.0.5/24", "family": 4}])
+        if path == "/api/dcim/interfaces/":
+            device_id = params.get("device_id")
+            matches = [
+                i
+                for i in state["interfaces"]
+                if str(i.get("device", {}).get("id")) == str(device_id)
+            ]
+            return httpx.Response(
+                200,
+                json={"count": len(matches), "next": None, "results": matches},
+            )
 
     if method == "PATCH":
         body = json.loads(request.content or b"{}")
@@ -145,6 +156,14 @@ def _fake_netbox_handler(request: httpx.Request) -> httpx.Response:
             )
         if path == "/api/ipam/ip-addresses/":
             return httpx.Response(201, json={"id": 200, "address": body.get("address")})
+        if path == "/api/dcim/interfaces/":
+            iface = {
+                "id": len(state["interfaces"]) + 1,
+                "device": body.get("device"),
+                "name": body.get("name"),
+            }
+            state["interfaces"].append(iface)
+            return httpx.Response(201, json=iface)
 
     if method == "PATCH" and path == "/api/dcim/devices/100/":
         return httpx.Response(200, json={"id": 100})
@@ -160,6 +179,7 @@ _fake_netbox_handler.state = {  # type: ignore[attr-defined]
     "roles": {},
     "mans": {},
     "types": {},
+    "interfaces": [],
 }
 
 
@@ -228,8 +248,11 @@ async def test_ipam_flow(client: NetboxClient) -> None:
     assert prefix["id"] == 5
     ips = await client.available_ips(5)
     assert ips[0]["address"] == "10.0.0.5/24"
+    # NetBox 4.7 attaches IPs to a device interface, not the device directly.
+    iface_id = await client.ensure_device_interface(100)
+    assert iface_id > 0
     created = await client.create_ip(
-        address="10.0.0.5/24", device_id=100, custom_fields={"stagewire_device_id": "abc"}
+        address="10.0.0.5/24", interface_id=iface_id, custom_fields={"stagewire_device_id": "abc"}
     )
     assert created["id"] == 200
 

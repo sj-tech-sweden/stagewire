@@ -10,7 +10,7 @@ import uuid
 
 from sqlalchemy import select
 
-from app.domains.audio.ws import publish_job_event
+from app.domains.audio.ws import publish_job_event, publish_venue_event
 from app.domains.graph.models import GraphDevice
 from app.domains.netbox import config as netbox_config
 from app.domains.netbox.client import NetboxClient
@@ -328,9 +328,10 @@ def _device_web_url(base_url: str, netbox_device: dict) -> str:
 
 async def assign_ip(
     db,
-    job_id: uuid.UUID,
-    device_id: uuid.UUID,
     *,
+    job_id: uuid.UUID | None = None,
+    venue_id: uuid.UUID | None = None,
+    device_id: uuid.UUID,
     prefix: str | None = None,
     address: str | None = None,
     description: str | None = None,
@@ -346,12 +347,24 @@ async def assign_ip(
     device = result.scalar_one_or_none()
     if device is None:
         return NetboxAssignIpResult(ok=False, message="Device not found.")
+    # A device mirrored from a job carries job_id; one from a venue base rig carries
+    # venue_id (job_id NULL). When the caller didn't pin a scope we infer it from the
+    # device so both the NetBox link/custom fields and the realtime room stay correct.
+    if job_id is None and venue_id is None:
+        job_id = device.job_id
+        venue_id = device.venue_id
+    if job_id is None and venue_id is None:
+        return NetboxAssignIpResult(
+            ok=False, message="Device is not part of a job or venue NetBox sync."
+        )
     attributes = dict(device.attributes or {})
 
     # Ensure the device exists in NetBox first.
     netbox_device = await nb.find_device(str(device.id))
-    link = _stagewire_link(cfg["public_url"], job_id=job_id, device_id=device.id)
-    cf = _device_custom_fields(job_id=job_id, device_id=device.id, link=link, status="ok")
+    link = _stagewire_link(cfg["public_url"], job_id=job_id, venue_id=venue_id, device_id=device.id)
+    cf = _device_custom_fields(
+        job_id=job_id, venue_id=venue_id, device_id=device.id, link=link, status="ok"
+    )
     if netbox_device is None:
         if not cfg["site_slug"]:
             return NetboxAssignIpResult(ok=False, message="Set the NetBox site before syncing.")
@@ -390,9 +403,12 @@ async def assign_ip(
             )
         address = available[0]["address"]
 
+    # NetBox 4.7 assigns IPs to a device interface, not the device directly, so we
+    # ensure the mirrored device has a Stagewire interface to hang the IP on.
+    interface_id = await nb.ensure_device_interface(netbox_device_id)
     ip = await nb.create_ip(
         address=address,
-        device_id=netbox_device_id,
+        interface_id=interface_id,
         custom_fields=cf,
         description=description,
     )
@@ -404,18 +420,21 @@ async def assign_ip(
     device.attributes = attributes
     await db.commit()
 
-    await publish_job_event(
-        job_id,
-        "graph.device.netbox",
-        {
-            "device_id": str(device.id),
-            "job_id": str(job_id),
-            "status": "ok",
-            "ip": bare,
-            "netbox_url": attributes.get(ATTR_NETBOX_URL),
-            "netbox_device_id": attributes.get(ATTR_NETBOX_DEVICE_ID),
-        },
-    )
+    # Broadcast to the matching room: a venue base-rig device updates the venue room,
+    # a job device updates the job room. The payload mirrors what the job path sends.
+    event_payload = {
+        "device_id": str(device.id),
+        "status": "ok",
+        "ip": bare,
+        "netbox_url": attributes.get(ATTR_NETBOX_URL),
+        "netbox_device_id": attributes.get(ATTR_NETBOX_DEVICE_ID),
+    }
+    if venue_id is not None:
+        event_payload["venue_id"] = str(venue_id)
+        await publish_venue_event(venue_id, "graph.device.netbox", event_payload)
+    else:
+        event_payload["job_id"] = str(job_id)
+        await publish_job_event(job_id, "graph.device.netbox", event_payload)
     return NetboxAssignIpResult(ok=True, ip=bare, netbox_ip_id=int(ip["id"]), message="Assigned.")
 
 
@@ -449,6 +468,7 @@ async def handle_webhook(db, payload: dict) -> dict:
 
     attributes = dict(device.attributes or {})
     job_id = device.job_id
+    venue_id = device.venue_id
     if event == "deleted":
         attributes[ATTR_NETBOX_SYNC_STATUS] = "conflict"
         attributes[ATTR_NETBOX_IP_ID] = None
@@ -468,18 +488,21 @@ async def handle_webhook(db, payload: dict) -> dict:
     device.attributes = attributes
     await db.commit()
 
-    if job_id is not None:
-        await publish_job_event(
-            job_id,
-            "graph.device.netbox",
-            {
-                "device_id": str(device.id),
-                "job_id": str(job_id),
-                "status": attributes.get(ATTR_NETBOX_SYNC_STATUS),
-                "ip": attributes.get("network_ip"),
-                "message": message,
-            },
-        )
+    # A venue base-rig device publishes to the venue room (no job_id); a job device
+    # publishes to the job room. This keeps the realtime NetBox conflict/updated
+    # banner on the correct live view.
+    event_payload = {
+        "device_id": str(device.id),
+        "status": attributes.get(ATTR_NETBOX_SYNC_STATUS),
+        "ip": attributes.get("network_ip"),
+        "message": message,
+    }
+    if venue_id is not None:
+        event_payload["venue_id"] = str(venue_id)
+        await publish_venue_event(venue_id, "graph.device.netbox", event_payload)
+    elif job_id is not None:
+        event_payload["job_id"] = str(job_id)
+        await publish_job_event(job_id, "graph.device.netbox", event_payload)
     return {
         "handled": True,
         "device_id": str(device.id),

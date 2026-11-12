@@ -207,7 +207,8 @@ async def assign_ip(payload: NetboxAssignIpRequest, db=Depends(get_db)) -> Netbo
         device_id = uuid.UUID(payload.device_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid device_id") from None
-    # Resolve the job the device belongs to so we can tag + broadcast correctly.
+    # Resolve the scope the device belongs to (a job OR a venue base rig) so we tag
+    # the NetBox object and broadcast the realtime event to the correct room.
     from sqlalchemy import select
 
     from app.domains.graph.models import GraphDevice
@@ -217,12 +218,16 @@ async def assign_ip(payload: NetboxAssignIpRequest, db=Depends(get_db)) -> Netbo
     if device is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
     job_id = device.job_id
-    if job_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Device is not part of a job")
+    venue_id = device.venue_id
+    if job_id is None and venue_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Device is not part of a job or venue NetBox sync"
+        )
     return await service.assign_ip(
         db,
-        job_id,
-        device_id,
+        job_id=job_id,
+        venue_id=venue_id,
+        device_id=device_id,
         prefix=payload.prefix,
         address=payload.address,
         description=payload.description,
