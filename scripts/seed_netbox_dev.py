@@ -121,6 +121,57 @@ def get_token(base_url: str, user: str, password: str) -> str:
     return f"Bearer nbt_{body['key']}.{body['token']}"
 
 
+def configure_stagewire(
+    args: argparse.Namespace, netbox_token: str, device_type_id: int
+) -> None:
+    """Best-effort: push the NetBox integration config into Stagewire so sync works.
+
+    The Stagewire integration config (tenant/site/role slugs, device type, token)
+    is what ``sync_job`` reads to build NetBox devices. If it is left empty — the
+    usual cause of a "Related object not found: {'slug': ''}" 500 — sync fails.
+    When ``--stagewire-url`` is given we log into Stagewire and PUT the config, so
+    a single seed run wires up both sides. Any failure here is non-fatal: the NetBox
+    side is still seeded and the values are printed for manual pasting.
+    """
+    url = args.stagewire_url.rstrip("/")
+    print(f"\nConfiguring Stagewire NetBox integration at {url} ...")
+    try:
+        _, login = _request(
+            url,
+            None,
+            "POST",
+            "/api/v1/auth/login",
+            body={"email": args.stagewire_user, "password": args.stagewire_password},
+        )
+        token = login.get("access_token")
+        if not token:
+            print("  ! Could not log into Stagewire; skipping auto-config. Paste values manually.")
+            return
+        status, resp = _request(
+            url,
+            f"Bearer {token}",
+            "PUT",
+            "/api/v1/netbox",
+            body={
+                "enabled": True,
+                "base_url": args.base_url,
+                "api_token": netbox_token,
+                "tenant_slug": _slug(args.tenant),
+                "site_slug": _slug(args.site),
+                "device_role_slug": _slug(args.role),
+                "device_type_id": device_type_id,
+                "default_device_status": "staged",
+                "public_url": url,
+            },
+        )
+        if status >= 400:
+            print(f"  ! Stagewire config failed (HTTP {status}): {resp}. Paste values manually.")
+        else:
+            print("  configured: Stagewire NetBox integration enabled with site/role/device type.")
+    except Exception as exc:  # noqa: BLE001 - best-effort convenience, never fatal
+        print(f"  ! Stagewire auto-config skipped: {exc}. Paste values manually.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed a dev NetBox for Stagewire.")
     parser.add_argument("--base-url", default="http://localhost:8088")
@@ -137,6 +188,16 @@ def main() -> int:
     )
     parser.add_argument(
         "--prefix", default="10.99.0.0/24", help="Sample prefix (subnet) inside the VLAN."
+    )
+    parser.add_argument(
+        "--stagewire-url",
+        default=None,
+        help="If set, also configure the Stagewire NetBox integration (base_url, slugs, "
+        "device type, token) by logging in and PUTting /api/v1/netbox. Best-effort.",
+    )
+    parser.add_argument("--stagewire-user", default="admin", help="Stagewire admin email.")
+    parser.add_argument(
+        "--stagewire-password", default="Test1234!", help="Stagewire admin password."
     )
     args = parser.parse_args()
 
@@ -191,7 +252,7 @@ def main() -> int:
     )
 
     # Device type (needs the manufacturer id)
-    ensure_object(
+    device_type = ensure_object(
         args.base_url,
         auth,
         "/api/dcim/device-types/",
@@ -248,6 +309,15 @@ def main() -> int:
     print("  http://host.docker.internal:8010  (from inside Docker)")
     print("  http://localhost:8010             (when Stagewire runs on the host)")
     print(f"\nNetBox UI is at:    {args.base_url}")
+
+    if args.stagewire_url:
+        configure_stagewire(args, auth, device_type["id"])
+
+    print(
+        "\nNext: in Stagewire run Provision (Settings → NetBox) to create/heal the "
+        "custom fields and webhook, then Sync the job. Provision is what writes the "
+        "device_type_id the sync needs."
+    )
     return 0
 
 

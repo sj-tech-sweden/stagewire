@@ -126,41 +126,64 @@ async def sync_job(db, job_id: uuid.UUID) -> NetboxSyncResult:
     if nb is None:
         return NetboxSyncResult(ok=False, message="NetBox is not configured.")
 
+    # A device needs a site, a role and a device type to be created in NetBox. These
+    # come from the integration config (site/role set in Settings, device_type_id from
+    # provision). If any are missing, say so clearly instead of letting NetBox return a
+    # 400 that would otherwise surface as a 500.
+    if not (cfg["site_slug"] and cfg["device_role_slug"] and cfg["device_type_id"]):
+        return NetboxSyncResult(
+            ok=False,
+            message=(
+                "NetBox is missing required config (site, device role or device type). "
+                "Set them in Settings → NetBox and run Provision before syncing."
+            ),
+        )
+
     result = await db.execute(select(GraphDevice).where(GraphDevice.job_id == job_id))
     devices = result.scalars().all()
     created = 0
     updated = 0
 
-    for device in devices:
-        attributes = dict(device.attributes or {})
-        link = _stagewire_link(cfg["public_url"], job_id, device.id)
-        cf = _device_custom_fields(job_id, device.id, link, "ok")
-        existing = await nb.find_device(str(device.id))
-        if existing is None:
-            created_device = await nb.create_device(
-                name=device.name or str(device.id),
-                site_slug=cfg["site_slug"],
-                device_type_id=int(cfg["device_type_id"] or 0),
-                role_slug=cfg["device_role_slug"],
-                status_slug=cfg["default_device_status"],
-                tenant_slug=cfg["tenant_slug"] or None,
-                custom_fields=cf,
-            )
-            attributes[ATTR_NETBOX_DEVICE_ID] = str(created_device["id"])
-            attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], created_device)
-            attributes[ATTR_NETBOX_LINK] = link
-            attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
-            created += 1
-        else:
-            await nb.update_device(
-                int(existing["id"]), {"custom_fields": {**existing.get("custom_fields", {}), **cf}}
-            )
-            attributes[ATTR_NETBOX_DEVICE_ID] = str(existing["id"])
-            attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], existing)
-            attributes[ATTR_NETBOX_LINK] = link
-            attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
-            updated += 1
-        device.attributes = attributes
+    try:
+        # Ensure custom fields exist and are valid for dcim.device (self-heals fields
+        # left stale by an older build), so device creation doesn't fail on them.
+        await nb.ensure_custom_fields()
+
+        for device in devices:
+            attributes = dict(device.attributes or {})
+            link = _stagewire_link(cfg["public_url"], job_id, device.id)
+            cf = _device_custom_fields(job_id, device.id, link, "ok")
+            existing = await nb.find_device(str(device.id))
+            if existing is None:
+                created_device = await nb.create_device(
+                    name=device.name or str(device.id),
+                    site_slug=cfg["site_slug"],
+                    device_type_id=int(cfg["device_type_id"] or 0),
+                    role_slug=cfg["device_role_slug"],
+                    status_slug=cfg["default_device_status"],
+                    tenant_slug=cfg["tenant_slug"] or None,
+                    custom_fields=cf,
+                )
+                attributes[ATTR_NETBOX_DEVICE_ID] = str(created_device["id"])
+                attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], created_device)
+                attributes[ATTR_NETBOX_LINK] = link
+                attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
+                created += 1
+            else:
+                await nb.update_device(
+                    int(existing["id"]),
+                    {"custom_fields": {**existing.get("custom_fields", {}), **cf}},
+                )
+                attributes[ATTR_NETBOX_DEVICE_ID] = str(existing["id"])
+                attributes[ATTR_NETBOX_URL] = _device_web_url(cfg["base_url"], existing)
+                attributes[ATTR_NETBOX_LINK] = link
+                attributes[ATTR_NETBOX_SYNC_STATUS] = "ok"
+                updated += 1
+            device.attributes = attributes
+    except RuntimeError as exc:
+        # NetBox client raises RuntimeError on any non-2xx; surface it as a clean
+        # result rather than a 500 so the UI can show the underlying NetBox error.
+        return NetboxSyncResult(ok=False, message=f"NetBox sync failed: {exc}")
 
     await db.commit()
     return NetboxSyncResult(
@@ -172,11 +195,15 @@ async def sync_job(db, job_id: uuid.UUID) -> NetboxSyncResult:
 
 
 def _device_web_url(base_url: str, netbox_device: dict) -> str:
-    display = netbox_device.get("display") or {}
-    path = display.get("url") or ""
-    if path:
-        return f"{base_url.rstrip('/')}{path}"
-    return netbox_device.get("url") or ""
+    # Build the NetBox web-UI URL from the device id. NetBox's UI path for a device
+    # is always ``/dcim/devices/{id}/``. Do NOT derive this from the ``display``
+    # field: NetBox 4.7 returns ``display`` as a plain string (older versions
+    # returned a dict with a ``url`` key), so ``display.get("url")`` raises
+    # AttributeError. The top-level ``url`` is the *API* URL, not the UI URL.
+    device_id = netbox_device.get("id")
+    if device_id is None:
+        return netbox_device.get("url") or ""
+    return f"{base_url.rstrip('/')}/dcim/devices/{device_id}/"
 
 
 async def assign_ip(

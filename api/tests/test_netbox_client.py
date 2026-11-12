@@ -18,14 +18,15 @@ def _fake_netbox_handler(request: httpx.Request) -> httpx.Response:
 
     if method == "GET":
         if path == "/api/extras/custom-fields/":
-            key = params.get("key")
-            existing = state["cf"].get(key) if key else None
+            # NetBox 4.7 returns every custom field (it ignores the `key` query param)
+            # and identifies fields by `name` (not `key`). The client matches by name.
+            all_cf = list(state["cf"].values())
             return httpx.Response(
                 200,
                 json={
-                    "count": 1 if existing else 0,
+                    "count": len(all_cf),
                     "next": None,
-                    "results": [existing] if existing else [],
+                    "results": all_cf,
                 },
             )
         if path == "/api/extras/webhooks/":
@@ -105,11 +106,22 @@ def _fake_netbox_handler(request: httpx.Request) -> httpx.Response:
         if path == "/api/ipam/prefixes/5/available-ips/":
             return httpx.Response(200, json=[{"address": "10.0.0.5/24", "family": 4}])
 
+    if method == "PATCH":
+        body = json.loads(request.content or b"{}")
+        if path.startswith("/api/extras/custom-fields/") and path.endswith("/"):
+            cf_id = int(path.split("/")[-2])
+            # The fake stores custom fields by key; find the row by id to patch it.
+            for _key, row in state["cf"].items():
+                if row.get("id") == cf_id:
+                    row.update(body)
+                    return httpx.Response(200, json=row)
+            return httpx.Response(404, json={"detail": "not found"})
+
     if method == "POST":
         body = json.loads(request.content or b"{}")
         if path == "/api/extras/custom-fields/":
-            state["cf"][body.get("key")] = body
-            return httpx.Response(201, json={**body, "id": len(state["cf"])})
+            state["cf"][body.get("name")] = {**body, "id": len(state["cf"]) + 1}
+            return httpx.Response(201, json=state["cf"][body.get("name")])
         if path == "/api/extras/webhooks/":
             state["webhooks"][body.get("name")] = body
             return httpx.Response(201, json={**body, "id": len(state["webhooks"])})
@@ -163,6 +175,23 @@ async def test_ensure_custom_fields_idempotent(client: NetboxClient) -> None:
     # Second pass finds them already present (fake returns empty, so still 0 new).
     again = await client.ensure_custom_fields()
     assert again == []
+
+
+async def test_ensure_custom_fields_heals_missing_object_types(client: NetboxClient) -> None:
+    # Reset shared fake state so the PATCH-by-id lookup is unambiguous across tests.
+    _fake_netbox_handler.state["cf"] = {}  # type: ignore[attr-defined]
+    # Simulate a field left stale by an older build: it exists (by key) but has no
+    # object_types, so it is "not valid for this object type" when set on a device.
+    _fake_netbox_handler.state["cf"]["stagewire_device_id"] = {  # type: ignore[attr-defined]
+        "id": 1,
+        "key": "stagewire_device_id",
+        "object_types": [],
+    }
+    healed = await client.ensure_custom_fields()
+    assert "stagewire_device_id" in healed
+    patched = _fake_netbox_handler.state["cf"]["stagewire_device_id"]  # type: ignore[attr-defined]
+    assert "dcim.device" in patched["object_types"]
+    assert "ipam.ipaddress" in patched["object_types"]
 
 
 async def test_ensure_webhook_creates_once(client: NetboxClient) -> None:

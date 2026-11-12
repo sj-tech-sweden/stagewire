@@ -77,6 +77,14 @@ class NetboxClient:
         async with self._client() as client:
             response = await client.request(method, path, params=params, json=json)
             self._raise_for_status(method, path, response)
+            # A mutation (POST/PATCH/DELETE) changes NetBox state, so any list we
+            # previously cached via _results may now be stale. Drop the whole page
+            # cache so the next read re-fetches. Without this, ensure_custom_fields
+            # would see a stale custom-fields list (missing the field it just
+            # created) and re-POST it, which NetBox rejects with 400 "name already
+            # exists" — surfacing as a sync 500 in production, where caching is on.
+            if method != "GET":
+                _PAGE_CACHE.clear()
             if response.status_code == 204 or not response.content:
                 return {}
             return response.json()
@@ -124,24 +132,48 @@ class NetboxClient:
     # --- Provisioning -------------------------------------------------------
 
     async def ensure_custom_fields(self) -> list[str]:
-        """Create Stagewire's custom fields idempotently. Returns created keys."""
+        """Create Stagewire's custom fields idempotently. Returns created/healed keys.
+
+        Self-heals fields created by an older build that omitted ``object_types``
+        (NetBox 4.7 renamed ``content_types`` → ``object_types``): a CF without the
+        right object types exists but is "not valid for this object type" when you
+        try to set it on a device, which previously surfaced as a cryptic NetBox
+        400. We PATCH those back into shape instead of leaving them broken.
+
+        Note: NetBox 4.7 ignores the ``?key=`` query param on custom fields (it
+        returns every field) and has no ``key`` attribute (identified by ``name``),
+        so we fetch the set and match by ``name`` in Python rather than the filter.
+        """
         defined = [
             (NETBOX_CF_JOB_ID, "text", "Stagewire production job ID"),
             (NETBOX_CF_DEVICE_ID, "text", "Stagewire graph device ID"),
             (NETBOX_CF_SYNC_STATUS, "text", "Stagewire sync status (ok/conflict/error)"),
             (NETBOX_CF_LINK, "url", "Link back to the Stagewire job/device view"),
         ]
+        all_fields = await self._results("/api/extras/custom-fields/")
+        # NetBox 4.7 has no `key` attribute on custom fields — they are identified
+        # by `name` (the API returns `key: null`). Match on `name`, never `key`.
+        by_name = {cf.get("name"): cf for cf in all_fields}
         created: list[str] = []
         for key, ftype, description in defined:
-            existing = await self._results("/api/extras/custom-fields/", params={"key": key})
+            existing = by_name.get(key)
             if existing:
+                # Heal a CF that lacks one of the required object types.
+                current = set(existing.get("object_types") or [])
+                missing = [t for t in NETBOX_CF_CONTENT_TYPES if t not in current]
+                if missing:
+                    await self._request(
+                        "PATCH",
+                        f"/api/extras/custom-fields/{existing['id']}/",
+                        json={"object_types": sorted(current | set(NETBOX_CF_CONTENT_TYPES))},
+                    )
+                    created.append(key)
                 continue
             await self._request(
                 "POST",
                 "/api/extras/custom-fields/",
                 json={
                     "name": key,
-                    "key": key,
                     "label": f"Stagewire {key}",
                     "type": ftype,
                     # NetBox 4.7 renamed this field from `content_types` to
@@ -239,14 +271,20 @@ class NetboxClient:
         tenant_slug: str | None,
         custom_fields: dict,
     ) -> dict:
+        # NetBox 4.7 rejects an empty ``{"slug": ""}`` FK with a confusing
+        # "Related object not found" — only include an FK when its slug is set.
+        # (Required FKs like site/role are validated upstream in sync_job, which
+        # returns a clear error rather than letting this 400 bubble up as a 500.)
         body: dict = {
             "name": name,
             "device_type": device_type_id,
-            "role": {"slug": role_slug},
-            "site": {"slug": site_slug},
             "status": status_slug,
             "custom_fields": custom_fields,
         }
+        if site_slug:
+            body["site"] = {"slug": site_slug}
+        if role_slug:
+            body["role"] = {"slug": role_slug}
         if tenant_slug:
             body["tenant"] = {"slug": tenant_slug}
         return await self._request("POST", "/api/dcim/devices/", json=body)

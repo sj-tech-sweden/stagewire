@@ -11,6 +11,7 @@ from app.core import db as db_mod
 from app.domains.audio.models import ProductionJob
 from app.domains.graph.models import GraphDevice
 from app.domains.netbox import config as netbox_config
+from app.domains.netbox import service as netbox_service
 from app.domains.netbox.schemas import NetboxAssignIpResult, NetboxProvisionResult
 from app.main import app
 
@@ -34,6 +35,27 @@ async def _seed_job_and_device() -> tuple[str, str]:
         db.add(device)
         await db.commit()
         return str(job.id), str(device.id)
+
+
+def test_device_web_url_uses_id_not_display() -> None:
+    # NetBox 4.7 returns `display` as a plain string (older versions returned a
+    # dict with a `url` key). Building the UI URL from `display.get("url")` raised
+    # AttributeError and turned a successful sync into a 500. The URL must come
+    # from the device id, which is stable across versions.
+    base = "http://netbox:8088"
+    as_string = {"id": 7, "display": "FOH Mixer 1", "url": "http://netbox:8088/api/dcim/devices/7/"}
+    as_dict = {
+        "id": 7,
+        "display": {"url": "/dcim/devices/7/"},
+        "url": "http://netbox:8088/api/dcim/devices/7/",
+    }
+    for device in (as_string, as_dict):
+        assert netbox_service._device_web_url(base, device) == "http://netbox:8088/dcim/devices/7/"
+    # Missing id falls back to the raw url/api url without crashing.
+    assert (
+        netbox_service._device_web_url(base, {"url": "http://x/api/dcim/devices/9/"})
+        == "http://x/api/dcim/devices/9/"
+    )
 
 
 async def test_netbox_config_default_and_update(auth_headers) -> None:
@@ -210,6 +232,30 @@ async def test_netbox_webhook_conflict_on_reassign() -> None:
             await db.execute(select(GraphDevice).where(GraphDevice.id == uuid.UUID(dev_id)))
         ).scalar_one()
         assert dev.attributes["netbox_sync_status"] == "conflict"
+
+
+async def test_netbox_sync_job_missing_config_returns_200_not_500(auth_headers) -> None:
+    # A missing site/role/device-type used to blow up as a 500 (NetBox 400 from an
+    # empty {"slug": ""} FK bubbled up). sync_job must validate and answer 200/ok=False.
+    job_id, _ = await _seed_job_and_device()
+    async with db_mod.SessionLocal() as db:
+        await netbox_config.save_integration_config(
+            db,
+            enabled=True,
+            base_url="http://netbox",
+            api_token="tok",
+            site_slug="",
+            device_role_slug="",
+            device_type_id=None,
+        )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(f"{BASE}/netbox/sync-job/{job_id}", headers=auth_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert "site" in body["message"].lower() or "device type" in body["message"].lower()
 
 
 async def test_netbox_webhook_accepts_address_update() -> None:
