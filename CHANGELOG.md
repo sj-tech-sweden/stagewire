@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.1.0...stagewire-v1.2.0) (2026-11-12)
+
+
+### Features
+
+* **venues:** venues as template jobs — unify Standard Base Rig with job workspace ([#70](https://github.com/sj-tech-sweden/stagewire/issues/70)) ([3d19061](https://github.com/sj-tech-sweden/stagewire/commit/3d19061a78ab2e4e2a01893771eb0c55d2a46505))
+* **web:** add Network & Control panel to inspector for AVL devices ([#74](https://github.com/sj-tech-sweden/stagewire/issues/74)) ([26015fc](https://github.com/sj-tech-sweden/stagewire/commit/26015fc8970eb132f61f53b93d1b88967aa66b10))
+* **web:** hide all stockwire-rental UI when the integration is disabled ([#73](https://github.com/sj-tech-sweden/stagewire/issues/73)) ([b4a6b3e](https://github.com/sj-tech-sweden/stagewire/commit/b4a6b3ea95be779168a74f8c8e4bf2e063cfdf91))
+
 ## [1.1.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.0.0...stagewire-v1.1.0) (2026-11-03)
 
 
