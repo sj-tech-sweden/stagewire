@@ -20,6 +20,8 @@ export const useNetboxStore = defineStore('netbox', {
       webhook_ready: false,
     },
     availableIps: [],
+    vlans: [],
+    prefixes: [],
     loading: false,
   }),
   getters: {
@@ -63,6 +65,16 @@ export const useNetboxStore = defineStore('netbox', {
     },
     async assignIp({ device_id, prefix, address }) {
       const { data } = await api.post('/netbox/assign-ip', { device_id, prefix, address });
+      return data;
+    },
+    async loadVlans() {
+      const { data } = await api.get('/netbox/vlans');
+      this.vlans = data;
+      return data;
+    },
+    async loadPrefixes(vlanId) {
+      const { data } = await api.get('/netbox/prefixes', { params: { vlan_id: vlanId } });
+      this.prefixes = data;
       return data;
     },
   },

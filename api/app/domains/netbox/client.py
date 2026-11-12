@@ -291,3 +291,64 @@ class NetboxClient:
         async with self._client() as client:
             response = await client.request("DELETE", f"/api/ipam/ip-addresses/{ip_id}/")
             self._raise_for_status("DELETE", f"/api/ipam/ip-addresses/{ip_id}/", response)
+
+    # --- VLANs & prefixes (browse for subnet selection) --------------------
+
+    async def list_vlans(
+        self, *, tenant_slug: str | None = None, site_slug: str | None = None
+    ) -> list[dict]:
+        """Return VLANs, optionally scoped to a tenant/site (slug)."""
+        params: dict = {}
+        if tenant_slug:
+            params["tenant"] = tenant_slug
+        if site_slug:
+            params["site"] = site_slug
+        rows = await self._results("/api/ipam/vlans/", params=params)
+        return [
+            {"id": r["id"], "vid": r.get("vid"), "name": r.get("name"), "slug": r.get("slug")}
+            for r in rows
+        ]
+
+    async def list_prefixes(
+        self,
+        *,
+        vlan_id: int | None = None,
+        tenant_slug: str | None = None,
+        site_slug: str | None = None,
+    ) -> list[dict]:
+        """Return IP prefixes, optionally filtered to a VLAN / tenant / site.
+
+        A VLAN can span several prefixes (e.g. IPv4 + IPv6), so the UI lists the
+        prefixes belonging to the chosen VLAN for the technician to pick the
+        subnet they actually want to draw an address from.
+        """
+        params: dict = {}
+        if vlan_id is not None:
+            params["vlan_id"] = vlan_id
+        if tenant_slug:
+            params["tenant"] = tenant_slug
+        if site_slug:
+            params["site"] = site_slug
+        rows = await self._results("/api/ipam/prefixes/", params=params)
+        out: list[dict] = []
+        for r in rows:
+            vlan = r.get("vlan")
+            if isinstance(vlan, dict):
+                vlan_id_val: int | None = vlan.get("id")
+            elif isinstance(vlan, int):
+                vlan_id_val = vlan
+            else:
+                vlan_id_val = None
+            site = r.get("site")
+            tenant = r.get("tenant")
+            out.append(
+                {
+                    "id": r["id"],
+                    "prefix": r.get("prefix"),
+                    "vlan_id": vlan_id_val,
+                    "site_slug": site.get("slug") if isinstance(site, dict) else None,
+                    "tenant_slug": tenant.get("slug") if isinstance(tenant, dict) else None,
+                    "description": r.get("description") or "",
+                }
+            )
+        return out

@@ -73,8 +73,35 @@ def _fake_netbox_handler(request: httpx.Request) -> httpx.Response:
             )
         if path == "/api/dcim/devices/":
             return httpx.Response(200, json={"count": 0, "next": None, "results": []})
+        if path == "/api/ipam/vlans/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "next": None,
+                    "results": [{"id": 1, "vid": 100, "name": "Mgmt", "slug": "mgmt"}],
+                },
+            )
         if path == "/api/ipam/prefixes/":
-            return httpx.Response(200, json={"count": 1, "next": None, "results": [{"id": 5}]})
+            # One prefix sitting in VLAN 1; the vlan_id filter is honoured
+            # trivially (the fake only has this single row).
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "next": None,
+                    "results": [
+                        {
+                            "id": 5,
+                            "prefix": "10.0.0.0/24",
+                            "vlan": {"id": 1, "vid": 100},
+                            "site": {"slug": "hq"},
+                            "tenant": {"slug": "stagewire"},
+                            "description": "Mgmt subnet",
+                        }
+                    ],
+                },
+            )
         if path == "/api/ipam/prefixes/5/available-ips/":
             return httpx.Response(200, json=[{"address": "10.0.0.5/24", "family": 4}])
 
@@ -174,6 +201,26 @@ async def test_ipam_flow(client: NetboxClient) -> None:
         address="10.0.0.5/24", device_id=100, custom_fields={"stagewire_device_id": "abc"}
     )
     assert created["id"] == 200
+
+
+async def test_list_vlans_parses_response(client: NetboxClient) -> None:
+    vlans = await client.list_vlans()
+    assert len(vlans) == 1
+    assert vlans[0]["id"] == 1
+    assert vlans[0]["vid"] == 100
+    assert vlans[0]["name"] == "Mgmt"
+
+
+async def test_list_prefixes_parses_nested_vlan_and_scope(client: NetboxClient) -> None:
+    prefixes = await client.list_prefixes(vlan_id=1)
+    assert len(prefixes) == 1
+    p = prefixes[0]
+    assert p["id"] == 5
+    assert p["prefix"] == "10.0.0.0/24"
+    assert p["vlan_id"] == 1
+    assert p["site_slug"] == "hq"
+    assert p["tenant_slug"] == "stagewire"
+    assert p["description"] == "Mgmt subnet"
 
 
 def test_webhook_signature_valid_and_invalid() -> None:

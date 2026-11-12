@@ -51,6 +51,22 @@ class NetboxAvailableIp(BaseModel):
     family: int = 4
 
 
+class NetboxVlan(BaseModel):
+    id: int
+    vid: int | None = None
+    name: str | None = None
+    slug: str | None = None
+
+
+class NetboxPrefix(BaseModel):
+    id: int
+    prefix: str
+    vlan_id: int | None = None
+    site_slug: str | None = None
+    tenant_slug: str | None = None
+    description: str | None = None
+
+
 class NetboxAssignIpRequest(BaseModel):
     device_id: str
     # The prefix (CIDR) to draw an available address from; defaults to the

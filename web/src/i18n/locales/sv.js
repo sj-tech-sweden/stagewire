@@ -484,6 +484,8 @@ export default {
       netboxAssigned: "Tilldelade {ip} från NetBox.",
       netboxConflict: "NetBox rapporterar en IP-konflikt för den här enheten — kontrollera adressen i NetBox.",
       netboxPrefix: "NetBox-prefix (CIDR)",
+      netboxVlan: "VLAN",
+      netboxSubnet: "Subnät (från VLAN)",
       netboxStatus: {
         ok: "Synkad",
         conflict: "Konflikt",

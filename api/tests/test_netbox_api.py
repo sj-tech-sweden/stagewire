@@ -99,6 +99,59 @@ async def test_netbox_assign_ip_routes_to_service(auth_headers, monkeypatch) -> 
         fake.assert_awaited_once()
 
 
+async def test_netbox_list_vlans_and_prefixes(auth_headers, monkeypatch) -> None:
+    from app.domains.netbox import service as nb_service
+    from app.domains.netbox.client import NetboxClient
+
+    fake_client = AsyncMock(spec=NetboxClient)
+    fake_client.list_vlans = AsyncMock(
+        return_value=[{"id": 1, "vid": 100, "name": "Mgmt", "slug": "mgmt"}]
+    )
+    fake_client.list_prefixes = AsyncMock(
+        return_value=[
+            {
+                "id": 5,
+                "prefix": "10.0.0.0/24",
+                "vlan_id": 1,
+                "site_slug": "hq",
+                "tenant_slug": "stagewire",
+                "description": "Mgmt subnet",
+            }
+        ]
+    )
+    monkeypatch.setattr(nb_service, "get_client", AsyncMock(return_value=fake_client))
+
+    # Configure a tenant/site so we also confirm they are forwarded to the client.
+    async with db_mod.SessionLocal() as db:
+        await netbox_config.save_integration_config(
+            db,
+            enabled=True,
+            base_url="http://netbox",
+            api_token="tok",
+            tenant_slug="stagewire",
+            site_slug="hq",
+        )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"{BASE}/netbox/vlans", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()[0]["vid"] == 100
+
+        resp = await client.get(
+            f"{BASE}/netbox/prefixes", headers=auth_headers, params={"vlan_id": 1}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["prefix"] == "10.0.0.0/24"
+
+    # The configured tenant/site scope is forwarded to the client.
+    _, kwargs = fake_client.list_prefixes.call_args
+    assert kwargs["tenant_slug"] == "stagewire"
+    assert kwargs["site_slug"] == "hq"
+    assert kwargs["vlan_id"] == 1
+
+
 async def _seed_device(attributes: dict) -> str:
     async with db_mod.SessionLocal() as db:
         await netbox_config.save_webhook_secret(db, "secret")

@@ -482,6 +482,8 @@ export default {
       netboxAssigned: "Assigned {ip} from NetBox.",
       netboxConflict: "NetBox reports an IP conflict for this device — check the address in NetBox.",
       netboxPrefix: "NetBox prefix (CIDR)",
+      netboxVlan: "VLAN",
+      netboxSubnet: "Subnet (from VLAN)",
       netboxStatus: {
         ok: "Synced",
         conflict: "Conflict",

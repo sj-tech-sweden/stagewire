@@ -661,6 +661,39 @@
             </template>
             {{ t('workspace.network.netboxConflict') }}
           </q-banner>
+          <!-- VLAN → subnet picker: choose a NetBox VLAN, then a prefix/subnet
+               inside it. Selecting the subnet sets the device's NetBox prefix
+               and draws available IPs from it. The manual CIDR input below is
+               kept as a fallback for subnets not tied to a VLAN. -->
+          <q-select
+            v-if="!readonly"
+            :model-value="selectedVlanId"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="netboxVlanOptions"
+            :label="t('workspace.network.netboxVlan')"
+            data-testid="network-netbox-vlan"
+            :loading="netboxVlansLoading"
+            @focus="loadNetboxVlans"
+            @update:model-value="onNetboxVlanChange"
+          />
+          <q-select
+            v-if="!readonly && selectedVlanId"
+            :model-value="selectedPrefixId"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="netboxPrefixOptions"
+            :label="t('workspace.network.netboxSubnet')"
+            data-testid="network-netbox-subnet"
+            :loading="netboxPrefixesLoading"
+            @update:model-value="onNetboxPrefixChange"
+          />
           <q-input
             v-if="!readonly"
             :model-value="attrs.network_prefix || ''"
@@ -973,17 +1006,73 @@ const netbox = useNetboxStore();
 const netboxQuerying = ref(false);
 const netboxAssigning = ref(false);
 const netboxSelectedIp = ref(null);
+const selectedVlanId = ref(null);
+const selectedPrefixId = ref(null);
+const netboxVlansLoading = ref(false);
+const netboxPrefixesLoading = ref(false);
 
 const netboxIpOptions = computed(() =>
   (netbox.availableIps || []).map((ip) => ({ label: ip.address, value: ip.address })),
 );
+
+const netboxVlanOptions = computed(() =>
+  (netbox.vlans || []).map((v) => ({
+    label: v.vid != null ? `${v.vid} — ${v.name || v.slug}` : (v.name || v.slug),
+    value: v.id,
+  })),
+);
+
+const netboxPrefixOptions = computed(() =>
+  (netbox.prefixes || []).map((p) => ({
+    label: p.prefix + (p.description ? ` (${p.description})` : ''),
+    value: p.id,
+    prefix: p.prefix,
+  })),
+);
+
+async function loadNetboxVlans() {
+  if (netbox.vlans.length) return;
+  netboxVlansLoading.value = true;
+  try {
+    await netbox.loadVlans();
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxVlansLoading.value = false;
+  }
+}
+
+async function onNetboxVlanChange(vlanId) {
+  selectedVlanId.value = vlanId;
+  selectedPrefixId.value = null;
+  netbox.prefixes = [];
+  if (!vlanId) return;
+  netboxPrefixesLoading.value = true;
+  try {
+    await netbox.loadPrefixes(vlanId);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxPrefixesLoading.value = false;
+  }
+}
+
+async function onNetboxPrefixChange(prefixId) {
+  selectedPrefixId.value = prefixId;
+  const opt = netboxPrefixOptions.value.find((o) => o.value === prefixId);
+  if (!opt) return;
+  // Persist the chosen subnet as the device's NetBox prefix, then draw available
+  // IPs from it so the rest of the assignment flow is unchanged.
+  await save({ attributes: { network_prefix: opt.prefix } });
+  await queryNetboxIps(opt.prefix);
+}
 const netboxStatusColor = computed(() => {
   const s = props.device?.attributes?.netbox_sync_status;
   return { ok: 'positive', conflict: 'negative', error: 'negative', pending: 'warning' }[s] || 'grey';
 });
 
-async function queryNetboxIps() {
-  const prefix = props.device?.attributes?.network_prefix;
+async function queryNetboxIps(prefixOverride) {
+  const prefix = prefixOverride || props.device?.attributes?.network_prefix;
   if (!prefix) {
     $q.notify({ type: 'warning', message: t('workspace.network.netboxNeedsSubnet') });
     return;

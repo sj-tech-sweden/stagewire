@@ -131,6 +131,13 @@ def main() -> int:
     parser.add_argument("--role", default="stagewire", help="Device role slug to create.")
     parser.add_argument("--manufacturer", default="Generic")
     parser.add_argument("--device-model", default="Stagewire Device")
+    parser.add_argument("--vlan", default="stagewire-mgmt", help="Sample VLAN slug/name to create.")
+    parser.add_argument(
+        "--vlan-vid", type=int, default=100, help="VLAN ID (VID) for the sample VLAN."
+    )
+    parser.add_argument(
+        "--prefix", default="10.99.0.0/24", help="Sample prefix (subnet) inside the VLAN."
+    )
     args = parser.parse_args()
 
     print(f"Seeding NetBox at {args.base_url} ...")
@@ -138,7 +145,7 @@ def main() -> int:
     print("  token provisioned (v2 Bearer header)")
 
     # Tenant
-    ensure_object(
+    tenant = ensure_object(
         args.base_url,
         auth,
         "/api/tenancy/tenants/",
@@ -147,9 +154,10 @@ def main() -> int:
         _slug(args.tenant),
         {"name": args.tenant, "slug": _slug(args.tenant)},
     )
+    tenant_id = tenant["id"]
 
     # Site (requires no other FKs in NetBox)
-    ensure_object(
+    site = ensure_object(
         args.base_url,
         auth,
         "/api/dcim/sites/",
@@ -158,6 +166,7 @@ def main() -> int:
         _slug(args.site),
         {"name": args.site, "slug": _slug(args.site)},
     )
+    site_id = site["id"]
 
     # Device role
     ensure_object(
@@ -193,6 +202,39 @@ def main() -> int:
             "manufacturer": man["id"],
             "model": args.device_model,
             "slug": _slug(args.device_model),
+        },
+    )
+
+    # Sample VLAN + prefix so the VLAN → subnet picker has something to show.
+    # NetBox 4.7 requires FK references (tenant/site) by numeric ID, not slug.
+    vlan = ensure_object(
+        args.base_url,
+        auth,
+        "/api/ipam/vlans/",
+        "/api/ipam/vlans/",
+        "slug",
+        _slug(args.vlan),
+        {
+            "name": args.vlan,
+            "slug": _slug(args.vlan),
+            "vid": args.vlan_vid,
+            "tenant": tenant_id,
+            "site": site_id,
+        },
+    )
+    ensure_object(
+        args.base_url,
+        auth,
+        "/api/ipam/prefixes/",
+        "/api/ipam/prefixes/",
+        "prefix",
+        args.prefix,
+        {
+            "prefix": args.prefix,
+            "site": site_id,
+            "tenant": tenant_id,
+            "vlan": vlan["id"],
+            "status": "active",
         },
     )
 

@@ -24,9 +24,11 @@ from app.domains.netbox.schemas import (
     NetboxAvailableIp,
     NetboxIntegrationOut,
     NetboxIntegrationUpdate,
+    NetboxPrefix,
     NetboxProvisionResult,
     NetboxSyncResult,
     NetboxTestResult,
+    NetboxVlan,
 )
 from app.domains.netbox.webhook import verify_netbox_signature
 
@@ -157,6 +159,38 @@ async def available_ips(
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No NetBox prefix matches {prefix}")
     rows = await nb.available_ips(int(prefix_obj["id"]))
     return [NetboxAvailableIp(address=r["address"], family=r.get("family", 4)) for r in rows]
+
+
+@router.get("/vlans", response_model=list[NetboxVlan])
+async def list_vlans(db=Depends(get_db)) -> list[NetboxVlan]:
+    """Browse NetBox VLANs. Scoped to the configured tenant/site when set."""
+    nb = await service.get_client(db)
+    if nb is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "NetBox is not configured")
+    cfg = await netbox_config.load_integration_config(db)
+    return await nb.list_vlans(
+        tenant_slug=cfg.get("tenant_slug") or None,
+        site_slug=cfg.get("site_slug") or None,
+    )
+
+
+@router.get("/prefixes", response_model=list[NetboxPrefix])
+async def list_prefixes(
+    vlan_id: int | None = Query(None, description="Filter to prefixes in this VLAN"),
+    db=Depends(get_db),
+) -> list[NetboxPrefix]:
+    """Browse NetBox prefixes, optionally filtered to a VLAN. Scoped to the
+    configured tenant/site when set. This is the 'subnet' step of the VLAN →
+    subnet picker used when assigning an IP to a device."""
+    nb = await service.get_client(db)
+    if nb is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "NetBox is not configured")
+    cfg = await netbox_config.load_integration_config(db)
+    return await nb.list_prefixes(
+        vlan_id=vlan_id,
+        tenant_slug=cfg.get("tenant_slug") or None,
+        site_slug=cfg.get("site_slug") or None,
+    )
 
 
 @router.post("/assign-ip", response_model=NetboxAssignIpResult)
