@@ -19,6 +19,11 @@
           {{ t('venues.baseRig.title') }}
         </div>
       </div>
+      <HistoryControls
+        kind="venue"
+        :scope-id="venueId"
+        @restored="load"
+      />
       <q-btn
         flat
         no-caps
@@ -628,6 +633,7 @@ import { emptyCablePlan } from '@/utils/cables';
 import { useGraphStore } from '@/stores/graph';
 import { useNetboxStore } from '@/stores/netbox';
 import { useVenueSocket } from '@/composables/useVenueSocket';
+import HistoryControls from '@/components/HistoryControls.vue';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
@@ -807,7 +813,10 @@ const venueId = computed(() => route.params.venueId);
 // (after `venueId`) because useVenueSocket reads venueId.value during setup and `const` is in the
 // temporal dead zone until this line — calling it earlier would throw and abort the whole component.
 // connect() is invoked further down once the venue graph has loaded.
-const venueSocket = useVenueSocket(venueId.value, (event) => graph.applyRealtimeEvent(event));
+const venueSocket = useVenueSocket(venueId.value, (event) => {
+  if (event.type === 'history.restore') load(); // an undo / restore changed many rows: reload
+  else graph.applyRealtimeEvent(event);
+});
 // Scope the graph store to this venue synchronously, in setup and therefore before child components
 // mount. Child components (e.g. RiggingEditor) fire venue-scoped API calls on mount; without this the
 // store's default job/null scope would send those requests to /jobs/null/... and fail UUID validation.

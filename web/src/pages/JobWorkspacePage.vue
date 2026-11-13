@@ -61,6 +61,11 @@
           </q-chip>
         </div>
       </div>
+      <HistoryControls
+        kind="job"
+        :scope-id="jobId"
+        @restored="onHistoryRestore"
+      />
       <q-btn
         flat
         no-caps
@@ -795,6 +800,7 @@ import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import { useGraphStore } from '@/stores/graph';
 import { useJobSocket } from '@/composables/useJobSocket';
+import HistoryControls from '@/components/HistoryControls.vue';
 import {
   PRODUCT_MIME,
   channelsOf,
@@ -964,10 +970,24 @@ function scheduleChecks() {
   checkTimer = setTimeout(() => graph.refreshChecks(jobId).catch(() => {}), 400);
 }
 
+// After an undo / redo / restore (this tab's own, or another tab's announced over the socket) a lot
+// of rows can have changed at once: reload the graph, the stage frame and the job instead of
+// patching. The channel lists and the console panel read the graph store, so they follow.
+let restoreTimer = null;
+function onHistoryRestore() {
+  clearTimeout(restoreTimer);
+  restoreTimer = setTimeout(async () => {
+    await Promise.all([loadWorkspace(), reloadJob()]);
+    scheduleChecks();
+  }, 150);
+}
+
 const socket = useJobSocket(jobId, (event) => {
   if (event.type?.startsWith('graph.')) {
     graph.applyRealtimeEvent(event);
     scheduleChecks();
+  } else if (event.type === 'history.restore') {
+    onHistoryRestore();
   }
 });
 

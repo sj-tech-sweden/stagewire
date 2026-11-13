@@ -13,6 +13,13 @@ import {
   fixturesOf,
   isFixtureNode,
   deviceCreateBody,
+  chainDeviceOptions,
+  findDeviceByName,
+  guessChainDevice,
+  isNewDeviceValue,
+  newChainDeviceBody,
+  newDeviceName,
+  newDeviceValue,
   deviceForm,
   devicePatch,
   portGroups,
@@ -713,18 +720,18 @@ test('stereo pairing links a channel with its odd/even neighbour and labels the 
   expect(lowerPartner.main.name).toBe('Keys R');
 });
 
-test('stereo pairing makes a missing partner, copies the shared fields and never stacks suffixes', () => {
+test('stereo pairing makes a missing partner, does not copy the preamp and never stacks suffixes', () => {
   const main = chan('a', 1, 'Piano L', { input_type: 'di', connector: 'xlr', phantom_power: true });
   const plan = stereoPairPlan(main, [main], true);
   expect(plan.partnerCreate).toMatchObject({
     channel_number: 2,
     source_label: 'Piano R',
-    input_type: 'di',
-    connector: 'xlr',
-    phantom_power: true,
     stereo: true,
     stereo_channel: 1,
   });
+  // each leg is its own preamp: input type, connector and +48V are not copied to the partner
+  expect(plan.partnerCreate).not.toHaveProperty('phantom_power');
+  expect(plan.partnerCreate).not.toHaveProperty('input_type');
   expect(plan.main.name).toBe('Piano L');
 });
 
@@ -813,4 +820,668 @@ test('a replaced source device is removed only when nothing else uses it', () =>
   expect(isOrphanedBySource('shared', 'ch', devices, [])).toBe(false);
   // patched into a chain or linked on the plot
   expect(isOrphanedBySource('mic', 'ch', devices, [{ src_device_id: 'x', dst_device_id: 'mic' }])).toBe(false);
+});
+
+test('a mixer imported from Stockwire patches the graph with real in/out ports (GLD-80 regression)', async () => {
+  const { mixerGraphPorts, connectorGroupsFromProduct } = await import('../../src/utils/workspace');
+  const product = {
+    specs: {
+      connectors: [
+        { connector: 'xlr3', direction: 'in', count: 4, signal: 'audio' },
+        { connector: 'xlr3', direction: 'out', count: 4, signal: 'audio' },
+        { connector: 'ethercon', direction: 'both', count: 2, signal: 'audio' },
+        { connector: 'dsnake', direction: 'both', count: 1, signal: 'audio' },
+      ],
+    },
+  };
+  const ports = mixerGraphPorts(connectorGroupsFromProduct(product), [{ id: 'power', direction: 'in', signal: 'power' }]);
+  // every port has an id and only the directions the graph accepts; 'both' became in + out
+  expect(ports.every((p) => p.id && (p.direction === 'in' || p.direction === 'out'))).toBe(true);
+  expect(ports.map((p) => p.id)).toEqual([
+    'in-xlr3', 'out-xlr3', 'in-ethercon', 'out-ethercon', 'in-dsnake', 'out-dsnake', 'power',
+  ]);
+  expect(mixerGraphPorts([], [])).toEqual([]);
+});
+
+test('a fader layout draft is the whole layout: a strip may sit on several faders, blanks are absent', async () => {
+  const { applyFaderChoice, faderDraftFromMap } = await import('../../src/utils/workspace');
+  let draft = applyFaderChoice({}, '1:A:1', 'c1');
+  expect(draft).toEqual({ '1:A:1': 'c1' });
+  // choosing c1 on another fader ADDS a placement: its first one stays
+  draft = applyFaderChoice(draft, '2:B:3', 'c1');
+  expect(draft).toEqual({ '1:A:1': 'c1', '2:B:3': 'c1' });
+  // 'empty' and null both leave that fader blank (an absent slot); other faders are untouched
+  draft = applyFaderChoice(draft, '1:A:2', 'c2');
+  expect(applyFaderChoice(draft, '1:A:2', 'empty')).toEqual({ '1:A:1': 'c1', '2:B:3': 'c1' });
+  expect(applyFaderChoice(draft, '1:A:2', null)).toEqual({ '1:A:1': 'c1', '2:B:3': 'c1' });
+  // taking over: the draft a loaded map starts from is EVERY placed cell, stored layout or the
+  // live starting point, so the first edit stores the whole map and nothing disappears
+  const start = {
+    custom: false,
+    layers: [{ banks: [{ strips: [
+      { slot: '1:A:1', pinned: false, kind: 'input', id: 'c1' },
+      { slot: '1:A:2', pinned: false, kind: 'input', id: 'c2' },
+      { slot: '1:A:3', pinned: false, kind: 'empty', id: null },
+    ] }] }],
+  };
+  expect(faderDraftFromMap(start)).toEqual({ '1:A:1': 'c1', '1:A:2': 'c2' });
+  const edited = applyFaderChoice(faderDraftFromMap(start), '1:A:3', 'c1');
+  expect(edited).toEqual({ '1:A:1': 'c1', '1:A:2': 'c2', '1:A:3': 'c1' });
+  expect(faderDraftFromMap({ ...start, custom: true })).toEqual({ '1:A:1': 'c1', '1:A:2': 'c2' });
+  expect(faderDraftFromMap(null)).toEqual({});
+});
+
+test('stereoView reads the console link and the partner copy no longer shares the preamp', async () => {
+  const { stereoView, stereoPairPlan } = await import('../../src/utils/workspace');
+  const a = { id: 'a', attributes: { channel_number: 1, is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'b' } };
+  const b = { id: 'b', attributes: { channel_number: 2, is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'a' } };
+  expect(stereoView(a, [a, b])).toMatchObject({ linked: true, isL: true, partner: 2, top: true });
+  expect(stereoView(b, [a, b])).toMatchObject({ linked: true, isL: false, partner: 1, bottom: true });
+  const plan = stereoPairPlan({ id: 'x', name: 'Keys', attributes: { channel_number: 3, phantom_power: true, input_type: 'di' } }, [], true);
+  expect(plan.partnerCreate.phantom_power).toBeUndefined();
+  expect(plan.partnerCreate.input_type).toBeUndefined();
+});
+
+// A fader map as the API returns it: layer 1, bank A, four faders; c1, c2 and fx-r placed, one blank.
+const faderMap = {
+  custom: true,
+  strips: [
+    { id: 'c1', kind: 'input' },
+    { id: 'c2', kind: 'input' },
+    { id: 'c3', kind: 'input' },
+    { id: 'fx-r', kind: 'fx' },
+    { id: 'fx-h', kind: 'fx', hidden: true },
+  ],
+  layers: [
+    {
+      layer: 1,
+      banks: [
+        {
+          id: 'A',
+          strips: [
+            { slot: '1:A:1', fader: 1, id: 'c1', kind: 'input', pinned: true },
+            { slot: '1:A:2', fader: 2, id: 'c2', kind: 'input', pinned: true },
+            { slot: '1:A:3', fader: 3, id: null, kind: 'empty', pinned: false },
+            { slot: '1:A:4', fader: 4, id: 'fx-r', kind: 'fx', pinned: true },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+test('dragging a fader strip onto an empty fader moves it and leaves its other placements alone', async () => {
+  const { moveFaderStrip } = await import('../../src/utils/workspace');
+  const full = { '1:A:1': 'c1', '1:A:2': 'c2', '1:A:4': 'fx-r' };
+  const next = moveFaderStrip(full, faderMap, { slot: '1:A:1' }, '1:A:3');
+  expect(next).toEqual({ '1:A:3': 'c1', '1:A:2': 'c2', '1:A:4': 'fx-r' });
+  // moving onto an occupied fader swaps: c2 takes the fader c1 came from
+  expect(moveFaderStrip(next, faderMap, { slot: '1:A:3' }, '1:A:2')).toEqual({
+    '1:A:2': 'c1',
+    '1:A:3': 'c2',
+    '1:A:4': 'fx-r',
+  });
+});
+
+test('from the tray a strip is added; what it displaces becomes unplaced, nothing refills the gap', async () => {
+  const { moveFaderStrip, unplacedStrips } = await import('../../src/utils/workspace');
+  const full = { '1:A:1': 'c1', '1:A:2': 'c2' };
+  // c3 dropped on c2's fader: c2 loses that placement and is unplaced (it is not re-filled anywhere)
+  const next = moveFaderStrip(full, faderMap, { strip: 'c3' }, '1:A:2');
+  expect(next).toEqual({ '1:A:1': 'c1', '1:A:2': 'c3' });
+  expect(unplacedStrips(next, faderMap).map((x) => x.id)).toEqual(['c2', 'fx-r']);
+  // dragged from the tray, a strip already placed is ADDED again (it now sits on two faders)
+  expect(moveFaderStrip({ '1:A:2': 'c1' }, faderMap, { strip: 'c1' }, '1:A:3')).toEqual({ '1:A:2': 'c1', '1:A:3': 'c1' });
+  // dropping a strip on the fader it already holds changes nothing
+  const same = { '1:A:2': 'c1' };
+  expect(moveFaderStrip(same, faderMap, { strip: 'c1' }, '1:A:2')).toBe(same);
+});
+
+test('fader drag edge cases: same slot, blank cell, and the tray drop', async () => {
+  const { moveFaderStrip, unpinFaderStrip } = await import('../../src/utils/workspace');
+  const draft = { '1:A:4': 'fx-r', '1:A:1': 'c1' };
+  expect(moveFaderStrip(draft, faderMap, { slot: '1:A:1' }, '1:A:1')).toBe(draft);
+  expect(moveFaderStrip(draft, faderMap, { slot: '1:A:3' }, '1:A:1')).toBe(draft); // blank: nothing to move
+  // tray drop takes a dragged cell off ITS fader only; by id it removes every placement
+  expect(unpinFaderStrip(draft, faderMap, { slot: '1:A:4' })).toEqual({ '1:A:1': 'c1' });
+  expect(unpinFaderStrip(draft, faderMap, { strip: 'fx-r' })).toEqual({ '1:A:1': 'c1' });
+  expect(unpinFaderStrip(draft, faderMap, { strip: 'c2' })).toEqual(draft);
+});
+
+test('the same strip on several faders, removing a placement leaves a blank, and unplaced counts', async () => {
+  const { moveFaderStrip, removeFaderPlacement, stripPlacements, unpinFaderStrip, unplacedStrips } = await import('../../src/utils/workspace');
+  const one = { '1:A:1': 'c1' };
+  // copy (Alt/Ctrl drag): c1 stays on fader 1 and also lands on 3
+  const copied = moveFaderStrip(one, faderMap, { slot: '1:A:1' }, '1:A:3', { copy: true });
+  expect(copied).toEqual({ '1:A:1': 'c1', '1:A:3': 'c1' });
+  // a plain drag moves it instead
+  expect(moveFaderStrip(one, faderMap, { slot: '1:A:1' }, '1:A:3')).toEqual({ '1:A:3': 'c1' });
+  // two placements, remove one (the cell menu): the other stays, the removed fader is blank
+  expect(removeFaderPlacement(copied, faderMap, '1:A:3')).toEqual({ '1:A:1': 'c1' });
+  expect(unpinFaderStrip(copied, faderMap, { slot: '1:A:1' })).toEqual({ '1:A:3': 'c1' });
+  // removing the only placement leaves the strip unplaced; it does not come back anywhere
+  const bare = removeFaderPlacement({ '1:A:2': 'c2' }, faderMap, '1:A:2');
+  expect(bare).toEqual({});
+  expect(stripPlacements(bare, faderMap, 'c2')).toEqual([]);
+  expect(removeFaderPlacement({}, faderMap, '1:A:3')).toEqual({}); // a blank fader stays as it is
+  // placements come from the draft while editing, from the saved map when there is no draft
+  expect(stripPlacements(copied, faderMap, 'c1').map((p) => p.slot)).toEqual(['1:A:1', '1:A:3']);
+  expect(stripPlacements(null, faderMap, 'c2').map((p) => p.slot)).toEqual(['1:A:2']);
+  expect(stripPlacements({}, faderMap, 'c2')).toEqual([]);
+  expect(stripPlacements(null, faderMap, 'nobody')).toEqual([]);
+  // unplaced = strips on no fader, hidden built-in FX not counted
+  expect(unplacedStrips(null, faderMap).map((x) => x.id)).toEqual(['c3']);
+  expect(unplacedStrips({ '1:A:1': 'c1' }, faderMap).map((x) => x.id)).toEqual(['c2', 'c3', 'fx-r']);
+});
+
+test('stereo pair tiles follow the console pairing rule, states and ranges', async () => {
+  const { stereoPairTiles, tilesInRange } = await import('../../src/utils/workspace');
+  const ch = (n, extra = {}) => ({ id: `c${n}`, channel_number: n, source_label: `S${n}`, ...extra });
+  const channels = [
+    ch(1, { is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'c2' }),
+    ch(2, { is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'c1' }),
+    ch(3),
+    // 5-6 is a linked pair too
+    ch(5, { is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'c6' }),
+    ch(6, { is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'c5' }),
+  ];
+  const tiles = stereoPairTiles(channels, { input_pairing: 'odd_even', dsp_inputs: { mono: 8 } });
+  expect(tiles.map((t) => [t.label, t.state])).toEqual([
+    ['1–2', 'linked'],
+    ['3–4', 'free'],
+    ['5–6', 'linked'],
+    ['7–8', 'free'],
+  ]);
+  // channel 4 does not exist yet: the tile is free and says what linking creates
+  expect(tiles[1].missing).toEqual([4]);
+  expect(tiles[0].missing).toEqual([]);
+  // the console's mono input count limits the grid; without a profile the highest channel does
+  // (a linked pair beyond that limit stays visible so it can still be unlinked)
+  expect(stereoPairTiles(channels, { dsp_inputs: { mono: 4 } }).map((t) => t.label)).toEqual(['1–2', '3–4', '5–6']);
+  expect(stereoPairTiles([ch(1), ch(2), ch(3), ch(4), ch(5), ch(6)], { dsp_inputs: { mono: 4 } }).map((t) => t.label)).toEqual(['1–2', '3–4']);
+  expect(stereoPairTiles(channels, null).map((t) => t.label)).toEqual(['1–2', '3–4', '5–6']);
+  expect(stereoPairTiles([], null)).toEqual([]);
+  // a leg linked to a different channel blocks the tile
+  const blocked = stereoPairTiles(
+    [ch(1), ch(2, { is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'c3' }), ch(3, { is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'c2' })],
+    { input_pairing: 'adjacent', dsp_inputs: { mono: 4 } },
+  );
+  expect(blocked.find((t) => t.label === '1–2').state).toBe('blocked');
+  // the unaligned linked pair still has its own tile (adjacent pairing)
+  expect(blocked.map((t) => t.label)).toContain('2–3');
+  // ranges: both legs must be inside
+  expect(tilesInRange(tiles, '1-4').map((t) => t.label)).toEqual(['1–2', '3–4']);
+  expect(tilesInRange(tiles, '1-3').map((t) => t.label)).toEqual(['1–2']);
+  expect(tilesInRange(tiles, '3-4, 7-8').map((t) => t.label)).toEqual(['3–4', '7–8']);
+  expect(tilesInRange(tiles, 'junk')).toEqual([]);
+});
+
+test('importing a bus-pool mixer adds inputs but no pre-made buses; other mixers keep the old padding', async () => {
+  const { mixerImportPlan } = await import('../../src/utils/workspace');
+  const pool = { profile: { dsp_inputs: { mono: 44 }, bus_pool: { total_slots: 30 } } };
+  const channels = [{ attributes: { channel_number: 1 } }];
+  const plan = mixerImportPlan(channels, [], { inputs: 48, buses: 20 }, pool);
+  expect(plan.busPool).toBe(true);
+  expect(plan.slots).toBe(30);
+  expect(plan.outputs).toEqual([]);
+  expect(plan.channels).toHaveLength(43); // up to 44 DSP mono strips, not the flat 48
+  expect(plan.channels[0]).toEqual({ channel_number: 2 });
+  // no mono count stated: fall back to the typed/flat input count
+  expect(mixerImportPlan([], [], { inputs: 16, buses: 4 }, { profile: { bus_pool: { total_slots: 8 } } }).channels).toHaveLength(16);
+  // no specs.mixer (422) or a simple profile: the old flat padding, buses included
+  for (const summary of [null, { profile: { dsp_inputs: { mono: 16 }, bus_pool: null } }]) {
+    const old = mixerImportPlan([], [], { inputs: 8, buses: 3 }, summary);
+    expect(old.busPool).toBe(false);
+    expect(old.channels).toHaveLength(8);
+    expect(old.outputs.map((o) => o.mode)).toEqual(['mono', 'mono', 'mono']);
+  }
+});
+
+test('the strip picker helpers: ranges, filters, shift-click and selection edits', async () => {
+  const h = await import('../../src/utils/workspace');
+  expect(h.parseNumberRanges('1-3, 8; 10–11 junk 5-4 0x')).toEqual([1, 2, 3, 4, 5, 8, 10, 11]);
+  expect(h.parseNumberRanges('')).toEqual([]);
+  expect(h.parseNumberRanges('1-99999', 10)).toHaveLength(11); // a typo cannot hang the page
+
+  const items = [
+    { id: 'a', kind: 'input', number: '1-2', label: 'Keys', group: 'keys' },
+    { id: 'b', kind: 'input', number: '3', label: 'Kick', group: 'drums' },
+    { id: 'c', kind: 'input', number: '4', label: 'Snare', group: 'drums' },
+    { id: 'd', kind: 'fx', number: 'FX', label: 'Plate' },
+    { id: 'e', kind: 'fxsend', number: 'FX send', label: 'Plate send' },
+    { id: 'f', kind: 'mix', number: 'aux', label: 'Wedge 3' },
+  ];
+  expect(h.stripChannelNumbers(items[0])).toEqual([1, 2]);
+  expect(h.stripChannelNumbers(items[3])).toEqual([]);
+  // a range selects inputs by channel number (a ganged pair counts for both numbers), never FX/mixes
+  expect(h.idsInRanges(items, '2-3')).toEqual(['a', 'b']);
+  expect(h.idsInRanges(items, '3')).toEqual(['b']);
+  expect(h.idsInRanges(items, 'nope')).toEqual([]);
+
+  expect(h.filterStripItems(items, { query: 'plate' }).map((i) => i.id)).toEqual(['d', 'e']);
+  expect(h.filterStripItems(items, { kinds: ['fx', 'fxsend'] }).map((i) => i.id)).toEqual(['d', 'e']);
+  expect(h.filterStripItems(items, { group: 'drums' }).map((i) => i.id)).toEqual(['b', 'c']);
+  expect(h.filterStripItems(items, { query: '3' }).map((i) => i.id)).toEqual(['b', 'f']); // number or label
+
+  const order = items.map((i) => i.id);
+  expect(h.rangeBetween(order, 'b', 'e')).toEqual(['b', 'c', 'd', 'e']);
+  expect(h.rangeBetween(order, 'e', 'b')).toEqual(['b', 'c', 'd', 'e']);
+  expect(h.rangeBetween(order, 'zz', 'b')).toEqual(['b']);
+
+  expect(h.selectIds(['a'], ['a', 'b'])).toEqual(['a', 'b']);
+  expect(h.deselectIds(['a', 'b', 'c'], ['b'])).toEqual(['a', 'c']);
+  // invert only touches the visible rows
+  expect(h.invertIds(['a', 'b'], ['b', 'c'])).toEqual(['a', 'c']);
+
+  const sum = h.summariseSelection(items, ['a', 'b', 'c', 'd', 'e', 'f', 'gone'], 3);
+  expect(sum.shown.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+  expect(sum.more).toBe(3);
+  expect(sum.total).toBe(6);
+});
+
+test('soft patch by port: grouping, socket rows, paging and the expansion editor helpers', async () => {
+  const h = await import('../../src/utils/workspace');
+  const ports = [
+    { device_id: 'D1', device_name: 'Desk', port_id: 'in-dante', direction: 'in', connector: 'dante', channels: 128 },
+    { device_id: 'D1', device_name: 'Desk', port_id: 'out-dante', direction: 'out', connector: 'dante', channels: 64 },
+    { device_id: 'D2', device_name: 'AR2412', port_id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 24 },
+    { device_id: 'D2', device_name: 'AR2412', port_id: 'io', direction: 'both', connector: 'ethercon', channels: 1 },
+  ];
+  const inGroups = h.groupPortsByDevice(ports, 'in');
+  expect(inGroups.map((g) => [g.device_name, g.ports.map((p) => p.port_id)])).toEqual([
+    ['Desk', ['in-dante']],
+    ['AR2412', ['in-xlr3', 'io']],
+  ]);
+  expect(h.groupPortsByDevice(ports, 'out').map((g) => g.ports.map((p) => p.port_id))).toEqual([['out-dante'], ['io']]);
+
+  const sockets = Array.from({ length: 128 }, (_, i) => ({
+    key: `D1:in-dante:${i + 1}`,
+    device_id: 'D1',
+    port_id: 'in-dante',
+    socket: 128 - i, // deliberately unsorted
+    dsp_source_channel_id: i === 127 ? 'c1' : undefined,
+  }));
+  const rows = h.portSockets(sockets, ports[0], 'dsp_source', new Map([['c1', 7]]));
+  expect(rows).toHaveLength(128);
+  expect(rows[0].socket).toBe(1);
+  expect(rows[0]).toMatchObject({ owner: 'c1', ownerNumber: 7 }); // socket 1 is the unsorted last item
+  expect(h.firstFreeSocket(rows)).toBe(2);
+  expect(h.firstFreeSocket(rows, 100)).toBe(100);
+  expect(h.pageOf(rows, 2, 64)[0].socket).toBe(65);
+  expect(h.pageOf(rows, 2, 64)).toHaveLength(64);
+  expect(h.portSockets(sockets, null, 'dsp_source')).toEqual([]);
+
+  expect(h.expansionPayload([
+    { protocol: ' Dante ', channels_in: '64', channels_out: 0 },
+    { protocol: 'madi', channels_in: 0, channels_out: 0 }, // empty card dropped
+    { protocol: '', channels_in: 4 },
+  ])).toEqual([{ protocol: 'dante', channels_in: 64, channels_out: 0 }]);
+  expect(h.expansionLimit({ max_channels: 64, max_channels_in: 32 }, 'in')).toBe(32);
+  expect(h.expansionLimit({ max_channels: 64, max_channels_in: 32 }, 'out')).toBe(64);
+  expect(h.expansionLimit({}, 'in')).toBeNull();
+  const rowsForm = h.expansionFormRows([{ protocol: 'dante', slots: 1, max_channels: 64 }]);
+  expect(rowsForm).toEqual([{ protocol: 'dante', slots: 1, max_channels: 64, max_channels_in: null, max_channels_out: null }]);
+  expect(h.expansionFromForm([{ protocol: ' DSNAKE ', slots: '', max_channels: '48', max_channels_in: 24, max_channels_out: null }, { protocol: '' }])).toEqual([
+    { protocol: 'dsnake', slots: null, max_channels: 48, max_channels_in: 24, max_channels_out: null },
+  ]);
+  // every strip kind has an icon, including FX sends (they were missing from the tray before)
+  for (const kind of ['input', 'fx', 'mix', 'fxsend', 'dca', 'empty']) expect(h.stripKindIcon(kind)).not.toBe('help_outline');
+  expect(h.stripKindIcon('nope')).toBe('help_outline');
+});
+
+
+test('shift-click selects the rows between the anchor and the clicked row over the visible rows only', async () => {
+  const { toggleRowSelection, orderByNumber } = await import('../../src/utils/workspace');
+  const visible = ['c2', 'c4', 'c6', 'c8']; // a filtered view: odd rows are hidden
+  const first = toggleRowSelection([], { id: 'c2', visibleIds: visible });
+  expect(first).toEqual({ selected: ['c2'], anchor: 'c2' });
+  const range = toggleRowSelection(first.selected, { id: 'c6', shift: true, anchor: first.anchor, visibleIds: visible });
+  expect(range.selected).toEqual(['c2', 'c4', 'c6']);
+  // shift-clicking a selected row switches the whole span off
+  const off = toggleRowSelection(range.selected, { id: 'c4', shift: true, anchor: 'c2', visibleIds: visible });
+  expect(off.selected).toEqual(['c6']);
+  // a stale anchor (filtered away) falls back to a plain toggle
+  expect(toggleRowSelection(['c2'], { id: 'c8', shift: true, anchor: 'gone', visibleIds: visible }).selected).toEqual(['c2', 'c8']);
+  // the order auto patch uses is the channel order, whatever order the clicks came in
+  const numbers = new Map([['a', 3], ['b', 1], ['c', 2]]);
+  expect(orderByNumber(['a', 'b', 'c'], numbers)).toEqual(['b', 'c', 'a']);
+});
+
+test('range box, select-all and invert only touch the visible rows', async () => {
+  const { idsInRanges, selectIds, deselectIds, invertIds, filterStripItems } = await import('../../src/utils/workspace');
+  const items = Array.from({ length: 12 }, (_, i) => ({ id: `c${i + 1}`, kind: 'input', number: String(i + 1), label: i < 6 ? `Vox ${i + 1}` : `Gtr ${i + 1}` }));
+  const visible = filterStripItems(items, { query: 'vox' });
+  expect(visible).toHaveLength(6);
+  const visibleIds = visible.map((i) => i.id);
+  expect(idsInRanges(visible, '2-4, 11')).toEqual(['c2', 'c3', 'c4']); // 11 is hidden by the filter
+  const all = selectIds(['c12'], visibleIds);
+  expect(all).toEqual(['c12', ...visibleIds]);
+  expect(invertIds(all, visibleIds)).toEqual(['c12']); // the hidden selection survives an invert
+  expect(deselectIds(all, visibleIds)).toEqual(['c12']);
+});
+
+test('the built-in FX helpers', async () => {
+  const { fxIsConfigured, fxConfiguredCount, fxResetEngine } = await import('../../src/utils/workspace');
+  const placeholder = { id: 'fx1', name: 'FX 1', type: 'other', sends: [] };
+  expect(fxIsConfigured(placeholder)).toBe(false);
+  expect(fxIsConfigured({ ...placeholder, name: 'Plate' })).toBe(true);
+  expect(fxIsConfigured({ ...placeholder, type: 'reverb' })).toBe(true);
+  expect(fxIsConfigured({ ...placeholder, sends: ['c1'] })).toBe(true);
+  expect(fxConfiguredCount([placeholder, { ...placeholder, id: 'fx2', type: 'delay' }])).toBe(1);
+  const reset = fxResetEngine({ id: 'fx2', name: 'Plate', type: 'reverb', sends: ['c1'], stereo_return: false, send_mode: 'stereo' }, 2);
+  expect(reset).toEqual({ id: 'fx2', name: 'FX 2', type: 'other', stereo_return: true, send_mode: 'mono', sends: [] });
+  expect(fxIsConfigured(reset)).toBe(false);
+});
+
+test('auto patch bodies and bulk clears for inputs, direct outs and bus outputs', async () => {
+  const { autoPatchBody, bulkClearBody, fieldOfMode, softFieldInfo } = await import('../../src/utils/workspace');
+  expect(['in', 'out', 'bus'].map(fieldOfMode)).toEqual(['dsp_source', 'direct_out', 'out_socket']);
+  expect(softFieldInfo('out_socket').idsKey).toBe('bus_ids');
+  expect(softFieldInfo('direct_out').direction).toBe('out');
+  const port = { device_id: 'd1', port_id: 'out-xlr3' };
+  expect(autoPatchBody('direct_out', ['c1', 'c2'], port, { start: 5, skip: false, dry: true })).toEqual({
+    field: 'direct_out',
+    channel_ids: ['c1', 'c2'],
+    device_id: 'd1',
+    port_id: 'out-xlr3',
+    start_socket: 5,
+    skip_taken: false,
+    dry_run: true,
+  });
+  const bus = autoPatchBody('out_socket', ['b1'], port, { start: 0 });
+  expect(bus.bus_ids).toEqual(['b1']);
+  expect('channel_ids' in bus).toBe(false);
+  expect(bus.start_socket).toBe(1); // never below 1
+  expect(bulkClearBody('out_socket', ['b1', 'b2'])).toEqual({
+    field: 'out_socket',
+    assignments: [{ bus_id: 'b1', ref: null }, { bus_id: 'b2', ref: null }],
+  });
+  expect(bulkClearBody('dsp_source', ['c1']).assignments[0]).toEqual({ channel_id: 'c1', ref: null });
+});
+
+test('output sockets show whether a direct out or a bus holds them', async () => {
+  const { portSocketsOut, groupPortsByDevice } = await import('../../src/utils/workspace');
+  const sockets = [
+    { device_id: 'd1', port_id: 'out-xlr3', socket: 2, direct_out_channel_id: 'c1' },
+    { device_id: 'd1', port_id: 'out-xlr3', socket: 1, out_socket_bus_id: 'b1' },
+    { device_id: 'd1', port_id: 'out-xlr3', socket: 3 },
+    { device_id: 'd2', port_id: 'out-xlr3', socket: 1 },
+  ];
+  const rows = portSocketsOut(sockets, { device_id: 'd1', port_id: 'out-xlr3' }, new Map([['c1', 7]]), new Map([['b1', 2]]));
+  expect(rows.map((r) => [r.socket, r.ownerKind, r.ownerLabel])).toEqual([
+    [1, 'bus', 'Mix 2'],
+    [2, 'channel', 'Ch 7'],
+    [3, null, ''],
+  ]);
+  expect(portSocketsOut(sockets, null, new Map(), new Map())).toEqual([]);
+  // the port list for outputs includes 'both' ports and skips input-only ones
+  const ports = [
+    { device_id: 'd1', device_name: 'Box', port_id: 'in-xlr3', direction: 'in' },
+    { device_id: 'd1', device_name: 'Box', port_id: 'out-xlr3', direction: 'out' },
+    { device_id: 'd2', device_name: 'Card', port_id: 'dante', direction: 'both' },
+  ];
+  expect(groupPortsByDevice(ports, 'out').flatMap((g) => g.ports.map((p) => p.port_id))).toEqual(['out-xlr3', 'dante']);
+});
+
+// --- soft patch in the signal flow and the chain editor --------------------------------------
+
+const softChannel = {
+  id: 'ch1',
+  kind: 'channel',
+  name: 'Vox',
+  attributes: {
+    channel_number: 5,
+    list_id: 'L',
+    dsp_source: { device_id: 'box', port_id: 'in-xlr3', socket: 5 },
+  },
+};
+const softDevices = [
+  { id: 'box', name: 'AR2412', kind: 'analog_stagebox', ports: [{ id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 24 }] },
+  { id: 'snake', name: 'Snake', kind: 'analog_snake', ports: [] },
+  { id: 'desk', name: 'GLD', kind: 'mixer', device_type: 'mixer', sound_list_id: 'L', ports: [] },
+];
+
+test('the soft-patched hop is found, kept last, and described', async () => {
+  const { lockedStepIndex, withLockedLast, softPatchInfo, chainStepsWithLock } = await import('../../src/utils/workspace');
+  const steps = [{ device_id: 'box' }, { device_id: 'snake' }];
+  expect(lockedStepIndex(softChannel, steps)).toBe(0);
+  expect(lockedStepIndex({ attributes: {} }, steps)).toBe(-1);
+  expect(withLockedLast(softChannel, steps).map((s: { device_id: string }) => s.device_id)).toEqual(['snake', 'box']);
+  // no soft patch / already last: order untouched
+  expect(withLockedLast({ attributes: {} }, steps)).toEqual(steps);
+  expect(withLockedLast(softChannel, [{ device_id: 'snake' }, { device_id: 'box' }]).map((s: { device_id: string }) => s.device_id)).toEqual(['snake', 'box']);
+  expect(softPatchInfo(softChannel, softDevices)).toMatchObject({ socket: 5, connector: 'XLR3', label: 'In 5 (XLR3)', device_name: 'AR2412' });
+  expect(softPatchInfo({ attributes: {} }, softDevices)).toBeNull();
+  // the chain editor starts from: snake first, the locked stagebox last
+  const form = chainStepsWithLock(softChannel, steps, softDevices);
+  expect(form.map((s: { device_id: string; locked: boolean }) => [s.device_id, s.locked])).toEqual([['snake', false], ['box', true]]);
+  // a chain that lost the hop gets it back (locked, labelled), so saving never drops it
+  const restored = chainStepsWithLock(softChannel, [{ device_id: 'snake' }], softDevices);
+  expect(restored.at(-1)).toMatchObject({ device_id: 'box', locked: true, patch_label: 'In 5', connector: 'xlr3' });
+  // a channel without a soft patch is untouched
+  expect(chainStepsWithLock({ attributes: {} }, steps, softDevices)).toEqual(steps);
+});
+
+test('the signal flow of a soft-patched channel shows the socket and ends on the console strip', async () => {
+  const { channelFlowTree } = await import('../../src/utils/workspace');
+  const edges = [
+    { id: 'e0', signal: 'audio', src_device_id: 'snake', dst_device_id: 'box', src_port: 'out', dst_port: 'in-xlr3',
+      attributes: { chain: 'ch1', position: 0, dst_socket: 5, connector: 'xlr3', patch_label: 'Out 2' } },
+    { id: 'e1', signal: 'audio', src_device_id: 'box', dst_device_id: 'ch1', src_port: 'out', dst_port: 'in',
+      attributes: { chain: 'ch1', position: 1, connector: 'xlr3', patch_label: 'In 5' } },
+  ];
+  const steps = [
+    { device_id: 'snake', connector: '', patch_label: 'Out 2', in_port: '', out_port: '' },
+    { device_id: 'box', connector: 'xlr3', patch_label: 'In 5', in_port: '', out_port: '' },
+  ];
+  const [root] = channelFlowTree(softChannel, edges, softDevices, 'Vox', steps);
+  // route: snake -> box (soft patch) -> channel strip, source side first
+  expect(root.label).toBe('Snake');
+  const box = root.children[0];
+  expect(box.label).toBe('AR2412');
+  expect(box.soft_patch).toEqual({ connector: 'XLR3', socket: 5 });
+  const strip = box.children[0];
+  expect(strip.kind).toBe('channel');
+  expect(strip.label).toBe('GLD · Ch 5 Vox');
+  expect(strip.connector).toBe('xlr3');
+  expect(strip.patch_label).toBe('In 5');
+});
+
+// --- bus endpoints, split sources, history names, grid picker, review fixes -----------------------------
+
+test('a stereo bus needs two adjacent sockets and endpoints read as "AR2412 · Out 3–4"', async () => {
+  const w = await import('../../src/utils/workspace');
+  expect([w.busWidth('mono'), w.busWidth('stereo'), w.busWidth('lcr'), w.busWidth('odd')]).toEqual([1, 2, 3, 1]);
+  expect(w.socketRunText([3, 4])).toBe('3–4');
+  expect(w.socketRunText([3, 7])).toBe('3 / 7');
+  expect(w.socketRunText([5])).toBe('5');
+  const names = new Map([['box', 'AR2412']]);
+  const stereo = { id: 'e1', refs: [{ device_id: 'box', port_id: 'out-xlr3', socket: 3 }, { device_id: 'box', port_id: 'out-xlr3', socket: 4 }] };
+  expect(w.endpointLabel(stereo, names)).toBe('AR2412 · Out 3–4');
+  expect(w.endpointLabel(stereo, names, { out: 'Ut' })).toBe('AR2412 · Ut 3–4');
+  expect(w.endpointSides(stereo, 'stereo')).toBe('L 3, R 4');
+  expect(w.endpointSides({ refs: [{ socket: 9 }] }, 'mono')).toBe('9');
+  // a mono endpoint on a bus switched to stereo is short one socket
+  const bus = { mode: 'stereo', out_endpoints: [{ id: 'e', refs: [{ socket: 3 }] }, stereo] };
+  expect(w.endpointShortages(bus)).toEqual([{ endpoint: bus.out_endpoints[0], have: 1, need: 2 }]);
+  expect(w.endpointShortages({ mode: 'mono', out_endpoints: [{ refs: [{ socket: 1 }] }] })).toEqual([]);
+});
+
+test('a tap claims a run of free adjacent sockets, or says it does not fit', async () => {
+  const w = await import('../../src/utils/workspace');
+  const rows = [1, 2, 3, 4].map((socket) => ({ socket, owner: socket === 3 ? 'other' : null }));
+  expect(w.busRunAt(rows, 1, 2)?.map((r) => r.socket)).toEqual([1, 2]);
+  expect(w.busRunAt(rows, 2, 2)).toBeNull(); // 3 is taken
+  expect(w.busRunAt(rows, 4, 2)).toBeNull(); // runs off the port
+  expect(w.busRunAt(rows, 3, 1, 'other')?.length).toBe(1); // a bus's own socket counts as free
+  expect(w.planRowText({ channel_number: 2, name: 'IEM', sockets: [3, 4], socket: 3 }, 'Mix')).toBe('Mix 2 IEM → 3–4');
+  expect(w.planRowText({ channel_number: 5, socket: 12 }, 'Ch')).toBe('Ch 5 → 12');
+});
+
+test('auto patch bodies carry append for buses and allow_shared for inputs only', async () => {
+  const { autoPatchBody } = await import('../../src/utils/workspace');
+  const port = { device_id: 'd', port_id: 'out-xlr3' };
+  expect(autoPatchBody('out_socket', ['b'], port, { append: true, shared: true })).toMatchObject({ field: 'out_socket', bus_ids: ['b'], append: true });
+  expect(autoPatchBody('out_socket', ['b'], port, { append: true, shared: true })).not.toHaveProperty('allow_shared');
+  expect(autoPatchBody('dsp_source', ['c'], { device_id: 'd', port_id: 'in' }, { shared: true })).toMatchObject({ allow_shared: true });
+  expect(autoPatchBody('dsp_source', ['c'], port, {})).not.toHaveProperty('allow_shared');
+  expect(autoPatchBody('direct_out', ['c'], port, { append: true })).not.toHaveProperty('append');
+});
+
+test('a split source shows every owner of the socket and builds the hint names', async () => {
+  const { portSockets, sharedChannelsText, numberedLabel } = await import('../../src/utils/workspace');
+  const rows = portSockets(
+    [
+      { device_id: 'd', port_id: 'in', socket: 1, dsp_source_channel_ids: ['a', 'b'], dsp_source_channel_id: 'a' },
+      { device_id: 'd', port_id: 'in', socket: 2, dsp_source_channel_ids: ['a'], dsp_source_channel_id: 'a' },
+      { device_id: 'd', port_id: 'in', socket: 3 },
+    ],
+    { device_id: 'd', port_id: 'in' },
+    'dsp_source',
+    new Map([['a', 1], ['b', 7]]),
+  );
+  expect(rows.map((r) => [r.shared, r.owners.length])).toEqual([[true, 2], [false, 1], [false, 0]]);
+  expect(rows[0].ownerLabel).toBe('Ch 1');
+  expect(sharedChannelsText([{ channel_number: 3 }, { channel_number: 4 }])).toBe('Ch 3, Ch 4');
+  expect(sharedChannelsText([])).toBe('');
+  // "Ch 1 L" must not become "Ch 1 Ch 1 L"
+  expect(numberedLabel('Ch', 1, 'Ch 1 L')).toBe('Ch 1 L');
+  expect(numberedLabel('Ch', 1, 'Ch1')).toBe('Ch1');
+  expect(numberedLabel('Ch', 12, 'Ch 1 L')).toBe('Ch 12 Ch 1 L');
+  expect(numberedLabel('Ch', 3, 'Kick')).toBe('Ch 3 Kick');
+  expect(numberedLabel('Mix', 2, '')).toBe('Mix 2');
+});
+
+test('history step names are translated by action, then verb + noun, then the English label', async () => {
+  const { historyStepLabel } = await import('../../src/utils/workspace');
+  const dict: Record<string, string> = {
+    'history.actions.update_channel': 'Ändra kanal',
+    'history.verbs.create': 'Skapa',
+    'history.verbs.delete': 'Ta bort',
+    'history.nouns.fixture': 'armatur',
+  };
+  const tr = { has: (k: string) => k in dict, t: (k: string) => dict[k] };
+  expect(historyStepLabel({ action: 'update_channel', label: 'Update channel' }, tr)).toBe('Ändra kanal');
+  expect(historyStepLabel({ action: 'create_fixture', label: 'Create fixture' }, tr)).toBe('Skapa armatur');
+  // a noun without a translation falls back to the server's label, never a half-translated string
+  expect(historyStepLabel({ action: 'create_mystery', label: 'Create mystery' }, tr)).toBe('Create mystery');
+  expect(historyStepLabel({ action: 'frobnicate_x', label: 'Frobnicate x' }, tr)).toBe('Frobnicate x');
+  expect(historyStepLabel({ action: '', label: 'Anything' }, tr)).toBe('Anything');
+  expect(historyStepLabel({ action: 'odd_thing' }, tr)).toBe('odd thing');
+});
+
+test('every history action the Swedish and English dictionaries name has both translations', async () => {
+  // the transpiler may wrap the ES default export once more
+  const unwrap = (m: { default: any }) => (m.default?.history ? m.default : m.default?.default);
+  const en = unwrap(await import('../../src/i18n/locales/en.js'));
+  const sv = unwrap(await import('../../src/i18n/locales/sv.js'));
+  for (const part of ['actions', 'verbs', 'nouns'] as const) {
+    expect(Object.keys(sv.history[part]).sort()).toEqual(Object.keys(en.history[part]).sort());
+  }
+  for (const key of ['set_dcas', 'set_fx', 'bulk_soft_patch', 'auto_soft_patch', 'set_bus_socket', 'add_to_faders', 'set_fader_layout', 'replace_channel_chain', 'set_console_profile', 'link_channels']) {
+    expect(sv.history.actions[key], key).toBeTruthy();
+    expect(sv.history.actions[key]).not.toBe(en.history.actions[key]);
+  }
+});
+
+test('the picker grid pages long lists and a shift-tap selects the run between two tiles', async () => {
+  const { pageOf, toggleRowSelection } = await import('../../src/utils/workspace');
+  const ids = Array.from({ length: 250 }, (_, i) => `s${i + 1}`);
+  expect(pageOf(ids, 1, 120)).toHaveLength(120);
+  expect(pageOf(ids, 3, 120)).toHaveLength(10);
+  let state = toggleRowSelection([], { id: 's2', visibleIds: ids });
+  state = toggleRowSelection(state.selected, { id: 's5', shift: true, anchor: state.anchor, visibleIds: ids });
+  expect(state.selected).toEqual(['s2', 's3', 's4', 's5']);
+  // tapping a selected tile again turns it off
+  expect(toggleRowSelection(state.selected, { id: 's3', visibleIds: ids }).selected).not.toContain('s3');
+});
+
+test('the mixer proposal response becomes the need line and one suggestion per candidate', async () => {
+  const { proposalFromResponse } = await import('../../src/utils/workspace');
+  const out = proposalFromResponse({ need: { strips: 24, mixes: 6 }, candidates: [{ product_id: '7', name: 'GLD-80', fits: true }] });
+  expect(out.need).toEqual({ strips: 24, mixes: 6 });
+  expect(out.suggestions).toEqual([{ product_id: '7', name: 'GLD-80', fits: true, id: '7' }]);
+  expect(proposalFromResponse(undefined)).toEqual({ need: null, suggestions: [] });
+});
+
+test('the flow starts at the typed source and never at the console link', async () => {
+  const { channelFlowTree } = await import('../../src/utils/workspace');
+  const gld = { id: 'gld', name: 'GLD-80', kind: 'mixer', sound_list_id: 'list', ports: [{ id: 'out-ethernet', direction: 'out', connector: 'ethernet' }] };
+  const box = {
+    id: 'box',
+    name: 'AR2412',
+    kind: 'analog_stagebox',
+    ports: [
+      { id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 24 },
+      { id: 'in-ethernet', direction: 'in', connector: 'ethernet' },
+    ],
+  };
+  const channel = { id: 'ch1', kind: 'channel', name: 'Ch 1', attributes: { list_id: 'list', channel_number: 1, device: 'SM58' } };
+  const edges = [
+    // the console's own link into the stagebox: not where the signal comes from
+    { id: 'link', signal: 'audio', src_device_id: 'gld', src_port: 'out-ethernet', dst_device_id: 'box', dst_port: 'in-ethernet', attributes: {} },
+    { id: 'hop', signal: 'audio', src_device_id: 'box', src_port: 'out', dst_device_id: 'ch1', dst_port: 'in', attributes: { chain: 'ch1', position: 0 } },
+  ];
+  const tree = channelFlowTree(channel, edges, [gld, box, channel], 'Ch 1', [{ device_id: 'box', connector: 'xlr3', patch_label: 'In 1' }]);
+  expect(tree[0].kind).toBe('source');
+  expect(tree[0].label).toBe('SM58');
+  expect(JSON.stringify(tree)).not.toContain('out-ethernet');
+  // no typed source and no linked gear: the console link is still not invented as a source
+  const bare = { ...channel, attributes: { list_id: 'list', channel_number: 1 } };
+  const without = channelFlowTree(bare, edges, [gld, box, bare], 'Ch 1', [{ device_id: 'box', connector: 'xlr3', patch_label: 'In 1' }]);
+  expect(without[0].kind).not.toBe('source');
+});
+
+
+test('a name typed into Edit patch becomes a pass-through device guessed from the name', () => {
+  const snake = guessChainDevice('Snake 16');
+  expect(snake.device_type).toBe('analog_stagebox');
+  expect(snake.count).toBe(16);
+  expect(snake.passive).toBe(true);
+  expect(snake.ports).toEqual([
+    { direction: 'in', connector: 'xlr3', count: 16 },
+    { direction: 'out', connector: 'xlr3', count: 16 },
+  ]);
+  expect(guessChainDevice('Splitter').device_type).toBe('split');
+  expect(guessChainDevice('Patch panel 24').device_type).toBe('patchbay');
+  expect(guessChainDevice('Patch panel 24').count).toBe(24);
+  expect(guessChainDevice('Dante stagebox 32').device_type).toBe('digital_stagebox');
+  expect(guessChainDevice('Dante stagebox 32').passive).toBe(false);
+  // a model number is not a channel count; an unknown name is a plain 1-in 1-out device
+  const model = guessChainDevice('AR2412');
+  expect(model.device_type).toBe('other');
+  expect(model.count).toBe(1);
+  expect(guessChainDevice('').ports).toHaveLength(2);
+});
+
+test('the typed chain device is created with exactly the typed name, both directions, no mains for a snake', () => {
+  const body = newChainDeviceBody('  Snake 8 ');
+  expect(body.name).toBe('Snake 8');
+  expect(body.device_type).toBe('analog_stagebox');
+  expect(body.power_inlet).toBe('none');
+  expect(body.ports.map((p: { direction: string }) => p.direction).sort()).toEqual(['in', 'out']);
+  expect(body.ports.every((p: { count: number }) => p.count === 8)).toBe(true);
+  expect(newChainDeviceBody('Dante stagebox').power_inlet).not.toBe('none');
+});
+
+test('typing in the step picker offers Create unless a device with that exact name exists', () => {
+  const options = [
+    { label: 'AR2412', value: 'd1' },
+    { label: 'Snake 16', value: 'd2' },
+  ];
+  const label = (text: string) => `Create "${text}"`;
+  const fresh = chainDeviceOptions(options, 'Snake 8', label);
+  expect(fresh[0]).toEqual({ label: 'Create "Snake 8"', value: 'new:Snake 8', create: true });
+  expect(fresh.slice(1)).toEqual([]); // 'snake 8' matches no existing label
+  // a partial match lists the match after the create option
+  expect(chainDeviceOptions(options, 'snake', label).map((o: { value: string }) => o.value)).toEqual(['new:snake', 'd2']);
+  // the exact name (any case) offers only that device: no duplicate
+  expect(chainDeviceOptions(options, ' snake 16 ', label)).toEqual([options[1]]);
+  // nothing typed lists everything
+  expect(chainDeviceOptions(options, '', label)).toEqual(options);
+  expect(findDeviceByName([{ id: 'd1', name: 'AR2412' }], ' ar2412 ')?.id).toBe('d1');
+  expect(findDeviceByName([{ id: 'd1', name: 'AR2412' }], 'AR')).toBeNull();
+  expect(isNewDeviceValue(newDeviceValue('X'))).toBe(true);
+  expect(newDeviceName('new: Foo ')).toBe('Foo');
+  expect(newDeviceName('uuid-1')).toBe('');
 });

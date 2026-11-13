@@ -150,10 +150,13 @@ function subLabel(node) {
   else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
   else if (node.kind === 'channel') bits.push(t('workspace.channel'));
   else bits.push(t('dmxChain.kindDevice'));
-  if (node.in_port) bits.push(`in ${node.in_port}`);
+  // a soft-patched device shows the real socket it feeds the mixer strip from: "XLR3 in 5"
+  if (node.soft_patch) {
+    bits.push(`${node.soft_patch.connector ? `${node.soft_patch.connector} ` : ''}in ${node.soft_patch.socket}`);
+  } else if (node.in_port) bits.push(`in ${node.in_port}`);
   if (node.out_port) bits.push(`out ${node.out_port}`);
-  if (node.connector) bits.push(node.connector);
-  if (node.patch_label) bits.push(node.patch_label);
+  if (node.connector && !node.soft_patch) bits.push(node.connector);
+  if (node.patch_label && !node.soft_patch) bits.push(node.patch_label);
   return bits.join(' · ') || '—';
 }
 
