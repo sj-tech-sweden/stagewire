@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.2.0...stagewire-v1.3.0) (2026-11-13)
+
+
+### Features
+
+* digital console support (bus pools, soft patch, history, console setup sheet) ([#85](https://github.com/sj-tech-sweden/stagewire/issues/85)) ([11ea5ed](https://github.com/sj-tech-sweden/stagewire/commit/11ea5edbf3a879517ee24fd437ec60354d13fa32))
+* NetBox IPAM/DCIM integration (jobs + venue base rig parity) ([#83](https://github.com/sj-tech-sweden/stagewire/issues/83)) ([c906af4](https://github.com/sj-tech-sweden/stagewire/commit/c906af4da1d59b40c76f033d1046eb9e64fc6836))
+
+
+### Bug Fixes
+
+* **web:** follow changes made in other browsers (console panel, job header, undo state) ([#86](https://github.com/sj-tech-sweden/stagewire/issues/86)) ([13fdfec](https://github.com/sj-tech-sweden/stagewire/commit/13fdfec23a2424c3dfc09c050992ebd45b14c45d))
+
 ## [1.2.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.1.0...stagewire-v1.2.0) (2026-11-12)
 
 
