@@ -630,9 +630,15 @@ export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []
   // The end of the flow is the mixer strip: "Console · Ch 5 Vox", with the last cable's connector
   // and (for a soft-patched strip) its "In 5" label on the cable into the channel.
   const stripName = sourceLabel || channel.name;
-  const stripLabel = ownerMixer
-    ? `${ownerMixer.name} · Ch ${channel.attributes?.channel_number ?? ''} ${stripName}`.replace(/\s+/g, ' ').trim()
-    : stripName;
+  // The strip always carries its number so the flow reads the same with or without a console
+  // device in the job: "Ch 1 Vox", or "Console · Ch 1 Vox" when the list has its console.
+  const channelNumber = channel.attributes?.channel_number;
+  const numbered = String(stripName || '').replace(/\s+/g, ' ').trim();
+  const withNumber =
+    channelNumber == null || new RegExp(`^ch\\s*${channelNumber}\\b`, 'i').test(numbered)
+      ? numbered
+      : `Ch ${channelNumber} ${numbered}`.trim();
+  const stripLabel = ownerMixer ? `${ownerMixer.name} · ${withNumber}` : withNumber;
   const endpoint = (id, edge = null) => ({
     id,
     device_id: channel.id,

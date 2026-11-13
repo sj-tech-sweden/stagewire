@@ -1,7 +1,8 @@
 import { APIRequestContext } from '@playwright/test';
 
 export const ADMIN = { email: 'admin@stagewire.test', password: 'Test1234!' };
-export const API_BASE = 'http://localhost:8010';
+// Overridable so the suite can run against a stack on other ports (E2E_API_BASE / E2E_BASE_URL).
+export const API_BASE = process.env.E2E_API_BASE || 'http://localhost:8010';
 
 export async function waitForApi(request: APIRequestContext, timeoutMs = 120_000): Promise<void> {
   const start = Date.now();

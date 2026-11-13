@@ -1753,7 +1753,9 @@ test('a channel is paired as stereo with its neighbour and a wireless channel ke
   await expect.poll(async () => (await channels()).map((c) => c.name)).toEqual(['Piano L', 'Piano R']);
   const both = await channels();
   expect(both.map((c) => c.attributes.stereo_channel)).toEqual([2, 1]);
-  expect(both[1].attributes.input_type).toBe('wireless');
+  // each leg is its own preamp: the new partner does not inherit the first leg's input type, pack
+  // or frequency (only name, colour, group and +48V follow the primary)
+  expect(both[1].attributes.wireless_pack ?? null).toBeNull();
   await expect(page.getByTestId('stereo-side')).toHaveText([/L/, /R/]);
 
   await page.getByTestId('channel-stereo').first().click();

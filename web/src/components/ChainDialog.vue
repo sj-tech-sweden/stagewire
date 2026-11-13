@@ -88,6 +88,7 @@
               :options="filtered"
               :label="t('workspace.stepDevice')"
               :hint="isNewDeviceValue(step.device_id) ? t('workspace.newDeviceHint') : ''"
+              :display-value="stepDeviceLabel(step)"
               data-testid="chain-device"
               @filter="filterDevices"
             >
@@ -366,6 +367,16 @@ function filterDevices(value, update) {
 function parentOptions(i) {
   return steps.value.slice(0, i).map((_, index) => ({ label: `${t('workspace.stepFrom')} ${index + 1}`, value: index }));
 }
+
+// The select's own option list is rebuilt for every search, so a device that is only a typed name
+// ("new:Snake 16", not created yet) is no longer among the options once the filter changes; the
+// field would then show nothing. Its label is therefore derived from the value itself.
+const stepDeviceLabel = (step) =>
+  isNewDeviceValue(step.device_id)
+    ? `${newDeviceName(step.device_id)} (${t('workspace.newDeviceTag')})`
+    : step.device_id
+      ? deviceName(step.device_id)
+      : '';
 
 const deviceName = (id) => props.devices.find((d) => d.id === id)?.name || graph.devices.find((d) => d.id === id)?.name || '?';
 

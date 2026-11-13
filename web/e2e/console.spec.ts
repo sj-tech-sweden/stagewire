@@ -1,5 +1,5 @@
 import { test, expect, APIRequestContext, Page } from '@playwright/test';
-import { ensureAdmin, login, API_BASE } from './helpers';
+import { ensureAdmin, enableStockwire, login, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
   await ensureAdmin(request);
@@ -78,8 +78,14 @@ test('choosing a preset enables the budget and fader map', async ({ page, reques
   await login(page);
   const { jobId } = await seed(request, await authedHeaders(page));
   await openConsole(page, jobId);
-  await page.getByTestId('console-preset').click();
-  await page.getByRole('option', { name: /GLD-80/ }).click();
+  // the preset list is fetched when the panel mounts; a select with no options does not open, so
+  // retry opening it until the list has arrived
+  const gld = page.getByRole('option', { name: /GLD-80/ });
+  await expect(async () => {
+    await page.getByTestId('console-preset').click();
+    await expect(gld).toBeVisible({ timeout: 1500 });
+  }).toPass({ timeout: 20_000 });
+  await gld.click();
   await page.getByTestId('console-apply-preset').click();
   await expect(page.getByTestId('console-source')).toContainText('Preset');
   await page.getByTestId('console-tab-buses').click();
@@ -235,8 +241,11 @@ test('the faders start as a starting point; the first edit stores the whole layo
   await page.reload();
   await openConsole(page, jobId);
   await page.getByTestId('console-tab-faders').click();
-  await expect(page.getByTestId('console-fader-unplaced')).toContainText('1');
-  // "Place unplaced strips" puts it on the next free fader
+  // two strips are unplaced: the new channel, and the DCA the first edit displaced from its fader
+  await expect(page.getByTestId('console-fader-unplaced')).toContainText('2 unplaced');
+  const manual = await (await request.get(`${API_BASE}/api/v1${base}/fader-map`, { headers })).json();
+  expect(manual.unplaced).toBe(2);
+  // "Place unplaced strips" puts them on the next free faders
   await page.getByTestId('console-fader-place-unplaced').click();
   await expect(page.getByTestId('console-fader-unplaced')).toHaveCount(0);
   // "Auto fill (start over)" replaces the layout with the default fill, after a confirmation
@@ -249,6 +258,8 @@ test('the faders start as a starting point; the first edit stores the whole layo
 });
 
 test('the mixer proposal shows the list need and whether each console fits', async ({ page, request }) => {
+  // the mixer (set-mixer) control is only offered while the Stockwire integration is enabled
+  await enableStockwire(request);
   await login(page);
   const { jobId } = await seed(request, await authedHeaders(page));
   // The catalog is not available in CI, so the proposal endpoint is mocked with its real shape.
@@ -284,7 +295,7 @@ test('a DCA can be named and given members, and the fader map shows it by name',
   await page.getByTestId('console-dca-name').first().fill('Vocals');
   // members are chosen in the strip picker dialog (search / range / kind chips), not a dropdown
   await page.getByTestId('console-dca-members').first().getByTestId('strip-picker-open').click();
-  await page.getByTestId('strip-picker-row').first().click();
+  await page.getByTestId('strip-picker-tile').first().click();
   await page.getByTestId('strip-picker-done').click();
   await expect(page.getByTestId('console-dca').first()).toContainText('1 assigned');
   await expect(page.getByTestId('console-save-status')).toHaveAttribute('data-status', 'saved');
@@ -317,7 +328,7 @@ test('the console has its built-in FX engines up front; setting one up stores on
   await expect(page.getByTestId('console-fx-remove')).toHaveCount(0);
   await page.getByTestId('console-fx-name').first().fill('Plate');
   await page.getByTestId('console-fx-sends').first().getByTestId('strip-picker-open').click();
-  await page.getByTestId('strip-picker-row').first().click();
+  await page.getByTestId('strip-picker-tile').first().click();
   await page.getByTestId('strip-picker-done').click();
   await expect(page.getByTestId('console-fx-count')).toContainText('1 / 8');
   await expect(page.getByTestId('console-save-status')).toHaveAttribute('data-status', 'saved');
@@ -327,12 +338,16 @@ test('the console has its built-in FX engines up front; setting one up stores on
   expect(plate.configured).toBe(true);
   expect(plate.sends).toHaveLength(1);
   expect(body.fx.filter((e: { configured: boolean }) => e.configured)).toHaveLength(1);
+  // a set-up engine is on the faders by default (the unset built-in ones stay off them)
+  await page.getByTestId('console-tab-faders').click(); // nothing to confirm: it saved as it changed
+  await expect(page.getByTestId('console-fader-grid')).toContainText('Plate');
+  await page.getByTestId('console-tab-fx').click();
   // a built-in engine is reset, not deleted
   await page.getByTestId('console-fx-reset').first().click();
   await expect(page.getByTestId('console-fx-count')).toContainText('0 / 8');
   await expect(page.getByTestId('console-fx-name').first()).toHaveValue('FX 1');
-  await page.getByTestId('console-tab-faders').click(); // nothing to confirm: it was saved as it changed
-  await expect(page.getByTestId('console-fader-grid')).toContainText('Plate');
+  await page.getByTestId('console-tab-faders').click();
+  await expect(page.getByTestId('console-fader-grid')).not.toContainText('Plate');
 });
 
 test('a fader strip can be dragged from the tray onto a fader', async ({ page, request }) => {
@@ -347,7 +362,11 @@ test('a fader strip can be dragged from the tray onto a fader', async ({ page, r
   await page.getByTestId('console-fader-edit').click();
   await expect(page.getByTestId('console-fader-tray')).toBeVisible();
   await page.getByTestId('console-fader-tray-strip').first().dragTo(page.getByTestId('console-fader').nth(7));
-  await expect(page.getByTestId('console-fader-pin')).toHaveCount(1);
+  // taking over stores the WHOLE layout: every placed fader is now the engineer's (pinned)
+  await expect(page.getByTestId('console-fader-pin').first()).toBeVisible();
+  await expect(page.getByTestId('console-save-status')).toHaveAttribute('data-status', 'saved');
+  const stored = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists/${listId}/fader-map`, { headers })).json();
+  expect(stored.custom).toBe(true);
 });
 
 test('the Inputs page shows the bus-pool budget and a role per output on a digital console', async ({
@@ -389,7 +408,10 @@ test('the strip picker selects by range, search and kind, and a DCA can hold FX 
   await expect(dialog.getByTestId('strip-picker-count')).toContainText('9 selected');
   // the kind chips and search reach FX returns and FX sends, which a DCA may hold
   await dialog.getByTestId('strip-picker-kind-fxsend').click();
-  await expect(dialog.getByTestId('strip-picker-row')).toHaveCount(1);
+  // 8 FX sends exist (the configured Plate plus 7 built-in); search narrows to the one wanted
+  await expect(dialog.getByTestId('strip-picker-tile')).toHaveCount(8);
+  await dialog.getByTestId('strip-picker-search').fill('Plate send');
+  await expect(dialog.getByTestId('strip-picker-tile')).toHaveCount(1);
   await dialog.getByTestId('strip-picker-all').click();
   await expect(dialog.getByTestId('strip-picker-count')).toContainText('10 selected');
   await dialog.getByTestId('strip-picker-done').click();
@@ -415,7 +437,8 @@ test('the fader tray lists FX returns and FX sends next to inputs and mixes', as
   await expect(tray).toContainText('Plate send');
   await expect(tray).toContainText('Wedge 1');
   await page.getByTestId('console-fader-tray-kind-fxsend').click();
-  await expect(page.getByTestId('console-fader-tray-strip')).toHaveCount(1);
+  // the console's 8 built-in FX each have a send (Plate is one of them)
+  await expect(page.getByTestId('console-fader-tray-strip')).toHaveCount(8);
 });
 
 test('auto patch previews a plan onto a Dante card and then applies it', async ({ page, request }) => {
@@ -564,10 +587,12 @@ test('bus outputs and direct outs can be auto patched onto output sockets', asyn
   await page.getByTestId('console-auto-preview').click();
   await expect(page.getByTestId('console-auto-plan')).toContainText('→');
   await page.getByTestId('console-auto-apply').click();
-  const outs = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json();
-  const sockets = outs[0].outputs.map((o: { out_socket: { socket: number } }) => o.out_socket.socket);
-  expect(sockets).toEqual([4, 5, 6]);
-  expect(outs[0].outputs[0].out_socket.device_id).toBe(box.id);
+  // the apply is a request: poll until the buses carry their sockets
+  type Bus = { out_socket: { socket: number; device_id: string } | null };
+  const outputs = async (): Promise<Bus[]> =>
+    ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as Array<{ outputs: Bus[] }>)[0].outputs;
+  await expect.poll(async () => (await outputs()).map((o) => o.out_socket?.socket ?? null)).toEqual([4, 5, 6]);
+  expect((await outputs())[0].out_socket!.device_id).toBe(box.id);
   // direct outs share the same output sockets: the next free ones are skipped
   await page.getByText('Direct out').first().click();
   await page.getByTestId('console-select-all').click();
@@ -613,13 +638,13 @@ test('a soft-patched channel shows its socket in the signal flow, with analog ho
   await page.getByRole('option', { name: 'Snake' }).click();
   await page.getByTestId('chain-save').click();
   // the server kept the stagebox last: snake first, stagebox (soft patch) at the strip end
-  const row = (await (await request.get(`${API_BASE}/api/v1${base}/channels`, { headers })).json()) as Array<{
-    id: string; patch_points: Array<{ device_id: string; position: number }>; dsp_source: { socket: number };
-  }>;
-  const mine = row.find((c) => c.id === channels[0].id)!;
-  const order = [...mine.patch_points].sort((a, b) => a.position - b.position).map((p) => p.device_id);
-  expect(order).toEqual([snake.id, box.id]);
-  expect(mine.dsp_source.socket).toBe(5);
+  type Row = { id: string; patch_points: Array<{ device_id: string; position: number }>; dsp_source: { socket: number } };
+  const mineNow = async () =>
+    ((await (await request.get(`${API_BASE}/api/v1${base}/channels`, { headers })).json()) as Row[]).find((c) => c.id === channels[0].id)!;
+  const orderNow = async () =>
+    [...(await mineNow()).patch_points].sort((a, b) => a.position - b.position).map((p) => p.device_id);
+  await expect.poll(orderNow).toEqual([snake.id, box.id]); // the save is a request: wait for it
+  expect((await mineNow()).dsp_source.socket).toBe(5);
 });
 
 test('a device typed into Edit patch is created with that name when the chain is saved', async ({
@@ -640,7 +665,8 @@ test('a device typed into Edit patch is created with that name when the chain is
   await page.keyboard.type('Snake 16');
   // not a known device: the picker offers to create it
   await page.getByTestId('chain-device-create').click();
-  await expect(step.getByTestId('chain-device')).toContainText('Snake 16');
+  // (the test id sits on the select's inner input, so the step itself is what shows the name)
+  await expect(step).toContainText('Snake 16');
   // nothing is created until Save: cancelling would leave no device behind
   const before = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as Array<{ name: string }>;
   expect(before.some((d) => d.name === 'Snake 16')).toBe(false);

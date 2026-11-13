@@ -86,12 +86,24 @@ test('the version drawer lists the steps and restores an earlier version', async
 });
 
 test('step names in the history drawer are translated', async ({ page, request }) => {
-  const { jobId } = await seed(page, request);
-  // the app reads its language from localStorage; Swedish names come from history.actions.* (sv)
-  await page.addInitScript(() => localStorage.setItem('sw_locale', 'sv-SE'));
-  await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await page.getByTestId('history-open').click();
-  const drawer = page.getByTestId('history-drawer');
-  await expect(drawer).toContainText('Skapa kanal');
-  await expect(drawer).not.toContainText('Create channel');
+  const { headers, jobId } = await seed(page, request);
+  // The app takes its language from the signed-in user's stored preference (it overwrites any
+  // localStorage value at startup), so set it on the account and put it back afterwards: the
+  // other specs in this run share the account and expect English.
+  const me = await (await request.get(`${API_BASE}/api/v1/auth/me`, { headers })).json();
+  const setLanguage = (preferred_language: string) =>
+    request.put(`${API_BASE}/api/v1/auth/users/${me.id}`, { headers, data: { preferred_language } });
+  expect((await setLanguage('sv')).ok()).toBeTruthy();
+  try {
+    await page.goto(`/jobs/${jobId}/workspace?view=lists`);
+    await page.getByTestId('history-open').click();
+    const drawer = page.getByTestId('history-drawer');
+    await expect(drawer).toContainText('Skapa kanal');
+    await expect(drawer).not.toContainText('Create channel');
+  } finally {
+    await setLanguage('en');
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) if (key.includes('locale')) localStorage.removeItem(key);
+    });
+  }
 });
