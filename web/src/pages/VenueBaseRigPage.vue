@@ -654,9 +654,6 @@ const netbox = useNetboxStore();
 const pushingNetbox = ref(false);
 const netboxMessage = ref('');
 const netboxError = ref(false);
-// Realtime NetBox events (IP assigned / conflict resolved) for this venue's base rig. Declared at
-// setup scope so onUnmounted registers; connect() is called once the venue graph is loaded.
-const venueSocket = useVenueSocket(venueId.value, (event) => graph.applyRealtimeEvent(event));
 
 // Mirror the venue's Standard Base Rig into NetBox, the venue counterpart to a
 // job's "Sync to NetBox". The button is hidden unless NetBox is configured.
@@ -806,6 +803,11 @@ async function assignNetboxIp() {
 }
 
 const venueId = computed(() => route.params.venueId);
+// Realtime NetBox events (IP assigned / conflict resolved) for this venue's base rig. Declared here
+// (after `venueId`) because useVenueSocket reads venueId.value during setup and `const` is in the
+// temporal dead zone until this line — calling it earlier would throw and abort the whole component.
+// connect() is invoked further down once the venue graph has loaded.
+const venueSocket = useVenueSocket(venueId.value, (event) => graph.applyRealtimeEvent(event));
 // Scope the graph store to this venue synchronously, in setup and therefore before child components
 // mount. Child components (e.g. RiggingEditor) fire venue-scoped API calls on mount; without this the
 // store's default job/null scope would send those requests to /jobs/null/... and fail UUID validation.
