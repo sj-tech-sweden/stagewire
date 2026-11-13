@@ -8,7 +8,6 @@ and only fall back to base_url when that is unset.
 
 import uuid
 
-import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core import db as db_mod
