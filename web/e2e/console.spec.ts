@@ -250,11 +250,19 @@ test('the faders start as a starting point; the first edit stores the whole layo
   await expect(page.getByTestId('console-fader-unplaced')).toHaveCount(0);
   // "Auto fill (start over)" replaces the layout with the default fill, after a confirmation
   await page.getByTestId('console-fader-autofill').click();
-  await page.getByRole('button', { name: /ok/i }).click();
+  // the confirmation only appears while a stored layout exists; if the map has not caught up yet
+  // there is nothing to confirm, so click OK only when the dialog is there
+  const ok = page.getByRole('button', { name: /^ok$/i });
+  if (await ok.isVisible({ timeout: 3000 }).catch(() => false)) await ok.click();
   await expect(page.getByTestId('console-save-status')).toBeVisible();
-  const reset = await (await request.get(`${API_BASE}/api/v1${base}/fader-map`, { headers })).json();
-  expect(reset.custom).toBe(true);
-  expect(reset.unplaced).toBe(0);
+  // Auto fill is a request that stores the default layout: wait for it rather than read once
+  const faderMap = async () =>
+    (await (await request.get(`${API_BASE}/api/v1${base}/fader-map`, { headers })).json()) as {
+      custom: boolean;
+      unplaced: number;
+    };
+  await expect.poll(async () => (await faderMap()).custom).toBe(true);
+  expect((await faderMap()).unplaced).toBe(0);
 });
 
 test('the mixer proposal shows the list need and whether each console fits', async ({ page, request }) => {
@@ -680,10 +688,14 @@ test('a device typed into Edit patch is created with that name when the chain is
   const devices = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/devices`, { headers })).json()) as Array<{ id: string; name: string; ports: Array<{ direction: string; count: number }> }>;
   const snake = devices.find((d) => d.name === 'Snake 16')!;
   expect(snake.ports.map((p) => p.direction).sort()).toEqual(['in', 'out']);
-  const rows = (await (await request.get(`${API_BASE}/api/v1${base}/channels`, { headers })).json()) as Array<{
-    id: string; patch_points: Array<{ device_id: string }>;
-  }>;
-  expect(rows.find((c) => c.id === channels[0].id)!.patch_points.map((p) => p.device_id)).toEqual([snake.id]);
+  // the device is created first and the chain saved right after it: wait for the chain too
+  const chainDevices = async () => {
+    const rows = (await (await request.get(`${API_BASE}/api/v1${base}/channels`, { headers })).json()) as Array<{
+      id: string; patch_points: Array<{ device_id: string }>;
+    }>;
+    return rows.find((c) => c.id === channels[0].id)!.patch_points.map((p) => p.device_id);
+  };
+  await expect.poll(chainDevices).toEqual([snake.id]);
 });
 
 async function seedStageboxWithOutputs(request: APIRequestContext, headers: Record<string, string>, jobId: string) {
