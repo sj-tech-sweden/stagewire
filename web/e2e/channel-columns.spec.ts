@@ -107,3 +107,114 @@ test('when the space is too small the table scrolls sideways instead of squeezin
   expect(scroll).toBeGreaterThan(client);
   await expect(page.getByTestId('channel-label').first()).toBeVisible();
 });
+
+// --- the optional columns: instrument group, colour (picker) and performer ---------------------
+
+type Row = { id: string; attributes: Record<string, unknown> };
+async function channelRows(request: APIRequestContext, page: Page, jobId: string): Promise<Row[]> {
+  const headers = await authedHeaders(page);
+  const lists = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as Array<{
+    channels: Array<{ id: string; channel_number: number; instrument_group: string; color_code: string | null; performer_name: string | null }>;
+  }>;
+  return lists[0].channels
+    .sort((a, b) => a.channel_number - b.channel_number)
+    .map((c) => ({ id: c.id, attributes: { instrument_group: c.instrument_group, color_code: c.color_code, performer_name: c.performer_name } }));
+}
+
+async function showOptionalColumns(page: Page) {
+  await page.getByTestId('channel-columns').click();
+  for (const name of ['instrument_group', 'color_code', 'performer_name']) {
+    await page.getByTestId(`channel-col-toggle-${name}`).click();
+  }
+  await page.keyboard.press('Escape');
+}
+
+test('instrument group, colour and performer are hidden by default and chosen in the Columns menu', async ({ page, request }) => {
+  await open(page, request, 2000);
+  await expect(header(page, 'Instrument group')).toHaveCount(0);
+  await expect(header(page, 'Colour')).toHaveCount(0);
+  await expect(header(page, 'Performer')).toHaveCount(0);
+  await showOptionalColumns(page);
+  await expect(header(page, 'Instrument group')).toBeVisible();
+  await expect(header(page, 'Colour')).toBeVisible();
+  await expect(header(page, 'Performer')).toBeVisible();
+  // the choice is remembered like any other
+  await page.reload();
+  await expect(page.getByTestId('channel-table')).toBeVisible();
+  await expect(header(page, 'Colour')).toBeVisible();
+});
+
+test('instrument group and performer save by themselves', async ({ page, request }) => {
+  const jobId = await open(page, request, 2000);
+  await showOptionalColumns(page);
+  await page.getByTestId('channel-group').first().click();
+  await page.getByRole('option', { name: 'Drums' }).click();
+  await page.getByTestId('channel-performer').first().fill('Anna');
+  await page.getByTestId('channel-performer').first().press('Enter');
+  await expect
+    .poll(async () => {
+      const first = (await channelRows(request, page, jobId))[0].attributes;
+      return [first.instrument_group, first.performer_name];
+    })
+    .toEqual(['drums', 'Anna']);
+});
+
+test('the colour column uses a colour picker that stores #rrggbb, and can be cleared', async ({ page, request }) => {
+  const jobId = await open(page, request, 2000);
+  await showOptionalColumns(page);
+  // unset: an empty (dashed) swatch, no text field anywhere in the cell
+  const swatch = page.getByTestId('channel-colour').first();
+  await expect(swatch).toHaveClass(/channel-swatch--unset/);
+  await swatch.click();
+  await page.getByTestId('channel-colour-preset-e53935').click();
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await channelRows(request, page, jobId))[0].attributes.color_code).toBe('#e53935');
+  await expect(swatch).not.toHaveClass(/channel-swatch--unset/);
+  await expect(swatch).toHaveCSS('background-color', 'rgb(229, 57, 53)');
+  // clear unsets it
+  await swatch.click();
+  await page.getByTestId('channel-colour-clear').click();
+  await expect.poll(async () => (await channelRows(request, page, jobId))[0].attributes.color_code).toBeNull();
+});
+
+test('an old colour name is shown best-effort and is not rewritten', async ({ page, request }) => {
+  const jobId = await open(page, request, 2000);
+  const headers = await authedHeaders(page);
+  const rows = await channelRows(request, page, jobId);
+  const res = await request.patch(`${API_BASE}/api/v1/jobs/${jobId}/graph/devices/${rows[1].id}`, {
+    headers,
+    data: { attributes: { color_code: 'red' }, expected_revision: 1 },
+  });
+  // (the revision moved on after the first read; fetch it if the guess was wrong)
+  if (res.status() === 409) {
+    const current = (await res.json()).detail.current;
+    await request.patch(`${API_BASE}/api/v1/jobs/${jobId}/graph/devices/${rows[1].id}`, {
+      headers,
+      data: { attributes: { color_code: 'red' }, expected_revision: current.revision },
+    });
+  }
+  await page.reload();
+  await showOptionalColumns(page);
+  await expect(page.getByTestId('channel-colour').nth(1)).toHaveCSS('background-color', 'rgb(255, 0, 0)');
+  expect((await channelRows(request, page, jobId))[1].attributes.color_code).toBe('red'); // untouched
+});
+
+test('the second leg of a stereo pair cannot edit group or colour: it follows the first', async ({ page, request }) => {
+  const jobId = await open(page, request, 2000);
+  const headers = await authedHeaders(page);
+  const lists = (await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as Array<{ id: string; channels: Array<{ id: string }> }>;
+  const link = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists/${lists[0].id}/console/link`, {
+    headers,
+    data: { primary_channel_id: lists[0].channels[0].id },
+  });
+  expect(link.status(), await link.text()).toBeLessThan(300);
+  await page.reload();
+  await showOptionalColumns(page);
+  // Ch 1 is the primary, Ch 2 its secondary leg, Ch 3 is on its own
+  await expect(page.getByTestId('channel-colour').nth(0)).toBeEnabled();
+  await expect(page.getByTestId('channel-colour').nth(1)).toBeDisabled();
+  await expect(page.getByTestId('channel-colour').nth(2)).toBeEnabled();
+  // (the test id sits on the select's inner input, which carries the disabled attribute)
+  await expect(page.getByTestId('channel-group').nth(1)).toBeDisabled();
+  await expect(page.getByTestId('channel-group').nth(0)).toBeEnabled();
+});

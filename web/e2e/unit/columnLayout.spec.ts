@@ -12,7 +12,7 @@ import {
   visibleColumns,
 } from '../../src/utils/columnLayout';
 
-const all = CHANNEL_COLUMNS.map((c) => c.name);
+const all = CHANNEL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.name); // the columns shown by default (the optional ones start hidden)
 const byName = (name: string) => CHANNEL_COLUMNS.find((c) => c.name === name)!;
 
 function memory() {
@@ -44,7 +44,7 @@ test('a short name fits by default on a normal desktop width', () => {
 
 test('minimums are respected; when they cannot fit the table scrolls instead of squeezing', () => {
   const narrow = computeWidths(CHANNEL_COLUMNS, { containerWidth: 700, visible: all });
-  for (const c of CHANNEL_COLUMNS) expect(narrow.widths[c.name]).toBeGreaterThanOrEqual(c.min);
+  for (const c of CHANNEL_COLUMNS.filter((x) => x.defaultVisible)) expect(narrow.widths[c.name]).toBeGreaterThanOrEqual(c.min);
   expect(narrow.overflow).toBe(true);
   expect(narrow.total).toBeGreaterThan(700);
   // an unknown container (not measured yet) behaves like "no space": minimums
@@ -54,7 +54,7 @@ test('minimums are respected; when they cannot fit the table scrolls instead of 
 test('a column pushed to its minimum frees the rest for the others', () => {
   // just enough room that Notes (weight 1, min 120) would fall below its minimum by pure weight
   const { widths } = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1300, visible: all });
-  for (const c of CHANNEL_COLUMNS) expect(widths[c.name]).toBeGreaterThanOrEqual(c.min);
+  for (const c of CHANNEL_COLUMNS.filter((x) => x.defaultVisible)) expect(widths[c.name]).toBeGreaterThanOrEqual(c.min);
   expect(Math.abs(Object.values(widths).reduce((a, b) => a + b, 0) - 1300)).toBeLessThan(8);
 });
 
@@ -177,4 +177,18 @@ test('hiding a column in one table does not touch another', () => {
   expect(loadLayout(1, grown, store, 'gear')).toEqual({ visible: ['name', 'kind', 'extra'], widths: { name: 222 } });
   resetLayout(1, gear, store, 'gear');
   expect(loadLayout(1, gear, store, 'gear')).toEqual(defaultLayout(gear));
+});
+
+
+test('the instrument group, colour and performer columns are optional and start hidden', () => {
+  const optional = CHANNEL_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.name);
+  expect(optional).toEqual(['instrument_group', 'color_code', 'performer_name']);
+  expect(visibleColumns(CHANNEL_COLUMNS, all).map((c) => c.name)).not.toContain('color_code');
+  // chosen in the Columns menu, they show up (and take space) like any other column
+  const names = visibleColumns(CHANNEL_COLUMNS, [...all, 'color_code']).map((c) => c.name);
+  expect(names).toContain('color_code');
+  // a layout saved before these columns existed has no opinion on them: they stay hidden
+  const storage = memory();
+  storage.setItem(storageKey(7), JSON.stringify({ v: 1, visible: all, widths: {} }));
+  expect(loadLayout(7, CHANNEL_COLUMNS, storage).visible).not.toContain('performer_name');
 });

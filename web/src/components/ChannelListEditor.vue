@@ -602,6 +602,104 @@
             />
           </q-td>
         </template>
+        <template #body-cell-instrument_group="slot">
+          <q-td :props="slot">
+            <q-select
+              :model-value="slot.row.attributes.instrument_group || 'other'"
+              :options="groupOptions"
+              emit-value
+              map-options
+              dense
+              borderless
+              :disable="isSecondaryLeg(slot.row)"
+              data-testid="channel-group"
+              @update:model-value="(v) => saveAttr(slot.row, 'instrument_group', v)"
+            >
+              <q-tooltip v-if="isSecondaryLeg(slot.row)">
+                {{ t("workspace.colourFollowsPrimary") }}
+              </q-tooltip>
+            </q-select>
+          </q-td>
+        </template>
+        <template #body-cell-color_code="slot">
+          <q-td :props="slot">
+            <q-btn
+              dense
+              flat
+              no-caps
+              class="channel-swatch"
+              :class="{ 'channel-swatch--unset': !slot.row.attributes.color_code }"
+              :style="swatchStyle(slot.row.attributes.color_code)"
+              :disable="isSecondaryLeg(slot.row)"
+              :aria-label="t('workspace.colourPick')"
+              data-testid="channel-colour"
+            >
+              <q-tooltip>
+                {{
+                  isSecondaryLeg(slot.row)
+                    ? t("workspace.colourFollowsPrimary")
+                    : slot.row.attributes.color_code || t("workspace.colourUnset")
+                }}
+              </q-tooltip>
+              <q-popup-proxy
+                v-if="!isSecondaryLeg(slot.row)"
+                @hide="commitColour(slot.row)"
+              >
+                <q-card
+                  class="q-pa-sm"
+                  style="width: 260px"
+                >
+                  <div class="row q-gutter-xs q-mb-sm">
+                    <q-btn
+                      v-for="preset in PRESET_COLOURS"
+                      :key="preset"
+                      dense
+                      unelevated
+                      round
+                      size="sm"
+                      :style="{ background: preset }"
+                      :aria-label="preset"
+                      :data-testid="`channel-colour-preset-${preset.slice(1)}`"
+                      @click="pickPreset(slot.row, preset)"
+                    />
+                  </div>
+                  <q-color
+                    :model-value="colourDraft(slot.row)"
+                    format-model="hex"
+                    no-header
+                    no-footer
+                    default-view="spectrum"
+                    flat
+                    @update:model-value="(v) => (pendingColour = { id: slot.row.id, value: v })"
+                    @change="(v) => setColour(slot.row, v)"
+                  />
+                  <q-btn
+                    v-close-popup
+                    flat
+                    dense
+                    no-caps
+                    icon="format_color_reset"
+                    :label="t('workspace.colourClear')"
+                    :disable="!slot.row.attributes.color_code"
+                    data-testid="channel-colour-clear"
+                    @click="setColour(slot.row, null)"
+                  />
+                </q-card>
+              </q-popup-proxy>
+            </q-btn>
+          </q-td>
+        </template>
+        <template #body-cell-performer_name="slot">
+          <q-td :props="slot">
+            <q-input
+              :model-value="slot.row.attributes.performer_name || ''"
+              dense
+              borderless
+              data-testid="channel-performer"
+              @change="(v) => saveAttr(slot.row, 'performer_name', String(v || '').trim() || null)"
+            />
+          </q-td>
+        </template>
         <template #body-cell-notes="slot">
           <q-td :props="slot">
             <q-input
@@ -994,6 +1092,8 @@ import ChainDialog from "@/components/ChainDialog.vue";
 import StockwireProductPicker from "@/components/StockwireProductPicker.vue";
 import { api } from "@/boot/api";
 import { CHANNEL_COLUMNS } from "@/utils/columnLayout";
+import { INSTRUMENT_GROUP_KEYS } from "@/utils/instrumentGroups";
+import { PRESET_COLOURS, colourToHex, normalizeHex, readableTextColour } from "@/utils/colour";
 import AdaptiveTable from "@/components/AdaptiveTable.vue";
 import ListBulkDialog from "@/components/ListBulkDialog.vue";
 import MixerDialog from "@/components/MixerDialog.vue";
@@ -1084,11 +1184,14 @@ const columnLabels = computed(() => ({
   stand_type: t("workspace.colStand"),
   phantom_power: "48V",
   stereo: "ST",
+  instrument_group: t("workspace.colInstrumentGroup"),
+  color_code: t("workspace.colColour"),
+  performer_name: t("workspace.colPerformer"),
   notes: t("workspace.colNotes"),
   chain: t("workspace.chain"),
   actions: "",
 }));
-const ALIGN = { phantom_power: "center", stereo: "center", actions: "right" };
+const ALIGN = { phantom_power: "center", stereo: "center", color_code: "center", actions: "right" };
 const columns = computed(() =>
   CHANNEL_COLUMNS.map((c) => ({
     ...c,
@@ -1158,6 +1261,45 @@ async function save(node, changes) {
 }
 const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
+
+// --- optional columns: instrument group, colour, performer ----------------------------------------
+const groupOptions = computed(() =>
+  INSTRUMENT_GROUP_KEYS.map((v) => ({
+    value: v,
+    label: t(`channels.instrumentGroups.${v}`),
+  })),
+);
+// The second leg of a stereo pair takes its name, colour and group from the first (the server
+// mirrors them), so those editors are read-only there.
+const isSecondaryLeg = (row) => row.attributes?.stereo_link_role === "secondary";
+// A stored colour may be an old plain name ("red"): the swatch shows it best-effort, an unknown name
+// gets a neutral swatch (the tooltip shows the text), and nothing is rewritten until the user picks.
+function swatchStyle(value) {
+  if (!value) return {};
+  const hex = colourToHex(value);
+  return hex
+    ? { background: hex, color: readableTextColour(hex) }
+    : { background: "#9e9e9e", color: "#000" };
+}
+// The picker's value follows the drag live, but is only saved once the user lets go (`change`) or
+// closes the popup, so dragging does not write on every tick.
+const pendingColour = ref(null);
+const colourDraft = (row) =>
+  (pendingColour.value?.id === row.id && normalizeHex(pendingColour.value.value)) ||
+  colourToHex(row.attributes.color_code) ||
+  "#ffffff";
+function setColour(row, value) {
+  pendingColour.value = null;
+  const hex = value == null ? null : normalizeHex(value);
+  if (value != null && !hex) return;
+  if ((row.attributes.color_code || null) === hex) return;
+  return saveAttr(row, "color_code", hex);
+}
+const pickPreset = (row, hex) => setColour(row, hex);
+// closing the popup saves a drag that never got its release event (e.g. dismissed mid-drag)
+function commitColour(row) {
+  if (pendingColour.value?.id === row.id) setColour(row, pendingColour.value.value);
+}
 
 // Import a Shure Wireless Workbench .shw show file onto the current list's wireless
 // channels. Two steps: first the file is parsed and the backend suggests a channel
@@ -1807,6 +1949,18 @@ const removeList = () => removeNode(list.value);
 </script>
 
 <style scoped>
+/* the colour column: a round swatch, dashed and empty while no colour is set */
+.channel-swatch {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.6);
+}
+.channel-swatch--unset {
+  border-style: dashed;
+}
 /* The chain button shows the whole chain and sits next to the flow button, so the cell must be
    wide enough for both or the next column would cover the flow button. */
 .chain-cell {
