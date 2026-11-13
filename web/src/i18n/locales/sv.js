@@ -418,6 +418,7 @@ export default {
     requestNoJob: "Koppla jobbet till ett Stockwire-jobb först",
     pending: "Skickar…",
     inspector: "Inspektör",
+    closeInspector: "Stäng inspektören",
     selectHint: "Välj en enhet för att se detaljer",
     signalFlow: "Signalflöde",
     traceUp: "Uppströms",

@@ -416,6 +416,7 @@ export default {
     requestNoJob: "Link this job to a Stockwire job first",
     pending: "Sending…",
     inspector: "Inspector",
+    closeInspector: "Close inspector",
     selectHint: "Select a device to see its details",
     signalFlow: "Signal flow",
     traceUp: "Upstream",
