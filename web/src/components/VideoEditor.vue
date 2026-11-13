@@ -220,8 +220,9 @@
             </q-expansion-item>
           </q-card>
         </div>
-        <q-table
+        <AdaptiveTable
           v-else
+          :table-id="section.kind === 'video_input' ? 'video-inputs' : 'video-outputs'"
           flat
           dense
           bordered
@@ -362,7 +363,7 @@
               />
             </q-td>
           </template>
-        </q-table>
+        </AdaptiveTable>
       </div>
     </template>
 
@@ -387,6 +388,7 @@
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref, watch } from 'vue';
@@ -457,12 +459,14 @@ const listSwitchers = computed(() => {
 });
 const chainTitle = computed(() => `${t('workspace.editChain')}: ${chainNode.value?.name || ''}`);
 
-const number = { name: 'number', label: '#', field: () => '', align: 'left' };
-const col = (name, label) => ({ name, label, field: () => '', align: 'left' });
+// Layout meta per column (see utils/columnLayout.js): the number and actions are compact, the
+// descriptive columns share the space by weight.
+const number = { name: 'number', label: '#', field: () => '', align: 'left', min: 56, width: 64, grow: 0, required: true };
+const col = (name, label, meta = {}) => ({ name, label, field: () => '', align: 'left', min: 120, width: 180, grow: 1.5, ...meta });
 const tail = [
-  col('notes', t('workspace.colNotes')),
-  col('chain', t('workspace.chain')),
-  { name: 'actions', label: '', field: () => '', align: 'right' },
+  col('notes', t('workspace.colNotes'), { min: 120, width: 180, grow: 1.5 }),
+  col('chain', t('workspace.chain'), { min: 200, width: 260, grow: 2 }),
+  { name: 'actions', label: '', field: () => '', align: 'right', min: 96, width: 96, grow: 0 },
 ];
 const sections = computed(() => [
   {
@@ -471,10 +475,10 @@ const sections = computed(() => [
     rows: videoRowsOf(graph.devices, listId.value, 'video_input'),
     columns: [
       number,
-      col('name', t('workspace.colSource')),
+      col('name', t('workspace.colSource'), { min: 150, width: 200, grow: 3, required: true }),
       col('source', t('workspace.videoSource')),
       col('source_type', t('workspace.colSourceType')),
-      col('connector', t('workspace.stepConnector')),
+      col('connector', t('workspace.stepConnector'), { min: 110, width: 130, grow: 0.5 }),
       ...tail,
     ],
   },
@@ -484,9 +488,9 @@ const sections = computed(() => [
     rows: videoRowsOf(graph.devices, listId.value, 'video_destination'),
     columns: [
       number,
-      col('name', t('workspace.colDestination')),
-      col('output_name', t('workspace.colName')),
-      col('connector', t('workspace.stepConnector')),
+      col('name', t('workspace.colDestination'), { min: 150, width: 200, grow: 3, required: true }),
+      col('output_name', t('workspace.colName'), { min: 130, width: 180, grow: 2 }),
+      col('connector', t('workspace.stepConnector'), { min: 110, width: 130, grow: 0.5 }),
       ...tail,
     ],
   },

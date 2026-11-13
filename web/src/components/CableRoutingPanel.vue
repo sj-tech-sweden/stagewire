@@ -152,111 +152,104 @@
         >
           {{ t('cables.none') }}
         </div>
-        <q-markup-table
+        <AdaptiveTable
           v-else
+          table-id="cable-routing"
           flat
           dense
           bordered
+          :rows="rows"
+          :columns="columns"
+          row-key="key"
+          :rows-per-page-options="[0]"
+          hide-bottom
           class="sticky-header-table"
           style="max-height: 40vh"
           data-testid="cable-table"
         >
-          <thead>
-            <tr>
-              <th class="text-left">
-                {{ t('workspace.colFrom') }}
-              </th>
-              <th class="text-left">
-                {{ t('workspace.colTo') }}
-              </th>
-              <th class="text-left">
-                {{ t('cables.routeColumn') }}
-              </th>
-              <th class="text-right">
-                {{ t('cables.pathM') }}
-              </th>
-              <th class="text-right">
-                {{ t('cables.neededM') }}
-              </th>
-              <th class="text-right">
-                {{ t('cables.lengthClass') }}
-              </th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in rows"
-              :key="row.key"
-              :class="{ 'bg-grey-9': rerouteKey === row.key }"
-              :data-testid="`cable-row-${row.index}`"
+          <template #body="bp">
+            <q-tr
+              :props="bp"
+              :class="{ 'bg-grey-9': rerouteKey === bp.row.key }"
+              :data-testid="`cable-row-${bp.row.index}`"
             >
-              <td>{{ row.fromName }}</td>
-              <td>{{ row.toName }}</td>
-              <td>
-                <span v-if="row.placed">{{ t(`cables.route.${row.mode}`) }}</span>
-                <span
-                  v-else
-                  class="text-warning"
-                >{{ t('cables.notPlaced') }}</span>
-                <q-icon
-                  v-if="row.crossesAudience"
-                  name="warning"
-                  color="warning"
-                >
-                  <q-tooltip>{{ t('cables.crossesAudience') }}</q-tooltip>
-                </q-icon>
-              </td>
-              <td class="text-right">
-                {{ row.pathM ?? '–' }}
-              </td>
-              <td class="text-right">
-                {{ row.requiredM ?? '–' }}
-              </td>
-              <td class="text-right">
-                {{ row.placed ? (row.assignedM === null ? t('cables.overMax') : `${row.assignedM} m`) : '–' }}
-              </td>
-              <td class="text-right no-wrap">
-                <q-btn
-                  flat
-                  dense
-                  round
-                  :icon="row.hidden ? 'visibility_off' : 'visibility'"
-                  :aria-label="row.hidden ? t('cables.showCable') : t('cables.hideCable')"
-                  data-testid="cable-hide"
-                  @click="emit('toggle-hidden', row)"
-                >
-                  <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
-                </q-btn>
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="alt_route"
-                  :color="rerouteKey === row.key ? 'primary' : undefined"
-                  :disable="!row.placed"
-                  :aria-label="t('cables.rerouteAction')"
-                  data-testid="cable-reroute"
-                  @click="emit('reroute', row)"
-                >
-                  <q-tooltip>{{ row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}</q-tooltip>
-                </q-btn>
-                <q-btn
-                  v-if="row.requestedMode === 'manual'"
-                  flat
-                  dense
-                  round
-                  icon="auto_fix_high"
-                  :aria-label="t('cables.autoRouteAction')"
-                  data-testid="cable-auto-route"
-                  @click="emit('reset-route', row)"
-                >
-                  <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
-                </q-btn>
-              </td>
-            </tr>
-          </tbody>
-        </q-markup-table>
+              <q-td
+                v-for="col in bp.cols"
+                :key="col.name"
+                :props="{ ...bp, col, value: undefined }"
+                :class="col.name === 'actions' ? 'no-wrap' : ''"
+              >
+                <template v-if="col.name === 'from'">
+                  {{ bp.row.fromName }}
+                </template>
+                <template v-else-if="col.name === 'to'">
+                  {{ bp.row.toName }}
+                </template>
+                <template v-else-if="col.name === 'route'">
+                  <span v-if="bp.row.placed">{{ t(`cables.route.${bp.row.mode}`) }}</span>
+                  <span
+                    v-else
+                    class="text-warning"
+                  >{{ t('cables.notPlaced') }}</span>
+                  <q-icon
+                    v-if="bp.row.crossesAudience"
+                    name="warning"
+                    color="warning"
+                  >
+                    <q-tooltip>{{ t('cables.crossesAudience') }}</q-tooltip>
+                  </q-icon>
+                </template>
+                <template v-else-if="col.name === 'pathM'">
+                  {{ bp.row.pathM ?? '–' }}
+                </template>
+                <template v-else-if="col.name === 'neededM'">
+                  {{ bp.row.requiredM ?? '–' }}
+                </template>
+                <template v-else-if="col.name === 'lengthClass'">
+                  {{ bp.row.placed ? (bp.row.assignedM === null ? t('cables.overMax') : `${bp.row.assignedM} m`) : '–' }}
+                </template>
+                <template v-else-if="col.name === 'actions'">
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    :icon="bp.row.hidden ? 'visibility_off' : 'visibility'"
+                    :aria-label="bp.row.hidden ? t('cables.showCable') : t('cables.hideCable')"
+                    data-testid="cable-hide"
+                    @click="emit('toggle-hidden', bp.row)"
+                  >
+                    <q-tooltip>{{ t('cables.hideTip') }}</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="alt_route"
+                    :color="rerouteKey === bp.row.key ? 'primary' : undefined"
+                    :disable="!bp.row.placed"
+                    :aria-label="t('cables.rerouteAction')"
+                    data-testid="cable-reroute"
+                    @click="emit('reroute', bp.row)"
+                  >
+                    <q-tooltip>{{ bp.row.placed ? t('cables.rerouteTip') : t('cables.rerouteDisabledTip') }}</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    v-if="bp.row.requestedMode === 'manual'"
+                    flat
+                    dense
+                    round
+                    icon="auto_fix_high"
+                    :aria-label="t('cables.autoRouteAction')"
+                    data-testid="cable-auto-route"
+                    @click="emit('reset-route', bp.row)"
+                  >
+                    <q-tooltip>{{ t('cables.autoRouteTip') }}</q-tooltip>
+                  </q-btn>
+                </template>
+              </q-td>
+            </q-tr>
+          </template>
+        </AdaptiveTable>
       </q-card-section>
     </q-card>
   </q-expansion-item>
@@ -264,6 +257,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { useI18n } from 'vue-i18n';
 import { cableTypeCsv, cablesToCsv } from '@/utils/cables';
 
@@ -280,6 +274,17 @@ const props = defineProps({
   // the cable whose manual waypoints are being placed on the map
   rerouteKey: { type: String, default: null },
 });
+// Layout meta per column (see utils/columnLayout.js); the row's buttons are the actions column.
+const columns = computed(() => [
+  { name: 'from', label: t('workspace.colFrom'), align: 'left', min: 130, width: 180, grow: 2, required: true },
+  { name: 'to', label: t('workspace.colTo'), align: 'left', min: 130, width: 180, grow: 2 },
+  { name: 'route', label: t('cables.routeColumn'), align: 'left', min: 120, width: 150, grow: 1 },
+  { name: 'pathM', label: t('cables.pathM'), align: 'right', min: 80, width: 96, grow: 0 },
+  { name: 'neededM', label: t('cables.neededM'), align: 'right', min: 80, width: 96, grow: 0 },
+  { name: 'lengthClass', label: t('cables.lengthClass'), align: 'right', min: 90, width: 110, grow: 0 },
+  { name: 'actions', label: '', align: 'right', min: 120, width: 130, grow: 0 },
+]);
+
 const emit = defineEmits(['settings', 'draw-start', 'draw-finish', 'draw-undo', 'draw-cancel', 'delete-way', 'toggle-hidden', 'reroute', 'reset-route']);
 const { t } = useI18n();
 
