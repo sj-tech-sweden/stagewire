@@ -161,8 +161,9 @@
       </q-card>
     </div>
 
-    <q-table
+    <AdaptiveTable
       v-else
+      table-id="lights"
       flat
       dense
       bordered
@@ -188,7 +189,6 @@
             dense
             borderless
             type="number"
-            style="width: 76px"
             :data-testid="`fixture-${field}`"
             @change="(v) => saveAttr(slot.row, field, v === '' ? null : Number(v))"
           />
@@ -219,7 +219,6 @@
             input-debounce="0"
             new-value-mode="add-unique"
             :options="typeOptions"
-            style="min-width: 130px"
             data-testid="fixture-fixture_type"
             @filter="filterTypes"
             @update:model-value="(v) => saveAttr(slot.row, 'fixture_type', v || null)"
@@ -237,7 +236,6 @@
             input-debounce="0"
             new-value-mode="add-unique"
             :options="modeOptions"
-            style="min-width: 100px"
             data-testid="fixture-channel_mode"
             @filter="(v, update) => filterModes(slot.row, v, update)"
             @update:model-value="(v) => chooseMode(slot.row, v)"
@@ -277,7 +275,7 @@
           />
         </q-td>
       </template>
-    </q-table>
+    </AdaptiveTable>
 
     <div class="row items-center q-mt-xl q-mb-sm">
       <div class="text-subtitle1 col">
@@ -400,6 +398,7 @@
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref } from 'vue';
@@ -467,17 +466,17 @@ const flags = computed(() => dmxFlags(fixtures.value.map(fixtureView)));
 const flagsOf = (fixture) => flags.value.get(fixture.id) || { conflict: false, overflow: false };
 
 const columns = computed(() => [
-  { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
-  { name: 'universe', label: t('lights.colUniverse'), field: () => '', align: 'left' },
-  { name: 'dmx_address', label: t('lights.colAddress'), field: () => '', align: 'left' },
-  { name: 'fixture_type', label: t('lights.colFixtureType'), field: () => '', align: 'left' },
-  { name: 'channel_mode', label: t('lights.colChannelMode'), field: () => '', align: 'left' },
-  { name: 'footprint', label: t('lights.colFootprint'), field: () => '', align: 'left' },
-  { name: 'location', label: t('lights.colLocation'), field: () => '', align: 'left' },
-  { name: 'gel', label: t('lights.colGel'), field: () => '', align: 'left' },
-  { name: 'purpose', label: t('lights.colPurpose'), field: () => '', align: 'left' },
-  { name: 'check', label: t('lights.colStatus'), field: () => '', align: 'center' },
-  { name: 'actions', label: '', field: () => '', align: 'right' },
+  { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left', min: 140, width: 180, grow: 3, required: true },
+  { name: 'universe', label: t('lights.colUniverse'), field: () => '', align: 'left', min: 90, width: 100, grow: 0 },
+  { name: 'dmx_address', label: t('lights.colAddress'), field: () => '', align: 'left', min: 90, width: 100, grow: 0 },
+  { name: 'fixture_type', label: t('lights.colFixtureType'), field: () => '', align: 'left', min: 140, width: 180, grow: 2 },
+  { name: 'channel_mode', label: t('lights.colChannelMode'), field: () => '', align: 'left', min: 110, width: 140, grow: 1 },
+  { name: 'footprint', label: t('lights.colFootprint'), field: () => '', align: 'left', min: 90, width: 100, grow: 0 },
+  { name: 'location', label: t('lights.colLocation'), field: () => '', align: 'left', min: 110, width: 150, grow: 1.5 },
+  { name: 'gel', label: t('lights.colGel'), field: () => '', align: 'left', min: 80, width: 110, grow: 0.5 },
+  { name: 'purpose', label: t('lights.colPurpose'), field: () => '', align: 'left', min: 110, width: 150, grow: 1.5 },
+  { name: 'check', label: t('lights.colStatus'), field: () => '', align: 'center', min: 72, width: 80, grow: 0 },
+  { name: 'actions', label: '', field: () => '', align: 'right', min: 64, width: 64, grow: 0 },
 ]);
 
 const failed = (err) =>

@@ -56,114 +56,114 @@
         />
 
         <template v-if="stockwire.isEnabled">
-        <q-separator class="q-my-md" />
-        <div class="text-subtitle2">
-          {{ t('stockwire.linkedJob') }}
-        </div>
-        <div class="row items-center q-gutter-sm">
-          <q-chip
-            dense
-            square
-            :color="job?.stockwire_job_id ? 'positive' : 'grey-7'"
-            text-color="white"
-            icon="link"
-            data-testid="job-stockwire-status"
-          >
-            {{ job?.stockwire_job_id ? t('stockwire.linkedAs', { id: job.stockwire_job_id }) : t('stockwire.notLinked') }}
-          </q-chip>
-          <template v-if="!job?.stockwire_job_id">
-            <q-btn
+          <q-separator class="q-my-md" />
+          <div class="text-subtitle2">
+            {{ t('stockwire.linkedJob') }}
+          </div>
+          <div class="row items-center q-gutter-sm">
+            <q-chip
               dense
-              outline
-              no-caps
-              color="primary"
+              square
+              :color="job?.stockwire_job_id ? 'positive' : 'grey-7'"
+              text-color="white"
               icon="link"
-              :label="t('stockwire.linkExisting')"
-              data-testid="job-link-existing"
-              @click="openLink"
+              data-testid="job-stockwire-status"
+            >
+              {{ job?.stockwire_job_id ? t('stockwire.linkedAs', { id: job.stockwire_job_id }) : t('stockwire.notLinked') }}
+            </q-chip>
+            <template v-if="!job?.stockwire_job_id">
+              <q-btn
+                dense
+                outline
+                no-caps
+                color="primary"
+                icon="link"
+                :label="t('stockwire.linkExisting')"
+                data-testid="job-link-existing"
+                @click="openLink"
+              />
+              <q-btn
+                dense
+                outline
+                no-caps
+                color="primary"
+                icon="add"
+                :label="t('stockwire.createNew')"
+                :loading="busy"
+                data-testid="job-create-stockwire"
+                @click="link(null)"
+              />
+            </template>
+            <q-btn
+              dense
+              outline
+              no-caps
+              color="primary"
+              icon="open_in_new"
+              :label="t('stockwire.openInStockwire')"
+              :disable="!job?.stockwire_job_id"
+              data-testid="job-open-stockwire"
+              @click="openInStockwire"
             />
             <q-btn
               dense
               outline
               no-caps
               color="primary"
-              icon="add"
-              :label="t('stockwire.createNew')"
-              :loading="busy"
-              data-testid="job-create-stockwire"
-              @click="link(null)"
+              icon="playlist_add"
+              :label="t('workspace.syncStockwire')"
+              :loading="pushing"
+              :disable="!job?.stockwire_job_id"
+              data-testid="job-sync-stockwire"
+              @click="sync"
             />
-          </template>
-          <q-btn
-            dense
-            outline
-            no-caps
-            color="primary"
-            icon="open_in_new"
-            :label="t('stockwire.openInStockwire')"
-            :disable="!job?.stockwire_job_id"
-            data-testid="job-open-stockwire"
-            @click="openInStockwire"
-          />
-          <q-btn
-            dense
-            outline
-            no-caps
-            color="primary"
-            icon="playlist_add"
-            :label="t('workspace.syncStockwire')"
-            :loading="pushing"
-            :disable="!job?.stockwire_job_id"
-            data-testid="job-sync-stockwire"
-            @click="sync"
-          />
-        </div>
-        <div class="text-caption text-grey-6">
-          {{ t('stockwire.addDevicesHint') }}
-        </div>
-        <div
-          v-if="message"
-          class="text-caption"
-          :class="error ? 'text-negative' : 'text-positive'"
-        >
-          {{ message }}
-        </div>
-
-        <div v-if="linkOpen">
-          <q-input
-            v-model="search"
-            dense
-            outlined
-            :label="t('stockwire.linkSearch')"
-            data-testid="job-link-search"
-            @update:model-value="onSearch"
-          />
-          <q-list
-            bordered
-            separator
-            class="q-mt-xs"
+          </div>
+          <div class="text-caption text-grey-6">
+            {{ t('stockwire.addDevicesHint') }}
+          </div>
+          <div
+            v-if="message"
+            class="text-caption"
+            :class="error ? 'text-negative' : 'text-positive'"
           >
-            <q-item
-              v-for="r in results"
-              :key="r.id"
-              clickable
-              data-testid="job-link-result"
-              @click="link(r.id)"
+            {{ message }}
+          </div>
+
+          <div v-if="linkOpen">
+            <q-input
+              v-model="search"
+              dense
+              outlined
+              :label="t('stockwire.linkSearch')"
+              data-testid="job-link-search"
+              @update:model-value="onSearch"
+            />
+            <q-list
+              bordered
+              separator
+              class="q-mt-xs"
             >
-              <q-item-section>
-                <q-item-label>{{ r.name || r.title || r.id }}</q-item-label>
-                <q-item-label caption>
-                  #{{ r.id }}<span v-if="r.venue_name"> · {{ r.venue_name }}</span>
-                </q-item-label>
-              </q-item-section>
-            </q-item>
-            <q-item v-if="!results.length && !loading">
-              <q-item-section class="text-grey-6">
-                {{ t('stockwire.notFound') }}
-              </q-item-section>
-            </q-item>
-          </q-list>
-        </div>
+              <q-item
+                v-for="r in results"
+                :key="r.id"
+                clickable
+                data-testid="job-link-result"
+                @click="link(r.id)"
+              >
+                <q-item-section>
+                  <q-item-label>{{ r.name || r.title || r.id }}</q-item-label>
+                  <q-item-label caption>
+                    #{{ r.id }}<span v-if="r.venue_name"> · {{ r.venue_name }}</span>
+                  </q-item-label>
+                </q-item-section>
+              </q-item>
+              <q-item v-if="!results.length && !loading">
+                <q-item-section class="text-grey-6">
+                  {{ t('stockwire.notFound') }}
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </div>
         </template>
 
         <template v-if="netbox.isEnabled">

@@ -41,8 +41,9 @@
       </q-item>
     </q-list>
 
-    <q-table
+    <AdaptiveTable
       v-else
+      table-id="devices"
       flat
       dense
       bordered
@@ -151,7 +152,7 @@
           />
         </q-td>
       </template>
-    </q-table>
+    </AdaptiveTable>
 
     <DeviceDialog
       v-model="dialogOpen"
@@ -164,6 +165,7 @@
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, onMounted, ref, watch } from 'vue';
@@ -192,15 +194,15 @@ const gear = computed(() =>
   graph.devices.filter((d) => isGear(d) && d.kind !== 'case').sort((a, b) => a.name.localeCompare(b.name)),
 );
 const columns = computed(() => [
-  { name: 'name', label: t('devices.name'), field: 'name', align: 'left' },
-  { name: 'type', label: t('devices.type'), field: 'kind', align: 'left' },
-  { name: 'ports', label: t('devices.ports'), field: () => '', align: 'left' },
-  { name: 'io', label: `${t('devices.inputs')} / ${t('devices.outputs')}`, field: () => '', align: 'left' },
-  { name: 'weight', label: t('devices.weight'), field: () => '', align: 'right' },
-  { name: 'power', label: t('devices.power'), field: () => '', align: 'right' },
-  { name: 'inlet', label: t('workspace.colInlet'), field: () => '', align: 'left' },
-  { name: 'patched', label: t('workspace.chain'), field: () => '', align: 'right' },
-  { name: 'actions', label: '', field: () => '', align: 'right' },
+  { name: 'name', label: t('devices.name'), field: 'name', align: 'left', min: 150, width: 200, grow: 3, required: true },
+  { name: 'type', label: t('devices.type'), field: 'kind', align: 'left', min: 110, width: 150, grow: 1 },
+  { name: 'ports', label: t('devices.ports'), field: () => '', align: 'left', min: 140, width: 220, grow: 2 },
+  { name: 'io', label: `${t('devices.inputs')} / ${t('devices.outputs')}`, field: () => '', align: 'left', min: 90, width: 110, grow: 0 },
+  { name: 'weight', label: t('devices.weight'), field: () => '', align: 'right', min: 90, width: 110, grow: 0 },
+  { name: 'power', label: t('devices.power'), field: () => '', align: 'right', min: 90, width: 110, grow: 0 },
+  { name: 'inlet', label: t('workspace.colInlet'), field: () => '', align: 'left', min: 120, width: 160, grow: 1 },
+  { name: 'patched', label: t('workspace.chain'), field: () => '', align: 'right', min: 80, width: 100, grow: 0 },
+  { name: 'actions', label: '', field: () => '', align: 'right', min: 90, width: 110, grow: 0 },
 ]);
 
 const effective = (device) => graph.effective[device.id];

@@ -110,8 +110,9 @@
             </q-card>
           </q-list>
 
-          <q-table
+          <AdaptiveTable
             v-else
+            table-id="settings-users"
             :rows="users"
             :columns="userColumns"
             row-key="id"
@@ -143,7 +144,7 @@
                 />
               </q-td>
             </template>
-          </q-table>
+          </AdaptiveTable>
 
           <q-dialog v-model="userDialog">
             <q-card style="min-width: 420px">
@@ -734,8 +735,9 @@
                   </q-card-actions>
                 </q-card>
               </q-list>
-              <q-table
+              <AdaptiveTable
                 v-else
+                table-id="settings-stockwire-categories"
                 :rows="categoryRows"
                 :columns="categoryColumns"
                 row-key="idx"
@@ -785,7 +787,7 @@
                     />
                   </q-td>
                 </template>
-              </q-table>
+              </AdaptiveTable>
               <div class="row q-gutter-sm q-mt-sm">
                 <q-btn
                   flat
@@ -925,6 +927,7 @@
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/boot/api'
@@ -1186,9 +1189,9 @@ const gearTypeOptions = [
   { label: 'Other', value: 'other' },
 ]
 const categoryColumns = [
-  { name: 'categoryId', label: t('stockwire.category'), field: 'categoryId', align: 'left' },
-  { name: 'gearType', label: t('stockwire.gearType'), field: 'gearType', align: 'left', style: 'width: 200px' },
-  { name: 'actions', label: '', field: 'actions', align: 'right', style: 'width: 50px' },
+  { name: 'categoryId', label: t('stockwire.category'), field: 'categoryId', align: 'left', min: 220, width: 320, grow: 3, required: true },
+  { name: 'gearType', label: t('stockwire.gearType'), field: 'gearType', align: 'left', min: 160, width: 200, grow: 0 },
+  { name: 'actions', label: '', field: 'actions', align: 'right', min: 56, width: 56, grow: 0 },
 ]
 
 async function loadCategoryMap() {
@@ -1245,11 +1248,11 @@ function blankUser() {
 }
 
 const userColumns = [
-  { name: 'email', label: t('settings.users.email'), field: 'email', align: 'left' },
-  { name: 'name', label: t('settings.users.name'), field: (r) => `${r.first_name} ${r.last_name}`, align: 'left' },
-  { name: 'role', label: t('settings.users.role'), field: 'role', align: 'left' },
-  { name: 'active', label: t('settings.users.active'), field: 'is_active', align: 'left' },
-  { name: 'actions', label: '', field: 'actions', align: 'right' },
+  { name: 'email', label: t('settings.users.email'), field: 'email', align: 'left', min: 200, width: 260, grow: 2, required: true },
+  { name: 'name', label: t('settings.users.name'), field: (r) => `${r.first_name} ${r.last_name}`, align: 'left', min: 140, width: 200, grow: 2 },
+  { name: 'role', label: t('settings.users.role'), field: 'role', align: 'left', min: 90, width: 120, grow: 0 },
+  { name: 'active', label: t('settings.users.active'), field: 'is_active', align: 'left', min: 90, width: 120, grow: 0 },
+  { name: 'actions', label: '', field: 'actions', align: 'right', min: 96, width: 120, grow: 0 },
 ]
 
 async function loadUsers() {
