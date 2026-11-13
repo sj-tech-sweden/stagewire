@@ -57,6 +57,30 @@ export async function enableStockwire(request: APIRequestContext): Promise<void>
   await setStockwireEnabled(request, true);
 }
 
+// Configure the NetBox integration's `enabled` flag directly via the API, mirroring
+// setStockwireEnabled. The frontend reads `settings.netbox.enabled` on auth to decide
+// which UI to show; CI seeds the integration disabled, so a test that exercises NetBox UI
+// must enable it first (the app's loadIntegration() then picks up the flag on first load).
+export async function setNetboxEnabled(request: APIRequestContext, enabled: boolean): Promise<void> {
+  await waitForApi(request);
+  const loginRes = await request.post(`${API_BASE}/api/v1/auth/login`, { data: ADMIN });
+  const token = (await loginRes.json()).access_token as string;
+  const res = await request.put(`${API_BASE}/api/v1/netbox`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      enabled,
+      base_url: 'http://host.docker.internal:8000',
+      public_url: 'http://host.docker.internal:8010',
+      api_token: 'dev-token-placeholder',
+    },
+  });
+  if (!res.ok()) throw new Error(`setNetboxEnabled failed: ${await res.text()}`);
+}
+
+export async function enableNetbox(request: APIRequestContext): Promise<void> {
+  await setNetboxEnabled(request, true);
+}
+
 export async function login(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/login');
   await page.locator('input[type="email"]').fill(ADMIN.email);

@@ -34,6 +34,11 @@
           :label="t('settings.stockwire.title')"
           data-testid="settings-tab-stockwire"
         />
+        <q-tab
+          name="netbox"
+          :label="t('settings.netbox.title')"
+          data-testid="settings-tab-netbox"
+        />
       </q-tabs>
       <q-separator />
 
@@ -798,6 +803,122 @@
             </div>
           </q-card>
         </q-tab-panel>
+
+        <!-- NETBOX -->
+        <q-tab-panel name="netbox">
+          <div class="text-subtitle1 q-mb-sm">
+            {{ t('settings.netbox.title') }}
+          </div>
+          <q-card
+            flat
+            bordered
+            class="q-pa-md"
+          >
+            <div
+              class="column q-gutter-md"
+              style="max-width: 520px"
+            >
+              <q-input
+                v-model="netboxBaseUrl"
+                :label="t('settings.netbox.baseUrl')"
+                placeholder="http://netbox:8000"
+              />
+              <q-input
+                v-model="netboxPublicUrl"
+                :label="t('settings.netbox.publicUrl')"
+                :hint="t('settings.netbox.publicUrlHint')"
+                placeholder="http://host.docker.internal:8010"
+              />
+              <q-input
+                v-model="netboxApiToken"
+                :label="t('settings.netbox.apiToken')"
+                :type="netboxShowToken ? 'text' : 'password'"
+                :hint="t('settings.netbox.apiTokenHint')"
+                :disable="netboxHasToken && !netboxShowToken"
+              />
+              <q-input
+                v-model="netboxTenantSlug"
+                :label="t('settings.netbox.tenantSlug')"
+                placeholder="stagewire"
+              />
+              <q-input
+                v-model="netboxSiteSlug"
+                :label="t('settings.netbox.siteSlug')"
+                placeholder="hq"
+              />
+              <q-input
+                v-model="netboxDeviceRoleSlug"
+                :label="t('settings.netbox.deviceRoleSlug')"
+                placeholder="stagewire"
+              />
+              <q-select
+                v-model="netboxDeviceStatus"
+                :options="netboxDeviceStatusOptions"
+                emit-value
+                map-options
+                :label="t('settings.netbox.deviceStatus')"
+              />
+              <div class="row items-center q-gutter-sm">
+                <q-toggle
+                  v-model="netboxEnabled"
+                  :label="t('settings.netbox.enabled')"
+                />
+                <q-toggle
+                  v-if="netboxHasToken"
+                  v-model="netboxShowToken"
+                  :label="t('settings.netbox.showToken')"
+                />
+              </div>
+              <div class="row q-gutter-sm items-center">
+                <q-btn
+                  color="primary"
+                  :label="t('app.actions.save')"
+                  :loading="savingNetbox"
+                  @click="saveNetbox"
+                />
+                <q-btn
+                  color="secondary"
+                  :label="t('settings.netbox.test')"
+                  :loading="testingNetbox"
+                  @click="testNetbox"
+                />
+                <q-btn
+                  color="positive"
+                  icon="sync"
+                  :label="t('settings.netbox.provision')"
+                  :loading="provisioningNetbox"
+                  @click="provisionNetbox"
+                />
+                <q-chip
+                  v-if="netboxTestResult"
+                  :color="netboxTestResult.ok ? 'positive' : 'negative'"
+                  :icon="netboxTestResult.ok ? 'check' : 'error'"
+                  square
+                  dense
+                >
+                  {{ netboxTestResult.ok ? `${netboxTestResult.latency_ms} ms` : netboxTestResult.detail }}
+                </q-chip>
+                <q-chip
+                  v-if="provisionResult"
+                  :color="provisionResult.ok ? 'positive' : 'negative'"
+                  :icon="provisionResult.ok ? 'check' : 'error'"
+                  square
+                  dense
+                >
+                  {{ provisionResultText }}
+                </q-chip>
+                <q-chip
+                  v-if="netboxDeviceTypeId"
+                  color="info"
+                  square
+                  dense
+                >
+                  {{ t('settings.netbox.deviceType') }}: #{{ netboxDeviceTypeId }}
+                </q-chip>
+              </div>
+            </div>
+          </q-card>
+        </q-tab-panel>
       </q-tab-panels>
     </template>
   </q-page>
@@ -809,6 +930,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/boot/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStockwireStore } from '@/stores/stockwire'
+import { useNetboxStore } from '@/stores/netbox'
 import { SUPPORTED_LOCALES } from '../i18n'
 
 const { t } = useI18n({ useScope: "global" })
@@ -934,6 +1056,117 @@ async function testStockwire() {
     }
   } finally {
     testingStockwire.value = false
+  }
+}
+
+/* ---------------- NetBox integration ---------------- */
+const netbox = useNetboxStore()
+const netboxBaseUrl = ref('')
+const netboxPublicUrl = ref('')
+const netboxApiToken = ref('')
+const netboxHasToken = ref(false)
+const netboxShowToken = ref(false)
+const netboxTenantSlug = ref('')
+const netboxSiteSlug = ref('')
+const netboxDeviceRoleSlug = ref('stagewire')
+const netboxDeviceStatus = ref('staged')
+const netboxDeviceTypeId = ref(null)
+const netboxEnabled = ref(false)
+const savingNetbox = ref(false)
+const testingNetbox = ref(false)
+const netboxTestResult = ref(null)
+const provisioningNetbox = ref(false)
+const provisionResult = ref(null)
+const netboxDeviceStatusOptions = [
+  { label: 'Active', value: 'active' },
+  { label: 'Planned', value: 'planned' },
+  { label: 'Staged', value: 'staged' },
+  { label: 'Offline', value: 'offline' },
+  { label: 'Deprecated', value: 'deprecated' },
+  { label: 'Inventory', value: 'inventory' },
+]
+
+const provisionResultText = computed(() => {
+  const r = provisionResult.value
+  if (!r) return ''
+  if (!r.ok) return t('settings.netbox.provisionFailed', { detail: r.message })
+  if (r.code === 'partial') return t('settings.netbox.provisionPartial')
+  return t('settings.netbox.provisioned')
+})
+
+async function loadNetbox() {
+  try {
+    const { data } = await api.get('/netbox')
+    netboxBaseUrl.value = data.base_url || ''
+    netboxPublicUrl.value = data.public_url || ''
+    netboxTenantSlug.value = data.tenant_slug || ''
+    netboxSiteSlug.value = data.site_slug || ''
+    netboxDeviceRoleSlug.value = data.device_role_slug || 'stagewire'
+    netboxDeviceStatus.value = data.default_device_status || 'staged'
+    netboxDeviceTypeId.value = data.device_type_id || null
+    netboxEnabled.value = !!data.enabled
+    netboxHasToken.value = !!data.has_api_token
+    netboxApiToken.value = ''
+    netboxShowToken.value = false
+  } catch {
+    /* ignore */
+  }
+}
+
+async function saveNetbox() {
+  savingNetbox.value = true
+  try {
+    await api.put('/netbox', {
+      enabled: netboxEnabled.value,
+      base_url: netboxBaseUrl.value,
+      public_url: netboxPublicUrl.value,
+      api_token: netboxApiToken.value || null,
+      tenant_slug: netboxTenantSlug.value,
+      site_slug: netboxSiteSlug.value,
+      device_role_slug: netboxDeviceRoleSlug.value,
+      default_device_status: netboxDeviceStatus.value,
+    })
+    netbox.integration = { ...netbox.integration, enabled: netboxEnabled.value }
+    if (netboxApiToken.value) netboxHasToken.value = true
+    netboxApiToken.value = ''
+    netboxShowToken.value = false
+  } finally {
+    savingNetbox.value = false
+  }
+}
+
+async function testNetbox() {
+  testingNetbox.value = true
+  netboxTestResult.value = null
+  try {
+    const { data } = await api.post('/netbox/test')
+    netboxTestResult.value = data
+  } catch (e) {
+    testResult.value = {
+      ok: false,
+      detail:
+        e?.response?.data?.detail || t('settings.netbox.notConfigured'),
+    }
+  } finally {
+    testingNetbox.value = false
+  }
+}
+
+async function provisionNetbox() {
+  provisioningNetbox.value = true
+  provisionResult.value = null
+  try {
+    await saveNetbox()
+    const { data } = await api.post('/netbox/provision')
+    provisionResult.value = data
+    if (data?.ok) await loadNetbox()
+  } catch (e) {
+    provisionResult.value = {
+      ok: false,
+      message: e?.response?.data?.detail || 'provision_failed',
+    }
+  } finally {
+    provisioningNetbox.value = false
   }
 }
 
@@ -1179,6 +1412,7 @@ onMounted(() => {
     loadCompany()
     loadStockwire()
     loadCategoryMap()
+    loadNetbox()
   }
 })
 
@@ -1189,6 +1423,7 @@ watch(isAdmin, (v) => {
     loadCompany()
     loadStockwire()
     loadCategoryMap()
+    loadNetbox()
   }
 })
 </script>

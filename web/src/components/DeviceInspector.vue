@@ -623,6 +623,125 @@
             @update:model-value="(v) => save({ attributes: { network_protocols: v || [] } })"
           />
         </div>
+        <template v-if="netbox.isEnabled">
+          <q-separator class="q-my-sm" />
+          <div class="text-caption text-grey-7 q-mb-xs">
+            {{ t('workspace.network.netboxTitle') }}
+          </div>
+          <div class="row q-gutter-xs items-center q-mb-xs">
+            <q-chip
+              v-if="attrs.netbox_sync_status"
+              :color="netboxStatusColor"
+              text-color="white"
+              dense
+            >
+              {{ t(`workspace.network.netboxStatus.${attrs.netbox_sync_status}`) }}
+            </q-chip>
+            <q-btn
+              v-if="attrs.netbox_url"
+              dense
+              flat
+              no-caps
+              icon="open_in_new"
+              color="primary"
+              :label="t('workspace.network.netboxOpen')"
+              :href="attrs.netbox_url"
+              target="_blank"
+              rel="noopener"
+            />
+          </div>
+          <q-banner
+            v-if="attrs.netbox_sync_status === 'conflict'"
+            dense
+            rounded
+            class="bg-negative text-white q-mb-sm"
+          >
+            <template #avatar>
+              <q-icon name="warning" />
+            </template>
+            {{ t('workspace.network.netboxConflict') }}
+          </q-banner>
+          <!-- VLAN → subnet picker: choose a NetBox VLAN, then a prefix/subnet
+               inside it. Selecting the subnet sets the device's NetBox prefix
+               and draws available IPs from it. The manual CIDR input below is
+               kept as a fallback for subnets not tied to a VLAN. -->
+          <q-select
+            v-if="!readonly"
+            :model-value="selectedVlanId"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="netboxVlanOptions"
+            :label="t('workspace.network.netboxVlan')"
+            data-testid="network-netbox-vlan"
+            :loading="netboxVlansLoading"
+            @focus="loadNetboxVlans"
+            @update:model-value="onNetboxVlanChange"
+          />
+          <q-select
+            v-if="!readonly && selectedVlanId"
+            :model-value="selectedPrefixId"
+            dense
+            outlined
+            emit-value
+            map-options
+            clearable
+            :options="netboxPrefixOptions"
+            :label="t('workspace.network.netboxSubnet')"
+            data-testid="network-netbox-subnet"
+            :loading="netboxPrefixesLoading"
+            @update:model-value="onNetboxPrefixChange"
+          />
+          <q-input
+            v-if="!readonly"
+            :model-value="attrs.network_prefix || ''"
+            dense
+            outlined
+            placeholder="10.0.0.0/24"
+            :label="t('workspace.network.netboxPrefix')"
+            data-testid="network-netbox-prefix"
+            @change="(v) => save({ attributes: { network_prefix: v || null } })"
+          />
+          <div
+            v-if="!readonly"
+            class="row q-gutter-xs items-center"
+          >
+            <q-btn
+              dense
+              outline
+              no-caps
+              icon="search"
+              :label="t('workspace.network.netboxQuery')"
+              :loading="netboxQuerying"
+              @click="queryNetboxIps()"
+            />
+            <q-select
+              v-if="netbox.availableIps.length"
+              v-model="netboxSelectedIp"
+              class="col"
+              dense
+              outlined
+              emit-value
+              map-options
+              :options="netboxIpOptions"
+              :label="t('workspace.network.netboxAvailable')"
+              data-testid="network-netbox-ip"
+            />
+            <q-btn
+              dense
+              flat
+              no-caps
+              color="primary"
+              icon="check"
+              :label="t('workspace.network.netboxAssign')"
+              :disable="!netboxSelectedIp"
+              :loading="netboxAssigning"
+              @click="assignNetboxIp"
+            />
+          </div>
+        </template>
       </q-expansion-item>
 
       <q-btn
@@ -661,6 +780,7 @@ import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
 import { useStagePlotStore } from '@/stores/stageplot';
 import { useStockwireStore } from '@/stores/stockwire';
+import { useNetboxStore } from '@/stores/netbox';
 import { getApiBaseUrl } from '@/utils/runtime-config';
 import { legacyId } from '@/utils/graphLegacy';
 import {
@@ -881,6 +1001,120 @@ const deviceIpWebUi = computed(() => {
   return ip ? `http://${ip}` : null;
 });
 
+// --- NetBox integration (IPAM/DCIM) -------------------------------------
+// When enabled, technicians can pull available IPs from NetBox and assign them
+// directly to this device, and conflicts pushed from NetBox surface here. The
+// whole block is hidden unless the integration is enabled (see netbox store).
+const netbox = useNetboxStore();
+const netboxQuerying = ref(false);
+const netboxAssigning = ref(false);
+const netboxSelectedIp = ref(null);
+const selectedVlanId = ref(null);
+const selectedPrefixId = ref(null);
+const netboxVlansLoading = ref(false);
+const netboxPrefixesLoading = ref(false);
+
+const netboxIpOptions = computed(() =>
+  (netbox.availableIps || []).map((ip) => ({ label: ip.address, value: ip.address })),
+);
+
+const netboxVlanOptions = computed(() =>
+  (netbox.vlans || []).map((v) => ({
+    label: v.vid != null ? `${v.vid} — ${v.name || v.slug}` : (v.name || v.slug),
+    value: v.id,
+  })),
+);
+
+const netboxPrefixOptions = computed(() =>
+  (netbox.prefixes || []).map((p) => ({
+    label: p.prefix + (p.description ? ` (${p.description})` : ''),
+    value: p.id,
+    prefix: p.prefix,
+  })),
+);
+
+async function loadNetboxVlans() {
+  if (netbox.vlans.length) return;
+  netboxVlansLoading.value = true;
+  try {
+    await netbox.loadVlans();
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxVlansLoading.value = false;
+  }
+}
+
+async function onNetboxVlanChange(vlanId) {
+  selectedVlanId.value = vlanId;
+  selectedPrefixId.value = null;
+  netbox.prefixes = [];
+  if (!vlanId) return;
+  netboxPrefixesLoading.value = true;
+  try {
+    await netbox.loadPrefixes(vlanId);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxPrefixesLoading.value = false;
+  }
+}
+
+async function onNetboxPrefixChange(prefixId) {
+  selectedPrefixId.value = prefixId;
+  const opt = netboxPrefixOptions.value.find((o) => o.value === prefixId);
+  if (!opt) return;
+  // Persist the chosen subnet as the device's NetBox prefix, then draw available
+  // IPs from it so the rest of the assignment flow is unchanged.
+  await save({ attributes: { network_prefix: opt.prefix } });
+  await queryNetboxIps(opt.prefix);
+}
+const netboxStatusColor = computed(() => {
+  const s = props.device?.attributes?.netbox_sync_status;
+  return { ok: 'positive', conflict: 'negative', error: 'negative', pending: 'warning' }[s] || 'grey';
+});
+
+async function queryNetboxIps(prefixOverride) {
+  const prefix = prefixOverride || props.device?.attributes?.network_prefix;
+  if (!prefix) {
+    $q.notify({ type: 'warning', message: t('workspace.network.netboxNeedsSubnet') });
+    return;
+  }
+  netboxQuerying.value = true;
+  try {
+    await netbox.queryIps(prefix);
+    netboxSelectedIp.value = null;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxQuerying.value = false;
+  }
+}
+
+async function assignNetboxIp() {
+  if (!netboxSelectedIp.value) return;
+  netboxAssigning.value = true;
+  try {
+    const res = await netbox.assignIp({
+      device_id: props.device.id,
+      prefix: props.device?.attributes?.network_prefix || undefined,
+      address: netboxSelectedIp.value,
+    });
+    if (res?.ok) {
+      $q.notify({
+        type: 'positive',
+        message: t('workspace.network.netboxAssigned', { ip: res.ip }),
+      });
+    } else {
+      $q.notify({ type: 'warning', message: res?.message || 'NetBox assignment failed' });
+    }
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxAssigning.value = false;
+  }
+}
+
 // Gear (not plot elements, power nodes or virtual list nodes) has a full dialog: ports, weight,
 // power, camera specs. It opens from here so any device reached through the inspector can use it.
 const detailsOpen = ref(false);
@@ -982,6 +1216,12 @@ watch(
     rejected.value = [];
     traces.upstream = null;
     traces.downstream = null;
+    // The VLAN/subnet picks are local to the device being edited; clear them so
+    // a freshly opened device doesn't show the previous device's selection. The
+    // stored `network_prefix` (the real source of truth) is untouched.
+    selectedVlanId.value = null;
+    selectedPrefixId.value = null;
+    netbox.prefixes = [];
   },
 );
 

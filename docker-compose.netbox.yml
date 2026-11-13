@@ -1,0 +1,106 @@
+# Local NetBox dev instance for building & testing the Stagewire NetBox integration.
+#
+# This is intentionally a SEPARATE compose file from the main `docker-compose.yml`
+# so a NetBox instance only runs when you opt into it. It uses its own Postgres
+# (5434) and Valkey (6381) so it never collides with Stagewire's stack (5433/6380).
+# Valkey is wire-compatible with Redis, so NetBox's REDIS_* settings just point at it.
+#
+# NetBox is the IPAM/DCIM source of truth; Stagewire talks to it over HTTP. From a
+# Stagewire container the callback URL (for webhooks) must use
+# `http://host.docker.internal:8010` rather than `localhost`, because `localhost`
+# inside the NetBox container is NetBox itself.
+#
+# Usage:
+#   docker compose -f docker-compose.netbox.yml up -d
+#   # wait for it to come up, then seed defaults + an API token:
+#   python scripts/seed_netbox_dev.py --base-url http://localhost:8088 \
+#       --user admin --password admin --site hq --tenant stagewire
+#
+# First login in the browser: http://localhost:8088  (admin / admin)
+services:
+  netbox-db:
+    image: postgres:18-alpine
+    container_name: stagewire-netbox-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: netbox
+    ports:
+      - "5434:5432"
+    volumes:
+      - netbox-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netbox -d netbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  netbox-valkey:
+    image: valkey/valkey:9-alpine
+    container_name: stagewire-netbox-valkey
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    volumes:
+      - netbox-valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  netbox:
+    image: netboxcommunity/netbox:latest
+    container_name: stagewire-netbox
+    restart: unless-stopped
+    depends_on:
+      netbox-db:
+        condition: service_healthy
+      netbox-valkey:
+        condition: service_healthy
+    environment:
+      # NetBox expects these (the docker image treats them as required). The names
+      # are NetBox's own REDIS_* convention; the backing service is Valkey, which
+      # speaks the Redis protocol.
+      # NetBox's docker config splits ALLOWED_HOSTS / CSRF_TRUSTED_ORIGINS on
+      # SPACES, not commas — a comma-separated value is treated as a single
+      # literal host and silently fails host validation (Django then returns a
+      # bare HTTP 400). `host.docker.internal` is what Stagewire (running in a
+      # container) uses to reach this published port on the host.
+      ALLOWED_HOSTS: "localhost 127.0.0.1 host.docker.internal netbox"
+      DB_HOST: netbox-db
+      DB_NAME: netbox
+      DB_USER: netbox
+      DB_PASSWORD: netbox
+      REDIS_HOST: netbox-valkey
+      REDIS_PORT: "6379"
+      REDIS_CACHE_HOST: netbox-valkey
+      REDIS_CACHE_PORT: "6379"
+      SECRET_KEY: "dev-only-insecure-stagewire-netbox-secret-change-me"
+      # NetBox v4.7+ requires a token pepper (env var API_TOKEN_PEPPER_1) to
+      # provision API tokens. Dev-only placeholder; use a real random value in any
+      # non-dev deployment.
+      API_TOKEN_PEPPER_1: "dev-only-insecure-stagewire-netbox-pepper-change-me"
+      SUPERUSER_NAME: admin
+      SUPERUSER_PASSWORD: admin
+      SUPERUSER_EMAIL: admin@stagewire.local
+      SKIP_SUPERUSER: "false"
+      # NetBox v4 prefers the API to run over the same scheme it is served on.
+      INTERNAL_URL: "http://localhost:8080"
+      BASE_PATH: ""
+      # Disable the default SSL redirect in dev so the plain-http webhook from
+      # Stagewire (and the API) works without TLS.
+      SECURE_PROXY_SSL_HEADER: ""
+      CSRF_TRUSTED_ORIGINS: "http://localhost:8088 http://host.docker.internal:8088"
+    ports:
+      - "8088:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  netbox-db-data:
+  netbox-valkey-data:

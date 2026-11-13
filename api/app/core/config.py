@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     stockwire_api_base_url: str = "https://rental-api.sj-tech.se"
     stockwire_api_token: str | None = None
 
+    # --- NetBox IPAM/DCIM integration (optional) ---
+    # These are only fallbacks; the real values live (encrypted) in the
+    # ``netbox_integration`` AppSetting row, edited from the Settings page.
+    netbox_api_base_url: str = ""
+    netbox_api_token: str | None = None
+
     # --- Uploaded files (stage plot element images) ---
     # Directory the API stores uploaded files in. Serve it at /static via a
     # StaticFiles mount. In the container this is backed by a persistent volume.

@@ -33,6 +33,24 @@
         :label="t('reports.openReports')"
         @click="reportsOpen = true"
       />
+      <q-btn
+        v-if="netbox.isEnabled"
+        flat
+        no-caps
+        icon="sync"
+        :label="t('netbox.syncVenue')"
+        data-testid="venue-sync-netbox"
+        :loading="pushingNetbox"
+        @click="syncNetbox"
+      />
+    </div>
+
+    <div
+      v-if="netboxMessage"
+      class="q-mb-md"
+      :class="netboxError ? 'text-negative' : 'text-positive'"
+    >
+      {{ netboxMessage }}
     </div>
 
     <!-- The venue Standard Base Rig mirrors the job workspace's discipline tabs so a venue is set up
@@ -384,6 +402,125 @@
               :model-value="powerTarget"
               @update:model-value="setPowerTarget"
             />
+            <!-- NetBox panel: status chip, link-out, conflict banner and the VLAN →
+                 subnet → IP picker, mirroring the job inspector's NetBox block. A venue
+                 base-rig device is edited through graph.updateDevice, so persistence goes
+                 through netboxSave rather than the job inspector's save(). -->
+            <template v-if="netbox.isEnabled">
+              <q-separator class="q-my-sm" />
+              <div class="text-caption text-grey-7 q-mb-xs">
+                {{ t('workspace.network.netboxTitle') }}
+              </div>
+              <div class="row q-gutter-xs items-center q-mb-xs">
+                <q-chip
+                  v-if="selectedDeviceAttrs.netbox_sync_status"
+                  :color="netboxStatusColor"
+                  text-color="white"
+                  dense
+                >
+                  {{ t(`workspace.network.netboxStatus.${selectedDeviceAttrs.netbox_sync_status}`) }}
+                </q-chip>
+                <q-btn
+                  v-if="selectedDeviceAttrs.netbox_url"
+                  dense
+                  flat
+                  no-caps
+                  icon="open_in_new"
+                  color="primary"
+                  :label="t('workspace.network.netboxOpen')"
+                  :href="selectedDeviceAttrs.netbox_url"
+                  target="_blank"
+                  rel="noopener"
+                />
+              </div>
+              <q-banner
+                v-if="selectedDeviceAttrs.netbox_sync_status === 'conflict'"
+                dense
+                rounded
+                class="bg-negative text-white q-mb-sm"
+              >
+                <template #avatar>
+                  <q-icon name="warning" />
+                </template>
+                {{ t('workspace.network.netboxConflict') }}
+              </q-banner>
+              <q-select
+                v-if="!readonly"
+                :model-value="selectedVlanId"
+                dense
+                outlined
+                emit-value
+                map-options
+                clearable
+                :options="netboxVlanOptions"
+                :label="t('workspace.network.netboxVlan')"
+                data-testid="network-netbox-vlan"
+                :loading="netboxVlansLoading"
+                @focus="loadNetboxVlans"
+                @update:model-value="onNetboxVlanChange"
+              />
+              <q-select
+                v-if="!readonly && selectedVlanId"
+                :model-value="selectedPrefixId"
+                dense
+                outlined
+                emit-value
+                map-options
+                clearable
+                :options="netboxPrefixOptions"
+                :label="t('workspace.network.netboxSubnet')"
+                data-testid="network-netbox-subnet"
+                :loading="netboxPrefixesLoading"
+                @update:model-value="onNetboxPrefixChange"
+              />
+              <q-input
+                v-if="!readonly"
+                :model-value="selectedDeviceAttrs.network_prefix || ''"
+                dense
+                outlined
+                placeholder="10.0.0.0/24"
+                :label="t('workspace.network.netboxPrefix')"
+                data-testid="network-netbox-prefix"
+                @change="(v) => netboxSave({ network_prefix: v || null })"
+              />
+              <div
+                v-if="!readonly"
+                class="row q-gutter-xs items-center"
+              >
+                <q-btn
+                  dense
+                  outline
+                  no-caps
+                  icon="search"
+                  :label="t('workspace.network.netboxQuery')"
+                  :loading="netboxQuerying"
+                  @click="queryNetboxIps()"
+                />
+                <q-select
+                  v-if="netbox.availableIps.length"
+                  v-model="netboxSelectedIp"
+                  class="col"
+                  dense
+                  outlined
+                  emit-value
+                  map-options
+                  :options="netboxIpOptions"
+                  :label="t('workspace.network.netboxAvailable')"
+                  data-testid="network-netbox-ip"
+                />
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  color="primary"
+                  icon="check"
+                  :label="t('workspace.network.netboxAssign')"
+                  :disable="!netboxSelectedIp"
+                  :loading="netboxAssigning"
+                  @click="assignNetboxIp"
+                />
+              </div>
+            </template>
             <q-btn
               class="q-mt-sm"
               dense
@@ -489,6 +626,8 @@ import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import { emptyCablePlan } from '@/utils/cables';
 import { useGraphStore } from '@/stores/graph';
+import { useNetboxStore } from '@/stores/netbox';
+import { useVenueSocket } from '@/composables/useVenueSocket';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
@@ -509,8 +648,166 @@ const { t } = useI18n();
 // the identical rigging/power/lighting/video treatment a job does. Edits commit immediately through
 // the incremental graph routes — there is no separate "save" step.
 const graph = useGraphStore();
+// NetBox integration config (gates the "Sync base rig to NetBox" button and tells
+// us whether the venue base rig can be mirrored into NetBox IPAM/DCIM).
+const netbox = useNetboxStore();
+const pushingNetbox = ref(false);
+const netboxMessage = ref('');
+const netboxError = ref(false);
+
+// Mirror the venue's Standard Base Rig into NetBox, the venue counterpart to a
+// job's "Sync to NetBox". The button is hidden unless NetBox is configured.
+async function syncNetbox() {
+  pushingNetbox.value = true;
+  netboxMessage.value = '';
+  netboxError.value = false;
+  try {
+    const { data } = await netbox.syncVenue(venueId.value);
+    if (data?.ok) {
+      netboxMessage.value = t('netbox.syncOk', {
+        created: data.devices_created,
+        updated: data.devices_updated,
+      });
+    } else {
+      netboxError.value = true;
+      netboxMessage.value = data?.message || t('netbox.syncFailed');
+    }
+  } catch (err) {
+    netboxError.value = true;
+    netboxMessage.value = apiErrorText(err) || t('netbox.syncFailed');
+  } finally {
+    pushingNetbox.value = false;
+  }
+}
+
+// --- Per-device NetBox panel (venue parity with the job inspector) ----------------------------
+// Mirrors DeviceInspector's NetBox block: status chip, link-out, conflict banner and the
+// VLAN → subnet → IP picker. A venue base-rig device is edited through graph.updateDevice
+// (scope-aware) instead of the job inspector's save(), so the persistence call differs only
+// in which store action commits the attribute patch.
+const readonly = false;
+const selectedDeviceAttrs = computed(() => graph.selectedDevice?.attributes || {});
+const netboxQuerying = ref(false);
+const netboxAssigning = ref(false);
+const netboxSelectedIp = ref(null);
+const selectedVlanId = ref(null);
+const selectedPrefixId = ref(null);
+const netboxVlansLoading = ref(false);
+const netboxPrefixesLoading = ref(false);
+
+// A venue rig is edited by admins, so the panel is always interactive here (no read-only mode).
+const netboxStatusColor = computed(() => {
+  const s = selectedDeviceAttrs.value.netbox_sync_status;
+  return { ok: 'positive', conflict: 'negative', error: 'negative', pending: 'warning' }[s] || 'grey';
+});
+
+const netboxIpOptions = computed(() =>
+  (netbox.availableIps || []).map((ip) => ({ label: ip.address, value: ip.address })),
+);
+const netboxVlanOptions = computed(() =>
+  (netbox.vlans || []).map((v) => ({
+    label: v.vid != null ? `${v.vid} — ${v.name || v.slug}` : (v.name || v.slug),
+    value: v.id,
+  })),
+);
+const netboxPrefixOptions = computed(() =>
+  (netbox.prefixes || []).map((p) => ({
+    label: p.prefix + (p.description ? ` (${p.description})` : ''),
+    value: p.id,
+    prefix: p.prefix,
+  })),
+);
+
+async function netboxSave(attrPatch) {
+  if (!graph.selectedDeviceId) return;
+  await graph.updateDevice(venueId.value, graph.selectedDeviceId, {
+    attributes: { ...(graph.selectedDevice?.attributes || {}), ...attrPatch },
+  });
+}
+
+async function loadNetboxVlans() {
+  if (netbox.vlans.length) return;
+  netboxVlansLoading.value = true;
+  try {
+    await netbox.loadVlans();
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxVlansLoading.value = false;
+  }
+}
+
+async function onNetboxVlanChange(vlanId) {
+  selectedVlanId.value = vlanId;
+  selectedPrefixId.value = null;
+  netbox.prefixes = [];
+  if (!vlanId) return;
+  netboxPrefixesLoading.value = true;
+  try {
+    await netbox.loadPrefixes(vlanId);
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxPrefixesLoading.value = false;
+  }
+}
+
+async function onNetboxPrefixChange(prefixId) {
+  selectedPrefixId.value = prefixId;
+  const opt = netboxPrefixOptions.value.find((o) => o.value === prefixId);
+  if (!opt) return;
+  // Persist the chosen subnet as the device's NetBox prefix, then draw available IPs from it.
+  await netboxSave({ network_prefix: opt.prefix });
+  await queryNetboxIps(opt.prefix);
+}
+
+async function queryNetboxIps(prefixOverride) {
+  const prefix = prefixOverride || selectedDeviceAttrs.value.network_prefix;
+  if (!prefix) {
+    $q.notify({ type: 'warning', message: t('workspace.network.netboxNeedsSubnet') });
+    return;
+  }
+  netboxQuerying.value = true;
+  try {
+    await netbox.queryIps(prefix);
+    netboxSelectedIp.value = null;
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxQuerying.value = false;
+  }
+}
+
+async function assignNetboxIp() {
+  if (!netboxSelectedIp.value || !graph.selectedDevice) return;
+  netboxAssigning.value = true;
+  try {
+    const res = await netbox.assignIp({
+      device_id: graph.selectedDevice.id,
+      prefix: selectedDeviceAttrs.value.network_prefix || undefined,
+      address: netboxSelectedIp.value,
+    });
+    if (res?.ok) {
+      $q.notify({
+        type: 'positive',
+        message: t('workspace.network.netboxAssigned', { ip: res.ip }),
+      });
+    } else {
+      $q.notify({ type: 'warning', message: res?.message || 'NetBox assignment failed' });
+    }
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiErrorText(err) });
+  } finally {
+    netboxAssigning.value = false;
+  }
+}
 
 const venueId = computed(() => route.params.venueId);
+// Realtime NetBox events (IP assigned / conflict resolved) for this venue's base rig. Declared here
+// (after `venueId`) because useVenueSocket reads venueId.value during setup and `const` is in the
+// temporal dead zone until this line — calling it earlier would throw and abort the whole component.
+// connect() is invoked further down once the venue graph has loaded.
+const venueSocket = useVenueSocket(venueId.value, (event) => graph.applyRealtimeEvent(event));
 // Scope the graph store to this venue synchronously, in setup and therefore before child components
 // mount. Child components (e.g. RiggingEditor) fire venue-scoped API calls on mount; without this the
 // store's default job/null scope would send those requests to /jobs/null/... and fail UUID validation.
@@ -632,6 +929,16 @@ async function load() {
   // Scope the graph store to this venue so every incremental graph call (devices, edges, rigging,
   // power) routes to /venues/{venueId}/graph and edits commit straight to the venue's rig.
   await graph.fetchGraph(venueId.value, 'venue');
+  // Refresh NetBox integration state so the "Sync base rig to NetBox" button shows
+  // only when the integration is configured (mirrors how job views gate it).
+  try {
+    await netbox.loadIntegration();
+  } catch {
+    /* netbox state stays default (disabled) if the request fails */
+  }
+  // Open the venue realtime room so NetBox IP-assignment / conflict events update the
+  // selected device live, matching the job workspace's behaviour.
+  venueSocket.connect();
 }
 
 // The power panel mutates the venue's circuits/outlets; refresh the canvas layer and the
