@@ -441,7 +441,9 @@ async def outbound_deeplink(job_id: str, db=Depends(get_db)) -> dict:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Connect stockwire-rental first (deeplinks are not set up)"
         )
-    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_id))
+    # job_id arrives as a path string; coerce to UUID so it binds against the
+    # Uuid-typed primary key (a bare str fails to bind on SQLite/Postgres).
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == UUID(job_id)))
     job = result.scalars().first()
     if job is None or not job.stockwire_job_id:
         raise HTTPException(
@@ -454,7 +456,12 @@ async def outbound_deeplink(job_id: str, db=Depends(get_db)) -> dict:
         instance_id=STAGEWIRE_RENTAL_INSTANCE_ID,
         ttl_seconds=60 * 60 * 24 * 7,
     )
-    url = f"{cfg['base_url'].rstrip('/')}/api/v1/settings/integrations/stagewire/open?token={token}"
+    # Open in the rental *frontend*, not the rental API (base_url). The frontend proxies
+    # /api to its API, so the token lands on the same endpoint either way — but pointing at
+    # the real frontend host is what makes the job open in the browser at the right place
+    # instead of wherever base_url happens to point (e.g. a dev localhost).
+    host = cfg.get("rental_frontend_url") or cfg["base_url"]
+    url = f"{host.rstrip('/')}/api/v1/settings/integrations/stagewire/open?token={token}"
     return {"url": url}
 
 
@@ -483,7 +490,8 @@ async def link_job(job_id: str, payload: LinkJobBody | None = None, db=Depends(g
     cfg = await load_integration_config(db)
     if not cfg.get("api_key"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Stockwire integration is not configured")
-    result = await db.execute(select(ProductionJob).where(ProductionJob.id == job_id))
+    # job_id arrives as a path string; coerce to UUID to bind against the Uuid primary key.
+    result = await db.execute(select(ProductionJob).where(ProductionJob.id == UUID(job_id)))
     job = result.scalars().first()
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")

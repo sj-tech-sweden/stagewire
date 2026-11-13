@@ -29,6 +29,7 @@ class StockwireIntegrationOut(BaseModel):
     base_url: str = ""
     has_api_key: bool = False
     public_url: str = ""
+    rental_frontend_url: str = ""
     deeplink_ready: bool = False
 
 
@@ -44,6 +45,7 @@ class StockwireIntegrationUpdate(BaseModel):
     base_url: str
     api_key: str | None = None
     public_url: str | None = None
+    rental_frontend_url: str | None = None
 
 
 class StockwireTestResult(BaseModel):
@@ -121,6 +123,7 @@ def _stockwire_out(cfg: dict) -> StockwireIntegrationOut:
         base_url=cfg["base_url"],
         has_api_key=bool(cfg["api_key"]),
         public_url=cfg["public_url"],
+        rental_frontend_url=cfg["rental_frontend_url"],
         deeplink_ready=bool(cfg["deeplink_secret"]),
     )
 
@@ -137,6 +140,7 @@ async def update_stockwire_integration(
         base_url=payload.base_url,
         api_key=payload.api_key,
         public_url=payload.public_url,
+        rental_frontend_url=payload.rental_frontend_url,
     )
     cfg = await load_integration_config(db)
     return _stockwire_out(cfg)

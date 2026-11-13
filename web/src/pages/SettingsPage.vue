@@ -618,6 +618,12 @@
                 placeholder="http://host.docker.internal:8010"
               />
               <q-input
+                v-model="stockwireRentalFrontendUrl"
+                :label="t('settings.stockwire.rentalFrontendUrl')"
+                :hint="t('settings.stockwire.rentalFrontendUrlHint')"
+                placeholder="https://rental.sj-tech.se"
+              />
+              <q-input
                 v-model="stockwireApiKey"
                 :label="t('settings.stockwire.apiKey')"
                 :type="stockwireShowKey ? 'text' : 'password'"
@@ -985,6 +991,7 @@ const savingStockwire = ref(false)
 const testingStockwire = ref(false)
 const testResult = ref(null)
 const stockwirePublicUrl = ref('')
+const stockwireRentalFrontendUrl = ref('')
 const connectingRental = ref(false)
 const connectResult = ref(null)
 const connectResultText = computed(() => {
@@ -999,6 +1006,7 @@ async function loadStockwire() {
     const { data } = await api.get('/settings/stockwire')
     stockwireBaseUrl.value = data.base_url || ''
     stockwirePublicUrl.value = data.public_url || ''
+    stockwireRentalFrontendUrl.value = data.rental_frontend_url || ''
     stockwireEnabled.value = !!data.enabled
     stockwireHasKey.value = !!data.has_api_key
     stockwireApiKey.value = ''
@@ -1015,6 +1023,7 @@ async function saveStockwire() {
       enabled: stockwireEnabled.value,
       base_url: stockwireBaseUrl.value,
       public_url: stockwirePublicUrl.value,
+      rental_frontend_url: stockwireRentalFrontendUrl.value || null,
       api_key: stockwireApiKey.value || null,
     })
     // Keep the global integration flag in sync so every dependent component reacts immediately
