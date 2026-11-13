@@ -125,6 +125,17 @@
           :loading="wwbImporting || wwbParsing"
           @click="wwbFileInput?.click()"
         />
+        <q-btn
+          v-if="jobId"
+          outline
+          no-caps
+          color="primary"
+          icon="settings_input_component"
+          :label="t('console.openPanel')"
+          :aria-pressed="consoleOpen"
+          data-testid="open-console"
+          @click="toggleConsole"
+        />
         <input
           ref="wwbFileInput"
           type="file"
@@ -134,6 +145,15 @@
           @change="onWwbFile"
         />
       </q-card>
+
+      <ConsolePanel
+        v-if="consoleOpen && jobId && !venueId"
+        ref="consolePanel"
+        :job-id="jobId"
+        :list-id="list.id"
+        :refresh-key="consoleSignature"
+        @changed="graph.fetchGraph(contextId, contextKind)"
+      />
       <div class="row items-center q-gutter-sm q-mb-sm">
         <q-input
           :model-value="list.name"
@@ -350,6 +370,7 @@
               <div class="row items-center">
                 <q-checkbox
                   :model-value="!!ch.attributes.phantom_power"
+                  :disable="ch.attributes.stereo_link_role === 'secondary'"
                   label="48V"
                   @update:model-value="(v) => saveAttr(ch, 'phantom_power', v)"
                 />
@@ -562,6 +583,10 @@
             <q-checkbox
               :model-value="!!slot.row.attributes[flag]"
               dense
+              :disable="
+                flag === 'phantom_power' &&
+                slot.row.attributes.stereo_link_role === 'secondary'
+              "
               @update:model-value="(v) => saveAttr(slot.row, flag, v)"
             />
           </q-td>
@@ -643,6 +668,45 @@
           @click="bulkOutputs = true"
         />
       </div>
+      <!-- The same bus-pool budget the console panel shows: these rows and the panel's Buses tab
+           edit the same output records, so the budget is visible wherever they are changed. The
+           rows save through the graph, which does not block, so an overflow is only a warning. -->
+      <div
+        v-if="consoleSummary?.budget?.enabled"
+        class="q-mb-sm"
+        data-testid="outputs-budget"
+      >
+        <div class="row items-center q-mb-xs">
+          <div class="text-caption col">
+            {{ t("console.budget") }}
+          </div>
+          <div class="text-caption" data-testid="outputs-budget-text">
+            {{ consoleSummary.budget.used_slots }} / {{ consoleSummary.budget.total_slots }}
+            {{ t("console.slots") }}
+          </div>
+        </div>
+        <q-linear-progress
+          :value="
+            consoleSummary.budget.total_slots
+              ? Math.min(consoleSummary.budget.used_slots / consoleSummary.budget.total_slots, 1)
+              : 0
+          "
+          size="10px"
+          rounded
+          :color="consoleSummary.budget.ok ? 'positive' : 'negative'"
+        />
+        <q-banner
+          v-if="!consoleSummary.budget.ok"
+          dense
+          rounded
+          class="bg-warning text-black q-mt-xs"
+          data-testid="outputs-budget-warning"
+        >
+          <div v-for="v in consoleSummary.budget.violations" :key="v">
+            {{ v }}
+          </div>
+        </q-banner>
+      </div>
       <q-list bordered separator>
         <q-item v-for="out in outputs" :key="out.id" data-testid="output-row">
           <q-item-section>
@@ -667,6 +731,21 @@
               :label="t('channels.outputMode')"
               data-testid="output-mode"
               @update:model-value="(v) => saveAttr(out, 'mode', v)"
+            />
+          </q-item-section>
+          <q-item-section
+            v-if="consoleSummary && !consoleSummary.simple"
+            side
+            style="min-width: 130px"
+          >
+            <q-select
+              :model-value="out.attributes.role || 'aux'"
+              :options="busRoles"
+              dense
+              outlined
+              :label="t('console.role')"
+              data-testid="output-role"
+              @update:model-value="(v) => saveAttr(out, 'role', v)"
             />
           </q-item-section>
           <q-item-section side>
@@ -725,6 +804,7 @@
       v-model="mixerOpen"
       :list="list"
       :channel-count="channels.length"
+      :job-id="venueId ? '' : jobId"
       @save="saveMixer"
     />
     <ChainFlowDialog
@@ -740,6 +820,7 @@
       :venue-id="venueId"
       :title="chainTitle"
       :initial="chainInitial"
+      :lock="chainKind === 'channel' ? softPatchInfo(liveChainNode, graph.devices) : null"
       :direct="chainNode ? directLines(chainNode) : []"
       :devices="gear"
       :branching="chainKind === 'output'"
@@ -749,6 +830,7 @@
           : []
       "
       @save="saveChain"
+      @open-soft-patch="openSoftPatch"
     />
 
     <!-- Two-step Wireless Workbench import: the parsed rows are shown with a per-row select so
@@ -855,8 +937,14 @@
 <script setup>
 import { apiErrorText } from "@/utils/errors";
 import { isRevisionConflict } from "@/utils/graph";
-import { deviceCreateBody, deviceForm, fillFormFromSpecs } from "@/utils/workspace";
-import { computed, ref, watch } from "vue";
+import {
+  deviceCreateBody,
+  deviceForm,
+  fillFormFromSpecs,
+  mixerGraphPorts,
+  mixerImportPlan,
+} from "@/utils/workspace";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { useGraphStore } from "@/stores/graph";
@@ -866,9 +954,12 @@ import StockwireProductPicker from "@/components/StockwireProductPicker.vue";
 import { api } from "@/boot/api";
 import ListBulkDialog from "@/components/ListBulkDialog.vue";
 import MixerDialog from "@/components/MixerDialog.vue";
+import ConsolePanel from "@/components/ConsolePanel.vue";
 import ChainFlowDialog from "@/components/ChainFlowDialog.vue";
 import {
   chainForm,
+  chainStepsWithLock,
+  softPatchInfo,
   busChannelsFor,
   chainDevices,
   directConnections,
@@ -881,7 +972,6 @@ import {
   isOrphanedBySource,
   isVirtual,
   mixerInputChoices,
-  mixerSlotsToAdd,
   nextChannelNumber,
   outputsOf,
   stereoPairPlan,
@@ -909,6 +999,20 @@ const chainKind = ref("channel");
 const chainInitial = ref([]);
 const wwbFileInput = ref(null);
 const wwbImporting = ref(false);
+const consoleOpen = ref(false);
+const consolePanel = ref(null);
+// "Change in Soft patch" from the chain editor: close it and show the console panel's soft patch tab.
+async function openSoftPatch() {
+  chainOpen.value = false;
+  consoleOpen.value = true;
+  await nextTick();
+  consolePanel.value?.openTab("patch");
+}
+// Closing the console panel first lets a pending (debounced) edit land: nothing needs saving.
+async function toggleConsole() {
+  if (consoleOpen.value && consolePanel.value) await consolePanel.value.settle();
+  consoleOpen.value = !consoleOpen.value;
+}
 
 const list = computed(
   () => graph.channelLists.find((l) => l.id === listId.value) || null,
@@ -1008,9 +1112,17 @@ const directLines = (node) =>
 const failed = (err) =>
   $q.notify({ type: "negative", message: apiErrorText(err) });
 
+// What a stereo link binds (console.py SHARED_FIELDS): a change to one of these on the primary is
+// copied onto the secondary by the server's graph sync.
+const LINK_SHARED = ["phantom_power", "color_code", "instrument_group", "source_label"];
 async function save(node, changes) {
   try {
     await graph.updateDevice(contextId.value, node.id, changes);
+    // The secondary is changed by the server as a side effect and that change is not pushed to
+    // this client, so re-read the graph to show it (48V, name, colour and group of the other leg).
+    const touched = [...Object.keys(changes.attributes || {}), ...("name" in changes ? ["source_label"] : [])];
+    if (node.attributes?.stereo_link_role === "primary" && touched.some((k) => LINK_SHARED.includes(k)))
+      await graph.fetchGraph(contextId.value, contextKind.value);
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
@@ -1125,6 +1237,7 @@ async function confirmWwbImport() {
 // releases both. The partner is made first so the main row never points at a channel that is not
 // there yet.
 async function setStereo(node, on) {
+  if (!props.venueId && props.jobId) return setStereoLink(node, on);
   const plan = stereoPairPlan(node, channels.value, on);
   try {
     if (plan.partnerCreate) {
@@ -1142,6 +1255,44 @@ async function setStereo(node, on) {
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);
   }
+}
+// Job lists: the Stereo toggle and the digital console's stereo link are one concept, so the toggle
+// goes through the validating link/unlink endpoints (pairing rules, DSP limits, 409 messages).
+// The odd/even partner is created first when missing. A link binds the strip's name, colour, group
+// and +48V: the server makes the secondary follow the primary (its name keeps its side, "Ch 1 L" ->
+// "Ch 1 R"). Patch, socket, input type and mic stay per leg, so nothing of those is copied.
+async function setStereoLink(node, on) {
+  const base = `/jobs/${props.jobId}/channel-lists/${listId.value}/console`;
+  try {
+    if (!on) {
+      await api.post(`${base}/unlink`, { primary_channel_id: node.id });
+    } else {
+      const plan = stereoPairPlan(node, channels.value, true);
+      let partner = plan.partner;
+      if (plan.partnerCreate) {
+        const [created] = await graph.createChannels(contextId.value, listId.value, [
+          { channel_number: plan.partnerNumber, source_label: plan.partnerCreate.source_label },
+        ]);
+        partner = created;
+      }
+      const lowerIsNode = Number(node.attributes.channel_number) < plan.partnerNumber;
+      // the primary (lower number) carries the " L"; the server derives the secondary's " R"
+      const primary = lowerIsNode ? node : partner;
+      const primaryName = lowerIsNode
+        ? plan.main.name
+        : plan.partnerChanges?.name || plan.partnerCreate?.source_label;
+      if (primaryName && primary?.id) {
+        await graph.updateDevice(contextId.value, primary.id, { name: primaryName });
+      }
+      await api.post(`${base}/link`, {
+        primary_channel_id: lowerIsNode ? node.id : partner.id,
+        secondary_channel_id: lowerIsNode ? partner.id : node.id,
+      });
+    }
+  } catch (err) {
+    $q.notify({ type: "negative", message: apiErrorText(err, t("console.failed")) });
+  }
+  await graph.fetchGraph(graph.scopeId, graph.scopeKind);
 }
 const setNumber = (node, value) =>
   save(node, { position: value, attributes: { channel_number: value } });
@@ -1210,17 +1361,41 @@ async function saveMixer({ product, inputs, buses }) {
         mixer_buses: buses ?? null,
       },
     });
-    const add = mixerSlotsToAdd(
+    // A job list tries to read the product's specs.mixer into the console profile first (a 422
+    // just means the product has none, and the old flat padding applies). Venue lists have no
+    // console routes and always use the flat padding.
+    let summary = null;
+    if (!props.venueId && product?.id && props.jobId) {
+      try {
+        summary = (
+          await api.put(
+            `/jobs/${props.jobId}/channel-lists/${list.value.id}/console-profile`,
+            { from_stockwire: true },
+          )
+        ).data;
+      } catch {
+        summary = null;
+      }
+    }
+    const add = mixerImportPlan(
       channels.value,
       outputs.value,
-      wantInputs,
-      wantBuses,
+      { inputs: wantInputs, buses: wantBuses },
+      summary,
     );
     if (add.channels.length)
       await graph.createChannels(contextId.value, list.value.id, add.channels);
     if (add.outputs.length)
       await graph.createOutputs(contextId.value, list.value.id, add.outputs);
-    if (add.channels.length || add.outputs.length) {
+    if (add.busPool) {
+      $q.notify({
+        type: "positive",
+        message: t("stockwire.mixerFilledPool", {
+          inputs: add.channels.length,
+          slots: add.slots,
+        }),
+      });
+    } else if (add.channels.length || add.outputs.length) {
       $q.notify({
         type: "positive",
         message: t("stockwire.mixerFilled", {
@@ -1254,8 +1429,15 @@ async function saveMixer({ product, inputs, buses }) {
       }
       if (existing) {
         const changes = { name };
-        if (ports.length) changes.ports = ports;
-        if (existing.name !== name || (ports.length && JSON.stringify(existing.ports) !== JSON.stringify(ports)))
+        // `ports` are editor connector groups (direction in/out/both); the graph PATCH takes real
+        // ports (an id and in|out only), so a 'both' group such as the GLD-80's etherCON must be
+        // expanded the way the device dialog does, keeping the device's own generic ports.
+        const graphPorts = mixerGraphPorts(ports, existing.ports);
+        if (graphPorts.length) changes.ports = graphPorts;
+        if (
+          existing.name !== name ||
+          (graphPorts.length && JSON.stringify(existing.ports) !== JSON.stringify(graphPorts))
+        )
           await graph.updateDevice(contextId.value, existing.id, changes);
       } else {
         await graph.createAudioDevice(
@@ -1344,9 +1526,11 @@ const gearItems = computed(() =>
 );
 // The source of a channel (the microphone, DI or other gear it comes from) is a real device in the
 // job: picking a job device links it, picking one of the company's own Stockwire products makes a
-// device from it (connectors and power from the product) and links that, and typed text is just a
-// label. The link is `attributes.source_device_id`; `attributes.device` keeps the name for lists
-// and exports. A linked device carries the Stockwire product (it counts once in the sync), so the
+// device from it (connectors and power from the product) and links that, and a name typed in that
+// is not in the library makes a device with exactly that name (a plain source with the usual single
+// XLR output) and links it - so the signal flow, patch chain and gear list all show the name the
+// engineer typed. The link is `attributes.source_device_id`; `attributes.device` keeps the name for
+// lists and exports. A linked device carries the Stockwire product (it counts once in the sync), so the
 // channel's own product is cleared then; an unlinked own product stays on the channel as before.
 const sourceDevice = (node) =>
   graph.devices.find((d) => d.id === node.attributes.source_device_id) || null;
@@ -1380,6 +1564,13 @@ async function setSource(node, pick) {
       // product is picked we keep the source name but don't create a graph device.
       if (!device && pick.id && contextKind.value !== 'venue')
         device = await graph.createDeviceFromProduct(contextId.value, pick);
+      // A typed name that is not in the library: make the device (one per channel, like picking a
+      // catalog product does, since each channel has its own physical mic).
+      if (!device && !pick.id && String(pick.name || '').trim())
+        device = await graph.createDeviceFromProduct(contextId.value, {
+          name: String(pick.name).trim(),
+          id: null,
+        });
       nextId = device?.id || null;
       await graph.updateDevice(contextId.value, node.id, {
         attributes: {
@@ -1471,6 +1662,53 @@ async function addOutput() {
   }
 }
 
+// Digital-console state for the list (job lists only): the bus-pool budget and the roles the
+// console allows, shown next to the output rows. It is re-read whenever the list's outputs or
+// channels change in the graph store, wherever the change was made (these rows or the panel).
+const consoleSummary = ref(null);
+const busRoles = computed(
+  () =>
+    consoleSummary.value?.profile?.bus_pool?.allowed_roles || [
+      "aux",
+      "group",
+      "matrix",
+      "main",
+      "fx_send",
+    ],
+);
+const consoleSignature = computed(() =>
+  JSON.stringify([
+    outputs.value.map((o) => [o.id, o.name, o.position, o.attributes?.mode, o.attributes?.role]),
+    channels.value.map((c) => [
+      c.id,
+      c.name,
+      c.attributes?.channel_number,
+      c.attributes?.stereo_link_role,
+      c.attributes?.is_stereo_linked,
+      c.attributes?.instrument_group,
+    ]),
+  ]),
+);
+let summaryTimer = null;
+async function loadConsoleSummary() {
+  if (props.venueId || !props.jobId || !list.value) {
+    consoleSummary.value = null;
+    return;
+  }
+  try {
+    consoleSummary.value = (
+      await api.get(`/jobs/${props.jobId}/channel-lists/${list.value.id}/console`)
+    ).data;
+  } catch {
+    consoleSummary.value = null;
+  }
+}
+watch([consoleSignature, () => list.value?.id], () => {
+  clearTimeout(summaryTimer);
+  summaryTimer = setTimeout(loadConsoleSummary, 300);
+});
+onMounted(loadConsoleSummary);
+
 const modeOptions = computed(() =>
   OUTPUT_MODES.map((m) => ({
     value: m.value,
@@ -1479,19 +1717,25 @@ const modeOptions = computed(() =>
 );
 
 const flowOpen = ref(false);
-const flowSteps = ref([]);
-
-// The chain as a diagram; its branches follow the parent of each step (outputs branch).
-function openFlow(node, kind) {
-  chainNode.value = node;
-  chainKind.value = kind;
+// The chain as a diagram; its branches follow the parent of each step (outputs branch). Computed
+// from the live graph store, so a soft patch or chain change made while the diagram is open (or
+// arriving over the websocket) redraws it instead of leaving a stale copy.
+const liveChainNode = computed(
+  () => graph.devices.find((d) => d.id === chainNode.value?.id) || chainNode.value,
+);
+const flowSteps = computed(() => {
+  const node = liveChainNode.value;
+  if (!flowOpen.value || !node) return [];
   const steps = chainForm(node, graph.edges, graph.devices);
   // A channel's flow also shows what feeds it and the direct cables it was connected with in the
   // inspector, so the diagram matches the connections; outputs keep the patch chain only.
-  flowSteps.value =
-    kind === "channel"
-      ? channelFlowTree(node, graph.edges, graph.devices, node.name, steps)
-      : flowTree(node.name, steps, graph.devices);
+  return chainKind.value === "channel"
+    ? channelFlowTree(node, graph.edges, graph.devices, node.name, steps)
+    : flowTree(node.name, steps, graph.devices);
+});
+function openFlow(node, kind) {
+  chainNode.value = node;
+  chainKind.value = kind;
   flowOpen.value = true;
 }
 function editFromFlow() {
@@ -1502,7 +1746,10 @@ function editFromFlow() {
 function openChain(node, kind) {
   chainNode.value = node;
   chainKind.value = kind;
-  chainInitial.value = chainForm(node, graph.edges, graph.devices);
+  const steps = chainForm(node, graph.edges, graph.devices);
+  // a soft-patched channel's chain shows that hop locked at the strip end (see ChainDialog)
+  chainInitial.value =
+    kind === "channel" ? chainStepsWithLock(node, steps, graph.devices) : steps;
   chainOpen.value = true;
 }
 

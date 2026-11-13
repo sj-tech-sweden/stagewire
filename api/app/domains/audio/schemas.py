@@ -121,6 +121,13 @@ class AudioChannelPatchRead(AudioChannelPatchBase):
     channel_list_id: UUID
     revision: int
     patch_points: list["ChannelPatchPointRead"] = []
+    # Read-only: set through the console endpoints (link/unlink, soft patch, direct out) so the
+    # pairing invariants hold; the create/update schemas deliberately do not accept them.
+    is_stereo_linked: bool = False
+    stereo_link_role: Literal["primary", "secondary"] | None = None
+    stereo_partner_id: UUID | None = None
+    dsp_source: dict | None = None
+    direct_out: dict | None = None
 
 
 class ChannelPatchPointBase(BaseModel):
@@ -184,13 +191,31 @@ class ChannelListOutputBase(BaseModel):
     name: str = "Output"
     position: int = 0
     mode: str = "mono"
+    # what the bus is for; only the bus-pool budget cares (a role the console does not allow is
+    # reported there). Defaults to aux so plain lists behave as before.
+    role: str = "aux"
     connector: str | None = None
     notes: str = ""
     color_code: str | None = None
 
 
+def _check_bus_mode(value: str | None) -> str | None:
+    # Validated on write only: rows written before the digital-console work may hold other text
+    # in ``mode`` and the Read model must keep serving them.
+    if value is not None and value not in ("mono", "stereo", "lcr"):
+        raise ValueError("mode must be mono, stereo or lcr")
+    return value
+
+
+def _check_bus_role(value: str | None) -> str | None:
+    if value is not None and value not in ("aux", "group", "matrix", "main", "fx_send"):
+        raise ValueError("role must be aux, group, matrix, main or fx_send")
+    return value
+
+
 class ChannelListOutputCreate(ChannelListOutputBase):
-    pass
+    _mode = field_validator("mode")(_check_bus_mode)
+    _role = field_validator("role")(_check_bus_role)
 
 
 class ChannelListOutputUpdate(ChannelListOutputBase):
@@ -199,7 +224,10 @@ class ChannelListOutputUpdate(ChannelListOutputBase):
     connector: str | None = None
     notes: str | None = None
     color_code: str | None = None
+    role: str | None = None
     expected_revision: int = Field(ge=1)
+    _mode = field_validator("mode")(_check_bus_mode)
+    _role = field_validator("role")(_check_bus_role)
 
 
 class ChannelListOutputRead(ChannelListOutputBase):
@@ -209,6 +237,11 @@ class ChannelListOutputRead(ChannelListOutputBase):
     channel_list_id: UUID
     revision: int
     points: list[OutputPatchPointRead] = []
+    # Read-only: the physical output socket this bus leaves from (set via the console endpoints)
+    out_socket: dict | None = None
+    # Read-only: every endpoint the bus leaves from ({id, refs:[{device_id, port_id, socket}]}); a
+    # stereo bus endpoint has two refs (L, R), an LCR one three
+    out_endpoints: list[dict] | None = None
 
 
 class PatchSheetChannel(BaseModel):
@@ -244,19 +277,54 @@ class ChannelListBase(BaseModel):
     mixer_product_name: str | None = None
     mixer_inputs: int | None = None
     mixer_buses: int | None = None
+    # digital-console profile (console.MixerProfile as JSON); null/absent = simple console
+    mixer_profile: dict | None = None
+    bundled_accessories: list[dict] | None = None
+
+
+def _check_profile(value: dict | None) -> dict | None:
+    # Validated on write (create and update) so a malformed profile can never be stored and then
+    # silently read back as "simple console"; the stored form is the normalised model.
+    from app.domains.audio.console import MixerProfile
+
+    return MixerProfile.model_validate(value).model_dump() if value is not None else None
+
+
+def _check_accessories(value: list[dict] | None) -> list[dict] | None:
+    # sync-stockwire does int() on these; reject junk here instead of 500-ing the sync later
+    if value is None:
+        return None
+    cleaned = []
+    for item in value:
+        try:
+            cleaned.append(
+                {
+                    "product_id": int(item["product_id"]),
+                    "name": str(item.get("name") or ""),
+                    "quantity": max(int(item.get("quantity") or 1), 1),
+                }
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("each accessory needs a numeric product_id and quantity") from exc
+    return cleaned
 
 
 class ChannelListCreate(ChannelListBase):
-    pass
+    _profile = field_validator("mixer_profile")(_check_profile)
+    _accessories = field_validator("bundled_accessories")(_check_accessories)
 
 
 class ChannelListUpdate(ChannelListBase):
+    _profile = field_validator("mixer_profile")(_check_profile)
+    _accessories = field_validator("bundled_accessories")(_check_accessories)
     name: str | None = None
     position: int | None = None
     mixer_product_id: str | None = None
     mixer_product_name: str | None = None
     mixer_inputs: int | None = None
     mixer_buses: int | None = None
+    mixer_profile: dict | None = None
+    bundled_accessories: list[dict] | None = None
 
 
 class ChannelListRead(ChannelListBase):

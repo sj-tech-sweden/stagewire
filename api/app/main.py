@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.security import add_cors
+from app.domains.audio.console_router import router as console_router
 from app.domains.audio.router import router as audio_router
 from app.domains.audio.ws import router as audio_ws_router
 from app.domains.auth.router import router as auth_router
@@ -20,6 +21,8 @@ from app.domains.graph.rigging import venue_router as graph_rigging_venue_router
 from app.domains.graph.router import router as graph_router
 from app.domains.graph.router import venue_router as graph_router_venue_router
 from app.domains.graph.venue_graph import router as graph_venue_router
+from app.domains.history.middleware import HistoryMiddleware
+from app.domains.history.router import router as history_router
 from app.domains.lighting.router import router as lighting_router
 from app.domains.netbox.router import public_router as netbox_public_router
 from app.domains.netbox.router import router as netbox_router
@@ -49,8 +52,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     add_cors(app)
+    # Records every write request's row changes so it can be undone (see domains/history).
+    app.add_middleware(HistoryMiddleware)
 
     app.include_router(audio_router, prefix="/api/v1")
+    app.include_router(console_router, prefix="/api/v1")
+    app.include_router(history_router, prefix="/api/v1")
     app.include_router(audio_ws_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(connectors_router, prefix="/api/v1")

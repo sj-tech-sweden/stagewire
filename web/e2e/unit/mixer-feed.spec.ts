@@ -175,7 +175,15 @@ test('a channel input and its direct outputs stay separate and preserve explicit
   expect(tree[0].children[0].children[0].in_port).toBe('in');
   expect(tree[1].children[0].label).toBe('Wedge');
   expect(JSON.stringify(tree)).not.toContain('Unrelated mixer');
-  expect(JSON.stringify(tree)).not.toContain('CQ18T');
+  // the owner console is not drawn as a routed device; it only names the strip the channel is on
+  const deviceLabels: string[] = [];
+  const walk = (nodes: Array<{ kind: string; label: string; children?: unknown[] }>) =>
+    nodes.forEach((n) => {
+      if (n.kind === 'device') deviceLabels.push(n.label);
+      walk((n.children || []) as never);
+    });
+  walk(tree as never);
+  expect(deviceLabels).not.toContain('CQ18T');
 });
 
 test('a multi-channel input port is offered as one socket per physical input', () => {

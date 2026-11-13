@@ -16,7 +16,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
-    baseURL: 'http://localhost:9010',
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:9010',
     trace: 'on-first-retry',
   },
   projects: [
@@ -25,10 +25,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: STACK_COMPOSE,
-    url: 'http://localhost:9010',
-    reuseExistingServer: true,
-    timeout: 300_000,
-  },
+  // With E2E_BASE_URL set the stack is started by the caller (no docker compose here).
+  webServer: process.env.E2E_BASE_URL
+    ? undefined
+    : {
+        command: STACK_COMPOSE,
+        url: 'http://localhost:9010',
+        reuseExistingServer: true,
+        timeout: 300_000,
+      },
 });

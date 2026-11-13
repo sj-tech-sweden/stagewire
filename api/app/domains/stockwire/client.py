@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Any
 
 import httpx
 
@@ -148,6 +149,8 @@ class StockwireClient:
         exclude_rental: bool = False,
         min_inputs: int | None = None,
         min_outputs: int | None = None,
+        mixer_architecture: str | None = None,
+        min_bus_slots: int | None = None,
         skip: int = 0,
         limit: int = 50,
     ) -> dict:
@@ -170,6 +173,11 @@ class StockwireClient:
             params["min_inputs"] = min_inputs
         if min_outputs is not None:
             params["min_outputs"] = min_outputs
+        # digital-console filters: read from the product's specs.mixer block (absent = excluded)
+        if mixer_architecture:
+            params["mixer_architecture"] = mixer_architecture
+        if min_bus_slots is not None:
+            params["min_bus_slots"] = min_bus_slots
         async with httpx.AsyncClient(
             base_url=self.base_url, headers=self._headers(), timeout=15.0
         ) as client:
@@ -435,6 +443,19 @@ class StockwireClient:
             base_url=self.base_url, headers=self._headers(), timeout=15.0
         ) as client:
             response = await client.get(f"/api/v1/inventory/products/{product_id}")
+            response.raise_for_status()
+            return response.json()
+
+    async def list_product_accessories(self, product_id: int | str) -> Any:
+        """Accessories / components Stockwire lists for a product (stageboxes, expansion cards).
+
+        ``GET /api/v1/inventory/products/{id}/accessories``. The envelope is returned as-is;
+        ``console_router.normalize_accessories`` reads it tolerantly.
+        """
+        async with httpx.AsyncClient(
+            base_url=self.base_url, headers=self._headers(), timeout=15.0
+        ) as client:
+            response = await client.get(f"/api/v1/inventory/products/{product_id}/accessories")
             response.raise_for_status()
             return response.json()
 

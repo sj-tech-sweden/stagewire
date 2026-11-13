@@ -497,6 +497,71 @@ export function patchSummary(node, edges, devices) {
   return [...upstream, node.name, ...chain, ...downstream].join(' → ');
 }
 
+// --- soft patch in the signal flow / chain editor -----------------------------------------------
+// A channel's soft patch (`attributes.dsp_source` {device_id, port_id, socket}) is mirrored by the
+// server into its patch chain as the LAST hop: the device whose socket feeds the DSP strip. The
+// source (microphone) is at the other end and any analog hops (snakes, splitters, patch panels) sit
+// between them. These helpers find that hop and describe it; the server enforces the order too.
+
+// Index of the soft-patched hop among chain `steps` (the last one for that device), or -1.
+export function lockedStepIndex(channel, steps) {
+  const ref = channel?.attributes?.dsp_source;
+  if (!ref?.device_id || !steps?.length) return -1;
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    if (String(steps[i].device_id) === String(ref.device_id)) return i;
+  }
+  return -1;
+}
+
+// `steps` with the soft-patched hop moved to the end (a copy; unchanged when there is none or it is
+// already last). Every step is kept, only the order changes.
+export function withLockedLast(channel, steps) {
+  const at = lockedStepIndex(channel, steps);
+  if (at < 0 || at === steps.length - 1) return [...(steps || [])];
+  return [...steps.slice(0, at), ...steps.slice(at + 1), steps[at]];
+}
+
+// What the locked hop shows: socket number, the port's connector and the label "In 5 (XLR3)".
+export function softPatchInfo(channel, devices) {
+  const ref = channel?.attributes?.dsp_source;
+  if (!ref?.device_id) return null;
+  const device = (devices || []).find((d) => d.id === ref.device_id);
+  const port = (device?.ports || []).find((p) => p.id === ref.port_id);
+  const connector = (port?.connector || '').toUpperCase();
+  const socket = ref.socket || 1;
+  return {
+    device_id: ref.device_id,
+    device_name: device?.name || '',
+    socket,
+    connector,
+    label: `In ${socket}${connector ? ` (${connector})` : ''}`,
+  };
+}
+
+// The chain a channel's chain dialog starts from: its steps with the soft-patched hop last and
+// flagged `locked`. When the chain lost that hop (it was edited elsewhere) it is put back, so saving
+// never drops the strip-side hop (the server would then clear the soft patch).
+export function chainStepsWithLock(channel, steps, devices) {
+  const info = softPatchInfo(channel, devices);
+  if (!info) return steps.map((s) => ({ ...s }));
+  const ordered = withLockedLast(channel, steps);
+  const at = lockedStepIndex(channel, ordered);
+  if (at >= 0) return ordered.map((s, i) => ({ ...s, locked: i === at }));
+  return [
+    ...ordered.map((s) => ({ ...s })),
+    {
+      device_id: info.device_id,
+      connector: info.connector.toLowerCase(),
+      patch_label: `In ${info.socket}`,
+      in_port: '',
+      out_port: '',
+      notes: '',
+      parent_index: null,
+      locked: true,
+    },
+  ];
+}
+
 // The channel's selected source and explicit patch points define its input route. Other cables
 // connected to the channel remain separate branches; a physical device does not imply port routing.
 export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []) {
@@ -532,13 +597,23 @@ export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []
   ) || edges.find(
     (edge) =>
       steps.length > 0 &&
+      // the console's own link to a stagebox (dSNAKE / Dante / ethernet) carries the stagebox's
+      // return, it is not where this channel's signal comes from
+      edge.src_device_id !== ownerMixer?.id &&
       FEED_SIGNALS.has(edge.signal) &&
       edge.dst_device_id === steps[0].device_id &&
       !edge.attributes?.chain &&
       byId.has(edge.src_device_id) &&
       !steps.some((step) => step.device_id === edge.src_device_id),
   );
-  const sourceDevice = byId.get(sourceId) || byId.get(sourceEdge?.src_device_id);
+  // The source is the linked gear, else a feeding device found by the edges, else - for a mic that
+  // is only named in the Source device field (no gear linked) - a label-only source, so the flow
+  // always starts at the microphone the patch summary names.
+  const typedSource = String(channel.attributes?.device || '').trim();
+  const sourceDevice =
+    byId.get(sourceId) ||
+    byId.get(sourceEdge?.src_device_id) ||
+    (typedSource ? { id: `source-text-${channel.id}`, name: typedSource } : null);
   const incomingEdges = edges.filter(
     (edge) =>
       FEED_SIGNALS.has(edge.signal) &&
@@ -550,16 +625,31 @@ export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []
     steps.length || sourceDevice
       ? []
       : incomingEdges.map((edge) => ({ edge, device: byId.get(edge.src_device_id) }));
+  const soft = softPatchInfo(channel, devices);
+  const softIndex = lockedStepIndex(channel, steps);
+  // The end of the flow is the mixer strip: "Console · Ch 5 Vox", with the last cable's connector
+  // and (for a soft-patched strip) its "In 5" label on the cable into the channel.
+  const stripName = sourceLabel || channel.name;
+  // The strip always carries its number so the flow reads the same with or without a console
+  // device in the job: "Ch 1 Vox", or "Console · Ch 1 Vox" when the list has its console.
+  const channelNumber = channel.attributes?.channel_number;
+  const numbered = String(stripName || '').replace(/\s+/g, ' ').trim();
+  const withNumber =
+    channelNumber == null || new RegExp(`^ch\\s*${channelNumber}\\b`, 'i').test(numbered)
+      ? numbered
+      : `Ch ${channelNumber} ${numbered}`.trim();
+  const stripLabel = ownerMixer ? `${ownerMixer.name} · ${withNumber}` : withNumber;
   const endpoint = (id, edge = null) => ({
     id,
     device_id: channel.id,
-    label: sourceLabel || channel.name,
+    label: stripLabel,
     kind: 'channel',
     in_port: edge
       ? portLabelOf(channel, edge.dst_port, edge.attributes?.dst_socket || null)
       : '',
     out_port: '',
     connector: steps.at(-1)?.connector || channel.attributes?.input_type || '',
+    patch_label: softIndex === steps.length - 1 && soft ? steps.at(-1)?.patch_label || `In ${soft.socket}` : '',
     children: [],
   });
   const routes = [];
@@ -586,6 +676,15 @@ export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []
             : step.out_port || '',
         connector: step.connector || '',
         patch_label: step.patch_label || '',
+        // the soft-patched hop shows the real input socket it is plugged into: "XLR3 in 5"
+        ...(soft && index === softIndex
+          ? {
+              soft_patch: {
+                connector: soft.connector || (step.connector || '').toUpperCase(),
+                socket: soft.socket,
+              },
+            }
+          : {}),
         children: [route],
       };
     }
@@ -942,6 +1041,86 @@ export function portsFromGroups(groups, existing, type) {
   });
   return [...fromGroups, ...generic];
 }
+
+// --- a device typed into the Edit patch dialog ----------------------------------------------------
+// A step's device may be a name that is neither a job device nor a catalog product. It is made into
+// a real device with exactly that name when the chain is saved (see ChainDialog). Gear in the middle
+// of a path passes signal through, so it gets BOTH an input and an output connector group; a name
+// that says what it is ("Snake 16", "Splitter", "Patch panel") also gets the matching type, port
+// count and (for passive snakes and patch panels) no power inlet.
+export const NEW_DEVICE_PREFIX = 'new:';
+export const newDeviceValue = (name) => `${NEW_DEVICE_PREFIX}${String(name || '').trim()}`;
+export const isNewDeviceValue = (value) => typeof value === 'string' && value.startsWith(NEW_DEVICE_PREFIX);
+export const newDeviceName = (value) => (isNewDeviceValue(value) ? value.slice(NEW_DEVICE_PREFIX.length).trim() : '');
+
+// The job device that already carries exactly this name (case-insensitive), so typing it picks the
+// existing one instead of making a duplicate.
+export function findDeviceByName(devices, name) {
+  const needle = String(name || '').trim().toLowerCase();
+  if (!needle) return null;
+  return (devices || []).find((d) => String(d.name || '').trim().toLowerCase() === needle) || null;
+}
+
+// Type, ports and power for a typed chain device, guessed from its name. Never throws; an unknown
+// name is a plain pass-through 'other' device with one XLR in and one out.
+export function guessChainDevice(name) {
+  const text = String(name || '').trim();
+  const lower = text.toLowerCase();
+  let device_type = 'other';
+  let passive = false;
+  if (/split/.test(lower)) {
+    device_type = 'split';
+    passive = !/active|powered/.test(lower);
+  } else if (/patch/.test(lower)) {
+    device_type = 'patchbay';
+    passive = true;
+  } else if (/snake|multicore|multi-core/.test(lower)) {
+    device_type = 'analog_stagebox';
+    passive = !/digital|dante|dsnake|d-snake|avb|madi/.test(lower);
+  } else if (/stagebox|stage box/.test(lower)) {
+    device_type = /digital|dante|dsnake|d-snake|avb|madi/.test(lower) ? 'digital_stagebox' : 'analog_stagebox';
+  }
+  // "Snake 16", "16ch snake", "AR2412" is left alone (a model number, not a channel count)
+  const match = lower.match(/(?:^|[^a-z0-9])(\d{1,2})(?:\s*(?:ch|channels?|in|x|-?way))?(?:$|[^a-z0-9])/);
+  const count = match && Number(match[1]) >= 2 && Number(match[1]) <= 64 ? Number(match[1]) : 1;
+  return {
+    device_type,
+    count,
+    passive,
+    ports: [
+      { direction: 'in', connector: 'xlr3', count },
+      { direction: 'out', connector: 'xlr3', count },
+    ],
+  };
+}
+
+// The create-endpoint body for a typed chain device (see guessChainDevice).
+export function newChainDeviceBody(name) {
+  const guess = guessChainDevice(name);
+  const form = deviceForm(null);
+  form.name = String(name || '').trim();
+  form.device_type = guess.device_type;
+  form.ports = guess.ports;
+  if (guess.passive) form.power_inlet = 'none';
+  return deviceCreateBody(form);
+}
+
+// The device options of a step's picker plus, for typed text that is not an existing device,
+// a leading 'Create "<text>"' option (value `new:<text>`), labelled by `label(text)`.
+export function chainDeviceOptions(options, needle, label) {
+  const text = String(needle || '').trim();
+  const lower = text.toLowerCase();
+  const matches = (options || []).filter((o) => String(o.label || '').toLowerCase().includes(lower));
+  if (!text || (options || []).some((o) => String(o.label || '').trim().toLowerCase() === lower)) return matches;
+  return [{ label: label(text), value: newDeviceValue(text), create: true }, ...matches];
+}
+
+// Graph ports for a mixer imported from Stockwire. The import yields editor connector groups
+// (direction in/out/both); the graph PATCH only accepts ports with an id and an in|out direction,
+// so a 'both' group (the GLD-80's etherCON, a dSNAKE port) is expanded to an in and an out port and
+// the device's own generic ports are kept. Empty when the product states no connectors.
+export const mixerGraphPorts = (groups, existingPorts) =>
+  groups?.length ? portsFromGroups(groups, existingPorts, 'mixer') : [];
 
 export const NUMBER_FIELDS = [
   'weight_kg',
@@ -1301,9 +1480,12 @@ export function outputPointOptions(devices, edges) {
 // Stereo pairing links two neighbouring channels (odd/even) as the L and R of one source. The pair
 // is stored on both rows (stereo + stereo_channel = the other's number) and the lower number is
 // L. The label gets a " L"/" R" suffix on both rows; the suffix is stripped first so toggling or
-// renumbering never stacks suffixes. The partner is created when it does not exist yet and
-// inherits the main row's input type, connector and phantom power, because both legs are the
-// same source. Unpairing clears both rows but leaves the labels the user may have edited.
+// renumbering never stacks suffixes. The partner is created when it does not exist yet, with just
+// its number and name: input type, connector, patch and socket are per leg (each is its own
+// preamp, possibly on another stagebox). What the link binds is done by the server once linked:
+// the secondary follows the primary's name (keeping its side: "Keys L" -> "Keys R"), colour,
+// instrument group and +48V, so the secondary's 48V checkbox is read-only. Unpairing clears both
+// rows but leaves the labels the user may have edited.
 export const stripStereoSuffix = (label) => (label || '').replace(/\s+(L|R)$/, '');
 
 export function stereoPairPlan(channel, channels, on) {
@@ -1322,11 +1504,7 @@ export function stereoPairPlan(channel, channels, on) {
   }
   const lowerIsMain = number < partnerNumber;
   const base = stripStereoSuffix(channel.name) || `Input ${number}`;
-  const shared = {
-    input_type: attrs.input_type ?? null,
-    connector: attrs.connector ?? null,
-    phantom_power: !!attrs.phantom_power,
-  };
+  // Each leg is its own preamp: input type, connector and +48V are NOT copied to the partner.
   return {
     partner,
     partnerNumber,
@@ -1337,7 +1515,7 @@ export function stereoPairPlan(channel, channels, on) {
     partnerChanges: partner
       ? {
           name: `${base} ${lowerIsMain ? 'R' : 'L'}`,
-          attributes: { ...shared, stereo: true, stereo_channel: number },
+          attributes: { stereo: true, stereo_channel: number },
         }
       : null,
     partnerCreate: partner
@@ -1345,7 +1523,6 @@ export function stereoPairPlan(channel, channels, on) {
       : {
           channel_number: partnerNumber,
           source_label: `${base} ${lowerIsMain ? 'R' : 'L'}`,
-          ...shared,
           stereo: true,
           stereo_channel: number,
         },
@@ -1356,6 +1533,19 @@ export function stereoPairPlan(channel, channels, on) {
 // the link line between the two rows. A channel whose partner is gone reads as mono.
 export function stereoView(channel, channels) {
   const attrs = channel.attributes || {};
+  // The console link (job lists) is authoritative when present: primary = L, secondary = R.
+  if (attrs.is_stereo_linked && attrs.stereo_partner_id) {
+    const partner = channels.find((c) => c.id === attrs.stereo_partner_id || c.attributes?.legacy_id === attrs.stereo_partner_id);
+    const isL = attrs.stereo_link_role === 'primary';
+    const idx = channels.findIndex((c) => c.id === channel.id);
+    return {
+      linked: !!partner,
+      isL,
+      partner: partner?.attributes?.channel_number ?? attrs.stereo_channel,
+      top: isL && channels[idx + 1]?.id === partner?.id,
+      bottom: !isL && channels[idx - 1]?.id === partner?.id,
+    };
+  }
   if (!attrs.stereo || !attrs.stereo_channel) return { linked: false };
   const isL = attrs.channel_number < attrs.stereo_channel;
   const idx = channels.findIndex((c) => c.id === channel.id);
@@ -1368,6 +1558,13 @@ export function stereoView(channel, channels) {
     bottom: !isL && channels[idx - 1]?.id === partner?.id,
   };
 }
+
+// The propose-mixer response as the dialog shows it: the list's need and one suggestion row per
+// candidate console (the candidate's product_id is the row id the picker uses).
+export const proposalFromResponse = (data) => ({
+  need: data?.need || null,
+  suggestions: (data?.candidates || []).map((c) => ({ ...c, id: c.product_id })),
+});
 
 // A mixer product's size from its Stockwire specs: the spec keys differ between categories (a
 // console has inputs/outputs, a stagebox sb_inputs/sb_outputs), so both are read. null means the
@@ -1389,6 +1586,22 @@ export function mixerSlotsToAdd(channels, outputs, wantInputs, wantBuses) {
     channels: Array.from({ length: missingInputs }, (_, i) => ({ channel_number: top + i + 1 })),
     outputs: Array.from({ length: missingBuses }, (_, i) => ({ name: `Out ${outputs.length + i + 1}`, mode: 'mono' })),
   };
+}
+
+// What importing a Stockwire mixer adds to a list. `summary` is the console summary returned after
+// the product's specs.mixer was read into the list's profile, or null when the product has none
+// (then the old padding applies: empty inputs and empty mono outputs up to the flat counts). A
+// bus-pool console gets empty inputs up to its DSP mono strips and NO pre-made buses: the pool is a
+// budget the engineer spends (20 empty mono buses would burn 20 of a GLD-80's 30 slots before a
+// single stereo IEM mix was made). `slots` is the pool size for the user message.
+export function mixerImportPlan(channels, outputs, want, summary) {
+  const profile = summary?.profile;
+  if (!profile?.bus_pool) {
+    return { ...mixerSlotsToAdd(channels, outputs, want.inputs, want.buses), busPool: false, slots: null };
+  }
+  const mono = profile.dsp_inputs?.mono || 0;
+  const add = mixerSlotsToAdd(channels, outputs, mono || want.inputs, 0);
+  return { channels: add.channels, outputs: [], busPool: true, slots: profile.bus_pool.total_slots };
 }
 
 // How much of each port of a device the graph's connections use. A port with a channel count
@@ -1432,3 +1645,617 @@ export function isOrphanedBySource(deviceId, channelId, devices, edges) {
   if (edges.some((e) => e.src_device_id === deviceId || e.dst_device_id === deviceId)) return false;
   return !devices.some((d) => d.id !== channelId && d.attributes?.source_device_id === deviceId);
 }
+
+// Fader layout draft: {"layer:bank:fader": stripId}. It is the WHOLE layout, not a set of pins on top
+// of an automatic fill: a slot that is not in the draft is a blank fader and a strip that is in no
+// slot is *unplaced* (it waits in the tray). The server's default fill is only a starting point
+// (the map has `custom: false` until a layout is stored) and is laid out again only by "Auto fill"
+// / "Place unplaced". A strip may sit on SEVERAL faders (an input on layers 1 and 3, a mix master
+// on both banks): placements are simply slots that hold the same id. 'empty' is accepted from older
+// saved layouts and means the same as an absent slot.
+const holds = (draft, slot) => {
+  const value = (draft || {})[slot];
+  return !value || value === 'empty' ? null : value;
+};
+
+// Put `choice` on `slot`: a strip id (an extra placement; its other faders stay) or 'empty' / null
+// (leave this fader blank). `_fader` is unused now (kept so older callers keep working).
+export function applyFaderChoice(draft, slot, choice, _fader = null) {
+  const next = { ...(draft || {}) };
+  if (choice && choice !== 'empty') next[slot] = choice;
+  else delete next[slot];
+  return next;
+}
+
+// Every fader a strip sits on, in surface order: [{slot, layer, bank, fader}]. With a `draft` (while
+// editing) that is the draft's own view; with `draft` null it is the saved map as the server sent it.
+export function stripPlacements(draft, fader, stripId) {
+  const out = [];
+  for (const layer of fader?.layers || []) {
+    for (const bank of layer.banks) {
+      for (const cell of bank.strips) {
+        const here = draft ? holds(draft, cell.slot) === stripId : cell.id === stripId;
+        if (here) out.push({ slot: cell.slot, layer: layer.layer, bank: bank.label || bank.id, fader: cell.fader });
+      }
+    }
+  }
+  return out;
+}
+
+// Strips that sit on no fader (the tray's "unplaced"): `strips` is the map's strip list; hidden
+// strips (built-in FX nobody set up) are not counted, they are offered separately.
+export function unplacedStrips(draft, fader, strips = fader?.strips || []) {
+  return strips.filter((st) => !st.hidden && stripPlacements(draft, fader, st.id).length === 0);
+}
+
+// Drag and drop on the fader map. `from` is {slot} (a cell was dragged) or {strip} (one was dragged
+// from the strip tray). From the tray the strip is ADDED on `toSlot`; whatever sat there loses that
+// placement (and is unplaced if it had no other). A dragged cell MOVES its strip (the displaced
+// strip, if any, swaps into the fader it came from); with `copy` (Alt/Option or Ctrl/Cmd held) it is
+// copied instead and stays put. Other placements of the strip are never touched. Dropping a cell on
+// itself, or dragging a blank cell, changes nothing.
+export function moveFaderStrip(draft, _fader, from, toSlot, { copy = false } = {}) {
+  const stripId = from.slot ? holds(draft, from.slot) : from.strip;
+  if (!stripId || from.slot === toSlot) return draft;
+  const displaced = holds(draft, toSlot);
+  if (displaced === stripId && !from.slot) return draft; // already there
+  const next = applyFaderChoice(draft, toSlot, stripId);
+  if (from.slot && !copy) {
+    if (displaced && displaced !== stripId) next[from.slot] = displaced;
+    else delete next[from.slot];
+  }
+  return next;
+}
+
+// Take one fader's placement away (the cell menu's "Remove from this fader"): that fader goes blank
+// and the strip's other placements stay. The strip does not reappear anywhere else.
+export function removeFaderPlacement(draft, _fader, slot) {
+  if (!(slot in (draft || {}))) return draft;
+  const next = { ...draft };
+  delete next[slot];
+  return next;
+}
+
+// Dropping on the tray: a dragged cell loses just its own placement; a strip dragged from the tray
+// itself (a no-op drop) loses every placement it has.
+export function unpinFaderStrip(draft, fader, from) {
+  if (from.slot) return removeFaderPlacement(draft, fader, from.slot);
+  if (!from.strip) return draft;
+  return Object.fromEntries(Object.entries(draft || {}).filter(([, value]) => value !== from.strip));
+}
+
+// The draft a loaded fader map starts from: EVERY placed cell, whether the map is a stored layout
+// or the live starting point. That is what makes the first edit a take-over: the whole starting
+// point is stored with the edit, so nothing the engineer did not touch disappears.
+export function faderDraftFromMap(fader) {
+  const draft = {};
+  for (const layer of fader?.layers || []) {
+    for (const bank of layer.banks) {
+      for (const cell of bank.strips) {
+        if (cell.id) draft[cell.slot] = cell.id;
+      }
+    }
+  }
+  return draft;
+}
+
+// --- stereo pair tiles (the console's Stereo links tab) --------------------------------------
+// One tile per channel pair the console can link: 1-2, 3-4, ... for 'odd_even' pairing (how GLD / SQ /
+// CL pair strips); 'adjacent' also allows N / N+1 but still tiles the aligned pairs (any other
+// linked pair is shown as a tile too, so nothing linked is hidden). The range stops at the
+// console's mono inputs (profile.dsp_inputs.mono, else mixer_inputs, else the highest channel
+// number). A channel that does not exist yet is `missing`: linking creates it, like the Inputs
+// page's Stereo toggle. State: 'linked' (the two are a pair), 'free', or 'blocked' (a leg is linked
+// to a different channel; unlink that first).
+// channels: [{id, channel_number, source_label, is_stereo_linked, stereo_link_role, stereo_partner_id}]
+export function stereoPairTiles(channels, profile = null, mixerInputs = null) {
+  const byNumber = new Map((channels || []).map((c) => [Number(c.channel_number), c]));
+  const top = Math.max(0, ...byNumber.keys());
+  const mono = Number(profile?.dsp_inputs?.mono) || 0;
+  const limit = mono || Number(mixerInputs) || top;
+  const tiles = new Map();
+  const add = (low) => {
+    const high = low + 1;
+    if (tiles.has(low) || high > Math.max(limit, top)) return;
+    const a = byNumber.get(low) || null;
+    const b = byNumber.get(high) || null;
+    const together = !!(a?.is_stereo_linked && b?.is_stereo_linked && (a.stereo_partner_id === b.id || b.stereo_partner_id === a.id));
+    const elsewhere = [a, b].some((c) => c?.is_stereo_linked && !together);
+    const names = [pairLegName(a), pairLegName(b)];
+    tiles.set(low, {
+      low,
+      high,
+      label: `${low}–${high}`,
+      state: together ? 'linked' : elsewhere ? 'blocked' : 'free',
+      a,
+      b,
+      missing: [a ? null : low, b ? null : high].filter((n) => n != null),
+      outOfRange: high > limit,
+      // what the tile shows under the numbers: "Drums L/R" for a pair sharing a base name,
+      // "Kick · Snare" for two different channels; empty when neither exists yet
+      names,
+      caption: pairCaption(names[0], names[1]),
+      // full text for the tooltip: "Ch 1 Drums L · Ch 2 Drums R" (a missing leg reads "Ch 2 +")
+      captionTitle: [
+        [low, names[0], a],
+        [high, names[1], b],
+      ]
+        .map(([n, name, c]) => `Ch ${n} ${c ? name : '+'}`.trim())
+        .join(' · '),
+    });
+  };
+  for (let low = 1; low + 1 <= Math.max(limit, 0); low += 2) add(low);
+  // linked pairs that are not on the aligned grid (adjacent pairing, e.g. 2-3) still get a tile
+  for (const c of channels || []) {
+    if (c.is_stereo_linked && c.stereo_link_role === 'primary') add(Number(c.channel_number));
+  }
+  return [...tiles.values()].sort((x, y) => x.low - y.low);
+}
+
+const pairLegName = (c) => String(c?.source_label || c?.name || '').trim();
+
+// The line under a pair tile's numbers. Both legs with the same base name ("Drums L" + "Drums R")
+// read "Drums L/R"; otherwise the names are joined ("Kick · Snare"); a missing leg adds nothing.
+export function pairCaption(nameA, nameB) {
+  const a = String(nameA || '').trim();
+  const b = String(nameB || '').trim();
+  const baseA = stripStereoSuffix(a);
+  const baseB = stripStereoSuffix(b);
+  if (a && b && baseA && baseA === baseB) return `${baseA} L/R`;
+  return [a, b].filter(Boolean).join(' · ');
+}
+
+// The tiles a "1-16" range covers: both legs inside the range (so "1-15" leaves 15–16 alone).
+export function tilesInRange(tiles, text) {
+  const wanted = new Set(parseNumberRanges(text));
+  return (tiles || []).filter((t) => wanted.has(t.low) && wanted.has(t.high));
+}
+
+// --- strip picker (DCA members, FX sends, auto patch) -------------------------------------------
+// A big console has 100+ strips, so a plain multi-select is unusable. These pure helpers back the
+// StripPicker dialog: a number-range box ("1-16, 20, 24-32"), text/kind/group filters and a
+// shift-click range.
+
+// "1-16, 20; 24–32" -> [1..16, 20, 24..32] (sorted, unique). Junk tokens are skipped; a reversed
+// range ("8-5") is read forwards; a range wider than `cap` is cut so a typo cannot hang the page.
+export function parseNumberRanges(text, cap = 2000) {
+  const out = new Set();
+  for (const token of String(text || '').split(/[\s,;]+/)) {
+    const m = token.match(/^(\d+)(?:[-–](\d+))?$/);
+    if (!m) continue;
+    let a = Number(m[1]);
+    let b = m[2] == null ? a : Number(m[2]);
+    if (a > b) [a, b] = [b, a];
+    for (let n = a; n <= Math.min(b, a + cap); n += 1) out.add(n);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+// The channel numbers an input strip stands for: "7" -> [7], a ganged pair "1-2" -> [1, 2]. Other
+// kinds (FX, mixes, DCAs) have none, so a range never selects them.
+export function stripChannelNumbers(item) {
+  if (item?.kind !== 'input') return [];
+  const m = String(item.number ?? '').match(/^(\d+)(?:-(\d+))?$/);
+  if (!m) return [];
+  return m[2] == null ? [Number(m[1])] : [Number(m[1]), Number(m[2])];
+}
+
+// Ids of the items a range string covers (inputs only, matched by channel number).
+export function idsInRanges(items, text) {
+  const wanted = new Set(parseNumberRanges(text));
+  if (!wanted.size) return [];
+  return (items || []).filter((i) => stripChannelNumbers(i).some((n) => wanted.has(n))).map((i) => i.id);
+}
+
+// Filter picker items by free text (label or number), kinds (empty = all) and instrument group.
+export function filterStripItems(items, { query = '', kinds = [], group = '' } = {}) {
+  const q = String(query || '').trim().toLowerCase();
+  const kindSet = new Set(kinds || []);
+  return (items || []).filter((i) => {
+    if (kindSet.size && !kindSet.has(i.kind)) return false;
+    if (group && i.group !== group) return false;
+    if (!q) return true;
+    return `${i.number ?? ''} ${i.label ?? ''}`.toLowerCase().includes(q);
+  });
+}
+
+// Shift-click: every id between two clicked rows (inclusive) in the visible order.
+export function rangeBetween(order, fromId, toId) {
+  const a = order.indexOf(fromId);
+  const b = order.indexOf(toId);
+  if (a === -1 || b === -1) return toId == null ? [] : [toId];
+  return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+// Selection edits that only touch the visible rows (so "all" under a filter selects what you see).
+export const selectIds = (selected, ids) => [...new Set([...(selected || []), ...ids])];
+export const deselectIds = (selected, ids) => (selected || []).filter((id) => !new Set(ids).has(id));
+export function invertIds(selected, visibleIds) {
+  const on = new Set(selected || []);
+  const visible = new Set(visibleIds);
+  return [...(selected || []).filter((id) => !visible.has(id)), ...visibleIds.filter((id) => !on.has(id))];
+}
+
+// A click on a selection row: a plain click toggles it, a shift-click toggles everything between the
+// anchor (the last row clicked) and this one over the VISIBLE rows, to the state the clicked row is
+// switching to. Returns the new selection and the new anchor.
+export function toggleRowSelection(selected, { id, shift = false, anchor = null, visibleIds = [] }) {
+  const isOn = new Set(selected || []).has(id);
+  if (shift && anchor != null && anchor !== id && visibleIds.includes(anchor) && visibleIds.includes(id)) {
+    const span = rangeBetween(visibleIds, anchor, id);
+    return { selected: isOn ? deselectIds(selected, span) : selectIds(selected, span), anchor: id };
+  }
+  return { selected: isOn ? deselectIds(selected, [id]) : selectIds(selected, [id]), anchor: id };
+}
+
+// Ids in channel-number order (what auto patch wants: the order is the order of the sockets).
+export const orderByNumber = (ids, numbers) => [...(ids || [])].sort((a, b) => (numbers.get(a) ?? 0) - (numbers.get(b) ?? 0));
+
+// The first `max` selected items for the collapsed chip row, and how many more there are.
+export function summariseSelection(items, selected, max = 6) {
+  const byId = new Map((items || []).map((i) => [i.id, i]));
+  const rows = (selected || []).map((id) => byId.get(id)).filter(Boolean);
+  return { shown: rows.slice(0, max), more: Math.max(0, rows.length - max), total: rows.length };
+}
+
+// --- soft patch by port ---------------------------------------------------------------------------
+// A big source (a 128-channel Dante card) is one port, not 128 dropdown rows.
+
+// Ports of the soft-patch response for one direction ('in' also lists 'both'), grouped by device.
+export function groupPortsByDevice(ports, direction) {
+  const want = direction === 'out' ? ['out', 'both'] : ['in', 'both'];
+  const groups = new Map();
+  for (const p of ports || []) {
+    if (!want.includes(p.direction)) continue;
+    if (!groups.has(p.device_id)) groups.set(p.device_id, { device_id: p.device_id, device_name: p.device_name, ports: [] });
+    groups.get(p.device_id).ports.push(p);
+  }
+  return [...groups.values()];
+}
+
+// The sockets of one port, in socket order, each with the number of the channel that holds it
+// (`field` is 'dsp_source' for inputs, 'direct_out' for direct outs; `numbers` maps channel id ->
+// channel number).
+export function portSockets(sockets, devicePort, field, numbers) {
+  if (!devicePort) return [];
+  return (sockets || [])
+    .filter((s) => s.device_id === devicePort.device_id && s.port_id === devicePort.port_id)
+    .sort((a, b) => a.socket - b.socket)
+    .map((s) => {
+      const owners = s[`${field}_channel_ids`] || (s[`${field}_channel_id`] ? [s[`${field}_channel_id`]] : []);
+      const owner = owners[0] || null;
+      const num = owner ? numbers?.get(owner) ?? null : null;
+      // an input socket may feed several channels (a split source): `owners` lists them all
+      return {
+        ...s,
+        owner,
+        owners,
+        shared: owners.length > 1,
+        ownerKind: owner ? 'channel' : null,
+        ownerNumber: num,
+        ownerLabel: owner ? `Ch ${num ?? '?'}` : '',
+      };
+    });
+}
+
+// --- soft patch targets -----------------------------------------------------------------------
+// The soft patch maps three kinds of things to physical sockets. `field` is the API's name for each:
+//   dsp_source  a channel's input socket          (targets: channels, input sockets)
+//   direct_out  a channel's direct output socket   (targets: channels, output sockets)
+//   out_socket  a bus' output socket               (targets: buses / mixes, output sockets)
+export const SOFT_FIELDS = {
+  dsp_source: { mode: 'in', direction: 'in', idsKey: 'channel_ids', idKey: 'channel_id' },
+  direct_out: { mode: 'out', direction: 'out', idsKey: 'channel_ids', idKey: 'channel_id' },
+  out_socket: { mode: 'bus', direction: 'out', idsKey: 'bus_ids', idKey: 'bus_id' },
+};
+export const fieldOfMode = (mode) => ({ in: 'dsp_source', out: 'direct_out', bus: 'out_socket' })[mode] || 'dsp_source';
+export const softFieldInfo = (field) => SOFT_FIELDS[field] || SOFT_FIELDS.dsp_source;
+
+// Body of POST .../soft-patch/auto for any target kind.
+export function autoPatchBody(field, ids, port, { start = 1, skip = true, dry = false, append = false, shared = false } = {}) {
+  const info = softFieldInfo(field);
+  return {
+    field,
+    [info.idsKey]: ids,
+    device_id: port.device_id,
+    port_id: port.port_id,
+    start_socket: Math.max(1, Number(start) || 1),
+    skip_taken: !!skip,
+    dry_run: !!dry,
+    // buses: add an endpoint to each bus instead of replacing its endpoints
+    ...(field === 'out_socket' && append ? { append: true } : {}),
+    // inputs: reuse sockets other channels already take (a split source)
+    ...(field === 'dsp_source' && shared ? { allow_shared: true } : {}),
+  };
+}
+
+// --- bus endpoints (stereo buses, several outputs per bus) -----------------------------------------
+// A bus leaves from one or more endpoints; one endpoint is 1 socket (mono), 2 adjacent sockets (stereo
+// L, R) or 3 (LCR). The server claims the following sockets when it is given only the first one.
+export const BUS_WIDTH = { mono: 1, stereo: 2, lcr: 3 };
+export const busWidth = (mode) => BUS_WIDTH[mode] || 1;
+const SIDES = { 1: [''], 2: ['L', 'R'], 3: ['L', 'R', 'C'] };
+
+// "3–4" for adjacent sockets, "3 / 7" otherwise.
+export function socketRunText(sockets) {
+  const nums = [...(sockets || [])].map(Number);
+  if (!nums.length) return '';
+  const sorted = [...nums].sort((a, b) => a - b);
+  const adjacent = sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1);
+  if (nums.length === 1) return String(nums[0]);
+  return adjacent ? `${sorted[0]}–${sorted.at(-1)}` : nums.join(' / ');
+}
+
+// One endpoint as a chip label: "AR2412 · Out 3–4" ("Out" keeps the port's direction word).
+export function endpointLabel(endpoint, deviceNames, { out = 'Out' } = {}) {
+  const refs = endpoint?.refs || [];
+  if (!refs.length) return '';
+  const name = deviceNames?.get(refs[0].device_id) || '?';
+  return `${name} · ${out} ${socketRunText(refs.map((r) => r.socket))}`;
+}
+
+// "L 3, R 4" for a stereo endpoint, "3" for mono.
+export function endpointSides(endpoint, mode) {
+  const refs = endpoint?.refs || [];
+  const sides = SIDES[Math.min(Math.max(refs.length, 1), 3)];
+  if (busWidth(mode) === 1 && refs.length <= 1) return String(refs[0]?.socket ?? '');
+  return refs.map((r, i) => `${sides[i] || ''} ${r.socket}`.trim()).join(', ');
+}
+
+// Endpoints that have fewer sockets than the bus's current mode needs (a mono bus switched to
+// stereo after it was patched): [{endpoint, have, need}].
+export function endpointShortages(bus) {
+  const need = busWidth(bus?.mode);
+  return (bus?.out_endpoints || [])
+    .filter((e) => (e.refs || []).length < need)
+    .map((endpoint) => ({ endpoint, have: (endpoint.refs || []).length, need }));
+}
+
+// The run of sockets a tap on `socket` would claim for a bus of `width`: all must exist on the port,
+// be free (or already this bus's own). Returns the socket rows, or null when it does not fit.
+export function busRunAt(socketRows, socket, width, ownerId = null) {
+  const bySocket = new Map((socketRows || []).map((r) => [r.socket, r]));
+  const run = [];
+  for (let i = 0; i < Math.max(1, width); i += 1) {
+    const row = bySocket.get(socket + i);
+    if (!row || (row.owner && row.owner !== ownerId)) return null;
+    run.push(row);
+  }
+  return run;
+}
+
+// A plan row from the auto patch preview: "Mix 2 → 3–4" (a stereo bus) or "Ch 5 → 12".
+export const planRowText = (row, prefix) =>
+  `${prefix} ${row.channel_number ?? ''}${row.name ? ` ${row.name}` : ''} → ${socketRunText(row.sockets?.length ? row.sockets : [row.socket])}`.replace(/\s+/g, ' ');
+
+// --- split sources --------------------------------------------------------------------------------
+// One input socket may feed several channels (FOH and monitors from the same source, each with its
+// own processing). "Ch 3, Ch 4" for the hint text.
+export const sharedChannelsText = (sharedWith, prefix = 'Ch') =>
+  (sharedWith || []).map((o) => `${prefix} ${o.channel_number ?? '?'}`).join(', ');
+
+// "Ch 3" in front of a label unless the label already starts with it ("Ch 1 L" stays "Ch 1 L").
+export function numberedLabel(prefix, number, label) {
+  const text = String(label || '').trim();
+  const lead = new RegExp(`^${prefix}\\s*${number}(\\D|$)`, 'i');
+  if (!text) return `${prefix} ${number}`;
+  return lead.test(text) ? text : `${prefix} ${number} ${text}`;
+}
+
+// --- soft patch tile grid ------------------------------------------------------------------------
+// One tile per channel (or bus): number, name, where it is patched now, stereo pairing and the
+// split-source badge, so 48-64+ channels read at a glance instead of as a long list.
+
+// A device name that fits a ~96 px tile: short names stay, a long one keeps its first word when that
+// fits, else is cut with an ellipsis ("Allen & Heath AR2412" -> "Allen").
+export function shortDeviceName(name, max = 9) {
+  const text = String(name || '').trim();
+  if (!text) return '?';
+  if (text.length <= max) return text;
+  const word = text.split(/\s+/)[0];
+  if (word.length >= 3 && word.length <= max) return word;
+  return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+// "AR2412 · 5" for a socket reference; "—" when there is none. `title` is the full text.
+export function routingShort(ref, deviceNames, { missing = '?', max = 9 } = {}) {
+  if (!ref) return { text: '—', title: '' };
+  const full = deviceNames?.get(ref.device_id);
+  return {
+    text: `${full ? shortDeviceName(full, max) : missing} · ${ref.socket ?? 1}`,
+    title: `${full || missing} · ${ref.port_id} #${ref.socket ?? 1}`,
+  };
+}
+
+// A bus's routing: its first endpoint as "AR2412 · 3–4" and "+1" for each further endpoint.
+export function busRoutingShort(bus, deviceNames, { missing = '?', max = 9, out = 'Out' } = {}) {
+  const endpoints = (bus?.out_endpoints || []).filter((e) => (e.refs || []).length);
+  if (!endpoints.length) return { text: '—', title: '' };
+  const first = endpoints[0];
+  const full = deviceNames?.get(first.refs[0].device_id);
+  const extra = endpoints.length > 1 ? ` +${endpoints.length - 1}` : '';
+  return {
+    text: `${full ? shortDeviceName(full, max) : missing} · ${socketRunText(first.refs.map((r) => r.socket))}${extra}`,
+    title: endpoints.map((e) => endpointLabel(e, deviceNames, { out })).join('  ·  '),
+  };
+}
+
+const MODE_BADGE = { mono: 'M', stereo: 'ST', lcr: 'LCR' };
+
+// The tile models for the channel (mode 'in' / 'out') or bus ('bus') strips, in the order given.
+// `strips` are the merged list+soft-patch rows the panel already builds (dsp_source, direct_out,
+// shared_with, *_orphaned, is_stereo_linked, stereo_link_role, stereo_partner_id, out_endpoints, mode).
+export function softPatchTiles(strips, { mode = 'in', deviceNames = new Map(), missing = '?', out = 'Out' } = {}) {
+  const tiles = (strips || []).map((c) => {
+    const isBus = mode === 'bus';
+    const field = mode === 'out' ? 'direct_out' : 'dsp_source';
+    const routing = isBus
+      ? busRoutingShort(c, deviceNames, { missing, out })
+      : routingShort(c[field], deviceNames, { missing });
+    const shortage = isBus ? endpointShortages(c).length > 0 : false;
+    const sharedCount = !isBus && mode === 'in' && c.shared_with?.length ? c.shared_with.length + 1 : 0;
+    return {
+      id: c.id,
+      number: c.channel_number,
+      name: String(c.source_label || '').trim(),
+      routing: routing.text,
+      routingTitle: routing.title,
+      patched: isBus ? !!(c.out_endpoints || []).length : !!c[field],
+      orphaned: !isBus && !!c[`${field}_orphaned`],
+      pair: !isBus && c.is_stereo_linked ? (c.stereo_link_role === 'primary' ? 'L' : 'R') : null,
+      partnerId: !isBus && c.is_stereo_linked ? c.stereo_partner_id || null : null,
+      bridge: null,
+      shared: sharedCount,
+      sharedWith: c.shared_with || [],
+      modeBadge: isBus ? MODE_BADGE[c.mode] || 'M' : '',
+      endpoints: isBus ? (c.out_endpoints || []).length : 0,
+      shortage,
+    };
+  });
+  return bridgePairs(tiles);
+}
+
+// Mark the two tiles of a linked pair that sit next to each other so they can be drawn joined:
+// the left one 'start', the right one 'end'. A pair whose legs are not neighbours in this order
+// (filtered out, or split across a page) simply is not bridged.
+export function bridgePairs(tiles) {
+  const list = tiles || [];
+  list.forEach((tile, i) => {
+    const next = list[i + 1];
+    if (tile.pair === 'L' && next && next.pair === 'R' && tile.partnerId === next.id) {
+      tile.bridge = 'start';
+      next.bridge = 'end';
+    }
+  });
+  return list;
+}
+
+// The tooltip of a soft patch tile: "Ch 5 Kick · AR2412 · in-xlr3 #5 · L (stereo)".
+export function softTileTitle(tile, prefix = 'Ch') {
+  return [
+    `${prefix} ${tile.number}${tile.name ? ` ${tile.name}` : ''}`,
+    tile.routingTitle || tile.routing,
+    tile.pair ? `${tile.pair} (stereo)` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+// --- history step names -----------------------------------------------------------------------------
+// The server sends `action` (the route's function name: "update_channel"). It is translated through
+// `history.actions.<action>`; unknown ones are composed from `history.verbs.<verb>` +
+// `history.nouns.<noun>` (split at the first underscore); the English `label` is the last resort.
+// `tr` = { has(key), t(key) } so the helper stays free of vue-i18n.
+export function historyStepLabel(entry, tr) {
+  const action = String(entry?.action || '');
+  if (action && tr.has(`history.actions.${action}`)) return tr.t(`history.actions.${action}`);
+  const i = action.indexOf('_');
+  const verb = i > 0 ? action.slice(0, i) : action;
+  const noun = i > 0 ? action.slice(i + 1) : '';
+  if (verb && tr.has(`history.verbs.${verb}`)) {
+    const v = tr.t(`history.verbs.${verb}`);
+    if (!noun) return v;
+    if (tr.has(`history.nouns.${noun}`)) return `${v} ${tr.t(`history.nouns.${noun}`)}`;
+  }
+  return entry?.label || action.replace(/_/g, ' ');
+}
+
+// Body of PUT .../soft-patch/bulk that clears the sockets of the given channels / buses.
+export function bulkClearBody(field, ids) {
+  const info = softFieldInfo(field);
+  return { field, assignments: ids.map((id) => ({ [info.idKey]: id, ref: null })) };
+}
+
+// Sockets of one OUTPUT port with whoever holds each: a channel's direct out or a bus (a socket
+// carries one or the other). `ownerKind` says which, `ownerLabel` is what the grid prints ("Ch 3",
+// "Mix 2"); the input side uses portSockets.
+export function portSocketsOut(sockets, devicePort, channelNumbers, busNumbers, { ch = 'Ch', mix = 'Mix' } = {}) {
+  if (!devicePort) return [];
+  return (sockets || [])
+    .filter((x) => x.device_id === devicePort.device_id && x.port_id === devicePort.port_id)
+    .sort((a, b) => a.socket - b.socket)
+    .map((x) => {
+      const channelId = x.direct_out_channel_id || null;
+      const busId = x.out_socket_bus_id || null;
+      const owner = channelId || busId;
+      const ownerKind = channelId ? 'channel' : busId ? 'bus' : null;
+      const num = channelId ? channelNumbers?.get(channelId) : busId ? busNumbers?.get(busId) : null;
+      return { ...x, owner, ownerKind, ownerNumber: num ?? null, ownerLabel: owner ? `${channelId ? ch : mix} ${num ?? '?'}` : '' };
+    });
+}
+
+// The first free socket of a port at or after `from` (1 when none is free, so the field is never empty).
+export function firstFreeSocket(socketRows, from = 1) {
+  return socketRows.find((s) => s.socket >= from && !s.owner)?.socket ?? 1;
+}
+
+// Rows [start, end) of a long list for the paged socket grid (page is 1-based).
+export const pageOf = (rows, page, size = 64) => rows.slice((page - 1) * size, page * size);
+
+// What the expansion editor sends: drop empty cards and keep only the fields the API takes.
+export function expansionPayload(cards) {
+  return (cards || [])
+    .map((c) => ({
+      protocol: String(c.protocol || '').trim().toLowerCase(),
+      channels_in: Math.max(0, Number(c.channels_in) || 0),
+      channels_out: Math.max(0, Number(c.channels_out) || 0),
+    }))
+    .filter((c) => c.protocol && (c.channels_in || c.channels_out));
+}
+
+// Largest channel count a port allows on one side (side-specific limit, else the total), or null.
+export function expansionLimit(port, side) {
+  const specific = side === 'in' ? port?.max_channels_in : port?.max_channels_out;
+  return specific ?? port?.max_channels ?? null;
+}
+
+// Expansion ports as the manual profile form edits them, and back (numbers or null, never '').
+export const expansionFormRows = (ports) =>
+  (ports || []).map((p) => ({
+    protocol: p.protocol || '',
+    slots: p.slots ?? null,
+    max_channels: p.max_channels ?? null,
+    max_channels_in: p.max_channels_in ?? null,
+    max_channels_out: p.max_channels_out ?? null,
+  }));
+export function expansionFromForm(rows) {
+  const n = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Math.max(0, Number(v)));
+  return (rows || [])
+    .filter((r) => String(r.protocol || '').trim())
+    .map((r) => ({
+      protocol: String(r.protocol).trim().toLowerCase(),
+      slots: n(r.slots),
+      max_channels: n(r.max_channels),
+      max_channels_in: n(r.max_channels_in),
+      max_channels_out: n(r.max_channels_out),
+    }));
+}
+
+// Icon and class suffix of a fader strip kind (input, fx return, mix, fx send, dca, empty).
+export const STRIP_KIND_ICON = {
+  input: 'mic',
+  fx: 'graphic_eq',
+  mix: 'call_split',
+  fxsend: 'north_east',
+  dca: 'workspaces',
+  empty: 'crop_square',
+};
+export const stripKindIcon = (kind) => STRIP_KIND_ICON[kind] || 'help_outline';
+
+
+// --- built-in FX engines -------------------------------------------------------------------------------
+
+// Mirrors the server: an engine is "set up" when it has sends, a name other than the default
+// "FX n", or a type other than 'other'. Anything else is a built-in placeholder.
+export const fxIsConfigured = (engine) =>
+  !!(engine?.sends || []).length || (!!engine?.name && !/^FX \d+$/.test(engine.name)) || (engine?.type || 'other') !== 'other';
+export const fxConfiguredCount = (list) => (list || []).filter(fxIsConfigured).length;
+// Back to the defaults of the engine at `position` (1-based): a built-in engine is reset, not deleted.
+export const fxResetEngine = (engine, position) => ({
+  ...engine,
+  name: `FX ${position}`,
+  type: 'other',
+  stereo_return: true,
+  send_mode: 'mono',
+  sends: [],
+});

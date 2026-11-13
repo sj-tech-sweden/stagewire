@@ -9,7 +9,7 @@ from app.domains.audio.models import ProductionJob
 from app.domains.graph import audio_native, devices_native
 from app.domains.graph.backfill import backfill_job
 from app.domains.lighting import service as lighting_service
-from app.domains.reports import graph_context
+from app.domains.reports import console_context, graph_context
 from app.domains.reports.cable_routing import routed_cable_paths_from_graph
 from app.domains.reports.context import JobOrVenue, load_subject
 from app.domains.reports.models import ReportTemplate
@@ -44,6 +44,10 @@ class ReportDefinition:
     fields_sv: tuple[ReportField, ...] = ()
     tables_sv: tuple[ReportTable, ...] = ()
     requires_patchpoint: bool = False
+    # A wide report prints on landscape A4 (unless a letterhead sets its own page size).
+    landscape: bool = False
+    # Earlier default bodies of this report; a built-in still holding one is upgraded in place.
+    previous_default_html: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -204,6 +208,152 @@ async def _patch_sheet_context(db: AsyncSession, context: JobOrVenue | UUID) -> 
     devices, edges, _ = await graph_context.load_graph(db, context)
     return {"job": job, "patchpoint_sheets": graph_context.patch_sheets(devices, edges)}
 
+
+async def _stage_patch_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    if context.is_job:
+        await backfill_job(db, context.id)
+    job = await load_subject(db, context)
+    devices, _, _ = await graph_context.load_graph(db, context)
+    return {"job": job, "stage_patch": console_context.stage_patch_rows(devices)}
+
+
+async def _console_dsp_context(db: AsyncSession, context: JobOrVenue | UUID) -> dict:
+    context = _as_context(context)
+    if context.is_job:
+        await backfill_job(db, context.id)
+    job = await load_subject(db, context)
+    devices, _, _ = await graph_context.load_graph(db, context)
+    return {"job": job, **console_context.console_sheet(devices)}
+
+
+_STAGE_PATCH_COLUMNS = (
+    ReportField(key="stagebox_socket", label="Stagebox socket"),
+    ReportField(key="channel_number", label="Ch"),
+    ReportField(key="source_label", label="Source"),
+    ReportField(key="mic_di", label="Mic / DI"),
+    ReportField(key="stand", label="Stand"),
+    ReportField(key="stage_zone", label="Stage zone"),
+    ReportField(key="notes", label="Notes"),
+)
+_STAGE_PATCH_COLUMNS_SV = (
+    ReportField(key="stagebox_socket", label="Stageboxuttag"),
+    ReportField(key="channel_number", label="Kanal"),
+    ReportField(key="source_label", label="Källa"),
+    ReportField(key="mic_di", label="Mikrofon / DI"),
+    ReportField(key="stand", label="Stativ"),
+    ReportField(key="stage_zone", label="Scenzon"),
+    ReportField(key="notes", label="Anteckningar"),
+)
+_CONSOLE_DSP_COLUMNS = (
+    ReportField(key="channel_number", label="Ch"),
+    ReportField(key="source_label", label="Label"),
+    ReportField(key="source", label="Source"),
+    ReportField(key="signal_path", label="Signal path"),
+    ReportField(key="input_socket", label="Input socket"),
+    ReportField(key="phantom_power", label="48V"),
+    ReportField(key="stereo_link", label="Stereo link"),
+    ReportField(key="direct_out", label="Direct out"),
+    ReportField(key="dca", label="DCA"),
+    ReportField(key="fx_sends", label="FX sends"),
+    ReportField(key="surface_location", label="Surface"),
+    ReportField(key="notes", label="Notes"),
+)
+_CONSOLE_DSP_COLUMNS_SV = (
+    ReportField(key="channel_number", label="Kanal"),
+    ReportField(key="source_label", label="Namn"),
+    ReportField(key="source", label="Källa"),
+    ReportField(key="signal_path", label="Signalväg"),
+    ReportField(key="input_socket", label="Ingångsuttag"),
+    ReportField(key="phantom_power", label="48V"),
+    ReportField(key="stereo_link", label="Stereolänk"),
+    ReportField(key="direct_out", label="Direktut"),
+    ReportField(key="dca", label="DCA"),
+    ReportField(key="fx_sends", label="FX-sändningar"),
+    ReportField(key="surface_location", label="Yta"),
+    ReportField(key="notes", label="Anteckningar"),
+)
+_CONSOLE_SETUP_COLUMNS = (
+    ReportField(key="item", label="Setting"),
+    ReportField(key="value", label="Value"),
+)
+_CONSOLE_SETUP_COLUMNS_SV = (
+    ReportField(key="item", label="Inställning"),
+    ReportField(key="value", label="Värde"),
+)
+_CONSOLE_BUS_COLUMNS = (
+    ReportField(key="bus", label="Bus"),
+    ReportField(key="mode", label="Mode"),
+    ReportField(key="role", label="Role"),
+    ReportField(key="slots", label="Pool slots"),
+    ReportField(key="outputs", label="Outputs"),
+    ReportField(key="surface_location", label="Surface"),
+    ReportField(key="notes", label="Notes"),
+)
+_CONSOLE_BUS_COLUMNS_SV = (
+    ReportField(key="bus", label="Buss"),
+    ReportField(key="mode", label="Läge"),
+    ReportField(key="role", label="Roll"),
+    ReportField(key="slots", label="Busspositioner"),
+    ReportField(key="outputs", label="Utgångar"),
+    ReportField(key="surface_location", label="Yta"),
+    ReportField(key="notes", label="Anteckningar"),
+)
+_CONSOLE_DCA_COLUMNS = (
+    ReportField(key="dca", label="DCA"),
+    ReportField(key="name", label="Name"),
+    ReportField(key="members", label="Members"),
+    ReportField(key="surface_location", label="Surface"),
+)
+_CONSOLE_DCA_COLUMNS_SV = (
+    ReportField(key="dca", label="DCA"),
+    ReportField(key="name", label="Namn"),
+    ReportField(key="members", label="Medlemmar"),
+    ReportField(key="surface_location", label="Yta"),
+)
+_CONSOLE_FX_COLUMNS = (
+    ReportField(key="fx", label="FX"),
+    ReportField(key="type", label="Type"),
+    ReportField(key="return", label="Return"),
+    ReportField(key="sent_from", label="Sent from"),
+    ReportField(key="surface_location", label="Surface"),
+)
+_CONSOLE_FX_COLUMNS_SV = (
+    ReportField(key="fx", label="FX"),
+    ReportField(key="type", label="Typ"),
+    ReportField(key="return", label="Retur"),
+    ReportField(key="sent_from", label="Skickas från"),
+    ReportField(key="surface_location", label="Yta"),
+)
+
+_CONSOLE_SHEET_HTML = (
+    "<h1>{{job.title}} — Console setup sheet</h1>"
+    "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+    "<h2>Console</h2>{{table:console_setup}}"
+    "<h2>Inputs and patch</h2>{{table:console_dsp}}"
+    "<h2>Buses and outputs</h2>{{table:console_buses}}"
+    "<h2>DCAs</h2>{{table:console_dcas}}"
+    "<h2>FX</h2>{{table:console_fx}}"
+)
+_CONSOLE_SHEET_HTML_SV = (
+    "<h1>{{job.title}} — Mixerinställningar</h1>"
+    "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+    "<h2>Mixer</h2>{{table:console_setup}}"
+    "<h2>Ingångar och patch</h2>{{table:console_dsp}}"
+    "<h2>Bussar och utgångar</h2>{{table:console_buses}}"
+    "<h2>DCA</h2>{{table:console_dcas}}"
+    "<h2>FX</h2>{{table:console_fx}}"
+)
+# What earlier versions shipped as the default body; an untouched built-in with one of these is
+# upgraded to the full setup sheet (see ensure_default_templates).
+_CONSOLE_SHEET_PREVIOUS = (
+    "<h1>{{job.title}} — Console DSP &amp; fader sheet</h1>"
+    "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+    "<h2>DSP channels</h2>{{table:console_dsp}}",
+    "<h1>{{job.title}} — Mixerblad (DSP &amp; fadrar)</h1>"
+    "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+    "<h2>DSP-kanaler</h2>{{table:console_dsp}}",
+)
 
 _CHANNEL_COLUMNS = (
     ReportField(key="list_name", label="List"),
@@ -513,6 +663,96 @@ REPORT_DEFINITIONS = (
             ),
         ),
         requires_patchpoint=True,
+    ),
+    ReportDefinition(
+        domain="audio",
+        report_type="stage-patch-sheet",
+        name="Stage patch sheet",
+        description="For stage techs: sources sorted by stagebox socket and cable run.",
+        default_html=(
+            "<h1>{{job.title}} — Stage patch sheet</h1>"
+            "<p><strong>Venue:</strong> {{job.venue_name}}</p>"
+            "<h2>Stagebox patch</h2>{{table:stage_patch}}"
+        ),
+        fields=(
+            ReportField(key="job.title", label="Job title"),
+            ReportField(key="job.venue_name", label="Venue"),
+        ),
+        tables=(
+            ReportTable(
+                key="stage_patch", label="Stagebox patch", columns=list(_STAGE_PATCH_COLUMNS)
+            ),
+        ),
+        context_builder=_stage_patch_context,
+        name_sv="Scenpatchblad",
+        description_sv="För scentekniker: källor sorterade efter stageboxuttag och kabel.",
+        default_html_sv=(
+            "<h1>{{job.title}} — Scenpatchblad</h1>"
+            "<p><strong>Spelplats:</strong> {{job.venue_name}}</p>"
+            "<h2>Stageboxpatch</h2>{{table:stage_patch}}"
+        ),
+        fields_sv=(
+            ReportField(key="job.title", label="Jobbtitel"),
+            ReportField(key="job.venue_name", label="Spelplats"),
+        ),
+        tables_sv=(
+            ReportTable(
+                key="stage_patch", label="Stageboxpatch", columns=list(_STAGE_PATCH_COLUMNS_SV)
+            ),
+        ),
+    ),
+    ReportDefinition(
+        domain="audio",
+        report_type="console-dsp-sheet",
+        name="Console setup sheet",
+        description=(
+            "Everything to set up the console: inputs with their whole signal path and sockets, "
+            "buses and their outputs, DCAs, FX and fader positions."
+        ),
+        default_html=_CONSOLE_SHEET_HTML,
+        fields=(
+            ReportField(key="job.title", label="Job title"),
+            ReportField(key="job.venue_name", label="Venue"),
+        ),
+        tables=(
+            ReportTable(key="console_setup", label="Console", columns=list(_CONSOLE_SETUP_COLUMNS)),
+            ReportTable(
+                key="console_dsp", label="Inputs and patch", columns=list(_CONSOLE_DSP_COLUMNS)
+            ),
+            ReportTable(
+                key="console_buses", label="Buses and outputs", columns=list(_CONSOLE_BUS_COLUMNS)
+            ),
+            ReportTable(key="console_dcas", label="DCAs", columns=list(_CONSOLE_DCA_COLUMNS)),
+            ReportTable(key="console_fx", label="FX", columns=list(_CONSOLE_FX_COLUMNS)),
+        ),
+        context_builder=_console_dsp_context,
+        landscape=True,
+        previous_default_html=_CONSOLE_SHEET_PREVIOUS,
+        name_sv="Mixerinställningar",
+        description_sv=(
+            "Allt för att ställa in mixern: ingångar med hela signalvägen och uttag, bussar och "
+            "deras utgångar, DCA, FX och fadrarnas placering."
+        ),
+        default_html_sv=_CONSOLE_SHEET_HTML_SV,
+        fields_sv=(
+            ReportField(key="job.title", label="Jobbtitel"),
+            ReportField(key="job.venue_name", label="Spelplats"),
+        ),
+        tables_sv=(
+            ReportTable(
+                key="console_setup", label="Mixer", columns=list(_CONSOLE_SETUP_COLUMNS_SV)
+            ),
+            ReportTable(
+                key="console_dsp", label="Ingångar och patch", columns=list(_CONSOLE_DSP_COLUMNS_SV)
+            ),
+            ReportTable(
+                key="console_buses",
+                label="Bussar och utgångar",
+                columns=list(_CONSOLE_BUS_COLUMNS_SV),
+            ),
+            ReportTable(key="console_dcas", label="DCA", columns=list(_CONSOLE_DCA_COLUMNS_SV)),
+            ReportTable(key="console_fx", label="FX", columns=list(_CONSOLE_FX_COLUMNS_SV)),
+        ),
     ),
     ReportDefinition(
         domain="audio",
@@ -837,6 +1077,24 @@ async def ensure_default_templates(db: AsyncSession) -> None:
                     definition.default_html_sv if is_swedish else definition.default_html
                 )
                 builtin.layout_json = _default_layout(definition, locale, builtin.body_html)
+                added = True
+            elif (
+                definition.previous_default_html
+                and builtin.body_html in definition.previous_default_html
+            ):
+                # an untouched built-in of an older default: bring it to the current one
+                builtin.body_html = (
+                    definition.default_html_sv if is_swedish else definition.default_html
+                )
+                builtin.layout_json = _default_layout(definition, locale, builtin.body_html)
+                builtin.name = (
+                    definition.name_sv if is_swedish and definition.name_sv else definition.name
+                )
+                builtin.description = (
+                    definition.description_sv
+                    if is_swedish and definition.description_sv
+                    else definition.description
+                )
                 added = True
             elif definition.has_stage_plot:
                 changed = False
