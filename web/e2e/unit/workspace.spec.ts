@@ -1568,3 +1568,28 @@ test('bus tiles show the first endpoint, extra endpoints and a mismatch', async 
   expect(busRoutingShort(buses[0], names).title).toBe('AR2412 · Out 3–4  ·  AR2412 · Out 9–10');
   expect(tiles.every((t) => t.pair === null && t.shared === 0)).toBe(true);
 });
+
+
+test('the console signature changes with everything the panel shows, and only with that', async () => {
+  const { consoleSignatureOf } = await import('../../src/utils/workspace');
+  const list = { id: 'L', attributes: { fader_layout: { '1:A:1': 'c1' }, dca_config: {}, fx_config: [] } };
+  const channels = [{ id: 'c1', name: 'Kick', attributes: { channel_number: 1, dsp_source: null }, notes: 'a' }];
+  const outputs = [{ id: 'o1', name: 'Mix 1', position: 1, attributes: { mode: 'mono', out_endpoints: null } }];
+  const devices = [{ id: 'd1', name: 'AR2412', legacy_ref: 'device:d1', ports: [{ id: 'in-xlr3' }] }];
+  const base = consoleSignatureOf(list, channels, outputs, devices);
+  expect(consoleSignatureOf(list, channels, outputs, devices)).toBe(base); // stable
+  const changed = (...args: unknown[]) => (consoleSignatureOf as (...a: unknown[]) => string)(...args) !== base;
+  // another browser moved a fader, renamed a DCA, set up FX, installed a card
+  expect(changed({ ...list, attributes: { ...list.attributes, fader_layout: { '1:A:2': 'c1' } } }, channels, outputs, devices)).toBe(true);
+  expect(changed({ ...list, attributes: { ...list.attributes, dca_config: { '1': { name: 'Drums', members: [] } } } }, channels, outputs, devices)).toBe(true);
+  expect(changed({ ...list, attributes: { ...list.attributes, fx_config: [{ id: 'fx1' }] } }, channels, outputs, devices)).toBe(true);
+  expect(changed({ ...list, attributes: { ...list.attributes, expansion_installed: [{ id: 'dante-1' }] } }, channels, outputs, devices)).toBe(true);
+  // a socket patched, a bus patched, a stagebox added, a pair linked
+  expect(changed(list, [{ ...channels[0], attributes: { ...channels[0].attributes, dsp_source: { socket: 5 } } }], outputs, devices)).toBe(true);
+  expect(changed(list, channels, [{ ...outputs[0], attributes: { ...outputs[0].attributes, out_endpoints: [{ id: 'e' }] } }], devices)).toBe(true);
+  expect(changed(list, channels, outputs, [...devices, { id: 'd2', name: 'Box 2', legacy_ref: 'device:d2', ports: [] }])).toBe(true);
+  expect(changed(list, [{ ...channels[0], attributes: { ...channels[0].attributes, is_stereo_linked: true } }], outputs, devices)).toBe(true);
+  // things the panel does not show do not reload it
+  expect(changed(list, [{ ...channels[0], notes: 'other' }], outputs, devices)).toBe(false);
+  expect(changed(list, channels, outputs, [...devices, { id: 'p', name: 'Plot', legacy_ref: null, ports: [] }])).toBe(false);
+});

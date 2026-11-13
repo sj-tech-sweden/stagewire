@@ -631,6 +631,7 @@ import { GEAR_ELEMENTS, OBJECT_TYPES } from '@/utils/plotObjects';
 import { buildCableRowsFromGraph } from '@/utils/graphLegacy';
 import { emptyCablePlan } from '@/utils/cables';
 import { useGraphStore } from '@/stores/graph';
+import { useHistoryStore } from '@/stores/history';
 import { useNetboxStore } from '@/stores/netbox';
 import { useVenueSocket } from '@/composables/useVenueSocket';
 import HistoryControls from '@/components/HistoryControls.vue';
@@ -654,6 +655,7 @@ const { t } = useI18n();
 // the identical rigging/power/lighting/video treatment a job does. Edits commit immediately through
 // the incremental graph routes — there is no separate "save" step.
 const graph = useGraphStore();
+const history = useHistoryStore();
 // NetBox integration config (gates the "Sync base rig to NetBox" button and tells
 // us whether the venue base rig can be mirrored into NetBox IPAM/DCIM).
 const netbox = useNetboxStore();
@@ -816,6 +818,8 @@ const venueId = computed(() => route.params.venueId);
 const venueSocket = useVenueSocket(venueId.value, (event) => {
   if (event.type === 'history.restore') load(); // an undo / restore changed many rows: reload
   else graph.applyRealtimeEvent(event);
+  // other people's writes change what can be undone: keep the undo / redo state current
+  if (/^(graph\.|venue\.|history\.)/.test(event.type || '')) history.scheduleRefresh(800);
 });
 // Scope the graph store to this venue synchronously, in setup and therefore before child components
 // mount. Child components (e.g. RiggingEditor) fire venue-scoped API calls on mount; without this the

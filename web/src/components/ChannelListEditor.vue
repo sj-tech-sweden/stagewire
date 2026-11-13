@@ -938,6 +938,7 @@
 import { apiErrorText } from "@/utils/errors";
 import { isRevisionConflict } from "@/utils/graph";
 import {
+  consoleSignatureOf,
   deviceCreateBody,
   deviceForm,
   fillFormFromSpecs,
@@ -1676,18 +1677,10 @@ const busRoles = computed(
       "fx_send",
     ],
 );
+// Changes made in another browser arrive through the realtime graph events, which update the store;
+// this signature makes the console panel (and its summary) reload when anything it shows changed.
 const consoleSignature = computed(() =>
-  JSON.stringify([
-    outputs.value.map((o) => [o.id, o.name, o.position, o.attributes?.mode, o.attributes?.role]),
-    channels.value.map((c) => [
-      c.id,
-      c.name,
-      c.attributes?.channel_number,
-      c.attributes?.stereo_link_role,
-      c.attributes?.is_stereo_linked,
-      c.attributes?.instrument_group,
-    ]),
-  ]),
+  consoleSignatureOf(list.value, channels.value, outputs.value, graph.devices),
 );
 let summaryTimer = null;
 async function loadConsoleSummary() {
