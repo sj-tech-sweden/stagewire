@@ -577,38 +577,54 @@
             @click="unlinkRange"
           />
         </div>
+        <!-- The tile grid is the whole UI: number big, the legs' names under it, state by colour. -->
         <div
-          class="row q-gutter-xs q-mb-md"
+          class="pair-grid q-mb-md"
+          role="group"
+          :aria-label="t('console.tabLinks')"
           data-testid="console-pair-grid"
         >
-          <q-btn
+          <button
             v-for="tile in pairTiles"
             :key="tile.low"
-            no-caps
-            dense
-            unelevated
-            class="pair-tile"
-            :color="tile.state === 'linked' ? 'primary' : tile.state === 'blocked' ? 'negative' : undefined"
-            :outline="tile.state !== 'linked'"
-            :disable="pairBusy || tile.state === 'blocked'"
-            :icon="tile.state === 'linked' ? 'link' : tile.missing.length ? 'add' : undefined"
-            :label="tile.label"
+            type="button"
+            :class="['pair-tile', `state-${tile.state}`]"
+            :disabled="pairBusy"
+            :aria-disabled="tile.state === 'blocked' ? 'true' : undefined"
             data-testid="console-pair-tile"
             :data-state="tile.state"
             @click="onTile(tile)"
           >
-            <q-tooltip>
-              {{
-                tile.state === "linked"
-                  ? t("console.pairLinked")
-                  : tile.state === "blocked"
-                    ? t("console.pairBlocked")
-                    : tile.missing.length
-                      ? t("console.pairCreates", { n: tile.missing.join(", ") })
-                      : t("console.pairFree")
-              }}
+            <span class="pair-top">
+              <q-icon
+                :name="tile.state === 'linked' ? 'link' : tile.state === 'blocked' ? 'block' : tile.missing.length ? 'add' : 'link_off'"
+                size="14px"
+              />
+              <span class="pair-num">{{ tile.label }}</span>
+            </span>
+            <span
+              class="pair-names"
+              data-testid="console-pair-names"
+            >{{ tile.caption || "\u00a0" }}</span>
+            <q-tooltip
+              :delay="400"
+              anchor="top middle"
+              self="bottom middle"
+            >
+              <div>{{ tile.captionTitle }}</div>
+              <div class="text-caption">
+                {{
+                  tile.state === "linked"
+                    ? t("console.pairLinked")
+                    : tile.state === "blocked"
+                      ? t("console.pairBlocked")
+                      : tile.missing.length
+                        ? t("console.pairCreates", { n: tile.missing.join(", ") })
+                        : t("console.pairFree")
+                }}
+              </div>
             </q-tooltip>
-          </q-btn>
+          </button>
           <div
             v-if="!pairTiles.length"
             class="text-grey-6"
@@ -616,51 +632,6 @@
             {{ t("console.noChannels") }}
           </div>
         </div>
-        <q-list
-          bordered
-          separator
-        >
-          <q-item
-            v-for="ch in strips"
-            :key="ch.id"
-            data-testid="console-strip"
-          >
-            <q-item-section>
-              <q-item-label>
-                <b>{{ stripNumber(ch) }}</b> {{ ch.source_label }}
-                <q-chip
-                  v-if="ch.is_stereo_linked"
-                  dense
-                  square
-                  color="primary"
-                  text-color="white"
-                  data-testid="console-ganged"
-                >
-                  {{ t("console.stereo") }}
-                </q-chip>
-              </q-item-label>
-            </q-item-section>
-            <q-item-section
-              v-if="ch.is_stereo_linked"
-              side
-            >
-              <q-btn
-                outline
-                no-caps
-                dense
-                icon="link_off"
-                :label="t('console.unlink')"
-                data-testid="console-unlink"
-                @click="unlink(ch)"
-              />
-            </q-item-section>
-          </q-item>
-          <q-item v-if="!strips.length">
-            <q-item-section class="text-grey-6">
-              {{ t("console.noChannels") }}
-            </q-item-section>
-          </q-item>
-        </q-list>
       </q-tab-panel>
 
       <!-- Soft patch ---------------------------------------------------------------------->
@@ -976,6 +947,27 @@
             >
               {{ t("console.nSelected", { n: selIds.length }) }}
             </q-chip>
+            <q-space />
+            <q-btn-toggle
+              :model-value="overviewView"
+              dense
+              no-caps
+              unelevated
+              toggle-color="primary"
+              :options="[
+                { icon: 'grid_view', value: 'grid', slot: 'grid' },
+                { icon: 'view_list', value: 'list', slot: 'list' },
+              ]"
+              data-testid="console-overview-view"
+              @update:model-value="setOverviewView"
+            >
+              <template #grid>
+                <q-tooltip>{{ t("console.viewGrid") }}</q-tooltip>
+              </template>
+              <template #list>
+                <q-tooltip>{{ t("console.viewList") }}</q-tooltip>
+              </template>
+            </q-btn-toggle>
           </div>
           <div class="row items-center q-col-gutter-xs q-mb-xs">
             <div class="col-12 col-sm-4">
@@ -1075,8 +1067,18 @@
               class="text-caption text-grey-6"
             >{{ t("console.multiTapHint", { n: selIds.length }) }}</span>
           </div>
+          <PatchTileGrid
+            v-if="visibleStrips.length && overviewView === 'grid'"
+            :tiles="patchTiles"
+            :selected="selIds"
+            :active-id="selChannelId"
+            :prefix="targetPrefix"
+            :aria-label="t('console.channelsOverview')"
+            :empty="t('console.noMatch')"
+            @tile="onTile2"
+          />
           <q-virtual-scroll
-            v-if="visibleStrips.length"
+            v-else-if="visibleStrips.length"
             :items="visibleStrips"
             :virtual-scroll-item-size="36"
             separator
@@ -2194,6 +2196,7 @@ import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { api } from "@/boot/api";
 import { apiErrorText } from "@/utils/errors";
+import PatchTileGrid from "@/components/PatchTileGrid.vue";
 import StripPicker from "@/components/StripPicker.vue";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
 import {
@@ -2214,6 +2217,7 @@ import {
   numberedLabel,
   planRowText,
   sharedChannelsText,
+  softPatchTiles,
   faderDraftFromMap,
   unplacedStrips,
   filterStripItems,
@@ -2400,7 +2404,6 @@ const profileFacts = computed(() => {
   ].filter(Boolean).join(" · ");
 });
 
-const stripNumber = (ch) => (ch.is_stereo_linked ? `Ch ${ch.channel_number}-${ch.channel_number + 1}` : `Ch ${ch.channel_number}`);
 const slotLabel = (bus) => {
   const e = budget.value?.entries?.find((x) => x.id === bus.id);
   return e ? `${t("console.slots")} ${e.slot_start}${e.slot_end > e.slot_start ? `–${e.slot_end}` : ""}` : "";
@@ -2968,16 +2971,6 @@ function unlinkRange() {
   $q.dialog({ title: t("console.unlinkRange"), message: t("console.unlinkRangeConfirm", { n: tiles.length }), cancel: true }).onOk(() => unlinkTiles(tiles));
   return null;
 }
-async function unlink(ch) {
-  try {
-    await api.post(`${lb.value}/console/unlink`, { primary_channel_id: ch.id });
-    applied();
-    await changed();
-  } catch (err) {
-    failed(err);
-  }
-}
-
 // --- soft patch ------------------------------------------------------------------------------
 // Port-centred: pick a source port, see its sockets as a grid (paged, so a 128-channel Dante card is
 // fine), tap a free socket to patch the selected channel. Auto patch and bulk clear cover the
@@ -3142,6 +3135,39 @@ const visibleStrips = computed(() => {
   const keep = new Set(visibleIds.value);
   return targetStrips.value.filter((c) => keep.has(c.id));
 });
+// Grid (default) or list for the channel / bus overview, remembered per browser; storage may be
+// blocked (private mode), so every access is guarded and the choice then just is not remembered.
+const OVERVIEW_VIEW_KEY = "stagewire.softPatchView";
+function loadOverviewView() {
+  try {
+    return localStorage.getItem(OVERVIEW_VIEW_KEY) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+const overviewView = ref(loadOverviewView());
+function setOverviewView(v) {
+  overviewView.value = v;
+  try {
+    localStorage.setItem(OVERVIEW_VIEW_KEY, v);
+  } catch {
+    /* blocked storage: not remembered */
+  }
+}
+// the tile models of what is shown (search / range filter applied), in channel order
+const patchTiles = computed(() =>
+  softPatchTiles(visibleStrips.value, {
+    mode: patchMode.value,
+    deviceNames: deviceNames.value,
+    missing: t("console.missingDevice"),
+    out: outWord.value,
+  }),
+);
+// A tile click is a selection click (toggle, shift-click = range over the shown tiles), like the
+// checkbox of a list row; with exactly one selected the socket grid follows that channel.
+function onTile2(tile, evt) {
+  onCheck(tile.id, evt);
+}
 // with exactly one channel selected the grid keeps its single-assign behaviour on that channel
 function syncSingle() {
   if (selIds.value.length === 1) selChannelId.value = selIds.value[0];
@@ -3436,8 +3462,63 @@ defineExpose({ settle: settleAll, openTab: (name) => (tab.value = name) });
 .fx-placeholder { opacity: 0.65; }
 .hidden-fx { border: 1px dashed rgba(255, 255, 255, 0.3); border-radius: 6px; }
 .fader-editable { cursor: pointer; outline: 1px dashed rgba(255, 255, 255, 0.35); }
+.pair-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 4px;
+}
 .pair-tile {
-  min-width: 72px;
-  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 54px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  line-height: 1.15;
+  text-align: left;
+  cursor: pointer;
+}
+.pair-tile:focus-visible {
+  outline: 2px solid var(--q-primary);
+  outline-offset: 1px;
+}
+.pair-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.pair-tile.state-linked {
+  background: var(--q-primary);
+  border-color: var(--q-primary);
+  color: #fff;
+}
+/* blocked stays hoverable (aria-disabled, not disabled) so its tooltip can say why */
+.pair-tile.state-blocked {
+  border-color: var(--q-negative);
+  color: var(--q-negative);
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+.pair-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pair-num {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.pair-names {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  opacity: 0.9;
 }
 </style>

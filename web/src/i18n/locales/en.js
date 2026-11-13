@@ -838,6 +838,8 @@ export default {
     unlinkRange: "Unlink pairs",
     unlinkRangeConfirm: "Unlink {n} stereo pair(s)?",
     unlinkConfirm: "Unlink the stereo pair {pair}? The two channels become mono again.",
+    viewGrid: "Grid view",
+    viewList: "List view",
     pairLinked: "Linked: tap to unlink",
     pairFree: "Tap to link this pair",
     pairBlocked: "One of these channels is linked to another channel: unlink that first",

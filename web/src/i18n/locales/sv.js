@@ -840,6 +840,8 @@ export default {
     unlinkRange: "Ta bort länkar",
     unlinkRangeConfirm: "Ta bort länken för {n} stereopar?",
     unlinkConfirm: "Ta bort stereolänken {pair}? De två kanalerna blir mono igen.",
+    viewGrid: "Rutnätsvy",
+    viewList: "Listvy",
     pairLinked: "Länkat: tryck för att ta bort länken",
     pairFree: "Tryck för att länka paret",
     pairBlocked: "En av kanalerna är länkad till en annan kanal: ta bort den länken först",

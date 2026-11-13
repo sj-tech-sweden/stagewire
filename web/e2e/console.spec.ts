@@ -88,7 +88,7 @@ test('choosing a preset enables the budget and fader map', async ({ page, reques
   await expect(page.getByTestId('console-fader-grid')).toBeVisible();
 });
 
-test('the Inputs-page Stereo toggle links a pair, the console overview shows it and can unlink', async ({
+test('the Inputs-page Stereo toggle links a pair, the console tile shows it and can unlink', async ({
   page,
   request,
 }) => {
@@ -100,15 +100,112 @@ test('the Inputs-page Stereo toggle links a pair, the console overview shows it 
   await expect(page.getByTestId('stereo-side').first()).toBeVisible();
   await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-links').click();
-  await expect(page.getByTestId('console-strip')).toHaveCount(1);
-  await expect(page.getByTestId('console-ganged')).toBeVisible();
-  // each leg is patched on its own: the soft patch tab lists both channels
+  // the tile grid is the whole UI: the pair is one linked tile that names its legs
+  const tile = page.getByTestId('console-pair-tile').first();
+  await expect(tile).toHaveAttribute('data-state', 'linked');
+  await expect(tile.getByTestId('console-pair-names')).toContainText('L/R');
+  // each leg is patched on its own: the soft patch tab shows both channels
   await page.getByTestId('console-tab-patch').click();
   await expect(page.getByTestId('console-patch-card')).toHaveCount(2);
   await page.getByTestId('console-tab-links').click();
-  await page.getByTestId('console-unlink').click();
-  await expect(page.getByTestId('console-strip')).toHaveCount(2);
+  // tapping a linked tile unlinks it after a confirmation
+  await tile.click();
+  await page.getByRole('button', { name: /ok/i }).click();
+  await expect(tile).toHaveAttribute('data-state', 'free');
 });
+
+test('a stereo tile shows the channel names, a free tile what linking would join', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  const base = `/jobs/${jobId}/channel-lists/${listId}`;
+  // seed() made Ch 1 and Ch 2 ("Src 1", "Src 2"); add two named channels
+  await call(request, headers, 'post', `${base}/channels`, { channel_number: 3, source_label: 'Kick' });
+  await call(request, headers, 'post', `${base}/channels`, { channel_number: 4, source_label: 'Snare' });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-links').click();
+  const tiles = page.getByTestId('console-pair-tile');
+  await expect(tiles.first().getByTestId('console-pair-names')).toContainText('Src 1 · Src 2');
+  await expect(tiles.nth(1).getByTestId('console-pair-names')).toContainText('Kick · Snare');
+  // linking names the primary "<base> L" and the server derives "<base> R": the tile then reads L/R
+  await tiles.nth(1).click();
+  await expect(tiles.nth(1)).toHaveAttribute('data-state', 'linked');
+  await expect(tiles.nth(1).getByTestId('console-pair-names')).toContainText('L/R');
+  // the old long list of strips is gone
+  await expect(page.getByTestId('console-strip')).toHaveCount(0);
+});
+
+test('the soft patch grid shows number, name, routing and pairing; selection works on tiles', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  const base = `/jobs/${jobId}/channel-lists/${listId}`;
+  for (const [n, label] of [[3, 'Kick'], [4, 'Snare']]) {
+    await call(request, headers, 'post', `${base}/channels`, { channel_number: n, source_label: label });
+  }
+  const box = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+    name: 'AR2412',
+    device_type: 'analog_stagebox',
+    ports: [{ direction: 'in', connector: 'xlr3', count: 24 }],
+  });
+  // Ch 3 is already patched to socket 5; Ch 1-2 are a linked pair
+  await call(request, headers, 'put', `/jobs/${jobId}/channels/${(await channelIdByNumber(request, headers, base, 3))}/soft-patch`, {
+    device_id: box.id,
+    port_id: 'in-xlr3',
+    socket: 5,
+  });
+  const first = await channelIdByNumber(request, headers, base, 1);
+  await call(request, headers, 'post', `${base}/console/link`, { primary_channel_id: first });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-patch').click();
+  // the grid is the default view
+  const cards = page.getByTestId('console-patch-card');
+  await expect(cards).toHaveCount(4);
+  const kick = cards.nth(2);
+  await expect(kick.getByTestId('console-tile-name')).toContainText('Kick');
+  await expect(kick.getByTestId('console-tile-route')).toContainText('AR2412 · 5');
+  await expect(kick).toHaveAttribute('data-patched', 'true');
+  // an unpatched tile says so, and the linked pair carries L / R badges
+  await expect(cards.nth(3)).toHaveAttribute('data-patched', 'false');
+  await expect(cards.nth(3).getByTestId('console-tile-route')).toContainText('—');
+  await expect(cards.nth(0).getByTestId('console-tile-pair')).toContainText('L');
+  await expect(cards.nth(1).getByTestId('console-tile-pair')).toContainText('R');
+  // click toggles the selection, shift-click selects the range between
+  await cards.nth(2).click();
+  await cards.nth(3).click({ modifiers: ['Shift'] });
+  await expect(page.getByTestId('console-select-count')).toContainText('2');
+  // the list view is still there and the choice is kept
+  await page.getByTestId('console-overview-view').getByRole('button').nth(1).click();
+  await expect(page.getByTestId('console-patch-check').first()).toBeVisible();
+});
+
+test('grid selection feeds the auto patch dialog with a dry-run preview', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId } = await seed(request, headers);
+  await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+    name: 'AR2412',
+    device_type: 'analog_stagebox',
+    ports: [{ direction: 'in', connector: 'xlr3', count: 24 }],
+  });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-patch').click();
+  await page.getByTestId('console-select-all').click();
+  await expect(page.getByTestId('console-select-count')).toContainText('2');
+  await page.getByTestId('console-select-auto').click();
+  await expect(page.getByTestId('console-auto-dialog')).toBeVisible();
+  await page.getByTestId('console-auto-preview').click();
+  await expect(page.getByTestId('console-auto-plan')).toContainText('→');
+});
+
+async function channelIdByNumber(request: APIRequestContext, headers: Record<string, string>, base: string, n: number) {
+  const lists = await (await request.get(`${API_BASE}/api/v1${base.replace(/\/channel-lists\/.*/, '')}/channel-lists`, { headers })).json();
+  for (const lst of lists) for (const c of lst.channels) if (c.channel_number === n) return c.id as string;
+  throw new Error(`no channel ${n}`);
+}
 
 test('the faders start as a starting point; the first edit stores the whole layout and Auto fill resets it', async ({ page, request }) => {
   await login(page);

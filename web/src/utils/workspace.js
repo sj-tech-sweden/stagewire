@@ -1755,6 +1755,7 @@ export function stereoPairTiles(channels, profile = null, mixerInputs = null) {
     const b = byNumber.get(high) || null;
     const together = !!(a?.is_stereo_linked && b?.is_stereo_linked && (a.stereo_partner_id === b.id || b.stereo_partner_id === a.id));
     const elsewhere = [a, b].some((c) => c?.is_stereo_linked && !together);
+    const names = [pairLegName(a), pairLegName(b)];
     tiles.set(low, {
       low,
       high,
@@ -1764,6 +1765,17 @@ export function stereoPairTiles(channels, profile = null, mixerInputs = null) {
       b,
       missing: [a ? null : low, b ? null : high].filter((n) => n != null),
       outOfRange: high > limit,
+      // what the tile shows under the numbers: "Drums L/R" for a pair sharing a base name,
+      // "Kick · Snare" for two different channels; empty when neither exists yet
+      names,
+      caption: pairCaption(names[0], names[1]),
+      // full text for the tooltip: "Ch 1 Drums L · Ch 2 Drums R" (a missing leg reads "Ch 2 +")
+      captionTitle: [
+        [low, names[0], a],
+        [high, names[1], b],
+      ]
+        .map(([n, name, c]) => `Ch ${n} ${c ? name : '+'}`.trim())
+        .join(' · '),
     });
   };
   for (let low = 1; low + 1 <= Math.max(limit, 0); low += 2) add(low);
@@ -1772,6 +1784,19 @@ export function stereoPairTiles(channels, profile = null, mixerInputs = null) {
     if (c.is_stereo_linked && c.stereo_link_role === 'primary') add(Number(c.channel_number));
   }
   return [...tiles.values()].sort((x, y) => x.low - y.low);
+}
+
+const pairLegName = (c) => String(c?.source_label || c?.name || '').trim();
+
+// The line under a pair tile's numbers. Both legs with the same base name ("Drums L" + "Drums R")
+// read "Drums L/R"; otherwise the names are joined ("Kick · Snare"); a missing leg adds nothing.
+export function pairCaption(nameA, nameB) {
+  const a = String(nameA || '').trim();
+  const b = String(nameB || '').trim();
+  const baseA = stripStereoSuffix(a);
+  const baseB = stripStereoSuffix(b);
+  if (a && b && baseA && baseA === baseB) return `${baseA} L/R`;
+  return [a, b].filter(Boolean).join(' · ');
 }
 
 // The tiles a "1-16" range covers: both legs inside the range (so "1-15" leaves 15–16 alone).
@@ -2009,6 +2034,105 @@ export function numberedLabel(prefix, number, label) {
   const lead = new RegExp(`^${prefix}\\s*${number}(\\D|$)`, 'i');
   if (!text) return `${prefix} ${number}`;
   return lead.test(text) ? text : `${prefix} ${number} ${text}`;
+}
+
+// --- soft patch tile grid ------------------------------------------------------------------------
+// One tile per channel (or bus): number, name, where it is patched now, stereo pairing and the
+// split-source badge, so 48-64+ channels read at a glance instead of as a long list.
+
+// A device name that fits a ~96 px tile: short names stay, a long one keeps its first word when that
+// fits, else is cut with an ellipsis ("Allen & Heath AR2412" -> "Allen").
+export function shortDeviceName(name, max = 9) {
+  const text = String(name || '').trim();
+  if (!text) return '?';
+  if (text.length <= max) return text;
+  const word = text.split(/\s+/)[0];
+  if (word.length >= 3 && word.length <= max) return word;
+  return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+// "AR2412 · 5" for a socket reference; "—" when there is none. `title` is the full text.
+export function routingShort(ref, deviceNames, { missing = '?', max = 9 } = {}) {
+  if (!ref) return { text: '—', title: '' };
+  const full = deviceNames?.get(ref.device_id);
+  return {
+    text: `${full ? shortDeviceName(full, max) : missing} · ${ref.socket ?? 1}`,
+    title: `${full || missing} · ${ref.port_id} #${ref.socket ?? 1}`,
+  };
+}
+
+// A bus's routing: its first endpoint as "AR2412 · 3–4" and "+1" for each further endpoint.
+export function busRoutingShort(bus, deviceNames, { missing = '?', max = 9, out = 'Out' } = {}) {
+  const endpoints = (bus?.out_endpoints || []).filter((e) => (e.refs || []).length);
+  if (!endpoints.length) return { text: '—', title: '' };
+  const first = endpoints[0];
+  const full = deviceNames?.get(first.refs[0].device_id);
+  const extra = endpoints.length > 1 ? ` +${endpoints.length - 1}` : '';
+  return {
+    text: `${full ? shortDeviceName(full, max) : missing} · ${socketRunText(first.refs.map((r) => r.socket))}${extra}`,
+    title: endpoints.map((e) => endpointLabel(e, deviceNames, { out })).join('  ·  '),
+  };
+}
+
+const MODE_BADGE = { mono: 'M', stereo: 'ST', lcr: 'LCR' };
+
+// The tile models for the channel (mode 'in' / 'out') or bus ('bus') strips, in the order given.
+// `strips` are the merged list+soft-patch rows the panel already builds (dsp_source, direct_out,
+// shared_with, *_orphaned, is_stereo_linked, stereo_link_role, stereo_partner_id, out_endpoints, mode).
+export function softPatchTiles(strips, { mode = 'in', deviceNames = new Map(), missing = '?', out = 'Out' } = {}) {
+  const tiles = (strips || []).map((c) => {
+    const isBus = mode === 'bus';
+    const field = mode === 'out' ? 'direct_out' : 'dsp_source';
+    const routing = isBus
+      ? busRoutingShort(c, deviceNames, { missing, out })
+      : routingShort(c[field], deviceNames, { missing });
+    const shortage = isBus ? endpointShortages(c).length > 0 : false;
+    const sharedCount = !isBus && mode === 'in' && c.shared_with?.length ? c.shared_with.length + 1 : 0;
+    return {
+      id: c.id,
+      number: c.channel_number,
+      name: String(c.source_label || '').trim(),
+      routing: routing.text,
+      routingTitle: routing.title,
+      patched: isBus ? !!(c.out_endpoints || []).length : !!c[field],
+      orphaned: !isBus && !!c[`${field}_orphaned`],
+      pair: !isBus && c.is_stereo_linked ? (c.stereo_link_role === 'primary' ? 'L' : 'R') : null,
+      partnerId: !isBus && c.is_stereo_linked ? c.stereo_partner_id || null : null,
+      bridge: null,
+      shared: sharedCount,
+      sharedWith: c.shared_with || [],
+      modeBadge: isBus ? MODE_BADGE[c.mode] || 'M' : '',
+      endpoints: isBus ? (c.out_endpoints || []).length : 0,
+      shortage,
+    };
+  });
+  return bridgePairs(tiles);
+}
+
+// Mark the two tiles of a linked pair that sit next to each other so they can be drawn joined:
+// the left one 'start', the right one 'end'. A pair whose legs are not neighbours in this order
+// (filtered out, or split across a page) simply is not bridged.
+export function bridgePairs(tiles) {
+  const list = tiles || [];
+  list.forEach((tile, i) => {
+    const next = list[i + 1];
+    if (tile.pair === 'L' && next && next.pair === 'R' && tile.partnerId === next.id) {
+      tile.bridge = 'start';
+      next.bridge = 'end';
+    }
+  });
+  return list;
+}
+
+// The tooltip of a soft patch tile: "Ch 5 Kick · AR2412 · in-xlr3 #5 · L (stereo)".
+export function softTileTitle(tile, prefix = 'Ch') {
+  return [
+    `${prefix} ${tile.number}${tile.name ? ` ${tile.name}` : ''}`,
+    tile.routingTitle || tile.routing,
+    tile.pair ? `${tile.pair} (stereo)` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 // --- history step names -----------------------------------------------------------------------------

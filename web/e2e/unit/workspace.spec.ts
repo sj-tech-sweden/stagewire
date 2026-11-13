@@ -1009,6 +1009,23 @@ test('stereo pair tiles follow the console pairing rule, states and ranges', asy
   expect(blocked.find((t) => t.label === '1–2').state).toBe('blocked');
   // the unaligned linked pair still has its own tile (adjacent pairing)
   expect(blocked.map((t) => t.label)).toContain('2–3');
+  // the names under the numbers: a pair with one base name reads "<base> L/R", two different
+  // channels "A · B", a missing leg shows only the one that exists
+  const named = stereoPairTiles(
+    [
+      { id: 'a', channel_number: 1, source_label: 'Drums L', is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'b' },
+      { id: 'b', channel_number: 2, source_label: 'Drums R', is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'a' },
+      { id: 'c', channel_number: 3, source_label: 'Kick' },
+      { id: 'd', channel_number: 4, source_label: 'Snare' },
+      { id: 'e', channel_number: 5, source_label: 'Keys' },
+    ],
+    { dsp_inputs: { mono: 8 } },
+  );
+  expect(named.map((t) => t.caption)).toEqual(['Drums L/R', 'Kick · Snare', 'Keys', '']);
+  expect(named[0].names).toEqual(['Drums L', 'Drums R']);
+  expect(named[0].captionTitle).toBe('Ch 1 Drums L · Ch 2 Drums R');
+  expect(named[2].captionTitle).toBe('Ch 5 Keys · Ch 6 +');
+  expect(named[3].captionTitle).toBe('Ch 7 + · Ch 8 +');
   // ranges: both legs must be inside
   expect(tilesInRange(tiles, '1-4').map((t) => t.label)).toEqual(['1–2', '3–4']);
   expect(tilesInRange(tiles, '1-3').map((t) => t.label)).toEqual(['1–2']);
@@ -1484,4 +1501,70 @@ test('typing in the step picker offers Create unless a device with that exact na
   expect(isNewDeviceValue(newDeviceValue('X'))).toBe(true);
   expect(newDeviceName('new: Foo ')).toBe('Foo');
   expect(newDeviceName('uuid-1')).toBe('');
+});
+
+
+test('pair captions and short names fit a tile', async () => {
+  const { pairCaption, shortDeviceName } = await import('../../src/utils/workspace');
+  expect(pairCaption('Drums L', 'Drums R')).toBe('Drums L/R');
+  expect(pairCaption('Kick', 'Snare')).toBe('Kick · Snare');
+  expect(pairCaption('Kick', '')).toBe('Kick');
+  expect(pairCaption('', '')).toBe('');
+  // an unsuffixed shared name is not collapsed: two channels that merely have the same name
+  expect(pairCaption('Keys', 'Keys')).toBe('Keys L/R');
+  expect(shortDeviceName('AR2412')).toBe('AR2412');
+  expect(shortDeviceName('Allen & Heath AR2412')).toBe('Allen');
+  expect(shortDeviceName('Digital stagebox rack')).toBe('Digital');
+  expect(shortDeviceName('ABCDEFGHIJKLMNOP')).toBe('ABCDEFGH…');
+  expect(shortDeviceName('')).toBe('?');
+});
+
+test('soft patch tiles show number, name, routing, pairing and split badge; pairs are bridged', async () => {
+  const { softPatchTiles, routingShort, busRoutingShort, softTileTitle } = await import('../../src/utils/workspace');
+  const names = new Map([['box', 'AR2412'], ['dante', 'Allen & Heath Dante card']]);
+  const ref = (device, port, socket) => ({ device_id: device, port_id: port, socket });
+  const strips = [
+    { id: 'c1', channel_number: 1, source_label: 'Keys L', dsp_source: ref('box', 'in-xlr3', 5), is_stereo_linked: true, stereo_link_role: 'primary', stereo_partner_id: 'c2', shared_with: [{ channel_id: 'c9', channel_number: 9 }] },
+    { id: 'c2', channel_number: 2, source_label: 'Keys R', dsp_source: ref('dante', 'in-dante', 12), is_stereo_linked: true, stereo_link_role: 'secondary', stereo_partner_id: 'c1', shared_with: [] },
+    { id: 'c3', channel_number: 3, source_label: '', dsp_source: null, direct_out: ref('box', 'out-xlr3', 2), dsp_source_orphaned: false },
+    { id: 'c4', channel_number: 4, source_label: 'Gone', dsp_source: ref('ghost', 'in-x', 1), dsp_source_orphaned: true },
+  ];
+  const tiles = softPatchTiles(strips, { mode: 'in', deviceNames: names });
+  expect(tiles.map((t) => [t.number, t.name, t.routing, t.patched, t.pair, t.bridge, t.shared])).toEqual([
+    [1, 'Keys L', 'AR2412 · 5', true, 'L', 'start', 2],
+    [2, 'Keys R', 'Allen · 12', true, 'R', 'end', 0],
+    [3, '', '—', false, null, null, 0],
+    [4, 'Gone', '? · 1', true, null, null, 0],
+  ]);
+  expect(tiles[3].orphaned).toBe(true); // a socket whose device is gone is flagged
+  expect(tiles[1].routingTitle).toBe('Allen & Heath Dante card · in-dante #12');
+  expect(softTileTitle(tiles[0])).toBe('Ch 1 Keys L · AR2412 · in-xlr3 #5 · L (stereo)');
+  // direct-out mode reads the other field and has no split badge
+  const outs = softPatchTiles(strips, { mode: 'out', deviceNames: names });
+  expect(outs[2].routing).toBe('AR2412 · 2');
+  expect(outs[3].orphaned).toBe(false); // the orphan flag follows the field of the mode
+  expect(outs.every((t) => t.shared === 0)).toBe(true);
+  // a pair is bridged only when its legs are neighbours in the shown order
+  const apart = softPatchTiles([strips[0], strips[2], strips[1]], { mode: 'in', deviceNames: names });
+  expect(apart.map((t) => t.bridge)).toEqual([null, null, null]);
+  expect(routingShort(null, names).text).toBe('—');
+});
+
+test('bus tiles show the first endpoint, extra endpoints and a mismatch', async () => {
+  const { softPatchTiles, busRoutingShort } = await import('../../src/utils/workspace');
+  const names = new Map([['box', 'AR2412']]);
+  const ep = (...sockets) => ({ id: `e${sockets[0]}`, refs: sockets.map((s) => ({ device_id: 'box', port_id: 'out-xlr3', socket: s })) });
+  const buses = [
+    { id: 'b1', channel_number: 1, source_label: 'Main', mode: 'stereo', out_endpoints: [ep(3, 4), ep(9, 10)] },
+    { id: 'b2', channel_number: 2, source_label: 'Aux', mode: 'mono', out_endpoints: [] },
+    { id: 'b3', channel_number: 3, source_label: 'IEM', mode: 'stereo', out_endpoints: [ep(7)] },
+  ];
+  const tiles = softPatchTiles(buses, { mode: 'bus', deviceNames: names });
+  expect(tiles.map((t) => [t.routing, t.modeBadge, t.endpoints, t.shortage, t.patched])).toEqual([
+    ['AR2412 · 3–4 +1', 'ST', 2, false, true],
+    ['—', 'M', 0, false, false],
+    ['AR2412 · 7', 'ST', 1, true, true], // a stereo bus with one socket needs two
+  ]);
+  expect(busRoutingShort(buses[0], names).title).toBe('AR2412 · Out 3–4  ·  AR2412 · Out 9–10');
+  expect(tiles.every((t) => t.pair === null && t.shared === 0)).toBe(true);
 });
