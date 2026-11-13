@@ -83,6 +83,10 @@ async def load_integration_config(db) -> dict:
         "api_key": _decrypt(enc) if enc else None,
         # URL under which stockwire-rental reaches this Stagewire API.
         "public_url": (stored.get("public_url") or "").rstrip("/"),
+        # Host of the stockwire-rental *frontend* (browser) used to build outbound
+        # deeplinks. Distinct from base_url (the rental API) so a deeplink opens the
+        # real rental frontend even when base_url points somewhere else (e.g. localhost).
+        "rental_frontend_url": (stored.get("rental_frontend_url") or "").rstrip("/"),
         # Shared HMAC secret for deeplinks, pushed to stockwire-rental on connect.
         "deeplink_secret": _decrypt(secret_enc) if secret_enc else None,
     }
@@ -95,6 +99,7 @@ async def save_integration_config(
     base_url: str,
     api_key: str | None,
     public_url: str | None = None,
+    rental_frontend_url: str | None = None,
 ) -> dict:
     stored = await _read_integration_raw(db)
     existing = await load_integration_config(db)
@@ -107,6 +112,11 @@ async def save_integration_config(
         "public_url": (public_url if public_url is not None else existing["public_url"]).rstrip(
             "/"
         ),
+        "rental_frontend_url": (
+            rental_frontend_url
+            if rental_frontend_url is not None
+            else existing["rental_frontend_url"]
+        ).rstrip("/"),
     }
     await _write_integration_raw(db, payload)
     return payload
