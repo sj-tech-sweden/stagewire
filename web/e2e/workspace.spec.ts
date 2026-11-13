@@ -497,10 +497,13 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
     .toBe(Math.round(100 + 60 / zoom));
 
   await page.getByTestId('connect-tool').click();
+  // Selecting the element may open the inspector column, which narrows the canvas and so changes
+  // the fitted zoom: measure again instead of reusing the geometry from before the drag.
+  const { box: area2, zoom: zoom2 } = await canvasGeometry(page);
   const movedX = 100 + 60 / zoom;
   const movedY = 100 + 40 / zoom;
-  const from = { x: area.x + movedX * zoom + 40, y: area.y + movedY * zoom + 20 };
-  const to = { x: area.x + 600 * zoom + 48, y: area.y + 100 * zoom + 20 };
+  const from = { x: area2.x + movedX * zoom2 + 40 * (zoom2 / zoom), y: area2.y + movedY * zoom2 + 20 * (zoom2 / zoom) };
+  const to = { x: area2.x + 600 * zoom2 + 48 * (zoom2 / zoom), y: area2.y + 100 * zoom2 + 20 * (zoom2 / zoom) };
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 8 });
@@ -1259,9 +1262,14 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
 
   await page.goto(`/jobs/${jobId}/workspace`);
   const canvas = page.getByTestId('workspace-canvas');
-  const { box, zoom } = await canvasGeometry(page);
-  // connect tool: drag from the amp (box 60 x 30 cm at 300,200) to the first outlet (600,200)
+  // the amp (the only placed device) and both outlets must be drawn before the drag starts, or the press lands on empty canvas
+  await expect(canvas).toHaveAttribute('data-canvas-devices', '1');
+  await expect(canvas).toHaveAttribute('data-outlets', '2');
+  // connect tool: drag from the amp (box 60 x 30 cm at 300,200) to the first outlet (600,200).
+  // The unplaced-gear tray ("Rack") appears late and pushes the canvas down, so measure after it.
   await page.getByTestId('connect-tool').click();
+  await expect(page.getByText('Rack', { exact: true }).first()).toBeVisible();
+  const { box, zoom } = await canvasGeometry(page);
   const from = { x: box.x + (300 + 30) * zoom, y: box.y + (200 + 15) * zoom };
   const to = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
   await page.mouse.move(from.x, from.y);
