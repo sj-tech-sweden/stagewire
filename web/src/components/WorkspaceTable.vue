@@ -39,8 +39,9 @@
       </q-item>
     </q-list>
 
-    <q-table
+    <AdaptiveTable
       v-else
+      table-id="gear"
       flat
       dense
       virtual-scroll
@@ -106,11 +107,12 @@
           >{{ slot.row.stockwire_product_name }}</span>
         </q-td>
       </template>
-    </q-table>
+    </AdaptiveTable>
   </div>
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed } from 'vue';
@@ -138,12 +140,12 @@ const scopeId = computed(() => props.venueId || props.jobId);
 
 const columns = computed(() => {
   const cols = [
-    { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left' },
-    { name: 'domain', label: t('workspace.colDomain'), field: 'domain', align: 'left' },
-    { name: 'kind', label: t('workspace.colKind'), field: 'kind', align: 'left' },
-    { name: 'inlet', label: t('workspace.colInlet'), field: (row) => (isPowerNode(row) ? '' : powerInletLabel(row.attributes?.power_inlet)), align: 'left' },
-    { name: 'stockwire', label: t('workspace.colStockwire'), field: 'stockwire_product_name', align: 'left' },
-    { name: 'notes', label: t('workspace.colNotes'), field: 'notes', align: 'left' },
+    { name: 'name', label: t('workspace.colName'), field: 'name', align: 'left', min: 150, width: 200, grow: 3, required: true },
+    { name: 'domain', label: t('workspace.colDomain'), field: 'domain', align: 'left', min: 80, width: 100, grow: 0 },
+    { name: 'kind', label: t('workspace.colKind'), field: 'kind', align: 'left', min: 110, width: 150, grow: 1 },
+    { name: 'inlet', label: t('workspace.colInlet'), field: (row) => (isPowerNode(row) ? '' : powerInletLabel(row.attributes?.power_inlet)), align: 'left', min: 100, width: 140, grow: 1 },
+    { name: 'stockwire', label: t('workspace.colStockwire'), field: 'stockwire_product_name', align: 'left', min: 150, width: 200, grow: 1.5 },
+    { name: 'notes', label: t('workspace.colNotes'), field: 'notes', align: 'left', min: 140, width: 200, grow: 2 },
   ];
   // The stockwire column (booking status / linked product) is an integration concern; drop it when
   // the integration is disabled so no stockwire data is surfaced.

@@ -102,8 +102,9 @@
         </template>
       </q-virtual-scroll>
 
-      <q-table
+      <AdaptiveTable
         v-else
+        table-id="patch-drawer"
         flat
         dense
         class="patch-scroll"
@@ -201,12 +202,13 @@
             />
           </q-td>
         </template>
-      </q-table>
+      </AdaptiveTable>
     </div>
   </q-card>
 </template>
 
 <script setup>
+import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref } from 'vue';
@@ -257,25 +259,20 @@ const rows = computed(() =>
 );
 
 const columns = computed(() => [
-  { name: 'from', label: t('workspace.colFrom'), field: 'from', align: 'left' },
-  { name: 'fromPort', label: '', field: 'fromPort', align: 'left' },
-  { name: 'to', label: t('workspace.colTo'), field: 'to', align: 'left' },
-  { name: 'toPort', label: '', field: 'toPort', align: 'left' },
-  {
-    name: 'patchLabel',
-    label: t('workspace.colPatchLabel'),
-    field: 'routeLabel',
-    align: 'left',
-  },
-  { name: 'channels', label: t('workspace.colChannels'), field: 'channels', align: 'right' },
+  { name: 'from', label: t('workspace.colFrom'), field: 'from', align: 'left', min: 130, width: 180, grow: 2, required: true },
+  { name: 'fromPort', label: '', chooserLabel: `${t('workspace.colFrom')} · ${t('workspace.colPort')}`, field: 'fromPort', align: 'left', min: 80, width: 110, grow: 0.5 },
+  { name: 'to', label: t('workspace.colTo'), field: 'to', align: 'left', min: 130, width: 180, grow: 2 },
+  { name: 'toPort', label: '', chooserLabel: `${t('workspace.colTo')} · ${t('workspace.colPort')}`, field: 'toPort', align: 'left', min: 80, width: 110, grow: 0.5 },
+  { name: 'patchLabel', label: t('workspace.colPatchLabel'), field: 'routeLabel', align: 'left', min: 110, width: 150, grow: 1.5 },
+  { name: 'channels', label: t('workspace.colChannels'), field: 'channels', align: 'right', min: 72, width: 84, grow: 0 },
   ...(tab.value === 'power'
-    ? [{ name: 'phase', label: t('workspace.colPhase'), field: 'phase', align: 'left' }]
+    ? [{ name: 'phase', label: t('workspace.colPhase'), field: 'phase', align: 'left', min: 80, width: 100, grow: 0 }]
     : []),
-  { name: 'cableLabel', label: t('workspace.colCable'), field: 'cableLabel', align: 'left' },
-  { name: 'issues', label: t('workspace.colIssues'), field: 'id', align: 'center' },
+  { name: 'cableLabel', label: t('workspace.colCable'), field: 'cableLabel', align: 'left', min: 110, width: 150, grow: 1 },
+  { name: 'issues', label: t('workspace.colIssues'), field: 'id', align: 'center', min: 72, width: 90, grow: 0 },
   ...(props.readonly
     ? []
-    : [{ name: 'actions', label: '', field: 'id', align: 'right' }]),
+    : [{ name: 'actions', label: '', field: 'id', align: 'right', min: 64, width: 72, grow: 0 }]),
 ]);
 
 const issuesByEdge = computed(() => {
