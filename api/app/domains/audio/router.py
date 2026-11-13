@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
-from app.domains.audio import schemas, service, wwb_store
+from app.domains.audio import console_service, schemas, service, wwb_store
 from app.domains.audio.camera_specs import resolve_camera_specs
 from app.domains.audio.coverage import coverage_grid, sector_for
 from app.domains.audio.device_specs import (
@@ -152,9 +152,8 @@ async def update_channel_list(
     channel_list = await service.get_channel_list(db, list_id)
     if channel_list is None or channel_list.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
-    channel_list = await service.update_channel_list(
-        db, channel_list, payload.model_dump(exclude_unset=True)
-    )
+    data = payload.model_dump(exclude_unset=True)
+    channel_list = await service.update_channel_list(db, channel_list, data)
     read = schemas.ChannelListRead.model_validate(channel_list)
     await audio_native.publish_nodes(db, job_id, [await _node_id(db, audio_native.LIST, list_id)])
     await publish_job_event(job_id, "list.upsert", read)
@@ -292,6 +291,7 @@ async def update_channel(
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    await console_service.guard_channel_update(db, channel_id, data)
     channel = await run_versioned_write(
         db,
         channel,
@@ -300,6 +300,11 @@ async def update_channel(
         lambda: service.update_channel(db, channel, data),
         lambda: service.get_channel(db, channel_id),
     )
+    mirrored = await console_service.mirror_to_secondary(db, job_id, channel.id)
+    await db.commit()
+    if mirrored is not None:
+        # the secondary changed too: other open workspaces must see it
+        await _publish_by_channel_id(db, audio_native.public_id(mirrored))
     channel = await service.get_channel(db, channel.id)
     read = schemas.AudioChannelPatchRead.model_validate(channel)
     await audio_native.publish_nodes(
@@ -320,6 +325,8 @@ async def delete_channel(
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel not found")
     removed: list = []
+    # deleting one half of a stereo pair frees the other half as a normal mono strip
+    freed = await console_service.release_partner(db, channel_id)
 
     async def remove() -> None:
         removed.append(await service.delete_channel(db, channel))
@@ -334,6 +341,8 @@ async def delete_channel(
     )
     await audio_native.publish_removed(channel.job_id, removed[0])
     await publish_job_event(channel.job_id, "channel.delete", {"id": str(channel_id)})
+    if freed is not None:
+        await _publish_by_channel_id(db, audio_native.public_id(freed))
 
 
 async def _node_id(db: AsyncSession, kind: str, ident: UUID) -> UUID:
@@ -474,6 +483,9 @@ async def create_output(
     job_id: UUID,
     list_id: UUID,
     payload: schemas.ChannelListOutputCreate,
+    force: bool = Query(
+        False, description="Add the bus even if it overflows the console's bus pool"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> schemas.ChannelListOutputRead:
     if await service.get_job(db, job_id) is None:
@@ -481,6 +493,9 @@ async def create_output(
     channel_list = await service.get_channel_list(db, list_id)
     if channel_list is None or channel_list.job_id != job_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    await console_service.guard_bus_budget(
+        db, job_id, list_id, new=payload.model_dump(exclude_unset=True), force=force
+    )
     output = await service.create_output(db, list_id, payload.model_dump(exclude_unset=True))
     await _publish_list(db, job_id, list_id)
     return schemas.ChannelListOutputRead.model_validate(output)
@@ -495,6 +510,7 @@ async def update_output(
     list_id: UUID,
     output_id: UUID,
     payload: schemas.ChannelListOutputUpdate,
+    force: bool = Query(False, description="Save even if the bus pool is overflowed"),
     db: AsyncSession = Depends(get_db),
 ) -> schemas.ChannelListOutputRead:
     if await service.get_job(db, job_id) is None:
@@ -503,6 +519,9 @@ async def update_output(
     if output is None or output.channel_list_id != list_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Output not found")
     data = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+    await console_service.guard_bus_budget(
+        db, job_id, list_id, replace=(str(output_id), data), force=force
+    )
     output = await run_versioned_write(
         db,
         output,
@@ -1122,17 +1141,28 @@ def _desired_stockwire_items(
     desired: dict[int, dict] = {}
     freetext: list[str] = []
 
-    def put(product_id, name: str | None, slot: str, freetext_name: str | None = None) -> None:
+    def put(
+        product_id,
+        name: str | None,
+        slot: str,
+        freetext_name: str | None = None,
+        quantity: int = 1,
+        bundle: str | None = None,
+    ) -> None:
         if not product_id:
             if freetext_name:
                 freetext.append(freetext_name)
             return
         pid = int(product_id)
-        entry = desired.setdefault(pid, {"quantity": 0, "label": name or "", "slots": []})
-        entry["quantity"] += 1
+        entry = desired.setdefault(
+            pid, {"quantity": 0, "label": name or "", "slots": [], "bundles": set()}
+        )
+        entry["quantity"] += quantity
         if name and not entry["label"]:
             entry["label"] = name
         entry["slots"].append(slot)
+        if bundle:
+            entry["bundles"].add(bundle)
 
     for clist in job.channel_lists if channel_lists is None else channel_lists:
         put(
@@ -1140,7 +1170,18 @@ def _desired_stockwire_items(
             clist.mixer_product_name,
             f"{clist.name} mixer",
             freetext_name=clist.mixer_product_name,
+            bundle=str(clist.id),
         )
+        # Hardware bundled with the console (stageboxes, expansion cards): part of the same
+        # bundle, so the sync keeps console + dependencies together (see sync_job_to_stockwire).
+        for accessory in clist.bundled_accessories or []:
+            put(
+                accessory.get("product_id"),
+                accessory.get("name"),
+                f"{clist.name} bundle: {accessory.get('name') or accessory.get('product_id')}",
+                quantity=max(int(accessory.get("quantity") or 1), 1),
+                bundle=str(clist.id),
+            )
         for ch in clist.channels:
             slot = f"Ch {ch.channel_number} {ch.source_label or ''}".strip()
             put(
@@ -1242,15 +1283,55 @@ async def sync_job_to_stockwire(
         removed.append(label)
     await db.commit()
 
+    # Atomic modular bundles: a console and its bundled stageboxes / expansion cards are synced as
+    # one unit. If any member of a bundle fails, the members of that bundle already written in this
+    # run are undone (added requirements deleted, changed quantities restored) and the rest of the
+    # bundle is skipped, so the rental job never holds a console without the hardware it needs.
+    undo: dict[str, list] = {}
+    failed_bundles: set[str] = set()
+
+    def once(action):
+        """A product shared by two bundles registers its undo under both; run it only once."""
+        ran = False
+
+        async def run() -> None:
+            nonlocal ran
+            if not ran:
+                ran = True
+                await action()
+
+        return run
+
+    async def roll_back(bundles: set[str]) -> None:
+        failed_bundles.update(bundles)
+        for bundle in bundles:
+            for action in reversed(undo.pop(bundle, [])):
+                try:
+                    await action()
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Could not roll back a bundle change: {exc}")
+        # Rollback restores each touched requirement to its pre-sync state. A product that is also
+        # used outside the bundle (e.g. as a mic) or by a second console is restored as a whole, so
+        # its other users catch up on the next sync; the error below tells the engineer to re-run.
+        errors.append(
+            "Console bundle rolled back: its hardware could not be synced together; fix the "
+            "failing item and sync again"
+        )
+
     for pid, want in desired.items():
         key = _product_key(pid)
         label = want["label"] or str(pid)
         notes = ", ".join(want["slots"]) if want["slots"] else None
         link = links_by_key.get(key)
+        bundles: set[str] = want.get("bundles") or set()
+        if bundles & failed_bundles:
+            errors.append(f"Skipped {label}: its console bundle failed")
+            continue
         if link is not None:
             if link.quantity == want["quantity"]:
                 unchanged += 1
                 continue
+            old_quantity = link.quantity
             try:
                 await sw.update_requirement(
                     link.rental_requirement_id,
@@ -1258,10 +1339,28 @@ async def sync_job_to_stockwire(
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"Could not update {label}: {exc}")
+                if bundles:
+                    await roll_back(bundles)
                 continue
-            updated.append(f"{label} {link.quantity}→{want['quantity']}")
+            entry_text = f"{label} {link.quantity}→{want['quantity']}"
+            updated.append(entry_text)
             link.quantity = want["quantity"]
             link.product_name = label
+
+            def restore(link=link, old=old_quantity, label=label, entry_text=entry_text):
+                async def action() -> None:
+                    await sw.update_requirement(
+                        link.rental_requirement_id, {"quantity_required": old, "label": label}
+                    )
+                    link.quantity = old
+                    if entry_text in updated:
+                        updated.remove(entry_text)
+
+                return action
+
+            shared = once(restore())
+            for bundle in bundles:
+                undo.setdefault(bundle, []).append(shared)
             continue
         try:
             created = await sw.add_requirement(
@@ -1275,18 +1374,32 @@ async def sync_job_to_stockwire(
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Could not add {label}: {exc}")
+            if bundles:
+                await roll_back(bundles)
             continue
-        db.add(
-            StockwireRequirementLink(
-                job_id=job.id,
-                item_key=key,
-                product_id=str(pid),
-                product_name=label,
-                rental_requirement_id=int(created["id"]),
-                quantity=want["quantity"],
-            )
+        new_link = StockwireRequirementLink(
+            job_id=job.id,
+            item_key=key,
+            product_id=str(pid),
+            product_name=label,
+            rental_requirement_id=int(created["id"]),
+            quantity=want["quantity"],
         )
+        db.add(new_link)
+        await db.flush()
         added.append(f"{label} ×{want['quantity']}")
+
+        def forget(link=new_link, label=label, quantity=want["quantity"]):
+            async def action() -> None:
+                await sw.delete_requirement(link.rental_requirement_id)
+                await db.delete(link)
+                added.remove(f"{label} ×{quantity}")
+
+            return action
+
+        shared = once(forget())
+        for bundle in bundles:
+            undo.setdefault(bundle, []).append(shared)
     await db.commit()
 
     parts: list[str] = []

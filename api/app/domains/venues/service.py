@@ -60,6 +60,9 @@ async def delete_venue(db: AsyncSession, venue: Venue) -> None:
     await db.execute(
         update(ProductionJob).where(ProductionJob.venue_id == venue.id).values(venue_id=None)
     )
+    from app.domains.history import service as history
+
+    await history.purge(db, "venue", venue.id)
     await db.delete(venue)
     await db.commit()
 

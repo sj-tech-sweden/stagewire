@@ -33,6 +33,8 @@ async def test_report_registry_templates_and_pdf_exports(auth_headers):
             "job-summary",
             "channel-list",
             "patch-sheet",
+            "stage-patch-sheet",
+            "console-dsp-sheet",
             "stage-plot",
             "fixture-patch",
             "power-sheet",

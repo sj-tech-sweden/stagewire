@@ -93,6 +93,9 @@ async def update_job(db: AsyncSession, job: ProductionJob, data: dict) -> Produc
 
 
 async def delete_job(db: AsyncSession, job: ProductionJob) -> None:
+    from app.domains.history import service as history
+
+    await history.purge(db, "job", job.id)
     await db.delete(job)
     await db.commit()
 

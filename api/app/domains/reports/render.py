@@ -15,7 +15,7 @@ from pypdf.errors import PdfReadError
 from reportlab.graphics.shapes import Drawing, Polygon, PolyLine, Rect, String
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -1060,7 +1060,15 @@ async def render_report_pdf(
         raise ReportRenderError("Unsupported stage plot view")
     html = _prepare_html(template.body_html, definition, context, template.locale)
     letterhead = await _select_letterhead(db, template)
-    page_size = (letterhead.page_width_pt, letterhead.page_height_pt) if letterhead else A4
+    # A report that is wide by nature (the console setup sheet) prints landscape; a letterhead's own
+    # page size always wins, since the letter paper is what it is printed on.
+    page_size = (
+        (letterhead.page_width_pt, letterhead.page_height_pt)
+        if letterhead
+        else landscape(A4)
+        if definition.landscape
+        else A4
+    )
     margins = (
         (
             letterhead.margin_top_mm * mm,

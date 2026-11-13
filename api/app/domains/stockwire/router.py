@@ -195,6 +195,8 @@ async def search_products(
     exclude_rental: bool = False,
     min_inputs: int | None = None,
     min_outputs: int | None = None,
+    mixer_architecture: str | None = None,
+    min_bus_slots: int | None = None,
     skip: int = 0,
     limit: int = 50,
     db=Depends(get_db),
@@ -212,6 +214,8 @@ async def search_products(
             exclude_rental=exclude_rental,
             min_inputs=min_inputs,
             min_outputs=min_outputs,
+            mixer_architecture=mixer_architecture,
+            min_bus_slots=min_bus_slots,
             skip=skip,
             limit=limit,
         )

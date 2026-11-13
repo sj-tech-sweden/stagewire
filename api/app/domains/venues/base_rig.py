@@ -9,7 +9,7 @@ into that job, giving each device/edge a fresh id and clearing ``venue_id``.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.graph.models import ConnectionEdge, GraphDevice
@@ -46,14 +46,22 @@ async def replace_base_rig(
     db: AsyncSession, venue_id: UUID, payload: VenueBaseRigWrite
 ) -> GraphRead:
     # Drop the existing rig first; edges reference devices, so remove them before the devices.
-    await db.execute(
-        delete(ConnectionEdge).where(
+    # Row by row through the ORM (not a bulk ``delete()``) so the history recorder sees the old rig
+    # and "undo" can bring it back.
+    old_edges = await db.scalars(
+        select(ConnectionEdge).where(
             ConnectionEdge.venue_id == venue_id, ConnectionEdge.job_id.is_(None)
         )
     )
-    await db.execute(
-        delete(GraphDevice).where(GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None))
+    for edge in old_edges.all():
+        await db.delete(edge)
+    await db.flush()
+    old_devices = await db.scalars(
+        select(GraphDevice).where(GraphDevice.venue_id == venue_id, GraphDevice.job_id.is_(None))
     )
+    for device in old_devices.all():
+        await db.delete(device)
+    await db.flush()
 
     for device in payload.devices:
         db.add(

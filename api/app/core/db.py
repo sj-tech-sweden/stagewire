@@ -35,6 +35,7 @@ async def init_db() -> None:
     import app.domains.auth.models  # noqa: F401
     import app.domains.connectors.models  # noqa: F401
     import app.domains.graph.models  # noqa: F401
+    import app.domains.history.models  # noqa: F401
     import app.domains.lighting.models  # noqa: F401
     import app.domains.reports.models  # noqa: F401
     import app.domains.venues.models  # noqa: F401

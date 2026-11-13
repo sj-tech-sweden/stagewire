@@ -22,8 +22,19 @@ CHANNEL_DEFAULTS = {
     "stereo": False,
     "stereo_channel": None,
     "color_code": None,
+    "is_stereo_linked": False,
+    "stereo_link_role": None,
+    "stereo_partner_id": None,
+    "dsp_source": None,
+    "direct_out": None,
 }
-OUTPUT_DEFAULTS = {"mode": "mono", "connector": None, "color_code": None}
+OUTPUT_DEFAULTS = {
+    "mode": "mono",
+    "connector": None,
+    "color_code": None,
+    "role": "aux",
+    "out_endpoints": None,
+}
 
 
 def channel_view(device: GraphDevice) -> SimpleNamespace:
@@ -61,6 +72,12 @@ def list_view(device: GraphDevice) -> SimpleNamespace:
         mixer_product_name=attrs.get("mixer_product_name"),
         mixer_inputs=attrs.get("mixer_inputs"),
         mixer_buses=attrs.get("mixer_buses"),
+        mixer_profile=attrs.get("mixer_profile"),
+        fader_layout=attrs.get("fader_layout"),
+        dca_config=attrs.get("dca_config"),
+        fx_config=attrs.get("fx_config"),
+        expansion_installed=attrs.get("expansion_installed"),
+        bundled_accessories=attrs.get("bundled_accessories") or [],
     )
 
 

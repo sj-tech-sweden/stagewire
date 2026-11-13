@@ -45,7 +45,24 @@ from app.domains.graph.models import ConnectionEdge, GraphDevice
 
 LIST, CHANNEL, OUTPUT = "channel_list", "channel", "output"
 KINDS = (LIST, CHANNEL, OUTPUT)
-LIST_ATTRS = ("mixer_product_id", "mixer_product_name", "mixer_inputs", "mixer_buses")
+LIST_ATTRS = (
+    "mixer_product_id",
+    "mixer_product_name",
+    "mixer_inputs",
+    "mixer_buses",
+    # digital-console profile (see audio/console.py) and the accessories bundled onto the console
+    "mixer_profile",
+    "bundled_accessories",
+    # custom surface layout: {"layer:bank:fader": strip id | "empty"}; absent = default fill
+    "fader_layout",
+    # DCA names/members ({"1": {"name", "members": [strip ids]}}) and built-in FX engines
+    # ([{"id", "name", "type", "stereo_return", "sends": [channel ids]}]); see console.py
+    "dca_config",
+    "fx_config",
+    # expansion cards installed in the console ([{id, protocol, channels_in, channels_out}]); they
+    # are also real port groups on the console's mixer device (tagged ``expansion``)
+    "expansion_installed",
+)
 CHANNEL_ATTRS = (
     "channel_number",
     "input_type",
@@ -65,8 +82,18 @@ CHANNEL_ATTRS = (
     "stockwire_asset_id",
     "stand_product_id",
     "stand_product_name",
+    # Stereo linking + soft patch. Written only by the console endpoints (the create/update
+    # schemas do not accept them), so the pairing invariants cannot be bypassed by a plain edit.
+    "is_stereo_linked",
+    "stereo_link_role",
+    "stereo_partner_id",
+    "dsp_source",
+    "direct_out",
 )
-OUTPUT_ATTRS = ("mode", "connector", "color_code")
+# ``out_endpoints`` (where a bus physically leaves from: one or more endpoints of 1 / 2 / 3
+# sockets for mono / stereo / LCR) is written only by the console endpoints, like the channel soft
+# patch; the create/update schemas do not accept it.
+OUTPUT_ATTRS = ("mode", "connector", "color_code", "role", "out_endpoints")
 # A channel is the logical endpoint of a source signal: a mic or a digital stagebox feeds *into*
 # the channel (`in`), and the channel then feeds *out* to a bus / PA (`out`). These two ports are
 # fixed for every channel, so they are derived rather than trusted from the stored `ports` column:
@@ -93,8 +120,9 @@ CHANNEL_DEFAULTS = {
     "instrument_group": "other",
     "phantom_power": False,
     "stereo": False,
+    "is_stereo_linked": False,
 }
-OUTPUT_DEFAULTS = {"mode": "mono"}
+OUTPUT_DEFAULTS = {"mode": "mono", "role": "aux", "out_endpoints": None}
 # a null in an edit clears only these (the rest of the old columns were NOT NULL: null = not sent)
 CLEARABLE = {
     "stockwire_product_id",
@@ -105,10 +133,26 @@ CLEARABLE = {
     "mixer_product_name",
     "mixer_inputs",
     "mixer_buses",
+    "mixer_profile",
+    "bundled_accessories",
+    "fader_layout",
+    "dca_config",
+    "fx_config",
+    "expansion_installed",
     "device",
+    "dsp_source",
+    "direct_out",
+    "out_endpoints",
 }
 POINT_KEYS = ("connector", "patch_label", "notes")
 POINT_TEXT = ("point_type", "connector", "patch_label", "notes")
+
+
+def _first_out_ref(endpoints: list | None) -> dict | None:
+    for endpoint in endpoints or []:
+        if endpoint.get("refs"):
+            return endpoint["refs"][0]
+    return None
 
 
 def _uuid(value) -> uuid.UUID | None:
@@ -249,6 +293,8 @@ def output_row(node: GraphDevice, devices: dict) -> SimpleNamespace:
         revision=node.revision,
         points=_points(node, devices),
         **{key: a.get(key, OUTPUT_DEFAULTS.get(key)) for key in OUTPUT_ATTRS},
+        # the single socket older clients read: first socket of the first endpoint
+        out_socket=_first_out_ref(a.get("out_endpoints")),
     )
 
 
@@ -911,6 +957,20 @@ async def sync_edges(builder) -> None:
     """
     nodes = await job_nodes(builder.db, builder.job_id)
     by_id = {n.id: n for n in (*nodes, *builder.devices.values())}
+    channels = _of_kind(nodes, CHANNEL)
+    before = {n.id: n.attributes for n in channels}
+    out_before = {n.id: n.attributes for n in _of_kind(nodes, OUTPUT)}
+    reconcile_soft_patch(channels, by_id)
+    reconcile_out_endpoints(_of_kind(nodes, OUTPUT), channels, by_id)
+    reconcile_stereo_links(channels, _of_kind(nodes, LIST))
+    # Channel nodes are not in the sync's device set, so a change made here (a mirrored +48V, a
+    # derived socket, a link) would never reach open workspaces: report those nodes as changed.
+    for node in channels:
+        if node.attributes is not before[node.id]:
+            builder.result.changed_devices.append(node.id)
+    for node in _of_kind(nodes, OUTPUT):
+        if node.attributes is not out_before.get(node.id, node.attributes):
+            builder.result.changed_devices.append(node.id)
     for node in _of_kind(nodes, CHANNEL):
         number = (node.attributes or {}).get("channel_number")
         points = []
@@ -956,14 +1016,23 @@ async def sync_edges(builder) -> None:
                 first = points[0] if points else None
                 first_connector = first[0].get("connector") if first else ""
                 destination = first[1] if first else node
+                dport, socket_attrs = _soft_port(
+                    node,
+                    destination,
+                    builder.port(destination, "in", "audio", first_connector or ""),
+                )
                 builder.edge(
                     f"channel_sources:{node.id}",
                     "audio",
                     source,
                     out_port["id"],
                     destination,
-                    builder.port(destination, "in", "audio", first_connector or ""),
-                    attributes={"channel_id": str(node.id), "channel_source": True},
+                    dport,
+                    attributes={
+                        "channel_id": str(node.id),
+                        "channel_source": True,
+                        **socket_attrs,
+                    },
                 )
 
         for index, (point, source_step) in enumerate(points):
@@ -974,14 +1043,20 @@ async def sync_edges(builder) -> None:
                 else (node.attributes or {}).get("input_type")
             )
             row = _ns(point)
+            dport, socket_attrs = _soft_port(
+                node,
+                destination,
+                builder.port(destination, "in", "audio", destination_connector or ""),
+            )
             builder.edge(
                 f"channel_patch_points:{point['point_id']}",
                 "audio",
                 source_step,
                 builder.port(source_step, "out", "audio", destination_connector or ""),
                 destination,
-                builder.port(destination, "in", "audio", destination_connector or ""),
+                dport,
                 attributes={
+                    **socket_attrs,
                     "channel_number": number,
                     "cable_point_id": (
                         str(points[index + 1][0]["point_id"]) if index + 1 < len(points) else None
@@ -1032,6 +1107,179 @@ async def sync_edges(builder) -> None:
                     **_point_attrs(point, bus, bus_connector=True),
                 },
             )
+
+
+def reconcile_stereo_links(channels: list[GraphDevice], lists: list[GraphDevice]) -> None:
+    """Make the new link keys agree with the pair fields the Inputs page toggle writes.
+
+    ``stereo`` + ``stereo_channel`` (the old pairing) and ``is_stereo_linked`` + primary/secondary
+    (the console link) describe the same pair, and the graph PATCH the Inputs page uses can change
+    only the old fields. So after every sync a *reciprocal* old-style pair that obeys the console's
+    pairing rules becomes a link (lower number = primary), and link keys with no such pair behind
+    them (the toggle was switched off, or the partner is gone) are removed. An *existing* link is
+    kept while its reciprocal pair stands even if the console's rules changed since (a new profile,
+    a smaller input count): silently dissolving it would leave the two sources of truth disagreeing.
+    A brand-new pair that breaks a rule is simply not linked.
+    """
+    from app.domains.audio import console
+
+    profiles = {
+        str(lst.id): console.profile_from_stored((lst.attributes or {}).get("mixer_profile"))
+        for lst in lists
+    }
+    limits = {str(lst.id): (lst.attributes or {}).get("mixer_inputs") for lst in lists}
+    by_key = {
+        (str((n.attributes or {}).get("list_id")), (n.attributes or {}).get("channel_number")): n
+        for n in channels
+    }
+    for node in channels:
+        attrs = node.attributes or {}
+        list_id = str(attrs.get("list_id"))
+        number = attrs.get("channel_number")
+        partner_number = attrs.get("stereo_channel") if attrs.get("stereo") else None
+        partner = by_key.get((list_id, partner_number)) if partner_number else None
+        pattrs = (partner.attributes or {}) if partner is not None else {}
+        wanted = None
+        if (
+            partner is not None
+            and partner is not node
+            and pattrs.get("stereo")
+            and pattrs.get("stereo_channel") == number
+        ):
+            low, high = sorted((int(number), int(partner_number)))
+            try:
+                console.check_link(
+                    low, high, profiles.get(list_id), mixer_inputs=limits.get(list_id)
+                )
+                wanted = {
+                    "is_stereo_linked": True,
+                    "stereo_link_role": "primary" if number == low else "secondary",
+                    "stereo_partner_id": str(public_id(partner)),
+                }
+            except console.LinkError:
+                wanted = None
+                if attrs.get("is_stereo_linked") and attrs.get("stereo_partner_id") == str(
+                    public_id(partner)
+                ):
+                    continue  # already linked and still paired: leave it as it is
+        current = {
+            k: attrs.get(k) for k in ("is_stereo_linked", "stereo_link_role", "stereo_partner_id")
+        }
+        if wanted is None:
+            if any(v for v in current.values()):
+                node.attributes = {
+                    k: v
+                    for k, v in attrs.items()
+                    if k not in ("is_stereo_linked", "stereo_link_role", "stereo_partner_id")
+                }
+        elif any(current.get(k) != v for k, v in wanted.items()):
+            node.attributes = {**attrs, **wanted}
+    # A secondary follows its primary's shared fields (name, colour, group, +48V). Doing it here, on
+    # every sync, covers edits that arrive through the graph PATCH the Inputs page uses, which never
+    # passes through the audio route that mirrors them.
+    by_id = {str(public_id(n)): n for n in channels}
+    for node in channels:
+        attrs = node.attributes or {}
+        if attrs.get("stereo_link_role") != "secondary":
+            continue
+        primary = by_id.get(str(attrs.get("stereo_partner_id")))
+        if primary is None:
+            continue
+        shared = console.mirrored_fields(primary.attributes or {})
+        merged = {k: v for k, v in attrs.items() if k not in shared}
+        merged.update({k: v for k, v in shared.items() if v is not None})
+        if merged != attrs:
+            node.attributes = merged
+            if "source_label" in shared and shared["source_label"]:
+                node.name = _channel_name(merged)
+
+
+def _soft_port(
+    channel: GraphDevice, destination: GraphDevice, default_port: str
+) -> tuple[str, dict]:
+    """The port (and socket) an edge arrives on when its destination is the soft-patched hop.
+
+    A cable into the stagebox / Dante card the strip is soft patched to ends on that device's real
+    input socket, so the signal flow can say "AR2412 · XLR in 5" instead of an anonymous port.
+    Any other destination keeps the port the sync chose.
+    """
+    ref = (channel.attributes or {}).get("dsp_source")
+    if ref and destination is not channel and str(destination.id) == str(ref.get("device_id")):
+        return ref["port_id"], {"dst_socket": ref.get("socket")}
+    return default_port, {}
+
+
+def reconcile_out_endpoints(
+    outputs: list[GraphDevice], channels: list[GraphDevice], by_id: dict
+) -> None:
+    """Chain -> bus output endpoints: keep each bus's ``out_endpoints`` in step with its chain.
+
+    Endpoints survive while one of their devices is still on the bus's chain; with none stored, the
+    first hop naming an output socket (``Out 5`` / ``Out 5-6``) yields one. Sockets used by a
+    channel's direct out or another bus's endpoints are never derived.
+    """
+    from app.domains.audio import console
+
+    devices = {
+        str(n.id): n for n in by_id.values() if n.legacy_ref and n.legacy_ref.startswith("device:")
+    }
+    taken: set[str] = set()
+    for channel in channels:
+        key = console.socket_key((channel.attributes or {}).get("direct_out"))
+        if key:
+            taken.add(key)
+    ordered = sorted(outputs, key=lambda n: (n.position or 0, str(n.id)))
+    for node in ordered:  # stored endpoints claim their sockets first
+        for endpoint in (node.attributes or {}).get("out_endpoints") or []:
+            taken.update(console.endpoint_keys(endpoint))
+    for node in ordered:
+        attrs = node.attributes or {}
+        own = {k for e in attrs.get("out_endpoints") or [] for k in console.endpoint_keys(e)}
+        endpoints = console.derive_out_endpoints(
+            attrs, attrs.get("points") or [], devices, taken - own, attrs.get("mode")
+        )
+        if endpoints != (attrs.get("out_endpoints") or []):
+            changed = dict(attrs)
+            if endpoints:
+                changed["out_endpoints"] = endpoints
+                taken.update(k for e in endpoints for k in console.endpoint_keys(e))
+            else:
+                changed.pop("out_endpoints", None)
+            node.attributes = changed
+
+
+def reconcile_soft_patch(channels: list[GraphDevice], by_id: dict) -> None:
+    """Chain -> soft patch: set each channel's ``dsp_source`` from its patch chain (see console.py).
+
+    Runs inside every graph sync, so every way of editing a chain (point CRUD, chain replace, edge
+    edit, device swap or removal) keeps the structured socket in step. The chain wins on a
+    disagreement; a soft patch whose chain no longer ends at its device is dropped. A socket may
+    feed several strips (a split source), so nothing is stolen or refused here.
+    """
+    from app.domains.audio import console
+
+    devices = {
+        str(n.id): n for n in by_id.values() if n.legacy_ref and n.legacy_ref.startswith("device:")
+    }
+    socket_cache: dict[str, list[dict]] = {}  # each device's sockets, expanded once per sync
+    for node in channels:
+        attrs = node.attributes or {}
+        # every strip, secondary legs included: each leg of a pair has its own patch
+        ref, _ = console.derive_from_chain(attrs, attrs.get("points") or [], devices, socket_cache)
+        changed = dict(attrs)
+        if ref != attrs.get("dsp_source"):
+            if ref is None:
+                changed.pop("dsp_source", None)
+            else:
+                changed["dsp_source"] = ref
+        # keep the soft-patched hop at the strip end of the chain (see pin_soft_patch_last)
+        pinned = console.pin_soft_patch_last(
+            changed.get("points") or [], ref["device_id"] if ref else None
+        )
+        if pinned is not None:
+            changed["points"] = pinned
+        if changed != attrs:
+            node.attributes = changed
 
 
 def _sorted(node: GraphDevice) -> list[dict]:
