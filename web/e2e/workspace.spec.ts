@@ -1415,13 +1415,14 @@ test('an outlet is moved on the map and its position is edited in the venue powe
   // before clicking, otherwise the click can land on empty canvas (slower outlet load on a busy
   // database, e.g. later in the suite) and the outlet inspector never opens.
   await expect(canvas).toHaveAttribute('data-outlets', '1');
+  const first = await canvasGeometry(page);
+  // a click on an outlet marker opens it in the inspector
+  await page.mouse.click(first.box.x + 600 * first.zoom, first.box.y + 200 * first.zoom);
+  await expect(page.getByTestId('outlet-inspector')).toBeVisible();
+  // Opening the inspector narrows the map, which changes the fitted zoom and so where the marker
+  // is on screen: measure again once it has settled and aim the drag with the new geometry.
   const { box, zoom } = await canvasGeometry(page);
   const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
-  // a click on an outlet marker opens it in the inspector
-  await page.mouse.click(from.x, from.y);
-  await expect(page.getByTestId('outlet-inspector')).toBeVisible();
-  // opening the inspector can change the map's width: let it settle before dragging the marker
-  await stable(async () => (await canvas.boundingBox())!.width);
   await expect(page.getByTestId('outlet-name')).toHaveValue('SL 1');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
