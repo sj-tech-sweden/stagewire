@@ -2259,3 +2259,55 @@ export const fxResetEngine = (engine, position) => ({
   send_mode: 'mono',
   sends: [],
 });
+
+
+// Everything the console panel shows that can change in ANOTHER browser, boiled down to a short
+// string. The panel reloads (debounced) when it changes, so a fader dragged, a DCA renamed, a socket
+// patched or a stagebox added elsewhere appears without a refresh. It must therefore cover the list's
+// own console settings, each channel's patch and link state, each bus's mode and endpoints, and the
+// job's gear (the soft patch offers every device's sockets). The input is the live graph store, which
+// the realtime events keep current. A short hash keeps the prop small.
+const LIST_CONSOLE_KEYS = [
+  'mixer_profile',
+  'fader_layout',
+  'dca_config',
+  'fx_config',
+  'expansion_installed',
+  'bundled_accessories',
+  'mixer_product_id',
+  'mixer_inputs',
+  'mixer_buses',
+];
+export function consoleSignatureOf(list, channels, outputs, devices) {
+  const attrs = list?.attributes || {};
+  const parts = [
+    LIST_CONSOLE_KEYS.map((k) => attrs[k] ?? null),
+    (outputs || []).map((o) => [
+      o.id,
+      o.name,
+      o.position,
+      o.attributes?.mode,
+      o.attributes?.role,
+      o.attributes?.out_endpoints ?? null,
+    ]),
+    (channels || []).map((c) => [
+      c.id,
+      c.name,
+      c.attributes?.channel_number,
+      c.attributes?.stereo_link_role,
+      c.attributes?.is_stereo_linked,
+      c.attributes?.stereo_partner_id,
+      c.attributes?.instrument_group,
+      c.attributes?.phantom_power,
+      c.attributes?.dsp_source ?? null,
+      c.attributes?.direct_out ?? null,
+    ]),
+    (devices || [])
+      .filter((d) => String(d.legacy_ref || '').startsWith('device:'))
+      .map((d) => [d.id, d.name, d.ports ?? null]),
+  ];
+  const text = JSON.stringify(parts);
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  return `${text.length}:${(hash >>> 0).toString(36)}`;
+}

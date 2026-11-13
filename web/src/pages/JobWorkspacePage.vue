@@ -799,6 +799,7 @@ import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { api } from '@/boot/api';
 import { useGraphStore } from '@/stores/graph';
+import { useHistoryStore } from '@/stores/history';
 import { useJobSocket } from '@/composables/useJobSocket';
 import HistoryControls from '@/components/HistoryControls.vue';
 import {
@@ -840,6 +841,7 @@ const router = useRouter();
 const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
+const history = useHistoryStore();
 const jobId = String(route.params.jobId);
 // Own the store scope now (in setup, before child components mount) so mount-time venue/job-scoped
 // calls use the right prefix instead of the store's default job/null scope. load() re-asserts it.
@@ -982,13 +984,52 @@ function onHistoryRestore() {
   }, 150);
 }
 
+// Changes other people make arrive here. The graph events keep the store (and so the channel lists,
+// the console panel and the canvas) current; `job.update` changes the job itself (title, dates,
+// venue, notes), which lives outside the graph, so the header and plot frame are reloaded; and every
+// data event refreshes the undo / redo state, which is also affected by other people's writes.
+// Fields of the job that change what the stage plot draws. Only a change in one of these (and not
+// the echo of this browser's own write, which changes nothing) reloads the plot frame; reloading it
+// on every `job.update` would redraw the canvas under the user's mouse.
+const PLOT_JOB_KEYS = [
+  'venue_id',
+  'stage_width_cm',
+  'stage_depth_cm',
+  'stage_x_cm',
+  'stage_y_cm',
+  'venue_width_cm',
+  'venue_depth_cm',
+  'venue_footprint_shape',
+  'venue_stage_shape',
+  'cable_plan',
+  'audience_polygon',
+  'venue_footprint_polygon',
+  'venue_stage_polygon',
+];
+let plotTimer = null;
+function onJobChanged(payload) {
+  if (!payload || !job.value) return;
+  const before = job.value;
+  const plotChanged = PLOT_JOB_KEYS.some(
+    (k) => k in payload && JSON.stringify(payload[k]) !== JSON.stringify(before[k]),
+  );
+  job.value = { ...before, ...payload };
+  if (plotChanged) {
+    clearTimeout(plotTimer);
+    plotTimer = setTimeout(() => plotFrame.load(), 300);
+  }
+}
+const DATA_EVENTS = /^(graph\.|job\.|list\.|channel\.|device\.)/;
 const socket = useJobSocket(jobId, (event) => {
   if (event.type?.startsWith('graph.')) {
     graph.applyRealtimeEvent(event);
     scheduleChecks();
   } else if (event.type === 'history.restore') {
     onHistoryRestore();
+  } else if (event.type === 'job.update') {
+    onJobChanged(event.payload);
   }
+  if (DATA_EVENTS.test(event.type || '') || event.type === 'history.restore') history.scheduleRefresh(800);
 });
 
 // The user's own changes after a conflict are sent again; if that fails they are told why (the
