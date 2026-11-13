@@ -36,6 +36,7 @@ export default {
       login: "Logga in",
       print: "Skriv ut",
       upload: "Ladda upp",
+      inspect: "Granska",
     },
     language: {
       label: "Språk",
@@ -1399,6 +1400,9 @@ export default {
       showKey: "Visa nyckel",
       test: "Testa anslutning",
       notConfigured: "Spara API-nyckeln innan du testar",
+      rentalFrontendUrl: "Frontend-URL för uthyrning",
+      rentalFrontendUrlHint:
+        "Webapp-URL:en för stockwire-rental. Används för deeplinks som öppnar ett jobb där. Lämna tomt för att falla tillbaka på API-bas-URL:en.",
     },
     netbox: {
       title: "NetBox-integration",

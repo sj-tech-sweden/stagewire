@@ -6,7 +6,7 @@ export const useStockwireStore = defineStore('stockwire', {
     categoryMap: {},
     gearTypes: [],
     categories: [],
-    integration: { enabled: false, base_url: '', has_api_key: false },
+    integration: { enabled: false, base_url: '', has_api_key: false, rental_frontend_url: '' },
     // Availability per job, keyed by jobId. Populated on demand by the availability panel
     // and reused inline by the device dialog so the Stockwire call happens once per job.
     jobAvailability: {},

@@ -38,6 +38,19 @@
             {{ typeLabel(device) }} · {{ portsLabel(device) }}
           </q-item-label>
         </q-item-section>
+        <!-- Inspect opens the DeviceInspector (a bottom dialog on phones); the row tap
+             still opens the edit dialog, so both actions stay reachable on small screens. -->
+        <q-item-section side>
+          <q-btn
+            flat
+            dense
+            round
+            icon="visibility"
+            :aria-label="t('app.actions.inspect')"
+            data-testid="inspect-device"
+            @click.stop="inspect(device)"
+          />
+        </q-item-section>
       </q-item>
     </q-list>
 
@@ -132,6 +145,15 @@
       </template>
       <template #body-cell-actions="slot">
         <q-td :props="slot">
+          <q-btn
+            flat
+            dense
+            round
+            icon="visibility"
+            :aria-label="t('app.actions.inspect')"
+            data-testid="inspect-device"
+            @click="inspect(slot.row)"
+          />
           <q-btn
             flat
             dense
@@ -239,6 +261,13 @@ const failed = (err) =>
 function openDialog(device) {
   editing.value = device;
   dialogOpen.value = true;
+}
+
+// Open the DeviceInspector for a device. In the job workspace this selects the device so the
+// inspector renders (as a bottom dialog on phones); in the venue base-rig it drives the inline
+// inspector. Setting the shared store id keeps a single source of truth across pages.
+function inspect(device) {
+  graph.selectedDeviceId = device.id;
 }
 
 async function quickSave(device, changes) {
