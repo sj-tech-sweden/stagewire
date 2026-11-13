@@ -36,6 +36,7 @@ export default {
       login: "Logga in",
       print: "Skriv ut",
       upload: "Ladda upp",
+      inspect: "Granska",
     },
     language: {
       label: "Språk",

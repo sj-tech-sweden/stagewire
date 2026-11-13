@@ -36,6 +36,7 @@ export default {
       login: "Log in",
       print: "Print",
       upload: "Upload",
+      inspect: "Inspect",
     },
     language: {
       label: "Language",

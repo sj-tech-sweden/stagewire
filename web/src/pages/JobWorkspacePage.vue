@@ -762,6 +762,7 @@
           @request-booking="requestBooking"
           @remove="removeDevice"
           @select="(id) => (graph.selectedDeviceId = id)"
+          @close="closeInspector"
         />
       </q-card>
     </q-dialog>
