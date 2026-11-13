@@ -19,19 +19,58 @@ async function post(request: APIRequestContext, headers: Record<string, string>,
 const dataRows = (page: Page) =>
   page.getByTestId('workspace-table').locator('tbody tr').filter({ has: page.locator('input') });
 
-async function rowWithInputValue(table: Locator, value: string) {
-  const rows = table.locator('tbody tr:has(input)');
-  for (let index = 0; index < (await rows.count()); index += 1) {
-    const row = rows.nth(index);
-    if ((await row.locator('input').first().inputValue()) === value) return row;
+// The table fills in after the graph has loaded (and a virtualised table renders only some rows),
+// so a single look can miss the row on a slow run: keep looking until it shows up.
+async function rowWithInputValue(table: Locator, value: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = table.locator('tbody tr:has(input)');
+    const count = await rows.count();
+    for (let index = 0; index < count; index += 1) {
+      const row = rows.nth(index);
+      const input = row.locator('input').first();
+      if ((await input.inputValue().catch(() => null)) === value) return row;
+    }
+    if (Date.now() > deadline) throw new Error(`No workspace row has an input with value "${value}"`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`No workspace row has an input with value "${value}"`);
+}
+
+// The canvas needs a moment after a fit, a resize or an inspector opening before its zoom and
+// position are final (the zoom attribute follows the click, the host resizes through a
+// ResizeObserver). Specs that turn centimetres into mouse positions must wait for that, or the
+// pointer lands off target on a slow machine: read until the value is unchanged for several
+// consecutive reads.
+async function stable<T>(read: () => Promise<T>, rounds = 4, intervalMs = 120, timeoutMs = 8000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let last = JSON.stringify(await read());
+  let same = 0;
+  let value = await read();
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    value = await read();
+    const now = JSON.stringify(value);
+    same = now === last ? same + 1 : 0;
+    last = now;
+    if (same >= rounds) return value;
+  }
+  return value;
+}
+
+// Fit the plot, wait for it to settle, and return the canvas box and zoom to derive pixels from cm.
+async function canvasGeometry(page: Page, { fit = true }: { fit?: boolean } = {}) {
+  const canvas = page.getByTestId('workspace-canvas');
+  if (fit) await page.getByTestId('canvas-fit').click();
+  await canvas.scrollIntoViewIfNeeded();
+  return stable(async () => ({
+    box: (await canvas.boundingBox())!,
+    zoom: Number(await canvas.getAttribute('data-zoom')),
+  }));
 }
 
 // Fit the plot and read the zoom it settled on, so pixel positions can be derived from cm.
 async function fittedZoom(page: Page) {
-  await page.getByTestId('canvas-fit').click();
-  return Number(await page.getByTestId('workspace-canvas').getAttribute('data-zoom'));
+  return (await canvasGeometry(page)).zoom;
 }
 
 async function seedGraph(page: Page, request: APIRequestContext) {
@@ -246,8 +285,7 @@ test('dragging from one device to another with the connect tool creates a connec
   await expect(canvas).toBeVisible();
 
   await page.getByTestId('connect-tool').click();
-  const box = (await canvas.boundingBox())!;
-  const zoom = await fittedZoom(page);
+  const { box, zoom } = await canvasGeometry(page);
   // each device box is 96x40 px with its top-left at (cm * zoom)
   const from = { x: box.x + 100 * zoom + 48, y: box.y + 100 * zoom + 20 };
   const to = { x: box.x + 500 * zoom + 48, y: box.y + 100 * zoom + 20 };
@@ -443,8 +481,7 @@ test('plot elements are drawn on the workspace canvas: dragging moves the elemen
   // dragging, otherwise the drag can land before the Konva node exists (slower graph load on a
   // busier database, e.g. later in the suite).
   await expect(canvas).toHaveAttribute('data-canvas-devices', '2');
-  const area = (await canvas.boundingBox())!;
-  const zoom = await fittedZoom(page);
+  const { box: area, zoom } = await canvasGeometry(page);
   // element: top-left (100,100) cm, 100x50 cm -> 80x40 px; grab it near its middle
   const grab = { x: area.x + 100 * zoom + 40, y: area.y + 100 * zoom + 20 };
   await page.mouse.move(grab.x, grab.y);
@@ -1221,10 +1258,8 @@ test('venue power groups and outlets feed the power tree, and gear is plugged in
   expect(patchRes.status()).toBeLessThan(300);
 
   await page.goto(`/jobs/${jobId}/workspace`);
-  await page.getByTestId('canvas-fit').click();
   const canvas = page.getByTestId('workspace-canvas');
-  const box = (await canvas.boundingBox())!;
-  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  const { box, zoom } = await canvasGeometry(page);
   // connect tool: drag from the amp (box 60 x 30 cm at 300,200) to the first outlet (600,200)
   await page.getByTestId('connect-tool').click();
   const from = { x: box.x + (300 + 30) * zoom, y: box.y + (200 + 15) * zoom };
@@ -1372,13 +1407,13 @@ test('an outlet is moved on the map and its position is edited in the venue powe
   // before clicking, otherwise the click can land on empty canvas (slower outlet load on a busy
   // database, e.g. later in the suite) and the outlet inspector never opens.
   await expect(canvas).toHaveAttribute('data-outlets', '1');
-  await page.getByTestId('canvas-fit').click();
-  const box = (await canvas.boundingBox())!;
-  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  const { box, zoom } = await canvasGeometry(page);
   const from = { x: box.x + 600 * zoom, y: box.y + 200 * zoom };
   // a click on an outlet marker opens it in the inspector
   await page.mouse.click(from.x, from.y);
   await expect(page.getByTestId('outlet-inspector')).toBeVisible();
+  // opening the inspector can change the map's width: let it settle before dragging the marker
+  await stable(async () => (await canvas.boundingBox())!.width);
   await expect(page.getByTestId('outlet-name')).toHaveValue('SL 1');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
@@ -1524,9 +1559,7 @@ test('cables are routed on the new map: settings, a drawn cableway and the cable
   // a cableway is drawn with two clicks on the map and saved on the job
   const canvas = page.getByTestId('workspace-canvas');
   await page.getByTestId('draw-cableway').click();
-  await canvas.scrollIntoViewIfNeeded();
-  const area = (await canvas.boundingBox())!;
-  const zoom = Number(await canvas.getAttribute('data-zoom'));
+  const { box: area, zoom } = await canvasGeometry(page, { fit: false });
   await page.mouse.click(area.x + 200 * zoom, area.y + 170 * zoom);
   await page.mouse.click(area.x + 830 * zoom, area.y + 170 * zoom);
   await page.getByTestId('finish-cableway').click();
@@ -1541,10 +1574,7 @@ test('cables are routed on the new map: settings, a drawn cableway and the cable
   // Re-fit now that the frame has fully loaded so the click coordinates match the rendered map: a
   // late frame load in a busy-database run can leave the earlier fit stale, and the reroute clicks
   // would then land off the stage and be ignored (no waypoints get added).
-  await page.getByTestId('canvas-fit').click();
-  await canvas.scrollIntoViewIfNeeded();
-  const area2 = (await canvas.boundingBox())!;
-  const zoom2 = Number(await canvas.getAttribute('data-zoom'));
+  const { box: area2, zoom: zoom2 } = await canvasGeometry(page);
   await page.mouse.click(area2.x + 400 * zoom2, area2.y + 300 * zoom2);
   await expect.poll(async () => (await routeOf())?.waypoints?.length).toBe(1);
   await page.mouse.click(area2.x + 600 * zoom2, area2.y + 300 * zoom2);
