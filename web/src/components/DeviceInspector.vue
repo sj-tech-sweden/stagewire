@@ -3,8 +3,22 @@
     class="q-pa-md"
     :class="{ 'inspector-readonly': readonly }"
   >
-    <div class="text-subtitle1 q-mb-sm">
-      {{ t('workspace.inspector') }}
+    <div class="row items-center q-mb-sm">
+      <div class="text-subtitle1 col">
+        {{ t('workspace.inspector') }}
+      </div>
+      <!-- Closing the inspector (deselecting) gives its width back to the map and the tables. -->
+      <q-btn
+        flat
+        dense
+        round
+        icon="close"
+        :aria-label="t('workspace.closeInspector')"
+        data-testid="inspector-close"
+        @click="emit('close')"
+      >
+        <q-tooltip>{{ t('workspace.closeInspector') }} (Esc)</q-tooltip>
+      </q-btn>
     </div>
     <div
       v-if="!device"
@@ -819,7 +833,7 @@ const props = defineProps({
   canBindAssets: { type: Boolean, default: false },
   graphData: { type: Object, default: null },
 });
-const emit = defineEmits(['request-booking', 'remove', 'select', 'asset-bound']);
+const emit = defineEmits(['request-booking', 'remove', 'select', 'asset-bound', 'close']);
 
 const { t } = useI18n();
 const $q = useQuasar();

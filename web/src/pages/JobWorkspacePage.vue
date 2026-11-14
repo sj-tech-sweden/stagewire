@@ -703,9 +703,12 @@
         </div>
       </div>
 
+      <!-- The inspector only takes room while something is selected, so the map and the tables
+           use the full width otherwise; its close button (or Esc) hands the width back. -->
       <div
-        v-if="$q.screen.gt.sm"
+        v-if="$q.screen.gt.sm && inspectorShown"
         class="col-md-4 col-lg-3"
+        data-testid="inspector-panel"
       >
         <!-- The patch drawer sits under the map (left), so a tall inspector never leaves a gap
              between them; the inspector stays in view and scrolls on its own when it is long. -->
@@ -730,6 +733,7 @@
             @request-booking="requestBooking"
             @remove="removeDevice"
             @select="(id) => (graph.selectedDeviceId = id)"
+            @close="closeInspector"
           />
         </q-card>
       </div>
@@ -758,6 +762,7 @@
           @request-booking="requestBooking"
           @remove="removeDevice"
           @select="(id) => (graph.selectedDeviceId = id)"
+          @close="closeInspector"
         />
       </q-card>
     </q-dialog>
@@ -962,6 +967,22 @@ const canvasEdges = computed(() => {
   return out;
 });
 const inspectorOpen = computed(() => Boolean(graph.selectedDevice) || Boolean(selectedOutlet.value));
+
+// Closing the inspector deselects what it shows; the column then disappears and the map / tables
+// take the full width again. Esc does the same unless the user is typing or a dialog is open.
+function closeInspector() {
+  graph.selectedDeviceId = null;
+  selectedOutletId.value = null;
+}
+function onEscape(event) {
+  if (event.key !== 'Escape' || !inspectorOpen.value || event.defaultPrevented) return;
+  const el = event.target;
+  const typing = el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+  if (typing || document.querySelector('.q-dialog, .q-menu')) return;
+  closeInspector();
+}
+onMounted(() => window.addEventListener('keydown', onEscape));
+onBeforeUnmount(() => window.removeEventListener('keydown', onEscape));
 
 const modeKey = `sw_ws_mode_${jobId}`;
 const errorText = (err) => apiErrorText(err);
@@ -1298,6 +1319,35 @@ function selectOutlet(id) {
   selectedOutletId.value = id;
   graph.selectedDeviceId = null;
 }
+
+// The column opens only once the pointer is released. Pressing on a device selects it at once, and
+// opening the column then would resize the map under the pointer in the middle of the drag; closing
+// is immediate. (Keyboard and programmatic selections have no pointer down, so they open at once.)
+const pointerDown = ref(false);
+const inspectorShown = ref(false);
+watch([inspectorOpen, pointerDown], ([open, down]) => {
+  if (!open) inspectorShown.value = false;
+  else if (!down) inspectorShown.value = true;
+});
+function onPointerDown() {
+  pointerDown.value = true;
+}
+function onPointerUp() {
+  // after the click that ends the gesture has been handled
+  setTimeout(() => {
+    pointerDown.value = false;
+  }, 0);
+}
+onMounted(() => {
+  window.addEventListener('pointerdown', onPointerDown, true);
+  window.addEventListener('pointerup', onPointerUp, true);
+  window.addEventListener('pointercancel', onPointerUp, true);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', onPointerDown, true);
+  window.removeEventListener('pointerup', onPointerUp, true);
+  window.removeEventListener('pointercancel', onPointerUp, true);
+});
 
 // Cables are derived from the chains and routed along the cableways (utils/cables.js); only the
 // settings and the cableways are stored, on the job. Drawing a cableway adds points with a click
