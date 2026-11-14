@@ -23,12 +23,17 @@ export default async function ({ app }) {
   } catch {
     // Token already consumed the fragment; bail to the login screen.
     auth.logout()
+    window.location.hash = ''
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
     return
   }
 
   // Drop the tokens from the URL bar. The route is already the intended page (the
   // backend defaults the post-login path to "/"), so nothing else needs to change.
+  // Use an empty-hash assignment (in addition to replaceState) so the fragment is
+  // reliably removed across browsers; replaceState alone has been observed to leave
+  // the #access_token=... fragment in place in the e2e run.
+  window.location.hash = ''
   window.history.replaceState(null, '', window.location.pathname + window.location.search)
   // Mirror the proactive-refresh schedule the api boot set up at startup (it ran
   // before this token existed, so re-arm it now that we have a valid session).

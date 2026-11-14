@@ -633,7 +633,9 @@ def build_saml_redirect_url(saml: SAMLProvider) -> str:
     request_data = {
         "https": "on" if parsed.scheme == "https" else "off",
         "http_host": parsed.netloc,
-        "script_name": (acs_parsed.path if (acs_parsed and acs_parsed.path) else "/api/v1/auth/sso/saml/acs"),
+        "script_name": (
+            acs_parsed.path if (acs_parsed and acs_parsed.path) else "/api/v1/auth/sso/saml/acs"
+        ),
         "get_data": {},
         "post_data": {},
     }

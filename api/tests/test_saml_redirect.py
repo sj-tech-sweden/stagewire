@@ -7,8 +7,8 @@ the response as "Invalid SAML relay state". The SAML login flow never worked.
 
 from urllib.parse import parse_qs, urlparse
 
-from app.domains.auth.sso import SAMLProvider, build_saml_redirect_url
 from app.domains.auth.router import _decode_saml_relay_state
+from app.domains.auth.sso import SAMLProvider, build_saml_redirect_url
 
 
 def _make_provider(key: str = "test-provider") -> SAMLProvider:
