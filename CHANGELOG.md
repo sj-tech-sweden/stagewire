@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.4.0...stagewire-v1.4.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **stockwire:** fix sync 500, deeplink white page, and rental dates ([#98](https://github.com/sj-tech-sweden/stagewire/issues/98)) ([b612d68](https://github.com/sj-tech-sweden/stagewire/commit/b612d68291adab1c1de286ecc4811352ca0f802d))
+
 ## [1.4.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.3.0...stagewire-v1.4.0) (2026-11-14)
 
 
