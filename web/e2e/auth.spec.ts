@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureAdmin, login } from './helpers';
+import { ADMIN, API_BASE, ensureAdmin, login } from './helpers';
 
 test.beforeEach(async ({ request }) => {
   await ensureAdmin(request);
@@ -48,4 +48,23 @@ test('httpOnly refresh cookie re-establishes the session when the access token i
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   expect(token).not.toBe('garbage.invalid.token');
   expect(token).toBeTruthy();
+});
+
+test('SAML ACS fragment tokens establish a session and are cleared from the URL', async ({
+  page,
+  request,
+}) => {
+  await ensureAdmin(request);
+  // Stand in for the SAML IdP ACS response: a real access token delivered in the URL
+  // fragment (the backend's saml_acs 302s back with #access_token=...&refresh_token=...).
+  const loginRes = await request.post(`${API_BASE}/api/v1/auth/login`, { data: ADMIN });
+  const token = (await loginRes.json()).access_token as string;
+  await page.goto(`/#access_token=${token}&refresh_token=ignored`);
+  await expect(
+    page.getByRole('main').getByText('Production jobs', { exact: true }),
+    'the SAML fragment handler hydrates the user and lands on the jobs page',
+  ).toBeVisible({ timeout: 15000 });
+  await expect(page, 'the tokens are stripped from the URL bar').not.toHaveURL(/access_token=/);
+  const stored = await page.evaluate(() => localStorage.getItem('sw_access_token'));
+  expect(stored).toBe(token);
 });
