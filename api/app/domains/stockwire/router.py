@@ -456,12 +456,13 @@ async def outbound_deeplink(job_id: str, db=Depends(get_db)) -> dict:
         instance_id=STAGEWIRE_RENTAL_INSTANCE_ID,
         ttl_seconds=60 * 60 * 24 * 7,
     )
-    # Open in the rental *frontend*, not the rental API (base_url). The frontend proxies
-    # /api to its API, so the token lands on the same endpoint either way — but pointing at
-    # the real frontend host is what makes the job open in the browser at the right place
-    # instead of wherever base_url happens to point (e.g. a dev localhost).
-    host = cfg.get("rental_frontend_url") or cfg["base_url"]
-    url = f"{host.rstrip('/')}/api/v1/settings/integrations/stagewire/open?token={token}"
+    # The deeplink is opened in the browser against the rental *backend*: its
+    # /api/v1/settings/integrations/stagewire/open endpoint verifies the token and then
+    # 302-redirects to the rental frontend job page (using the backend's own configured
+    # frontend base URL). No separate frontend URL setting is needed on the Stagewire side;
+    # the browser reaches the backend directly and the backend drives the redirect.
+    api_host = cfg["base_url"].rstrip("/")
+    url = f"{api_host}/api/v1/settings/integrations/stagewire/open?token={token}"
     return {"url": url}
 
 

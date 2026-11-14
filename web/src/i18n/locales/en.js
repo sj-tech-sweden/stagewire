@@ -1398,9 +1398,6 @@ export default {
       showKey: "Show key",
       test: "Test connection",
       notConfigured: "Save the API key before testing",
-      rentalFrontendUrl: "Rental frontend URL",
-      rentalFrontendUrlHint:
-        "Browser URL of the stockwire-rental web app. Used for deeplinks that open a job there. Leave blank to fall back to the API base URL.",
     },
     netbox: {
       title: "NetBox integration",
