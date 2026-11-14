@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.3.0...stagewire-v1.4.0) (2026-11-14)
+
+
+### Features
+
+* **web:** adaptive tables with column chooser, resizing and floating headers ([#87](https://github.com/sj-tech-sweden/stagewire/issues/87)) ([be8f957](https://github.com/sj-tech-sweden/stagewire/commit/be8f9571042a5dd0a78a39e2bf60ee7611bf28fe))
+* **web:** inspector only takes room while something is selected, and can be closed ([#88](https://github.com/sj-tech-sweden/stagewire/issues/88)) ([3386cbb](https://github.com/sj-tech-sweden/stagewire/commit/3386cbb50de06ee72516fe941e76ccf225df1fd1))
+
 ## [1.3.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.2.0...stagewire-v1.3.0) (2026-11-13)
 
 
