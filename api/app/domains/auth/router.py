@@ -65,13 +65,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _refresh_cookie_samesite() -> str:
+    # SameSite=None requires the Secure attribute to be honoured by browsers. Over
+    # plain http (dev/test, secure_cookies=False) a None+insecure cookie is dropped,
+    # which silently breaks the refresh flow — so fall back to Lax there. Lax is
+    # still sent on same-origin requests, which is how the dev/PWA stack is served.
+    return "none" if settings.secure_cookies else "lax"
+
+
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     max_age = settings.jwt_refresh_expire_days * 24 * 60 * 60
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        samesite="none",
+        samesite=_refresh_cookie_samesite(),
         secure=settings.secure_cookies,
         path="/api/v1/auth",
         max_age=max_age,
@@ -83,7 +91,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         key="refresh_token",
         value="",
         httponly=True,
-        samesite="none",
+        samesite=_refresh_cookie_samesite(),
         secure=settings.secure_cookies,
         path="/api/v1/auth",
         max_age=0,

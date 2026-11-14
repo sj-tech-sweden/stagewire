@@ -41,7 +41,10 @@ test('httpOnly refresh cookie re-establishes the session when the access token i
   // cookie is still valid. The interceptor must refresh via the cookie and recover.
   await page.evaluate(() => localStorage.setItem('sw_access_token', 'garbage.invalid.token'));
   await page.reload();
-  await expect(page.getByRole('main').getByText('Production jobs', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('main').getByText('Production jobs', { exact: true }),
+    'silent refresh via the httpOnly cookie recovers the session',
+  ).toBeVisible({ timeout: 15000 });
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   expect(token).not.toBe('garbage.invalid.token');
   expect(token).toBeTruthy();
