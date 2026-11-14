@@ -8,7 +8,16 @@ from app.core.config import get_settings
 
 
 def rental_job_payload(job) -> dict:
-    """Map a Stagewire production job onto stockwire-rental's JobCreate schema."""
+    """Map a Stagewire production job onto stockwire-rental's JobCreate schema.
+
+    The rental job's dates are the *rental period* (``start_date``/``end_date`` on the
+    Stagewire job), not the one-off ``event_date``. stockwire-rental shows the rental
+    window and runs availability against it, so both bounds must be sent: previously we
+    only forwarded ``event_date`` as ``start_date`` (with no ``end_date``), which made the
+    rental job span a single day and left the rental period empty/weird. When an ``end_date``
+    is missing but a ``start_date`` exists we close the window to a single day so the rental
+    still has a valid, non-open-ended period.
+    """
     code = f"SW-{str(job.id).replace('-', '')[:8].upper()}"
     payload: dict = {
         "job_code": code,
@@ -17,10 +26,15 @@ def rental_job_payload(job) -> dict:
         "notes": job.notes or None,
         "status": "draft",
     }
-    event_date = getattr(job, "event_date", None)
-    if event_date:
-        day = event_date.date() if hasattr(event_date, "date") else event_date
-        payload["start_date"] = day.isoformat() if hasattr(day, "isoformat") else str(day)
+    start = getattr(job, "start_date", None)
+    end = getattr(job, "end_date", None)
+    if start is not None:
+        payload["start_date"] = start.isoformat() if hasattr(start, "isoformat") else str(start)
+        # Close an open-ended rental window to a single day rather than leaving end_date blank.
+        if end is None:
+            end = start
+    if end is not None:
+        payload["end_date"] = end.isoformat() if hasattr(end, "isoformat") else str(end)
     return payload
 
 

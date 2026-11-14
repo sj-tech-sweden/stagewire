@@ -1,9 +1,9 @@
-"""Outbound deeplink (Stagewire -> stockwire-rental) targets the rental *frontend*.
+"""Outbound deeplink (Stagewire -> stockwire-rental) targets the rental *backend*.
 
-The deeplink used to be built from ``base_url`` (the rental API host), so it always
-landed on whatever host base_url pointed at — in dev that is localhost:9000 even when the
-real rental frontend lives elsewhere. It must now prefer the dedicated ``rental_frontend_url``
-and only fall back to base_url when that is unset.
+The deeplink opens in the browser against the rental backend's
+``/api/v1/settings/integrations/stagewire/open`` endpoint (built from the configured
+``base_url``). That endpoint verifies the signed token and 302-redirects to the rental
+frontend job page, so no separate frontend URL setting is needed on the Stagewire side.
 """
 
 import uuid
@@ -41,15 +41,14 @@ async def _set_stockwire_job_id(job_id, sw_job_id):
         await db.commit()
 
 
-async def _configure(rental_frontend_url):
+async def _configure():
     async with db_mod.SessionLocal() as db:
         await save_integration_config(
             db,
             enabled=True,
-            base_url="http://localhost:8000",
+            base_url="https://rental-api.sj-tech.se",
             api_key="dev-token",
             public_url="http://stagewire:8010",
-            rental_frontend_url=rental_frontend_url,
         )
         await save_deeplink_secret(db, "test-deeplink-secret")
 
@@ -59,31 +58,21 @@ async def _deeplink(auth_headers, job_id):
         return await ac.get(f"{BASE}/stockwire/jobs/{job_id}/deeplink")
 
 
-async def test_deeplink_uses_rental_frontend_url(auth_headers):
+async def test_deeplink_targets_rental_backend(auth_headers):
     job_id = await _create_job(auth_headers)
     await _set_stockwire_job_id(job_id, "rental-123")
-    await _configure("https://rental.sj-tech.se")
+    await _configure()
 
     res = await _deeplink(auth_headers, job_id)
     assert res.status_code == 200, res.text
     url = res.json()["url"]
-    assert url.startswith("https://rental.sj-tech.se" + DEEPLINK_PATH), url
-
-
-async def test_deeplink_falls_back_to_base_url_when_frontend_unset(auth_headers):
-    job_id = await _create_job(auth_headers)
-    await _set_stockwire_job_id(job_id, "rental-456")
-    await _configure("")
-
-    res = await _deeplink(auth_headers, job_id)
-    assert res.status_code == 200, res.text
-    url = res.json()["url"]
-    assert url.startswith("http://localhost:8000" + DEEPLINK_PATH), url
+    # The browser hits the rental backend, which 302-redirects to the frontend job page.
+    assert url.startswith("https://rental-api.sj-tech.se" + DEEPLINK_PATH), url
 
 
 async def test_deeplink_requires_linked_job(auth_headers):
     job_id = await _create_job(auth_headers)  # no stockwire_job_id set
-    await _configure("https://rental.sj-tech.se")
+    await _configure()
 
     res = await _deeplink(auth_headers, job_id)
     assert res.status_code == 400, res.text
