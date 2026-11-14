@@ -842,10 +842,17 @@ test('rigging points and the power tree are built in the rigging editor and fixt
   await expect.poll(async () => (await legacy('power-nodes'))[0]?.name).toBe('Mains');
 
   const row = page.getByTestId('load-row').first();
+  // Each menu is opened and its option waited for before clicking: the options come from data that
+  // has just been saved, and clicking before they render picks nothing.
   await row.getByTestId('load-point').click();
-  await page.locator('.q-menu .q-item').first().click();
+  const pointItem = page.locator('.q-menu .q-item').first();
+  await expect(pointItem).toBeVisible();
+  await pointItem.click();
+  await expect(page.locator('.q-menu')).toHaveCount(0);
   await row.getByTestId('load-node').click();
-  await page.locator('.q-menu .q-item', { hasText: 'Mains' }).click();
+  const nodeItem = page.locator('.q-menu .q-item', { hasText: 'Mains' });
+  await expect(nodeItem).toBeVisible();
+  await nodeItem.click();
   await expect
     .poll(async () => {
       const fx = (await legacy('fixtures'))[0];

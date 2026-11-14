@@ -20,8 +20,11 @@ async function seed(page: Page, request: APIRequestContext) {
 // An explicit inspect button selects the device and opens the DeviceInspector (a bottom dialog
 // on phones), driven by the shared graph.selectedDeviceId.
 test('phone devices list: inspect button opens the DeviceInspector', async ({ page, request }) => {
-  await page.setViewportSize({ width: 390, height: 844 }); // lt.sm -> q-list, lt.md -> bottom dialog
+  // Sign in at the default desktop size: login() waits for the header's account button, whose
+  // label is not shown on a phone. Only then shrink to the phone viewport
+  // (lt.sm -> q-list, lt.md -> bottom dialog).
   const jobId = await seed(page, request);
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/jobs/${jobId}/workspace`);
 
   // Switch to the Devices mode (q-tabs, label localized as "Devices"/"Enheter").
