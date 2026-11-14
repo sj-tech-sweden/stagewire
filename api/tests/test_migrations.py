@@ -164,4 +164,16 @@ def test_alembic_upgrade_head_succeeds_on_postgres() -> None:
             "venues.footprint_shape missing: the venue geometry migration did "
             "not run (venue branch dropped from the chain)."
         )
+
+        # The Stockwire sync link table must carry venue_id: the model declares it
+        # (a job or a venue base rig can own the link) but the table was created
+        # without it, so the sync's first SELECT 500'd with UndefinedColumn and the
+        # UI reported a bare "Network Error". Migration i3s4t5u6v7w8 adds it.
+        links_columns = {
+            col["name"] for col in inspector.get_columns("stockwire_requirement_links")
+        }
+        assert "venue_id" in links_columns, (
+            "stockwire_requirement_links.venue_id missing: the link table was "
+            "created without venue_id, so sync_job_to_stockwire 500s."
+        )
     engine.dispose()
