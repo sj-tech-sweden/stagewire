@@ -426,12 +426,66 @@
             data-testid="console-bus"
           >
             <q-item-section>
-              <q-input
-                :model-value="bus.name"
-                dense
-                borderless
-                @change="(v) => updateBus(bus, { name: v })"
-              />
+              <div class="row items-center q-gutter-xs">
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  class="channel-swatch"
+                  :class="{ 'channel-swatch--unset': !bus.color_code }"
+                  :style="busSwatchStyle(bus.color_code)"
+                  :aria-label="t('workspace.colourPick')"
+                  data-testid="bus-colour"
+                >
+                  <q-tooltip>
+                    {{ bus.color_code || t("workspace.colourUnset") }}
+                  </q-tooltip>
+                  <q-popup-proxy @hide="commitBusColour(bus)">
+                    <q-card class="q-pa-sm" style="width: 260px">
+                      <div class="row q-gutter-xs q-mb-sm">
+                        <q-btn
+                          v-for="preset in PRESET_COLOURS"
+                          :key="preset"
+                          dense
+                          unelevated
+                          round
+                          size="sm"
+                          :style="{ background: preset }"
+                          :aria-label="preset"
+                          @click="pickBusPreset(bus, preset)"
+                        />
+                      </div>
+                      <q-color
+                        :model-value="busColourDraft(bus)"
+                        format-model="hex"
+                        no-header
+                        no-footer
+                        default-view="spectrum"
+                        flat
+                        @update:model-value="(v) => (pendingBusColour = { id: bus.id, value: v })"
+                        @change="(v) => setBusColour(bus, v)"
+                      />
+                      <q-btn
+                        v-close-popup
+                        flat
+                        dense
+                        no-caps
+                        icon="format_color_reset"
+                        :label="t('workspace.colourClear')"
+                        :disable="!bus.color_code"
+                        @click="setBusColour(bus, null)"
+                      />
+                    </q-card>
+                  </q-popup-proxy>
+                </q-btn>
+                <q-input
+                  :model-value="bus.name"
+                  dense
+                  borderless
+                  class="col"
+                  @change="(v) => updateBus(bus, { name: v })"
+                />
+              </div>
               <q-item-label
                 v-if="slotLabel(bus)"
                 caption
@@ -479,6 +533,31 @@
                 icon="delete"
                 :aria-label="t('workspace.remove')"
                 @click="removeBus(bus)"
+              />
+            </q-item-section>
+          </q-item>
+          <q-item>
+            <q-item-section>
+              <q-input
+                :model-value="bus.notes"
+                dense
+                outlined
+                :label="t('console.busNotes')"
+                data-testid="console-bus-notes"
+                @change="(v) => updateBus(bus, { notes: v })"
+              />
+            </q-item-section>
+            <q-item-section side style="min-width: 140px">
+              <q-select
+                :model-value="bus.tap_point"
+                :options="tapPoints"
+                dense
+                outlined
+                emit-value
+                map-options
+                :label="t('console.busTapPoint')"
+                data-testid="console-bus-tap-point"
+                @update:model-value="(v) => updateBus(bus, { tap_point: v })"
               />
             </q-item-section>
           </q-item>
@@ -1466,6 +1545,54 @@
                 >
                   DCA {{ n }}
                 </q-badge>
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  class="channel-swatch"
+                  :class="{ 'channel-swatch--unset': !dcaDraft[n].color }"
+                  :style="busSwatchStyle(dcaDraft[n].color)"
+                  :aria-label="t('workspace.colourPick')"
+                  data-testid="dca-colour"
+                >
+                  <q-popup-proxy @hide="commitDcaColour(n)">
+                    <q-card class="q-pa-sm" style="width: 260px">
+                      <div class="row q-gutter-xs q-mb-sm">
+                        <q-btn
+                          v-for="preset in PRESET_COLOURS"
+                          :key="preset"
+                          dense
+                          unelevated
+                          round
+                          size="sm"
+                          :style="{ background: preset }"
+                          :aria-label="preset"
+                          @click="setDcaColour(n, preset)"
+                        />
+                      </div>
+                      <q-color
+                        :model-value="dcaColourDraft(n)"
+                        format-model="hex"
+                        no-header
+                        no-footer
+                        default-view="spectrum"
+                        flat
+                        @update:model-value="(v) => (pendingDcaColour = { n, value: v })"
+                        @change="(v) => setDcaColour(n, v)"
+                      />
+                      <q-btn
+                        v-close-popup
+                        flat
+                        dense
+                        no-caps
+                        icon="format_color_reset"
+                        :label="t('workspace.colourClear')"
+                        :disable="!dcaDraft[n].color"
+                        @click="setDcaColour(n, null)"
+                      />
+                    </q-card>
+                  </q-popup-proxy>
+                </q-btn>
                 <q-input
                   v-model="dcaDraft[n].name"
                   dense
@@ -1476,6 +1603,15 @@
                   @update:model-value="dcaSaver.schedule()"
                 />
               </div>
+              <q-input
+                v-model="dcaDraft[n].notes"
+                dense
+                outlined
+                class="q-mb-sm"
+                :label="t('console.dcaNotes')"
+                data-testid="console-dca-notes"
+                @update:model-value="dcaSaver.schedule()"
+              />
               <StripPicker
                 v-model="dcaDraft[n].members"
                 :items="dcaItems"
@@ -2196,6 +2332,7 @@ import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { api } from "@/boot/api";
 import { apiErrorText } from "@/utils/errors";
+import { PRESET_COLOURS, colourToHex, normalizeHex } from "@/utils/colour";
 import PatchTileGrid from "@/components/PatchTileGrid.vue";
 import StripPicker from "@/components/StripPicker.vue";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
@@ -2337,6 +2474,7 @@ const budget = computed(() => summary.value?.budget);
 const buses = computed(() => (listData.value?.outputs || []).map((o) => ({ ...o, mode: o.mode || "mono", role: o.role || "aux" })));
 const roles = computed(() => summary.value?.profile?.bus_pool?.allowed_roles || ["aux", "group", "matrix", "main", "fx_send"]);
 const busModes = computed(() => ["mono", "stereo", "lcr"].map((m) => ({ value: m, label: t(`console.busMode.${m}`) })));
+const tapPoints = computed(() => ["pre_eq", "post_eq", "post_fade"].map((m) => ({ value: m, label: t(`console.tapPoint.${m}`) })));
 // A linked pair is ONE ganged strip: the secondary is hidden everywhere in this panel.
 const strips = computed(() =>
   (listData.value?.channels || []).filter((c) => c.stereo_link_role !== "secondary").sort((a, b) => a.channel_number - b.channel_number),
@@ -2580,6 +2718,65 @@ const addBus = () =>
   ).then(() => { newBus.name = ""; });
 const updateBus = (bus, changes) =>
   withForce((params) => api.patch(`${lb.value}/outputs/${bus.id}`, { ...changes, expected_revision: bus.revision }, { params }));
+
+const pendingBusColour = ref(null);
+const pendingDcaColour = ref(null);
+function busSwatchStyle(value) {
+  if (!value) return {};
+  const hex = colourToHex(value);
+  return hex ? { background: hex } : { background: "#9e9e9e" };
+}
+const busColourDraft = (bus) =>
+  (pendingBusColour.value?.id === bus.id && normalizeHex(pendingBusColour.value.value)) ||
+  colourToHex(bus.color_code) ||
+  "#ffffff";
+function setBusColour(bus, value) {
+  pendingBusColour.value = null;
+  const hex = value == null ? null : normalizeHex(value);
+  if (value != null && !hex) return;
+  if ((bus.color_code || null) === hex) return;
+  return updateBus(bus, { color_code: hex });
+}
+const pickBusPreset = (bus, hex) => setBusColour(bus, hex);
+function commitBusColour(bus) {
+  const pending = pendingBusColour.value;
+  if (!pending || pending.id !== bus.id) return;
+  pendingBusColour.value = null;
+  const hex = normalizeHex(pending.value);
+  if (!hex) return;
+  if ((bus.color_code || null) === hex) return;
+  return updateBus(bus, { color_code: hex });
+}
+
+function dcaSwatchStyle(value) {
+  if (!value) return {};
+  const hex = colourToHex(value);
+  return hex ? { background: hex } : { background: "#9e9e9e" };
+}
+const dcaColourDraft = (n) =>
+  (pendingDcaColour.value?.n === n && normalizeHex(pendingDcaColour.value.value)) ||
+  colourToHex(dcaDraft.value?.[n]?.color) ||
+  "#ffffff";
+function setDcaColour(n, value) {
+  pendingDcaColour.value = null;
+  const hex = value == null ? null : normalizeHex(value);
+  if (value != null && !hex) return;
+  if (!dcaDraft.value?.[n]) return;
+  if ((dcaDraft.value[n].color || null) === hex) return;
+  dcaDraft.value[n].color = hex;
+  dcaSaver.schedule();
+}
+function commitDcaColour(n) {
+  const pending = pendingDcaColour.value;
+  if (!pending || pending.n !== n) return;
+  pendingDcaColour.value = null;
+  const hex = normalizeHex(pending.value);
+  if (!hex) return;
+  if (!dcaDraft.value?.[n]) return;
+  if ((dcaDraft.value[n].color || null) === hex) return;
+  dcaDraft.value[n].color = hex;
+  dcaSaver.schedule();
+}
 async function removeBus(bus) {
   try {
     await api.delete(`${lb.value}/outputs/${bus.id}`, { params: { expected_revision: bus.revision } });
@@ -2595,7 +2792,7 @@ function dcaFrom(s) {
   const out = {};
   for (let n = 1; n <= (s.dca_count || 0); n += 1) {
     const d = s.dcas?.[String(n)] || {};
-    out[n] = { name: d.name || "", members: [...(d.members || [])] };
+    out[n] = { name: d.name || "", color: d.color || null, notes: d.notes || "", members: [...(d.members || [])] };
   }
   return out;
 }
@@ -2634,7 +2831,11 @@ async function persistDcas() {
   const dcas = {};
   for (const n of dcaNumbers.value) {
     const d = dcaDraft.value[n];
-    if (d && (d.name.trim() || d.members.length)) dcas[n] = { name: d.name.trim(), members: d.members };
+    if (d && (d.name.trim() || d.members.length || d.color || d.notes)) {
+      dcas[n] = { name: d.name.trim(), members: d.members };
+      if (d.color) dcas[n].color = d.color;
+      if (d.notes) dcas[n].notes = d.notes;
+    }
   }
   try {
     const { data } = await api.put(`${lb.value}/dcas`, { dcas });
