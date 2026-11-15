@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.4.1...stagewire-v1.5.0) (2026-11-15)
+
+
+### Features
+
+* **console:** fixed_buses for simple/fixed-aux consoles (Qu-16, ...) ([#104](https://github.com/sj-tech-sweden/stagewire/issues/104)) ([8a96b7b](https://github.com/sj-tech-sweden/stagewire/commit/8a96b7b5e4f0ac69d0a038cb16ebe913db0ec670))
+* **web:** keep users signed in via proactive refresh and httpOnly cookie ([#101](https://github.com/sj-tech-sweden/stagewire/issues/101)) ([78f47b1](https://github.com/sj-tech-sweden/stagewire/commit/78f47b155a0fa0bddc47b521656e9fcad06e0ff7))
+
+
+### Bug Fixes
+
+* **saml:** make SAML SSO login work end-to-end ([#102](https://github.com/sj-tech-sweden/stagewire/issues/102)) ([67ba177](https://github.com/sj-tech-sweden/stagewire/commit/67ba177fbb861f04db79ae3447415c52c4b4fbfd))
+
 ## [1.4.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.4.0...stagewire-v1.4.1) (2026-11-14)
 
 
