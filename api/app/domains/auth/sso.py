@@ -622,14 +622,51 @@ async def _ensure_mapped_role_exists(db: AsyncSession, user: User, role_name: st
 
 
 def build_saml_redirect_url(saml: SAMLProvider) -> str:
-    api_base = settings.public_api_base_url
-    parsed = urlparse(api_base)
+    # No dedicated `public_api_base_url` setting exists; derive the API host from
+    # the configured ACS URL (which is the public endpoint the IdP posts back to),
+    # falling back to the frontend base URL so the helper never crashes.
+    acs_parsed = urlparse(saml.acs_url) if saml.acs_url else None
+    if acs_parsed is not None and acs_parsed.netloc:
+        parsed = acs_parsed
+    else:
+        parsed = urlparse(settings.effective_frontend_base_url)
     request_data = {
         "https": "on" if parsed.scheme == "https" else "off",
         "http_host": parsed.netloc,
-        "script_name": "/api/v1/auth/sso/saml/acs",
+        "script_name": (
+            acs_parsed.path if (acs_parsed and acs_parsed.path) else "/api/v1/auth/sso/saml/acs"
+        ),
         "get_data": {},
         "post_data": {},
     }
-    auth = OneLogin_Saml2_Auth(request_data, saml.to_settings())
-    return auth.login()
+    # Build the OneLogin settings inline, mirroring parse_saml_response, so the
+    # provider's IdP/SP configuration is actually passed in (SAMLProvider has no
+    # to_settings() method — calling it used to raise AttributeError).
+    saml_settings = {
+        "strict": True,
+        "debug": False,
+        "sp": {
+            "entityId": saml.sp_entity_id,
+            "assertionConsumerService": {
+                "url": saml.acs_url,
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+            },
+        },
+        "idp": {
+            "entityId": saml.idp_entity_id,
+            "singleSignOnService": {
+                "url": saml.idp_sso_url,
+                "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+            },
+            "x509cert": saml.idp_x509_cert,
+        },
+    }
+    auth = OneLogin_Saml2_Auth(request_data, old_settings=saml_settings)
+    # Echo the provider key (and an in-app redirect) back to ourselves through the
+    # IdP as RelayState. saml_acs decodes this to recover which provider handled the
+    # assertion; without it the ACS rejects the response as "Invalid SAML relay
+    # state" and the whole SAML login fails before the frontend is ever reached.
+    relay_state = base64.urlsafe_b64encode(
+        json.dumps({"provider": saml.key, "redirect": "/"}).encode("utf-8")
+    ).decode()
+    return auth.login(return_to=relay_state)
