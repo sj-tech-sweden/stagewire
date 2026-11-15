@@ -98,7 +98,15 @@ CHANNEL_ATTRS = (
 # ``out_endpoints`` (where a bus physically leaves from: one or more endpoints of 1 / 2 / 3
 # sockets for mono / stereo / LCR) is written only by the console endpoints, like the channel soft
 # patch; the create/update schemas do not accept it.
-OUTPUT_ATTRS = ("mode", "connector", "color_code", "role", "out_endpoints", "tap_point", "talkback_destinations")
+OUTPUT_ATTRS = (
+    "mode",
+    "connector",
+    "color_code",
+    "role",
+    "out_endpoints",
+    "tap_point",
+    "talkback_destinations",
+)
 # A channel is the logical endpoint of a source signal: a mic or a digital stagebox feeds *into*
 # the channel (`in`), and the channel then feeds *out* to a bus / PA (`out`). These two ports are
 # fixed for every channel, so they are derived rather than trusted from the stored `ports` column:
