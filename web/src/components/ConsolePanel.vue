@@ -485,6 +485,15 @@
                   class="col"
                   @change="(v) => updateBus(bus, { name: v })"
                 />
+                <q-input
+                  :model-value="bus.notes"
+                  dense
+                  outlined
+                  class="col-12 q-mt-xs"
+                  :label="t('console.busNotes')"
+                  data-testid="console-bus-notes"
+                  @change="(v) => updateBus(bus, { notes: v })"
+                />
               </div>
               <q-item-label
                 v-if="slotLabel(bus)"
@@ -524,29 +533,6 @@
                 @update:model-value="(v) => updateBus(bus, { role: v })"
               />
             </q-item-section>
-            <q-item-section side>
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeBus(bus)"
-              />
-            </q-item-section>
-          </q-item>
-          <q-item>
-            <q-item-section>
-              <q-input
-                :model-value="bus.notes"
-                dense
-                outlined
-                :label="t('console.busNotes')"
-                data-testid="console-bus-notes"
-                @change="(v) => updateBus(bus, { notes: v })"
-              />
-            </q-item-section>
             <q-item-section side style="min-width: 140px">
               <q-select
                 :model-value="bus.tap_point"
@@ -558,6 +544,17 @@
                 :label="t('console.busTapPoint')"
                 data-testid="console-bus-tap-point"
                 @update:model-value="(v) => updateBus(bus, { tap_point: v })"
+              />
+            </q-item-section>
+            <q-item-section side>
+              <q-btn
+                flat
+                dense
+                round
+                color="negative"
+                icon="delete"
+                :aria-label="t('workspace.remove')"
+                @click="removeBus(bus)"
               />
             </q-item-section>
           </q-item>
