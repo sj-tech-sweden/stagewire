@@ -114,10 +114,14 @@ def test_parse_mixer_specs_reads_fixed_buses():
     # cannot cover 4 stereo aux buses.
     buses = [{"name": f"A{i}", "mode": "stereo", "role": "aux"} for i in range(4)]
     need = console.mixer_need([{"channel_number": i + 1} for i in range(5)], buses)
-    product = {"specs": {"mixer": {
-        "architecture": "digital_fixed",
-        "fixed_buses": {"aux_mono": 4, "aux_stereo": 3, "groups": 2, "main": 1},
-    }}}
+    product = {
+        "specs": {
+            "mixer": {
+                "architecture": "digital_fixed",
+                "fixed_buses": {"aux_mono": 4, "aux_stereo": 3, "groups": 2, "main": 1},
+            }
+        }
+    }
     fit = console.fit_mixer(need, buses, product)
     assert fit["fits"] is False
     # but 3 stereo auxes cover 3 stereo aux buses
