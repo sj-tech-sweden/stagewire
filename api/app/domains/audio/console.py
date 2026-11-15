@@ -883,7 +883,14 @@ def fit_mixer(need: dict, buses: list[dict], product: dict) -> dict:
         reasons.extend(budget["violations"])
     elif profile is not None and profile.fixed_buses is not None:
         fb = profile.fixed_buses
-        needed = {"aux_mono": 0, "aux_stereo": 0, "groups": 0, "matrix": 0, "main": 0, "fx_sends": 0}
+        needed = {
+            "aux_mono": 0,
+            "aux_stereo": 0,
+            "groups": 0,
+            "matrix": 0,
+            "main": 0,
+            "fx_sends": 0,
+        }
         for b in buses:
             role = (b.get("role") or "aux").lower()
             mode = (b.get("mode") or "mono").lower()
@@ -910,7 +917,9 @@ def fit_mixer(need: dict, buses: list[dict], product: dict) -> dict:
         }
         for cat in needed:
             if avail[cat] < needed[cat]:
-                reasons.append(f"{avail[cat]} {cat.replace('_', ' ')} available, {needed[cat]} needed")
+                reasons.append(
+                    f"{avail[cat]} {cat.replace('_', ' ')} available, {needed[cat]} needed"
+                )
         headroom["bus_slots"] = sum(avail.values()) - sum(needed.values())
     elif need["mixes"]:
         outputs = _flat(specs.get("outputs"))
