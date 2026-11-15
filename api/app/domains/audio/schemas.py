@@ -98,6 +98,8 @@ class AudioChannelPatchBase(BaseModel):
     stereo_channel: int | None = None
     notes: str = ""
     color_code: str | None = None
+    tap_point: str | None = None
+    bus_tap_points: dict | None = None
     stockwire_asset_id: str | None = None
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
@@ -197,6 +199,8 @@ class ChannelListOutputBase(BaseModel):
     connector: str | None = None
     notes: str = ""
     color_code: str | None = None
+    tap_point: str | None = None
+    talkback_destinations: list | None = None
 
 
 def _check_bus_mode(value: str | None) -> str | None:
@@ -280,6 +284,7 @@ class ChannelListBase(BaseModel):
     # digital-console profile (console.MixerProfile as JSON); null/absent = simple console
     mixer_profile: dict | None = None
     bundled_accessories: list[dict] | None = None
+    talkback_presets: list[dict] | None = None
 
 
 def _check_profile(value: dict | None) -> dict | None:
@@ -325,6 +330,7 @@ class ChannelListUpdate(ChannelListBase):
     mixer_buses: int | None = None
     mixer_profile: dict | None = None
     bundled_accessories: list[dict] | None = None
+    talkback_presets: list[dict] | None = None
 
 
 class ChannelListRead(ChannelListBase):

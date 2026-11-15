@@ -59,6 +59,9 @@ LIST_ATTRS = (
     # ([{"id", "name", "type", "stereo_return", "sends": [channel ids]}]); see console.py
     "dca_config",
     "fx_config",
+    # Multi-preset talkback routing: [{"name": str, "destinations": [output_id, ...]}].
+    # Destinations may reference any bus/output except FX buses.
+    "talkback_presets",
     # expansion cards installed in the console ([{id, protocol, channels_in, channels_out}]); they
     # are also real port groups on the console's mixer device (tagged ``expansion``)
     "expansion_installed",
@@ -79,6 +82,8 @@ CHANNEL_ATTRS = (
     "stereo",
     "stereo_channel",
     "color_code",
+    "tap_point",
+    "bus_tap_points",
     "stockwire_asset_id",
     "stand_product_id",
     "stand_product_name",
@@ -93,7 +98,7 @@ CHANNEL_ATTRS = (
 # ``out_endpoints`` (where a bus physically leaves from: one or more endpoints of 1 / 2 / 3
 # sockets for mono / stereo / LCR) is written only by the console endpoints, like the channel soft
 # patch; the create/update schemas do not accept it.
-OUTPUT_ATTRS = ("mode", "connector", "color_code", "role", "out_endpoints")
+OUTPUT_ATTRS = ("mode", "connector", "color_code", "role", "out_endpoints", "tap_point", "talkback_destinations")
 # A channel is the logical endpoint of a source signal: a mic or a digital stagebox feeds *into*
 # the channel (`in`), and the channel then feeds *out* to a bus / PA (`out`). These two ports are
 # fixed for every channel, so they are derived rather than trusted from the stored `ports` column:
@@ -121,8 +126,16 @@ CHANNEL_DEFAULTS = {
     "phantom_power": False,
     "stereo": False,
     "is_stereo_linked": False,
+    "tap_point": "post_fade",
+    "bus_tap_points": None,
 }
-OUTPUT_DEFAULTS = {"mode": "mono", "role": "aux", "out_endpoints": None}
+OUTPUT_DEFAULTS = {
+    "mode": "mono",
+    "role": "aux",
+    "out_endpoints": None,
+    "tap_point": "post_fade",
+    "talkback_destinations": None,
+}
 # a null in an edit clears only these (the rest of the old columns were NOT NULL: null = not sent)
 CLEARABLE = {
     "stockwire_product_id",
@@ -143,6 +156,10 @@ CLEARABLE = {
     "dsp_source",
     "direct_out",
     "out_endpoints",
+    "tap_point",
+    "talkback_destinations",
+    "bus_tap_points",
+    "talkback_presets",
 }
 POINT_KEYS = ("connector", "patch_label", "notes")
 POINT_TEXT = ("point_type", "connector", "patch_label", "notes")
