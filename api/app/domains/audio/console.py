@@ -795,7 +795,13 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
         if device.kind in ("channel", "output", "channel_list"):
             continue
         for port in device.ports or []:
-            if port.get("signal") not in (None, "audio"):
+            # Include every port on an audio-domain device as a soft-patch endpoint.
+            # Stockwire-imported gear (especially digital/Dante stageboxes) may carry
+            # audio over ports whose signal is not exactly "audio" (e.g. "data",
+            # None, or a vendor-specific value), and filtering those out made whole
+            # devices disappear from the soft-patch target list. The frontend already
+            # filters by direction, so the signal check here is unnecessary.
+            if port.get("signal") == "power":
                 continue
             direction = port.get("direction") or "in"
             count = port.get("channels") or 1
