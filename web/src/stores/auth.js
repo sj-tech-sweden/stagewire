@@ -3,7 +3,6 @@ import { api } from '@/boot/api'
 import { setLocale, setUserLocalePreference } from '../i18n'
 
 const TOKEN_KEY = 'sw_access_token'
-const REFRESH_KEY = 'sw_refresh_token'
 const USER_KEY = 'sw_user'
 
 function readUser() {
@@ -19,7 +18,6 @@ function readUser() {
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     token: localStorage.getItem(TOKEN_KEY) || null,
-    refreshToken: localStorage.getItem(REFRESH_KEY) || null,
     user: readUser(),
     loading: false,
     error: null,
@@ -31,8 +29,6 @@ export const useAuthStore = defineStore('auth', {
     persist() {
       if (this.token) localStorage.setItem(TOKEN_KEY, this.token)
       else localStorage.removeItem(TOKEN_KEY)
-      if (this.refreshToken) localStorage.setItem(REFRESH_KEY, this.refreshToken)
-      else localStorage.removeItem(REFRESH_KEY)
       if (this.user) localStorage.setItem(USER_KEY, JSON.stringify(this.user))
       else localStorage.removeItem(USER_KEY)
     },
@@ -42,7 +38,6 @@ export const useAuthStore = defineStore('auth', {
       try {
         const { data } = await api.post('/auth/login', { email, password })
         this.token = data.access_token
-        this.refreshToken = data.refresh_token
         this.user = data.user
         this.persist()
         return data
@@ -59,7 +54,6 @@ export const useAuthStore = defineStore('auth', {
       try {
         const { data } = await api.post('/auth/setup', payload)
         this.token = data.access_token
-        this.refreshToken = data.refresh_token
         this.user = data.user
         this.persist()
         return data
@@ -72,7 +66,6 @@ export const useAuthStore = defineStore('auth', {
     },
     setSession(data) {
       this.token = data.access_token
-      this.refreshToken = data.refresh_token
       this.user = data.user
       this.persist()
       const lang = data.user?.preferred_language
@@ -112,25 +105,19 @@ export const useAuthStore = defineStore('auth', {
         return null
       }
     },
-    async refresh() {
-      if (!this.refreshToken) return false
-      try {
-        const resp = await api.post('/auth/refresh', null, {
-          headers: { 'X-Refresh-Token': this.refreshToken },
-        })
-        this.token = resp.data.access_token
-        this.refreshToken = resp.data.refresh_token
-        this.user = resp.data.user
-        this.persist()
-        return true
-      } catch {
-        this.logout()
-        return false
-      }
+    // Mirror the access token + user after a silent refresh. The refresh token
+    // itself lives only in the backend's httpOnly cookie (see boot/api.js), so it
+    // is never exposed to JS or written to localStorage.
+    setRefreshedTokens(data) {
+      this.token = data.access_token
+      if (data.user) this.user = data.user
+      this.persist()
     },
     logout() {
+      // Revoke the server-side refresh session and clear the httpOnly cookie so a
+      // logout actually ends the session (otherwise the cookie would re-auth later).
+      api.post('/auth/logout').catch(() => {})
       this.token = null
-      this.refreshToken = null
       this.user = null
       this.persist()
     },
