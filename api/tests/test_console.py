@@ -81,6 +81,31 @@ def test_products_without_mixer_specs_have_no_profile(product):
     assert console.parse_mixer_specs(product) is None
 
 
+def test_simple_architecture_drops_leftover_bus_pool():
+    # A console explicitly marked "simple" (fixed routing) must never carry a bus
+    # pool, even if stale bus_pool data is present (e.g. from a previous
+    # digital_bus_pool setup or a half-filled stockwire product).
+    profile = console.parse_mixer_specs(
+        {
+            "specs": {
+                "mixer": {
+                    "architecture": "simple",
+                    "dcas": 8,
+                    "dsp_inputs": {"mono": 16, "stereo": 1, "fx_returns": 4},
+                    "bus_pool": {"total_slots": 30, "max_mixes": 20},
+                    "surface": {"banks": [{"id": "A", "faders": 17}], "layers": 2},
+                }
+            }
+        }
+    )
+    assert profile is not None
+    assert profile.architecture == "simple"
+    assert profile.bus_pool is None
+    assert console.is_simple(profile) is True
+    assert profile.dcas == 8
+    assert profile.surface.layers == 2
+
+
 def test_parser_drops_bad_values_instead_of_raising():
     profile = console.parse_mixer_specs(
         {

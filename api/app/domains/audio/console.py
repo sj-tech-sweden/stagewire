@@ -171,6 +171,10 @@ def parse_mixer_specs(product: dict | None) -> MixerProfile | None:
     architecture = str(raw.get("architecture") or "").lower()
     if architecture not in ARCHITECTURES:
         architecture = "digital_bus_pool" if pool else "simple"
+    # An explicitly "simple" console has fixed routing, so any leftover bus-pool
+    # data must not turn it into a pool console. The architecture field wins.
+    if architecture == "simple":
+        pool = None
     return MixerProfile(
         architecture=architecture,  # type: ignore[arg-type]
         dsp_inputs=dsp,
