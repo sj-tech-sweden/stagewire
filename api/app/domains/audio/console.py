@@ -51,6 +51,23 @@ class DspInputs(BaseModel):
     fx_returns: int = Field(default=0, ge=0)
 
 
+class FixedBuses(BaseModel):
+    """Fixed (non-pooled) bus counts for ``simple`` consoles.
+
+    Analog and compact digital desks (A&H Qu series, CQ, small Yamahas, ...)
+    have a fixed number of auxes/groups rather than a shared pool. Each value is
+    an independent capacity: a stereo aux counts as one ``aux_stereo`` slot, not
+    two mono slots.
+    """
+
+    aux_mono: int = Field(default=0, ge=0)
+    aux_stereo: int = Field(default=0, ge=0)
+    groups: int = Field(default=0, ge=0)
+    matrix: int = Field(default=0, ge=0)
+    main: int = Field(default=1, ge=0)
+    fx_sends: int = Field(default=0, ge=0)
+
+
 class BusPool(BaseModel):
     total_slots: int = Field(ge=0)
     max_mixes: int | None = Field(default=None, ge=0)
@@ -91,6 +108,9 @@ class MixerProfile(BaseModel):
     architecture: Literal["simple", "digital_bus_pool"] = "digital_bus_pool"
     dsp_inputs: DspInputs = Field(default_factory=DspInputs)
     bus_pool: BusPool | None = None
+    # Fixed (non-pooled) bus counts for simple consoles. None = not specified,
+    # fall back to flat outputs for propose-mixer.
+    fixed_buses: FixedBuses | None = None
     dcas: int = Field(default=0, ge=0)
     surface: Surface | None = None
     expansion_ports: list[ExpansionPort] = Field(default_factory=list)
@@ -146,6 +166,18 @@ def parse_mixer_specs(product: dict | None) -> MixerProfile | None:
             odd_even_stereo_pairing=bool(pool_raw.get("odd_even_stereo_pairing")),
         )
 
+    fixed_raw = raw.get("fixed_buses")
+    fixed: FixedBuses | None = None
+    if isinstance(fixed_raw, dict):
+        fixed = FixedBuses(
+            aux_mono=_int(fixed_raw.get("aux_mono")) or 0,
+            aux_stereo=_int(fixed_raw.get("aux_stereo")) or 0,
+            groups=_int(fixed_raw.get("groups")) or 0,
+            matrix=_int(fixed_raw.get("matrix")) or 0,
+            main=_int(fixed_raw.get("main")) if fixed_raw.get("main") is not None else 1,
+            fx_sends=_int(fixed_raw.get("fx_sends")) or 0,
+        )
+
     surface: Surface | None = None
     surface_raw = raw.get("surface")
     if isinstance(surface_raw, dict):
@@ -169,12 +201,24 @@ def parse_mixer_specs(product: dict | None) -> MixerProfile | None:
     ]
 
     architecture = str(raw.get("architecture") or "").lower()
+    # stockwire-rental uses "digital_fixed"/"fixed_analog" for fixed-routing desks;
+    # normalize them to Stagewire's "simple" architecture.
+    if architecture in ("digital_fixed", "fixed_analog"):
+        architecture = "simple"
     if architecture not in ARCHITECTURES:
         architecture = "digital_bus_pool" if pool else "simple"
+    # An explicitly "simple" console has fixed routing, so any leftover bus-pool
+    # data must not turn it into a pool console. The architecture field wins.
+    if architecture == "simple":
+        pool = None
+    # fixed_buses only applies to simple consoles.
+    if architecture != "simple":
+        fixed = None
     return MixerProfile(
         architecture=architecture,  # type: ignore[arg-type]
         dsp_inputs=dsp,
         bus_pool=pool,
+        fixed_buses=fixed,
         dcas=_int(raw.get("dcas")) or 0,
         surface=surface,
         expansion_ports=expansion,
@@ -837,6 +881,37 @@ def fit_mixer(need: dict, buses: list[dict], product: dict) -> dict:
         budget = bus_budget(profile, buses)
         headroom["bus_slots"] = budget["total_slots"] - budget["used_slots"]
         reasons.extend(budget["violations"])
+    elif profile is not None and profile.fixed_buses is not None:
+        fb = profile.fixed_buses
+        needed = {"aux_mono": 0, "aux_stereo": 0, "groups": 0, "matrix": 0, "main": 0, "fx_sends": 0}
+        for b in buses:
+            role = (b.get("role") or "aux").lower()
+            mode = (b.get("mode") or "mono").lower()
+            if role == "aux":
+                if mode in ("stereo", "lcr"):
+                    needed["aux_stereo"] += 1
+                else:
+                    needed["aux_mono"] += 1
+            elif role == "group":
+                needed["groups"] += 1
+            elif role == "matrix":
+                needed["matrix"] += 1
+            elif role == "main":
+                needed["main"] += 1
+            elif role == "fx_send":
+                needed["fx_sends"] += 1
+        avail = {
+            "aux_mono": fb.aux_mono,
+            "aux_stereo": fb.aux_stereo,
+            "groups": fb.groups,
+            "matrix": fb.matrix,
+            "main": fb.main,
+            "fx_sends": fb.fx_sends,
+        }
+        for cat in needed:
+            if avail[cat] < needed[cat]:
+                reasons.append(f"{avail[cat]} {cat.replace('_', ' ')} available, {needed[cat]} needed")
+        headroom["bus_slots"] = sum(avail.values()) - sum(needed.values())
     elif need["mixes"]:
         outputs = _flat(specs.get("outputs"))
         if outputs is None:

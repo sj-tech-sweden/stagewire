@@ -81,6 +81,52 @@ def test_products_without_mixer_specs_have_no_profile(product):
     assert console.parse_mixer_specs(product) is None
 
 
+def test_parse_mixer_specs_reads_fixed_buses():
+    profile = console.parse_mixer_specs(
+        {
+            "specs": {
+                "mixer": {
+                    "architecture": "digital_fixed",
+                    "dcas": 8,
+                    "dsp_inputs": {"mono": 16, "stereo": 1, "fx_returns": 4},
+                    "fixed_buses": {
+                        "aux_mono": 4,
+                        "aux_stereo": 3,
+                        "groups": 2,
+                        "matrix": 0,
+                        "main": 1,
+                        "fx_sends": 0,
+                    },
+                    "surface": {"banks": [{"id": "A", "faders": 17}], "layers": 2},
+                }
+            }
+        }
+    )
+    assert profile is not None
+    assert profile.architecture == "simple"
+    assert console.is_simple(profile) is True
+    assert profile.fixed_buses is not None
+    assert profile.fixed_buses.aux_mono == 4
+    assert profile.fixed_buses.aux_stereo == 3
+    assert profile.fixed_buses.groups == 2
+    assert profile.dcas == 8
+    # fixed buses are judged by per-role counts, not flat outputs: 3 stereo auxes
+    # cannot cover 4 stereo aux buses.
+    buses = [{"name": f"A{i}", "mode": "stereo", "role": "aux"} for i in range(4)]
+    need = console.mixer_need([{"channel_number": i + 1} for i in range(5)], buses)
+    product = {"specs": {"mixer": {
+        "architecture": "digital_fixed",
+        "fixed_buses": {"aux_mono": 4, "aux_stereo": 3, "groups": 2, "main": 1},
+    }}}
+    fit = console.fit_mixer(need, buses, product)
+    assert fit["fits"] is False
+    # but 3 stereo auxes cover 3 stereo aux buses
+    buses3 = [{"name": f"A{i}", "mode": "stereo", "role": "aux"} for i in range(3)]
+    need3 = console.mixer_need([{"channel_number": i + 1} for i in range(4)], buses3)
+    fit3 = console.fit_mixer(need3, buses3, product)
+    assert fit3["fits"] is True
+
+
 def test_parser_drops_bad_values_instead_of_raising():
     profile = console.parse_mixer_specs(
         {
