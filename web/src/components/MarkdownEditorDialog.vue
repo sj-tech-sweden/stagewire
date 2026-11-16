@@ -27,7 +27,8 @@
 
       <q-card-section class="col column q-pa-md overflow-auto">
         <!-- Formatting toolbar. Buttons are icon-only with a tooltip label; the actual insertion
-             is handled by applyInline / applyBlock / insertLink which read the textarea selection. -->
+             is handled by applyInline / togglePrefix / toggleNumbered / toggleHeading / insertLink which read
+       the textarea selection. -->
         <div
           class="row q-gutter-xs wrap q-mb-sm items-center"
           data-testid="markdown-toolbar"
@@ -63,23 +64,30 @@
             <q-tooltip>{{ t('workspace.toolbar.strike') }}</q-tooltip>
           </q-btn>
           <q-separator vertical />
-          <q-btn
-            flat
-            dense
-            icon="title"
-            :aria-label="t('workspace.toolbar.heading')"
-            data-testid="markdown-toolbar-heading"
-            @click="applyBlock({ test: (l) => /^#+\s/.test(l), marker: /^#+\s/ }, '# ')"
+          <q-separator vertical />
+          <template
+            v-for="level in headingLevels"
+            :key="level"
           >
-            <q-tooltip>{{ t('workspace.toolbar.heading') }}</q-tooltip>
-          </q-btn>
+            <q-btn
+              flat
+              dense
+              :label="`H${level}`"
+              :aria-label="`${t('workspace.toolbar.heading')} ${level}`"
+              :data-testid="`markdown-toolbar-heading-${level}`"
+              @click="toggleHeading(level)"
+            >
+              <q-tooltip>{{ t('workspace.toolbar.heading') }} {{ level }}</q-tooltip>
+            </q-btn>
+          </template>
+          <q-separator vertical />
           <q-btn
             flat
             dense
             icon="format_list_bulleted"
             :aria-label="t('workspace.toolbar.bullet')"
             data-testid="markdown-toolbar-bullet"
-            @click="applyBlock({ test: (l) => /^- /.test(l), marker: /^- / }, '- ')"
+            @click="togglePrefix('- ')"
           >
             <q-tooltip>{{ t('workspace.toolbar.bullet') }}</q-tooltip>
           </q-btn>
@@ -89,7 +97,7 @@
             icon="format_list_numbered"
             :aria-label="t('workspace.toolbar.numbered')"
             data-testid="markdown-toolbar-numbered"
-            @click="applyBlock({ test: (l) => /^\d+\.\s/.test(l), marker: /^\d+\.\s/ }, null, true)"
+            @click="toggleNumbered()"
           >
             <q-tooltip>{{ t('workspace.toolbar.numbered') }}</q-tooltip>
           </q-btn>
@@ -99,7 +107,7 @@
             icon="format_quote"
             :aria-label="t('workspace.toolbar.quote')"
             data-testid="markdown-toolbar-quote"
-            @click="applyBlock({ test: (l) => /^> /.test(l), marker: /^> / }, '> ')"
+            @click="togglePrefix('> ')"
           >
             <q-tooltip>{{ t('workspace.toolbar.quote') }}</q-tooltip>
           </q-btn>
@@ -251,24 +259,45 @@ function applyInline(before, after, placeholder) {
   }
 }
 
-// Block prefix (heading/list/quote): prefix every selected line. If every line already carries the
-// marker we toggle it off (so the button is a real on/off switch); otherwise we add it. Numbered
-// lists renumber from 1 on each line.
-function applyBlock({ test, marker }, prefix, numbered = false) {
-  const ta = textareaEl();
-  const val = draft.value;
+// The heading/block buttons operate on whole lines. This returns the bounds of the selected line
+// range (expanding a collapsed cursor to its full line) so each toggle can read/replace the block.
+function selectedLineBounds(ta, val) {
   const s = ta ? ta.selectionStart : val.length;
   const e = ta ? ta.selectionEnd : val.length;
   const lineStart = val.lastIndexOf('\n', s - 1) + 1;
   let lineEnd = val.indexOf('\n', e);
   if (lineEnd === -1) lineEnd = val.length;
-  const block = val.slice(lineStart, lineEnd);
-  const lines = block.split('\n');
-  const active = lines.every((l) => test(l));
+  return { lineStart, lineEnd, lines: val.slice(lineStart, lineEnd).split('\n') };
+}
+
+// Simple per-line prefix (bullet / quote). Toggles: if every selected line already has the prefix,
+// remove it; otherwise add it to every line.
+function togglePrefix(marker) {
+  const ta = textareaEl();
+  const val = draft.value;
+  const { lineStart, lineEnd, lines } = selectedLineBounds(ta, val);
+  const active = lines.every((l) => l.startsWith(marker));
+  const newLines = lines.map((l) => (active ? l.slice(marker.length) : marker + l));
+  const newBlock = newLines.join('\n');
+  draft.value = val.slice(0, lineStart) + newBlock + val.slice(lineEnd);
+  if (ta) {
+    nextTick(() => {
+      ta.focus();
+      ta.setSelectionRange(lineStart, lineStart + newBlock.length);
+    });
+  }
+}
+
+// Ordered list: toggles the `n. ` prefix off when present, otherwise renumbers every selected line
+// from 1. We strip any existing `n. ` first so re-clicking converts rather than stacking numbers.
+function toggleNumbered() {
+  const ta = textareaEl();
+  const val = draft.value;
+  const { lineStart, lineEnd, lines } = selectedLineBounds(ta, val);
+  const active = lines.every((l) => /^\d+\.\s/.test(l));
   const newLines = lines.map((l, i) => {
-    const stripped = l.replace(marker, '');
-    if (active) return stripped;
-    return (numbered ? `${i + 1}. ` : prefix) + stripped;
+    const stripped = l.replace(/^\d+\.\s?/, '');
+    return active ? stripped : `${i + 1}. ${stripped}`;
   });
   const newBlock = newLines.join('\n');
   draft.value = val.slice(0, lineStart) + newBlock + val.slice(lineEnd);
@@ -279,6 +308,32 @@ function applyBlock({ test, marker }, prefix, numbered = false) {
     });
   }
 }
+
+// Heading (H1-H6): toggles the exact level off when every selected line already has it; otherwise
+// converts every line to that level (replacing any other heading level, or adding it). This is what
+// makes the level buttons behave like a radio group: clicking the active level removes it, clicking
+// another level switches to it instead of stripping the line to plain text.
+function toggleHeading(level) {
+  const ta = textareaEl();
+  const val = draft.value;
+  const { lineStart, lineEnd, lines } = selectedLineBounds(ta, val);
+  const marker = '#'.repeat(level) + ' ';
+  const active = lines.every((l) => l.startsWith(marker));
+  const newLines = lines.map((l) => {
+    const withoutHeading = l.replace(/^#+\s?/, '');
+    return active ? withoutHeading : marker + withoutHeading;
+  });
+  const newBlock = newLines.join('\n');
+  draft.value = val.slice(0, lineStart) + newBlock + val.slice(lineEnd);
+  if (ta) {
+    nextTick(() => {
+      ta.focus();
+      ta.setSelectionRange(lineStart, lineStart + newBlock.length);
+    });
+  }
+}
+
+const headingLevels = [1, 2, 3, 4, 5, 6];
 
 // Link: insert [selection](url) and select the url placeholder so it can be typed over.
 function insertLink() {
