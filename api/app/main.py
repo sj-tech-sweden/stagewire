@@ -41,7 +41,14 @@ from app.domains.video.router import router as video_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    yield
+    # Cross-worker realtime fan-out over Valkey (no-op in the test environment).
+    from app.domains.audio.ws import start_realtime_bus, stop_realtime_bus
+
+    await start_realtime_bus()
+    try:
+        yield
+    finally:
+        await stop_realtime_bus()
 
 
 def create_app() -> FastAPI:
