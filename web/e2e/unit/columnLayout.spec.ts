@@ -31,8 +31,10 @@ test('compact columns keep their default width and flexible ones share what is l
   expect(total).toBeGreaterThanOrEqual(1590);
   expect(total).toBeLessThanOrEqual(1600);
   expect(overflow).toBe(false);
-  expect(widths.name).toBeGreaterThan(widths.chain);
-  expect(widths.chain).toBeGreaterThan(widths.device);
+  // the patch cell (chain) is a fixed compact column now, so it keeps its default width and is no
+  // longer part of the flexible ranking; the flexible columns share the rest by weight
+  expect(widths.chain).toBe(96);
+  expect(widths.name).toBeGreaterThan(widths.device);
   expect(widths.device).toBeGreaterThan(widths.notes);
   expect(widths.name).toBeGreaterThanOrEqual(byName('name').min);
 });
@@ -74,10 +76,11 @@ test('a dragged width wins (clamped to the minimum) and the others share the rem
   // wide enough that Notes (min 110) sits above its minimum in the auto layout, so dragging Name
   // wider can actually shrink it; tap_point's fixed width is part of the budget now
   const auto = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1700, visible: all });
-  const wide = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1700, visible: all, overrides: { name: 400 } });
+  // same container width as `auto` so the only difference is the dragged name; the others share less
+  const wide = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1600, visible: all, overrides: { name: 400 } });
   expect(wide.widths.name).toBe(400);
   expect(wide.widths.notes).toBeLessThan(auto.widths.notes); // the rest got less
-  expect(Math.abs(wide.total - 1700)).toBeLessThan(8);
+  expect(Math.abs(wide.total - 1600)).toBeLessThan(8);
   // below the minimum is clamped up; a compact column can be dragged too
   const small = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1600, visible: all, overrides: { name: 10, stereo: 120 } });
   expect(small.widths.name).toBe(byName('name').min);

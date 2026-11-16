@@ -64,6 +64,13 @@
         data-testid="console-tab-profile"
       />
       <q-tab
+        name="inputs"
+        icon="input"
+        :label="t('console.tabInputs')"
+        no-caps
+        data-testid="console-tab-inputs"
+      />
+      <q-tab
         name="buses"
         icon="account_tree"
         :label="t('console.tabBuses')"
@@ -364,6 +371,11 @@
         </template>
       </q-tab-panel>
 
+      <!-- Inputs (the channel list editor, slotted in from ChannelListEditor) ------------------>
+      <q-tab-panel name="inputs">
+        <slot name="inputs" />
+      </q-tab-panel>
+
       <!-- Buses --------------------------------------------------------------------------->
       <q-tab-panel name="buses">
         <div
@@ -441,7 +453,10 @@
                     {{ bus.color_code || t("workspace.colourUnset") }}
                   </q-tooltip>
                   <q-popup-proxy @hide="commitBusColour(bus)">
-                    <q-card class="q-pa-sm" style="width: 260px">
+                    <q-card
+                      class="q-pa-sm"
+                      style="width: 260px"
+                    >
                       <div class="row q-gutter-xs q-mb-sm">
                         <q-btn
                           v-for="preset in PRESET_COLOURS"
@@ -518,7 +533,11 @@
                 caption
                 class="q-mt-xs text-grey-7"
               >
-                <q-icon name="campaign" size="xs" class="q-mr-xs" />
+                <q-icon
+                  name="campaign"
+                  size="xs"
+                  class="q-mr-xs"
+                />
                 {{ t("console.talkbackFeeds", { names: talkbackForBus(bus.id).join(", ") }) }}
               </q-item-label>
             </q-item-section>
@@ -553,7 +572,10 @@
                 @update:model-value="(v) => updateBus(bus, { role: v })"
               />
             </q-item-section>
-            <q-item-section side style="min-width: 140px">
+            <q-item-section
+              side
+              style="min-width: 140px"
+            >
               <q-select
                 :model-value="bus.tap_point"
                 :options="tapPoints"
@@ -567,15 +589,35 @@
               />
             </q-item-section>
             <q-item-section side>
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeBus(bus)"
-              />
+              <div class="row">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="route"
+                  :aria-label="t('workspace.editChain')"
+                  data-testid="console-bus-edit-chain"
+                  @click="openBusChain(bus)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="account_tree"
+                  :aria-label="t('workspace.showFlow')"
+                  data-testid="console-bus-show-flow"
+                  @click="openBusFlow(bus)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  color="negative"
+                  icon="delete"
+                  :aria-label="t('workspace.remove')"
+                  @click="removeBus(bus)"
+                />
+              </div>
             </q-item-section>
           </q-item>
           <q-item v-if="!buses.length">
@@ -629,12 +671,26 @@
               @click="addBus"
             />
           </div>
+          <div class="col-12 col-sm-auto">
+            <q-btn
+              flat
+              no-caps
+              icon="playlist_add"
+              :label="t('console.bulkAddBuses')"
+              data-testid="console-bulk-buses"
+              @click="bulkBusOpen = true"
+            />
+          </div>
         </div>
 
         <!-- Talkback presets ---------------------------------------------------------------->
         <div class="q-mt-md">
-          <div class="text-subtitle2 q-mb-xs">{{ t("console.talkbackPresets") }}</div>
-          <div class="text-caption text-grey-6 q-mb-sm">{{ t("console.talkbackPresetsHelp") }}</div>
+          <div class="text-subtitle2 q-mb-xs">
+            {{ t("console.talkbackPresets") }}
+          </div>
+          <div class="text-caption text-grey-6 q-mb-sm">
+            {{ t("console.talkbackPresetsHelp") }}
+          </div>
           <div
             v-for="(preset, pi) in talkbackPresets"
             :key="pi"
@@ -1623,7 +1679,10 @@
                   data-testid="dca-colour"
                 >
                   <q-popup-proxy @hide="commitDcaColour(n)">
-                    <q-card class="q-pa-sm" style="width: 260px">
+                    <q-card
+                      class="q-pa-sm"
+                      style="width: 260px"
+                    >
                       <div class="row q-gutter-xs q-mb-sm">
                         <q-btn
                           v-for="preset in PRESET_COLOURS"
@@ -2397,6 +2456,29 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <ListBulkDialog
+      v-model="bulkBusOpen"
+      outputs
+      :roles="roles"
+      :busy="false"
+      @create="bulkCreateBuses"
+    />
+    <ChainFlowDialog
+      v-model="busFlowOpen"
+      :title="`${t('workspace.showFlow')}: ${busChainNode?.name || ''}`"
+      :steps="busFlowSteps"
+    />
+    <ChainDialog
+      v-model="busChainOpen"
+      :job-id="jobId"
+      :title="t('console.busChain', { name: busChainNode?.name || '' })"
+      :initial="busChainInitial"
+      :direct="[]"
+      :devices="graph.devices"
+      :branching="true"
+      :bus-channels="busChannelsFor(busChainNode?.mode)"
+      @save="saveBusChain"
+    />
 
     <!-- Shared markdown editor for bus notes; opened from each bus row. -->
     <MarkdownEditorDialog
@@ -2432,6 +2514,10 @@ import PatchTileGrid from "@/components/PatchTileGrid.vue";
 import NotesDisplay from "@/components/NotesDisplay.vue";
 import MarkdownEditorDialog from "@/components/MarkdownEditorDialog.vue";
 import StripPicker from "@/components/StripPicker.vue";
+import ListBulkDialog from "@/components/ListBulkDialog.vue";
+import ChainDialog from "@/components/ChainDialog.vue";
+import ChainFlowDialog from "@/components/ChainFlowDialog.vue";
+import { useGraphStore } from "@/stores/graph";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
 import {
   applyFaderChoice,
@@ -2477,6 +2563,9 @@ import {
   stripKindIcon,
   toggleRowSelection,
   unpinFaderStrip,
+  busChannelsFor,
+  chainForm,
+  flowTree,
 } from "@/utils/workspace";
 
 const props = defineProps({
@@ -2491,7 +2580,7 @@ const emit = defineEmits(["changed"]);
 const { t } = useI18n();
 const $q = useQuasar();
 
-const tab = ref("profile");
+const tab = ref("inputs");
 const summary = ref(null);
 const listData = ref(null);
 const presets = ref([]);
@@ -2566,6 +2655,7 @@ const retrySaves = () => savers.filter((x) => x.state.error).forEach((x) => x.re
 const isRefusal = (err) => err?.response?.status >= 400 && err?.response?.status < 500;
 
 const lb = computed(() => `/jobs/${props.jobId}/channel-lists/${props.listId}`);
+const graph = useGraphStore();
 const simple = computed(() => !summary.value || summary.value.simple);
 const budget = computed(() => summary.value?.budget);
 const buses = computed(() => (listData.value?.outputs || []).map((o) => ({ ...o, mode: o.mode || "mono", role: o.role || "aux" })));
@@ -2829,9 +2919,45 @@ const addBus = () =>
   withForce((params) =>
     api.post(`${lb.value}/outputs`, { name: newBus.name || `${t("workspace.output")} ${buses.value.length + 1}`, mode: newBus.mode, role: newBus.role }, { params }),
   ).then(() => { newBus.name = ""; });
+// Bulk-create many buses at once from the same dialog the channel/output editors use; each item
+// carries name/mode/role, so a batch can be "8 × Aux (stereo)" named "Aux 1..8". Budget overflow is
+// surfaced the same way as a single add (the "Add anyway" confirmation in withForce).
+const bulkBusOpen = ref(false);
+const bulkCreateBuses = (items) =>
+  withForce((params) => api.post(`${lb.value}/outputs/batch`, items, { params })).then(() => {
+    bulkBusOpen.value = false;
+  });
 const updateBus = (bus, changes) =>
   withForce((params) => api.patch(`${lb.value}/outputs/${bus.id}`, { ...changes, expected_revision: bus.revision }, { params }));
 
+// A bus is a graph output node, so its patch chain (the devices/sources it feeds from and the bus
+// channels it lands on) is edited through the graph store, not the console API. The console API owns
+// the bus's own attributes (mode/role/tap), the graph owns what it is patched to. After saving we
+// reload so the budget and the bus row reflect the new chain.
+const busChainOpen = ref(false);
+const busChainNode = ref(null);
+const busChainInitial = ref([]);
+function openBusChain(bus) {
+  busChainNode.value = bus;
+  busChainInitial.value = chainForm(bus, graph.edges, graph.devices);
+  busChainOpen.value = true;
+}
+const busFlowOpen = ref(false);
+const busFlowSteps = ref([]);
+function openBusFlow(bus) {
+  busChainNode.value = bus;
+  busFlowSteps.value = flowTree(bus.name, chainForm(bus, graph.edges, graph.devices), graph.devices);
+  busFlowOpen.value = true;
+}
+async function saveBusChain(steps) {
+  try {
+    await graph.replaceChain(props.jobId, "output", busChainNode.value.id, steps);
+    busChainOpen.value = false;
+    await changed();
+  } catch (err) {
+    failed(err);
+  }
+}
 // Bus notes open the shared markdown editor; the dialog seeds from the bus and saves back through the
 // normal bus update (so realtime/versioning behave exactly as the inline editor did).
 const busNotesOpen = ref(false);

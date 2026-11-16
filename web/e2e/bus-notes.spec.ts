@@ -39,7 +39,6 @@ test('bus notes render as markdown and can be edited via the markdown editor', a
   });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 
@@ -89,7 +88,6 @@ test('toolbar inserts markdown around the selection', async ({ page, request }) 
   const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge 1' });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 
@@ -125,7 +123,6 @@ test('bold toolbar button toggles off on second click', async ({ page, request }
   const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge 1' });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 
@@ -162,7 +159,6 @@ test('heading buttons toggle and convert levels', async ({ page, request }) => {
   const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge 1' });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 

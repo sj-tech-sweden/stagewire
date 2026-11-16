@@ -34,7 +34,6 @@ test('DCA notes render as markdown and can be edited via the markdown editor', a
   await call(request, headers, 'put', `${base}/console-profile`, { preset: 'gld-80' });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-dca').click();
 

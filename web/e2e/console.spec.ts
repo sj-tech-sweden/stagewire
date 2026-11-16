@@ -1,5 +1,5 @@
 import { test, expect, APIRequestContext, Page } from '@playwright/test';
-import { ensureAdmin, enableStockwire, login, API_BASE } from './helpers';
+import { ensureAdmin, enableStockwire, setStockwireEnabled, login, API_BASE } from './helpers';
 
 test.beforeEach(async ({ request }) => {
   await ensureAdmin(request);
@@ -36,7 +36,6 @@ async function seed(request: APIRequestContext, headers: Record<string, string>)
 
 async function openConsole(page: Page, jobId: string) {
   await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
 }
 
@@ -44,6 +43,7 @@ test('a simple console shows no bus budget or fader map', async ({ page, request
   await login(page);
   const { jobId } = await seed(request, await authedHeaders(page));
   await openConsole(page, jobId);
+  await page.getByTestId('console-tab-profile').click();
   await expect(page.getByTestId('console-simple-note')).toBeVisible();
   await expect(page.getByTestId('console-tab-faders')).toHaveCount(0);
   await page.getByTestId('console-tab-buses').click();
@@ -78,6 +78,7 @@ test('choosing a preset enables the budget and fader map', async ({ page, reques
   await login(page);
   const { jobId } = await seed(request, await authedHeaders(page));
   await openConsole(page, jobId);
+  await page.getByTestId('console-tab-profile').click();
   // the preset list is fetched when the panel mounts; a select with no options does not open, so
   // retry opening it until the list has arrived
   const gld = page.getByRole('option', { name: /GLD-80/ });
@@ -104,7 +105,6 @@ test('the Inputs-page Stereo toggle links a pair, the console tile shows it and 
   // one concept: the Inputs toggle goes through the validated link endpoint
   await page.getByTestId('channel-stereo').first().click();
   await expect(page.getByTestId('stereo-side').first()).toBeVisible();
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-links').click();
   // the tile grid is the whole UI: the pair is one linked tile that names its legs
   const tile = page.getByTestId('console-pair-tile').first();
@@ -377,7 +377,7 @@ test('a fader strip can be dragged from the tray onto a fader', async ({ page, r
   expect(stored.custom).toBe(true);
 });
 
-test('the Inputs page shows the bus-pool budget and a role per output on a digital console', async ({
+test('the console Buses tab shows the bus-pool budget and a role per bus on a digital console', async ({
   page,
   request,
 }) => {
@@ -391,9 +391,26 @@ test('the Inputs page shows the bus-pool budget and a role per output on a digit
     name: 'IEM',
     mode: 'stereo',
   });
-  await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await expect(page.getByTestId('outputs-budget-text')).toContainText('2 / 4');
-  await expect(page.getByTestId('output-role')).toBeVisible();
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await expect(page.getByTestId('console-budget-text')).toContainText('2 / 4');
+  await expect(page.getByTestId('console-bus-role')).toBeVisible();
+});
+
+test('the console Buses tab bulk-adds buses with a chosen role', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  await call(request, headers, 'put', `/jobs/${jobId}/channel-lists/${listId}/console-profile`, {
+    profile: { bus_pool: { total_slots: 40, allowed_roles: ['aux', 'group', 'matrix', 'main', 'fx_send'] } },
+  });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bulk-buses').click();
+  await page.getByTestId('list-bulk-count').fill('3');
+  await page.getByTestId('list-bulk-prefix').fill('Aux');
+  await page.getByTestId('list-bulk-create').click();
+  await expect(page.getByTestId('console-bus')).toHaveCount(3);
 });
 
 test('the strip picker selects by range, search and kind, and a DCA can hold FX sends', async ({ page, request }) => {
@@ -498,6 +515,7 @@ test('an expansion card is fitted within the console limits and becomes sockets'
     profile: { bus_pool: { total_slots: 20 }, expansion_ports: [{ protocol: 'dante', slots: 1, max_channels: 64 }] },
   });
   await openConsole(page, jobId);
+  await page.getByTestId('console-tab-profile').click();
   await expect(page.getByTestId('console-expansion-port')).toContainText('dante');
   await page.getByTestId('console-expansion-fit').click();
   await expect(page.getByTestId('console-expansion-card')).toContainText('128 sockets');
@@ -534,7 +552,6 @@ test('nothing needs saving: edits persist by themselves and there is one status 
   await page.getByTestId('console-tab-buses').click();
   await expect(status).toHaveAttribute('data-status', 'saved');
   await page.reload();
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-dca').click();
   await expect(page.getByTestId('console-dca-name').first()).toHaveValue('Drums 2');
   // an FX engine set up in the FX tab is stored without a click, and a DCA can hold its send at once
@@ -807,24 +824,28 @@ test('a pair linked from the console tab shows on the Inputs page, and the Input
     });
   }
   await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-links').click();
   // link 1-2 from the console tab: the tile turns linked and the Inputs page shows the L/R badges
   const tile = page.getByTestId('console-pair-tile').first();
   await expect(tile).toHaveAttribute('data-state', 'free');
   await tile.click();
   await expect(tile).toHaveAttribute('data-state', 'linked');
+  // the Inputs tab is where the L/R badges render; switch to it to see them
+  await page.getByTestId('console-tab-inputs').click();
   await expect(page.getByTestId('stereo-side').first()).toBeVisible();
   // link 3-4 from the Inputs page: the console tile follows without a reload
   await page.getByTestId('channel-stereo').nth(2).click();
+  await page.getByTestId('console-tab-links').click();
   await expect(page.getByTestId('console-pair-tile').nth(1)).toHaveAttribute('data-state', 'linked');
   // a range unlinks both, and the Inputs page loses its badges
   await page.getByTestId('console-pair-range').fill('1-4');
   await page.getByTestId('console-pair-unlink-range').click();
   await page.getByRole('button', { name: /ok/i }).click();
   await expect(page.getByTestId('console-pair-tile').first()).toHaveAttribute('data-state', 'free');
+  await page.getByTestId('console-tab-inputs').click();
   await expect(page.getByTestId('stereo-side')).toHaveCount(0);
   // and a range links every free pair in it
+  await page.getByTestId('console-tab-links').click();
   await page.getByTestId('console-pair-link-range').click();
   await expect(page.getByTestId('console-pair-tile').nth(1)).toHaveAttribute('data-state', 'linked');
 });
@@ -853,4 +874,59 @@ test('the same channel can sit on two faders and the cells show x2', async ({ pa
   await page.getByTestId('console-fader').nth(5).click();
   await page.getByTestId('console-fader-remove').click();
   await expect(page.getByTestId('console-fader-dup')).toHaveCount(0);
+});
+
+test('source and stand selectors are usable when the Stockwire integration is disabled', async ({ page, request }) => {
+  // The catalog picker only shows with the integration on; with it off the selectors must still render
+  // and let you pick an existing job device (the unassigned audio devices) or type a new name.
+  await setStockwireEnabled(request, false);
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId } = await seed(request, headers);
+  // an audio device already in the job: picking it should link it as the channel source
+  await call(request, headers, 'post', `/jobs/${jobId}/graph/audio-devices`, {
+    name: 'Shure SM58',
+    device_type: 'microphone',
+  });
+  await openConsole(page, jobId);
+  const source = page.getByTestId('source-picker').first();
+  const stand = page.getByTestId('stand-picker').first();
+  await expect(source).toBeVisible();
+  await expect(stand).toBeVisible();
+
+  // pick an existing unassigned audio device from the job
+  await source.click();
+  await page.keyboard.type('SM58');
+  await page.locator('.q-menu .q-item:not(.text-primary)', { hasText: 'Shure SM58' }).click();
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
+        ?.channels[0],
+    )
+    .toMatchObject({ device: 'Shure SM58' });
+
+  // a typed name is stored as a new source device (the free-text option is the primary-coloured one).
+  // Scope the option by the typed text: both the source and stand pickers render a "use as typed"
+  // row, and a closed picker's row lingers in the DOM, so an un-scoped `.text-primary` can hit the
+  // wrong one.
+  await source.click();
+  await page.keyboard.type('Neumann');
+  await page.locator('.q-menu .q-item', { hasText: 'Neumann' }).first().click();
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
+        ?.channels[0],
+    )
+    .toMatchObject({ device: 'Neumann' });
+
+  // stand: no local devices, so a typed name becomes the stand type
+  await stand.click();
+  await page.keyboard.type('K&M 210');
+  await page.locator('.q-menu .q-item', { hasText: 'K&M 210' }).first().click();
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
+        ?.channels[0],
+    )
+    .toMatchObject({ stand_type: 'K&M 210' });
 });

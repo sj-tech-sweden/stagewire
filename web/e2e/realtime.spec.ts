@@ -56,7 +56,6 @@ async function openWorkspace(page: Page, jobId: string) {
 
 async function openConsole(page: Page, jobId: string) {
   await openWorkspace(page, jobId);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
 }
 

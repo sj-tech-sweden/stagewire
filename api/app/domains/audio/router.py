@@ -501,6 +501,34 @@ async def create_output(
     return schemas.ChannelListOutputRead.model_validate(output)
 
 
+@router.post(
+    "/{job_id}/channel-lists/{list_id}/outputs/batch",
+    response_model=list[schemas.ChannelListOutputRead],
+    status_code=201,
+)
+async def create_outputs_batch(
+    job_id: UUID,
+    list_id: UUID,
+    payload: list[schemas.ChannelListOutputCreate],
+    force: bool = Query(
+        False, description="Add the buses even if they overflow the console's bus pool"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.ChannelListOutputRead]:
+    # Bulk-add posts an array of buses (name/mode/role each) in one request, so a batch like
+    # "8 × stereo Aux" is created atomically and budget-checked as a single write.
+    if await service.get_job(db, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Production job not found")
+    channel_list = await service.get_channel_list(db, list_id)
+    if channel_list is None or channel_list.job_id != job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Channel list not found")
+    items = [item.model_dump(exclude_unset=True) for item in payload]
+    await console_service.guard_bus_budget(db, job_id, list_id, new_many=items, force=force)
+    created = [await service.create_output(db, list_id, data) for data in items]
+    await _publish_list(db, job_id, list_id)
+    return [schemas.ChannelListOutputRead.model_validate(o) for o in created]
+
+
 @router.patch(
     "/{job_id}/channel-lists/{list_id}/outputs/{output_id}",
     response_model=schemas.ChannelListOutputRead,

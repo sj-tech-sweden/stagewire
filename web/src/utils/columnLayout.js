@@ -53,8 +53,8 @@ export const CHANNEL_COLUMNS = [
   { name: 'tap_point', min: 90, width: 130, grow: 0, required: false, defaultVisible: true },
   { name: 'performer_name', min: 120, width: 160, grow: 1, required: false, defaultVisible: false },
   { name: 'notes', min: 110, width: 160, grow: 1, required: false, defaultVisible: true },
-  // the patch summary and the flow button sit side by side
-  { name: 'chain', min: 210, width: 260, grow: 2, required: false, defaultVisible: true },
+  // the patch cell is just the edit-chain and show-flow icons now, so keep it to their width
+  { name: 'chain', min: 72, width: 96, grow: 0, required: false, defaultVisible: true },
   { name: 'actions', min: 96, width: 96, grow: 0, required: true, defaultVisible: true },
 ];
 
