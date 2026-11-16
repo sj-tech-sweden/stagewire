@@ -37,6 +37,8 @@ export default {
       print: "Print",
       upload: "Upload",
       inspect: "Inspect",
+      readMore: "Read more",
+      readLess: "Read less",
     },
     language: {
       label: "Language",
