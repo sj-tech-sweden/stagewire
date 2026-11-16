@@ -69,6 +69,8 @@ test('bulk add creates many video inputs at once', async ({ page, request }) => 
 test('bulk add creates many video outputs at once', async ({ page, request }) => {
   const { jobId, listId } = await openVideoList(page, request);
 
+  // Outputs are on their own tab; switch to it before the rows are in the DOM.
+  await page.getByTestId('video-tab-outputs').click();
   await page.getByTestId('bulk-outputs').click();
   await expect(page.getByTestId('video-bulk-create')).toBeVisible();
   await page.getByTestId('video-bulk-count').fill('4');
