@@ -701,6 +701,34 @@
             />
           </q-td>
         </template>
+        <template #body-cell-tap_point="slot">
+          <q-td :props="slot">
+            <div class="row items-center q-gutter-xs">
+              <q-select
+                :model-value="slot.row.attributes?.tap_point || 'post_fade'"
+                :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
+                dense
+                borderless
+                emit-value
+                map-options
+                style="min-width: 90px"
+                @update:model-value="(v) => saveAttr(slot.row, 'tap_point', v)"
+              />
+              <q-btn
+                flat
+                dense
+                round
+                size="sm"
+                icon="tune"
+                :aria-label="t('console.busTapPoints')"
+                data-testid="channel-bus-tap-points"
+                @click="openBusTapPoints(slot.row)"
+              >
+                <q-tooltip>{{ t("console.busTapPoints") }}</q-tooltip>
+              </q-btn>
+            </div>
+          </q-td>
+        </template>
         <template #body-cell-notes="slot">
           <q-td :props="slot">
             <q-input
@@ -1070,6 +1098,37 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="tapPointBusDialog">
+      <q-card style="min-width: 360px">
+        <q-card-section class="text-h6">
+          {{ t("console.busTapPoints") }} — {{ tapPointBusChannel?.source_label || tapPointBusChannel?.attributes?.channel_number }}
+        </q-card-section>
+        <q-card-section>
+          <div
+            v-for="b in busesForTap"
+            :key="b.id"
+            class="row items-center q-gutter-sm q-mb-sm"
+          >
+            <div class="col">{{ b.name }}</div>
+            <q-select
+              :model-value="tapPointBusDraft[b.id]"
+              :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
+              dense
+              outlined
+              emit-value
+              map-options
+              style="min-width: 120px"
+              @update:model-value="(v) => (tapPointBusDraft[b.id] = v)"
+            />
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat :label="t('workspace.cancel')" v-close-popup />
+          <q-btn color="primary" unelevated :label="t('workspace.save')" @click="saveBusTapPoints" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -1187,12 +1246,13 @@ const columnLabels = computed(() => ({
   stereo: "ST",
   instrument_group: t("workspace.colInstrumentGroup"),
   color_code: t("workspace.colColour"),
+  tap_point: t("workspace.colTapPoint"),
   performer_name: t("workspace.colPerformer"),
   notes: t("workspace.colNotes"),
   chain: t("workspace.chain"),
   actions: "",
 }));
-const ALIGN = { phantom_power: "center", stereo: "center", color_code: "center", actions: "right" };
+const ALIGN = { phantom_power: "center", stereo: "center", color_code: "center", tap_point: "center", actions: "right" };
 const columns = computed(() =>
   CHANNEL_COLUMNS.map((c) => ({
     ...c,
@@ -1247,7 +1307,7 @@ const failed = (err) =>
 
 // What a stereo link binds (console.py SHARED_FIELDS): a change to one of these on the primary is
 // copied onto the secondary by the server's graph sync.
-const LINK_SHARED = ["phantom_power", "color_code", "instrument_group", "source_label"];
+const LINK_SHARED = ["phantom_power", "color_code", "instrument_group", "source_label", "tap_point"];
 async function save(node, changes) {
   try {
     await graph.updateDevice(contextId.value, node.id, changes);
@@ -1262,6 +1322,28 @@ async function save(node, changes) {
 }
 const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
+
+// Per-channel -> bus tap point overrides
+const tapPointBusDialog = ref(false);
+const tapPointBusChannel = ref(null);
+const tapPointBusDraft = ref({});
+const busesForTap = computed(() => (outputs.value || []).map((o) => ({ id: o.id, name: o.name || o.id })));
+function openBusTapPoints(row) {
+  tapPointBusChannel.value = row;
+  const existing = row.attributes?.bus_tap_points || {};
+  const draft = {};
+  for (const b of busesForTap.value) {
+    draft[b.id] = existing[b.id] || row.attributes?.tap_point || 'post_fade';
+  }
+  tapPointBusDraft.value = draft;
+  tapPointBusDialog.value = true;
+}
+async function saveBusTapPoints() {
+  const row = tapPointBusChannel.value;
+  if (!row) return;
+  await saveAttr(row, 'bus_tap_points', { ...tapPointBusDraft.value });
+  tapPointBusDialog.value = false;
+}
 
 // --- optional columns: instrument group, colour, performer ----------------------------------------
 const groupOptions = computed(() =>

@@ -477,7 +477,9 @@ test('auto patch previews a plan onto a Dante card and then applies it', async (
   await page.getByTestId('strip-picker-done').click();
   await dialog.getByTestId('console-auto-start').fill('17');
   await dialog.getByTestId('console-auto-preview').click();
-  await expect(dialog.getByTestId('console-auto-plan')).toContainText('8 channels will be patched');
+  // The plan maps channels to starting sockets; assert on that locale-neutral mapping rather than
+  // the translated sentence (the runner's browser locale decides the language).
+  await expect(dialog.getByTestId('console-auto-plan')).toContainText('Ch 1 → 17');
   // a preview changes nothing
   let ch = await (await request.get(`${API_BASE}/api/v1${base}/channels`, { headers })).json();
   expect(ch.every((c: { dsp_source: unknown }) => !c.dsp_source)).toBe(true);

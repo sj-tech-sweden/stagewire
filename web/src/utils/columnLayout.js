@@ -50,6 +50,7 @@ export const CHANNEL_COLUMNS = [
   // optional, hidden until chosen in the Columns menu
   { name: 'instrument_group', min: 120, width: 140, grow: 0, required: false, defaultVisible: false },
   { name: 'color_code', min: 72, width: 80, grow: 0, required: false, defaultVisible: false },
+  { name: 'tap_point', min: 90, width: 130, grow: 0, required: false, defaultVisible: true },
   { name: 'performer_name', min: 120, width: 160, grow: 1, required: false, defaultVisible: false },
   { name: 'notes', min: 110, width: 160, grow: 1, required: false, defaultVisible: true },
   // the patch summary and the flow button sit side by side

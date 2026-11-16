@@ -455,7 +455,7 @@ function done() {
 }
 .strip-tile:focus-visible { outline: 2px solid var(--q-primary); outline-offset: 1px; }
 .strip-tile.on { border-color: var(--q-primary); box-shadow: inset 0 0 0 2px var(--q-primary); }
-.tile-number { font-size: 1.05rem; font-weight: 700; }
+.tile-number { font-size: 1.05rem; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.68rem; opacity: 0.8; }
 .tile-kind { position: absolute; top: 2px; left: 3px; opacity: 0.7; }
 .tile-check { position: absolute; top: 2px; right: 3px; color: var(--q-primary); }

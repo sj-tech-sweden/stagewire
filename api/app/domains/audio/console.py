@@ -1070,8 +1070,15 @@ def validate_dca_config(profile: MixerProfile | None, config: dict, member_ids: 
         if unknown:
             raise ValueError(f"DCA {number} has an unknown member: {unknown[0]}")
         name = str(value.get("name") or "").strip()
-        if name or members:
-            clean[str(number)] = {"name": name, "members": members}
+        color = value.get("color")
+        notes = str(value.get("notes") or "").strip()
+        if name or members or color or notes:
+            entry = {"name": name, "members": members}
+            if color:
+                entry["color"] = str(color).strip()
+            if notes:
+                entry["notes"] = notes
+            clean[str(number)] = entry
     return clean
 
 

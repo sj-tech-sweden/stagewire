@@ -426,17 +426,128 @@
             data-testid="console-bus"
           >
             <q-item-section>
-              <q-input
-                :model-value="bus.name"
-                dense
-                borderless
-                @change="(v) => updateBus(bus, { name: v })"
-              />
+              <div class="row items-center q-gutter-xs">
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  class="channel-swatch"
+                  :class="{ 'channel-swatch--unset': !bus.color_code }"
+                  :style="busSwatchStyle(bus.color_code)"
+                  :aria-label="t('workspace.colourPick')"
+                  data-testid="bus-colour"
+                >
+                  <q-tooltip>
+                    {{ bus.color_code || t("workspace.colourUnset") }}
+                  </q-tooltip>
+                  <q-popup-proxy @hide="commitBusColour(bus)">
+                    <q-card class="q-pa-sm" style="width: 260px">
+                      <div class="row q-gutter-xs q-mb-sm">
+                        <q-btn
+                          v-for="preset in PRESET_COLOURS"
+                          :key="preset"
+                          dense
+                          unelevated
+                          round
+                          size="sm"
+                          :style="{ background: preset }"
+                          :aria-label="preset"
+                          @click="pickBusPreset(bus, preset)"
+                        />
+                      </div>
+                      <q-color
+                        :model-value="busColourDraft(bus)"
+                        format-model="hex"
+                        no-header
+                        no-footer
+                        default-view="spectrum"
+                        flat
+                        @update:model-value="(v) => (pendingBusColour = { id: bus.id, value: v })"
+                        @change="(v) => setBusColour(bus, v)"
+                      />
+                      <q-btn
+                        v-close-popup
+                        flat
+                        dense
+                        no-caps
+                        icon="format_color_reset"
+                        :label="t('workspace.colourClear')"
+                        :disable="!bus.color_code"
+                        @click="setBusColour(bus, null)"
+                      />
+                    </q-card>
+                  </q-popup-proxy>
+                </q-btn>
+                <q-input
+                  :model-value="bus.name"
+                  dense
+                  borderless
+                  class="col"
+                  @change="(v) => updateBus(bus, { name: v })"
+                />
+                <!-- Bus notes: rendered as markdown (the common NotesDisplay, with a read-more
+                     toggle) where shown; editing stays raw text in the input below. -->
+                <div
+                  v-if="busNotesEditing[bus.id]"
+                  class="col-12 q-mt-xs"
+                >
+                  <q-input
+                    :model-value="bus.notes"
+                    dense
+                    outlined
+                    autogrow
+                    :label="t('console.busNotes')"
+                    data-testid="console-bus-notes"
+                    @change="(v) => { updateBus(bus, { notes: v }); busNotesEditing[bus.id] = false; }"
+                  >
+                    <template #append>
+                      <q-btn
+                        flat
+                        round
+                        dense
+                        icon="close"
+                        :aria-label="t('app.actions.cancel')"
+                        @click="busNotesEditing[bus.id] = false"
+                      />
+                    </template>
+                  </q-input>
+                </div>
+                <div
+                  v-else
+                  class="col-12 q-mt-xs row items-start q-gutter-xs"
+                >
+                  <NotesDisplay
+                    v-if="bus.notes"
+                    class="col"
+                    :notes="bus.notes"
+                    :rows="3"
+                  />
+                  <q-btn
+                    dense
+                    flat
+                    no-caps
+                    size="sm"
+                    :icon="bus.notes ? 'edit' : 'add'"
+                    :label="bus.notes ? undefined : t('console.busNotes')"
+                    :aria-label="t('app.actions.edit')"
+                    data-testid="console-bus-edit-notes"
+                    @click="busNotesEditing[bus.id] = true"
+                  />
+                </div>
+              </div>
               <q-item-label
                 v-if="slotLabel(bus)"
                 caption
               >
                 {{ slotLabel(bus) }}
+              </q-item-label>
+              <q-item-label
+                v-if="talkbackForBus(bus.id).length"
+                caption
+                class="q-mt-xs text-grey-7"
+              >
+                <q-icon name="campaign" size="xs" class="q-mr-xs" />
+                {{ t("console.talkbackFeeds", { names: talkbackForBus(bus.id).join(", ") }) }}
               </q-item-label>
             </q-item-section>
             <q-item-section
@@ -468,6 +579,19 @@
                 :label="t('console.role')"
                 data-testid="console-bus-role"
                 @update:model-value="(v) => updateBus(bus, { role: v })"
+              />
+            </q-item-section>
+            <q-item-section side style="min-width: 140px">
+              <q-select
+                :model-value="bus.tap_point"
+                :options="tapPoints"
+                dense
+                outlined
+                emit-value
+                map-options
+                :label="t('console.busTapPoint')"
+                data-testid="console-bus-tap-point"
+                @update:model-value="(v) => updateBus(bus, { tap_point: v })"
               />
             </q-item-section>
             <q-item-section side>
@@ -533,6 +657,56 @@
               @click="addBus"
             />
           </div>
+        </div>
+
+        <!-- Talkback presets ---------------------------------------------------------------->
+        <div class="q-mt-md">
+          <div class="text-subtitle2 q-mb-xs">{{ t("console.talkbackPresets") }}</div>
+          <div class="text-caption text-grey-6 q-mb-sm">{{ t("console.talkbackPresetsHelp") }}</div>
+          <div
+            v-for="(preset, pi) in talkbackPresets"
+            :key="pi"
+            class="row items-center q-gutter-sm q-mb-sm"
+          >
+            <q-input
+              :model-value="preset.name"
+              dense
+              outlined
+              class="col-4"
+              :label="t('console.talkbackPresetName')"
+              data-testid="console-talkback-preset-name"
+              @change="(v) => updateTalkbackPreset(pi, { name: v })"
+            />
+            <div class="col">
+              <StripPicker
+                :model-value="preset.destinations || []"
+                :items="talkbackDestinationItems"
+                :label="t('console.talkbackPresetDestinations')"
+                :title="t('console.talkbackPickTitle')"
+                data-testid="console-talkback-preset-destinations"
+                @update:model-value="(v) => updateTalkbackPreset(pi, { destinations: v })"
+              />
+            </div>
+            <q-btn
+              flat
+              dense
+              round
+              color="negative"
+              icon="delete"
+              :aria-label="t('workspace.remove')"
+              @click="removeTalkbackPreset(pi)"
+            />
+          </div>
+          <q-btn
+            flat
+            dense
+            no-caps
+            icon="add"
+            color="primary"
+            :label="t('console.talkbackPresetAdd')"
+            data-testid="console-talkback-preset-add"
+            @click="addTalkbackPreset"
+          />
         </div>
       </q-tab-panel>
 
@@ -1466,6 +1640,54 @@
                 >
                   DCA {{ n }}
                 </q-badge>
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  class="channel-swatch"
+                  :class="{ 'channel-swatch--unset': !dcaDraft[n].color }"
+                  :style="busSwatchStyle(dcaDraft[n].color)"
+                  :aria-label="t('workspace.colourPick')"
+                  data-testid="dca-colour"
+                >
+                  <q-popup-proxy @hide="commitDcaColour(n)">
+                    <q-card class="q-pa-sm" style="width: 260px">
+                      <div class="row q-gutter-xs q-mb-sm">
+                        <q-btn
+                          v-for="preset in PRESET_COLOURS"
+                          :key="preset"
+                          dense
+                          unelevated
+                          round
+                          size="sm"
+                          :style="{ background: preset }"
+                          :aria-label="preset"
+                          @click="setDcaColour(n, preset)"
+                        />
+                      </div>
+                      <q-color
+                        :model-value="dcaColourDraft(n)"
+                        format-model="hex"
+                        no-header
+                        no-footer
+                        default-view="spectrum"
+                        flat
+                        @update:model-value="(v) => (pendingDcaColour = { n, value: v })"
+                        @change="(v) => setDcaColour(n, v)"
+                      />
+                      <q-btn
+                        v-close-popup
+                        flat
+                        dense
+                        no-caps
+                        icon="format_color_reset"
+                        :label="t('workspace.colourClear')"
+                        :disable="!dcaDraft[n].color"
+                        @click="setDcaColour(n, null)"
+                      />
+                    </q-card>
+                  </q-popup-proxy>
+                </q-btn>
                 <q-input
                   v-model="dcaDraft[n].name"
                   dense
@@ -1474,6 +1696,56 @@
                   :label="t('console.dcaName')"
                   data-testid="console-dca-name"
                   @update:model-value="dcaSaver.schedule()"
+                />
+              </div>
+              <!-- DCA notes: rendered as markdown (the common NotesDisplay) where shown; the
+                   edit affordance reveals the raw-text input, matching the bus notes pattern. -->
+              <div
+                v-if="dcaNotesEditing[n]"
+                class="q-mb-sm"
+              >
+                <q-input
+                  v-model="dcaDraft[n].notes"
+                  dense
+                  outlined
+                  autogrow
+                  :label="t('console.dcaNotes')"
+                  data-testid="console-dca-notes"
+                  @update:model-value="dcaSaver.schedule()"
+                >
+                  <template #append>
+                    <q-btn
+                      flat
+                      round
+                      dense
+                      icon="close"
+                      :aria-label="t('app.actions.cancel')"
+                      data-testid="console-dca-notes-close"
+                      @click="dcaNotesEditing[n] = false"
+                    />
+                  </template>
+                </q-input>
+              </div>
+              <div
+                v-else
+                class="row items-start q-gutter-xs q-mb-sm"
+              >
+                <NotesDisplay
+                  v-if="dcaDraft[n].notes"
+                  class="col"
+                  :notes="dcaDraft[n].notes"
+                  :rows="3"
+                />
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  size="sm"
+                  :icon="dcaDraft[n].notes ? 'edit' : 'add'"
+                  :label="dcaDraft[n].notes ? undefined : t('console.dcaNotes')"
+                  :aria-label="t('app.actions.edit')"
+                  data-testid="console-dca-edit-notes"
+                  @click="dcaNotesEditing[n] = true"
                 />
               </div>
               <StripPicker
@@ -2196,7 +2468,9 @@ import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { api } from "@/boot/api";
 import { apiErrorText } from "@/utils/errors";
+import { PRESET_COLOURS, colourToHex, normalizeHex } from "@/utils/colour";
 import PatchTileGrid from "@/components/PatchTileGrid.vue";
+import NotesDisplay from "@/components/NotesDisplay.vue";
 import StripPicker from "@/components/StripPicker.vue";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
 import {
@@ -2337,6 +2611,23 @@ const budget = computed(() => summary.value?.budget);
 const buses = computed(() => (listData.value?.outputs || []).map((o) => ({ ...o, mode: o.mode || "mono", role: o.role || "aux" })));
 const roles = computed(() => summary.value?.profile?.bus_pool?.allowed_roles || ["aux", "group", "matrix", "main", "fx_send"]);
 const busModes = computed(() => ["mono", "stereo", "lcr"].map((m) => ({ value: m, label: t(`console.busMode.${m}`) })));
+const tapPoints = computed(() => ["pre_eq", "post_eq", "post_fade"].map((m) => ({ value: m, label: t(`console.tapPoint.${m}`) })));
+const talkbackPresets = computed(() => listData.value?.talkback_presets || []);
+// StripPicker items for the talkback destinations: every bus/output except FX sends. The preset's
+// destination list is the source of truth; this is just the picker's catalogue.
+const talkbackDestinationItems = computed(() =>
+  buses.value
+    .filter((b) => b.role !== "fx_send")
+    .map((b) => ({ id: b.id, kind: "mix", label: b.role, number: b.name || b.id })),
+);
+// Reverse mapping: the names of the talkback presets that route to a given bus, derived from the
+// presets' destination lists (the presets are the source of truth; we never store it per-bus).
+function talkbackForBus(busId) {
+  return talkbackPresets.value
+    .filter((p) => (p.destinations || []).includes(busId))
+    .map((p) => p.name)
+    .filter(Boolean);
+}
 // A linked pair is ONE ganged strip: the secondary is hidden everywhere in this panel.
 const strips = computed(() =>
   (listData.value?.channels || []).filter((c) => c.stereo_link_role !== "secondary").sort((a, b) => a.channel_number - b.channel_number),
@@ -2580,6 +2871,91 @@ const addBus = () =>
   ).then(() => { newBus.name = ""; });
 const updateBus = (bus, changes) =>
   withForce((params) => api.patch(`${lb.value}/outputs/${bus.id}`, { ...changes, expected_revision: bus.revision }, { params }));
+
+const saveTalkbackPresets = async (presets) => {
+  try {
+    await api.patch(`/jobs/${props.jobId}/channel-lists/${props.listId}`, { talkback_presets: presets });
+    await load();
+  } catch (err) {
+    failed(err);
+  }
+};
+const addTalkbackPreset = () => {
+  const next = [...(listData.value?.talkback_presets || []), { name: "", destinations: [] }];
+  saveTalkbackPresets(next);
+};
+const removeTalkbackPreset = (pi) => {
+  const next = [...(listData.value?.talkback_presets || [])];
+  next.splice(pi, 1);
+  saveTalkbackPresets(next);
+};
+const updateTalkbackPreset = (pi, changes) => {
+  const next = (listData.value?.talkback_presets || []).map((p, i) => (i === pi ? { ...p, ...changes } : p));
+  saveTalkbackPresets(next);
+};
+
+const pendingBusColour = ref(null);
+const pendingDcaColour = ref(null);
+// Per-bus / per-DCA flag tracking which entity is currently in notes-edit mode (raw-text input).
+// Display uses the common NotesDisplay markdown renderer; only one edits at a time.
+const busNotesEditing = ref({});
+const dcaNotesEditing = ref({});
+function busSwatchStyle(value) {
+  if (!value) return {};
+  const hex = colourToHex(value);
+  return hex ? { background: hex } : { background: "#9e9e9e" };
+}
+const busColourDraft = (bus) =>
+  (pendingBusColour.value?.id === bus.id && normalizeHex(pendingBusColour.value.value)) ||
+  colourToHex(bus.color_code) ||
+  "#ffffff";
+function setBusColour(bus, value) {
+  pendingBusColour.value = null;
+  const hex = value == null ? null : normalizeHex(value);
+  if (value != null && !hex) return;
+  if ((bus.color_code || null) === hex) return;
+  return updateBus(bus, { color_code: hex });
+}
+const pickBusPreset = (bus, hex) => setBusColour(bus, hex);
+function commitBusColour(bus) {
+  const pending = pendingBusColour.value;
+  if (!pending || pending.id !== bus.id) return;
+  pendingBusColour.value = null;
+  const hex = normalizeHex(pending.value);
+  if (!hex) return;
+  if ((bus.color_code || null) === hex) return;
+  return updateBus(bus, { color_code: hex });
+}
+
+function dcaSwatchStyle(value) {
+  if (!value) return {};
+  const hex = colourToHex(value);
+  return hex ? { background: hex } : { background: "#9e9e9e" };
+}
+const dcaColourDraft = (n) =>
+  (pendingDcaColour.value?.n === n && normalizeHex(pendingDcaColour.value.value)) ||
+  colourToHex(dcaDraft.value?.[n]?.color) ||
+  "#ffffff";
+function setDcaColour(n, value) {
+  pendingDcaColour.value = null;
+  const hex = value == null ? null : normalizeHex(value);
+  if (value != null && !hex) return;
+  if (!dcaDraft.value?.[n]) return;
+  if ((dcaDraft.value[n].color || null) === hex) return;
+  dcaDraft.value[n].color = hex;
+  dcaSaver.schedule();
+}
+function commitDcaColour(n) {
+  const pending = pendingDcaColour.value;
+  if (!pending || pending.n !== n) return;
+  pendingDcaColour.value = null;
+  const hex = normalizeHex(pending.value);
+  if (!hex) return;
+  if (!dcaDraft.value?.[n]) return;
+  if ((dcaDraft.value[n].color || null) === hex) return;
+  dcaDraft.value[n].color = hex;
+  dcaSaver.schedule();
+}
 async function removeBus(bus) {
   try {
     await api.delete(`${lb.value}/outputs/${bus.id}`, { params: { expected_revision: bus.revision } });
@@ -2595,7 +2971,7 @@ function dcaFrom(s) {
   const out = {};
   for (let n = 1; n <= (s.dca_count || 0); n += 1) {
     const d = s.dcas?.[String(n)] || {};
-    out[n] = { name: d.name || "", members: [...(d.members || [])] };
+    out[n] = { name: d.name || "", color: d.color || null, notes: d.notes || "", members: [...(d.members || [])] };
   }
   return out;
 }
@@ -2634,7 +3010,11 @@ async function persistDcas() {
   const dcas = {};
   for (const n of dcaNumbers.value) {
     const d = dcaDraft.value[n];
-    if (d && (d.name.trim() || d.members.length)) dcas[n] = { name: d.name.trim(), members: d.members };
+    if (d && (d.name.trim() || d.members.length || d.color || d.notes)) {
+      dcas[n] = { name: d.name.trim(), members: d.members };
+      if (d.color) dcas[n].color = d.color;
+      if (d.notes) dcas[n].notes = d.notes;
+    }
   }
   try {
     const { data } = await api.put(`${lb.value}/dcas`, { dcas });
@@ -3432,6 +3812,17 @@ defineExpose({ settle: settleAll, openTab: (name) => (tab.value = name) });
 </script>
 
 <style scoped>
+.channel-swatch {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.6);
+}
+.channel-swatch--unset {
+  border-style: dashed;
+}
 .fader-bank {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
