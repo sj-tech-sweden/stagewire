@@ -535,10 +535,15 @@ test('a channel list is built in the channel list editor and ends up in the expo
 
   await row.getByTestId('edit-chain').click();
   await page.getByTestId('chain-add-step').click();
-  await page.getByTestId('chain-device').first().click();
-  await page.locator('.q-menu .q-item', { hasText: 'Stagebox A' }).click();
+  // the patch cell is now icon-only; the chain is summarised in the button's title (route), so assert
+  // on the title, not on text content. Selecting the step device uses the option role scoped to the
+  // step, the same pattern the console chain tests use (a bare `.q-menu .q-item` match is unreliable
+  // for the use-input select).
+  const step = page.getByTestId('chain-step').first();
+  await step.getByTestId('chain-device').click();
+  await page.getByRole('option', { name: 'Stagebox A' }).click();
   await page.getByTestId('chain-save').click();
-  await expect(row.getByTestId('edit-chain')).toContainText('Stagebox A');
+  await expect(row.getByTestId('edit-chain')).toHaveAttribute('title', /Stagebox A/);
 
   // the chain is also shown as a signal flow diagram, with a way back to editing it
   await row.getByTestId('show-flow').click();
@@ -1216,17 +1221,21 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
   await page.getByTestId('list-bulk-create').click();
   await expect.poll(async () => (await lists())[0]?.outputs.map((o) => o.name)).toEqual(['Aux 1', 'Aux 2', 'Aux 3']);
 
+  // the channel table (with the stand/source pickers) lives on the console's Inputs tab; switching
+  // to the Buses tab above hid it, so come back before editing the first channel row
+  await page.getByTestId('console-tab-inputs').click();
+
   const row = page.getByTestId('channel-table').locator('tbody tr').filter({ has: page.locator('input') }).first();
   await row.getByTestId('stand-picker').first().click();
   await page.keyboard.type('boom');
   await expect(page.locator('.q-menu .q-item', { hasText: '×12' })).toBeVisible();
-  await page.locator('.q-menu .q-item', { hasText: 'Boom stand' }).click();
+  await page.locator('.q-menu .q-item:not(.text-primary)', { hasText: 'Boom stand' }).click();
   await expect.poll(async () => (await lists())[0]?.channels[0]?.stand_product_name).toBe('Boom stand');
 
   // the source is picked from what is already in the job (or the own equipment), not typed
   await row.getByTestId('source-picker').first().click();
   await page.keyboard.type('wireless');
-  await page.locator('.q-menu .q-item', { hasText: 'Wireless pack A' }).click();
+  await page.locator('.q-menu .q-item:not(.text-primary)', { hasText: 'Wireless pack A' }).click();
   await expect
     .poll(async () => ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]?.channels[0]?.device)
     .toBe('Wireless pack A');
@@ -2071,10 +2080,10 @@ test('replacing or clearing a source removes the device it created, but not one 
     await picker.waitFor({ state: 'visible' });
     await picker.click();
     await page.keyboard.type(name);
-    // not the "use as typed" row: the device already in the job. Wait for the dropdown row to be
-    // ready before clicking, otherwise the click can land before it renders (slower on a busy
-    // database) and the source is never assigned.
-    const item = page.locator('.q-menu .q-item', { hasText: `${name} ·` });
+    // not the "use as typed" row (that one is highlighted): the device already in the job. The
+    // picker now renders a job device as its name with an "in this job" caption (no "·" suffix),
+    // so select the non-free-text row that carries the name.
+    const item = page.locator('.q-menu .q-item:not(.text-primary)', { hasText: name });
     await item.first().waitFor({ state: 'visible' });
     await item.first().click();
   };
@@ -2083,8 +2092,18 @@ test('replacing or clearing a source removes the device it created, but not one 
   // replacing Mic A with Mic B removes Mic A, which nothing else used
   await pick(0, 'Mic B');
   await expect.poll(names).toEqual(['Mic B']);
-  // Mic B is also the second channel's source, so clearing the first keeps it
-  await pick(1, 'Mic B');
+  // A device may be the source of more than one channel. The source picker now only offers
+  // unassigned devices (the #124 change that keeps it from re-offering an already-linked mic), so
+  // the second channel's shared source is set through the same write the picker performs. Keeping
+  // Mic B linked to a second channel is what makes the "still in use" branch below real.
+  const graph = (await (await request.get(`${API_BASE}/api/v1${g}`, { headers })).json()) as any;
+  const micBId = (graph.devices as any[]).find((d: any) => d.name === 'Mic B')?.id;
+  const ch1Node = (graph.devices as any[]).find((d: any) => d.kind === 'channel' && d.name === 'Gtr');
+  await request.patch(`${API_BASE}/api/v1${g}/devices/${ch1Node.id}`, {
+    headers,
+    data: { attributes: { device: 'Mic B', source_device_id: micBId }, expected_revision: ch1Node.revision },
+  });
+  // clearing the first channel must keep Mic B, which the second channel still uses
   await page.getByRole('button', { name: /clear|rensa/i }).first().click();
   await expect(page.getByTestId('open-source-device')).toHaveCount(1);
   expect(await names()).toEqual(['Mic B']);

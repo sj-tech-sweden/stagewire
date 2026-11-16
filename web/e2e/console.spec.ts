@@ -905,10 +905,13 @@ test('source and stand selectors are usable when the Stockwire integration is di
     )
     .toMatchObject({ device: 'Shure SM58' });
 
-  // a typed name is stored as a new source device (the free-text option is the primary-coloured one)
+  // a typed name is stored as a new source device (the free-text option is the primary-coloured one).
+  // Scope the option by the typed text: both the source and stand pickers render a "use as typed"
+  // row, and a closed picker's row lingers in the DOM, so an un-scoped `.text-primary` can hit the
+  // wrong one.
   await source.click();
   await page.keyboard.type('Neumann');
-  await page.locator('.q-menu .q-item.text-primary').click();
+  await page.locator('.q-menu .q-item', { hasText: 'Neumann' }).first().click();
   await expect
     .poll(async () =>
       ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
@@ -919,7 +922,7 @@ test('source and stand selectors are usable when the Stockwire integration is di
   // stand: no local devices, so a typed name becomes the stand type
   await stand.click();
   await page.keyboard.type('K&M 210');
-  await page.locator('.q-menu .q-item.text-primary').click();
+  await page.locator('.q-menu .q-item', { hasText: 'K&M 210' }).first().click();
   await expect
     .poll(async () =>
       ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
