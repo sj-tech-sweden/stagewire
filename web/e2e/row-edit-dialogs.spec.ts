@@ -147,8 +147,14 @@ test('the video row edit dialog exposes signal metadata and saves it', async ({ 
       aspect_ratio: '16:9',
     });
 
-  // Output row shares the same dialog and the same signal fields.
-  await page.getByTestId('video-edit-open').nth(1).click();
+  // Output row shares the same dialog and the same signal fields. Outputs live on their own tab,
+  // so switch to it first — the inactive tab's rows are not in the DOM. Wait for the output table to
+  // be present (the animated panel transition can leave the other panel briefly mounted), then scope
+  // the edit button to that table so we click the output's row, not a transitioning input row.
+  await page.getByTestId('video-tab-outputs').click();
+  const outputTable = page.getByTestId('video-video_output-table');
+  await expect(outputTable).toBeVisible();
+  await outputTable.getByTestId('video-edit-open').first().click();
   await expect(page.getByTestId('video-edit-dialog')).toBeVisible();
   await page.getByTestId('video-edit-resolution').fill('3840x2160');
   await page.getByTestId('video-edit-signal-format').click();
