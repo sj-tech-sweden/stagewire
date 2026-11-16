@@ -174,7 +174,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
@@ -235,10 +235,11 @@ watch(
   { immediate: true },
 );
 
-const sourceOfForm = () =>
+const sourceOfForm = computed(() =>
   form.value.stockwire_product_name
     ? { id: form.value.stockwire_product_id, name: form.value.stockwire_product_name }
-    : null;
+    : null,
+);
 function onPickSource(pick) {
   form.value.stockwire_product_id = pick?.id ? String(pick.id) : null;
   form.value.stockwire_product_name = pick?.name || null;
