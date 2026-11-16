@@ -240,21 +240,61 @@ function textareaEl() {
   return c.$el.querySelector('textarea') || c.$el.querySelector('input');
 }
 
-// Inline wrap (bold/italic/strike/code): surround the current selection with before/after markers.
-// With no selection, insert a placeholder and select it so the user can just type over it.
+// Inline wrap (bold/italic/strike/code). This is a toggle: if the selection (or, for a collapsed
+// cursor, the word under it) is already wrapped in the markers, they are removed; otherwise they are
+// added around it. Toggling off works whether the markers sit just outside the selection or are part
+// of the selected text itself.
+function expandWord(val, pos) {
+  let start = pos;
+  let end = pos;
+  while (start > 0 && !/\s/.test(val[start - 1])) start -= 1;
+  while (end < val.length && !/\s/.test(val[end])) end += 1;
+  return { start, end };
+}
+
 function applyInline(before, after, placeholder) {
   const ta = textareaEl();
   const val = draft.value;
-  const s = ta ? ta.selectionStart : val.length;
-  const e = ta ? ta.selectionEnd : val.length;
-  const selected = val.slice(s, e) || placeholder;
-  const inserted = before + selected + after;
-  draft.value = val.slice(0, s) + inserted + val.slice(e);
+  let s = ta ? ta.selectionStart : val.length;
+  let e = ta ? ta.selectionEnd : val.length;
+  if (s === e) {
+    // Collapsed cursor: act on the whole word so clicking inside "**bold**" toggles it.
+    const w = expandWord(val, s);
+    s = w.start;
+    e = w.end;
+  }
+  const selText = val.slice(s, e);
+  const outerBefore = val.slice(s - before.length, s) === before;
+  const outerAfter = val.slice(e, e + after.length) === after;
+  let newStart;
+  let newEnd;
+  if (outerBefore && outerAfter) {
+    // Markers sit just outside the selection: drop them, keep the inner text selected.
+    draft.value = val.slice(0, s - before.length) + selText + val.slice(e + after.length);
+    newStart = s - before.length;
+    newEnd = newStart + selText.length;
+  } else if (
+    selText.startsWith(before) &&
+    selText.endsWith(after) &&
+    selText.length >= before.length + after.length
+  ) {
+    // Selection itself includes the markers: unwrap to the inner text.
+    const inner = selText.slice(before.length, selText.length - after.length);
+    draft.value = val.slice(0, s) + inner + val.slice(e);
+    newStart = s;
+    newEnd = newStart + inner.length;
+  } else {
+    // Not wrapped: wrap it (or insert a placeholder when there is nothing to wrap).
+    const target = selText || placeholder;
+    const inserted = before + target + after;
+    draft.value = val.slice(0, s) + inserted + val.slice(e);
+    newStart = s + before.length;
+    newEnd = newStart + target.length;
+  }
   if (ta) {
     nextTick(() => {
       ta.focus();
-      const start = s + before.length;
-      ta.setSelectionRange(start, start + selected.length);
+      ta.setSelectionRange(newStart, newEnd);
     });
   }
 }

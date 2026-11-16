@@ -114,6 +114,42 @@ test('toolbar inserts markdown around the selection', async ({ page, request }) 
     .toBe('**Hello**');
 });
 
+// Inline styles (bold here) toggle off when clicked again, rather than stacking markers.
+test('bold toolbar button toggles off on second click', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await call(request, headers, 'post', '/jobs', { title: `Bus bold toggle E2E ${Date.now()}` });
+  const list = await call(request, headers, 'post', `/jobs/${job.id}/channel-lists`, { name: 'FOH' });
+  const base = `/jobs/${job.id}/channel-lists/${list.id}`;
+  await call(request, headers, 'put', `${base}/console-profile`, { preset: 'gld-80' });
+  const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge 1' });
+
+  await page.goto(`/jobs/${job.id}/workspace?view=lists`);
+  await page.getByTestId('open-console').click();
+  await expect(page.getByTestId('console-panel')).toBeVisible();
+  await page.getByTestId('console-tab-buses').click();
+
+  const busEl = page.getByTestId('console-bus').first();
+  await busEl.getByTestId('console-bus-edit-notes').click();
+  const editor = page.getByTestId('markdown-editor-input');
+  await expect(editor).toBeVisible();
+  await editor.fill('Hello');
+  await editor.press('Control+a');
+  await page.getByTestId('markdown-toolbar-bold').click();
+  await page.getByTestId('markdown-toolbar-bold').click();
+  await page.getByTestId('markdown-editor-save').click();
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${job.id}/channel-lists`, { headers })).json();
+      const out = (lists.find((l: { id: string }) => l.id === list.id)?.outputs || []).find(
+        (o: { id: string }) => o.id === bus.id,
+      );
+      return out?.notes;
+    })
+    .toBe('Hello');
+});
+
 // Heading buttons behave like a radio group: H2 on plain text adds "## ", H2 again removes it, and
 // clicking a different level converts rather than stacking hashes.
 test('heading buttons toggle and convert levels', async ({ page, request }) => {
