@@ -1,8 +1,11 @@
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from jwt import PyJWTError as JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import get_db
+from app.domains.auth.models import User
 from app.domains.auth.security import decode_token, verify_share_token
 
 router = APIRouter()
@@ -69,13 +72,20 @@ async def publish_venue_event(venue_id, event_type: str, payload) -> None:
 
 
 @router.websocket("/ws/jobs/{job_id}")
-async def job_ws(websocket: WebSocket, job_id: str) -> None:
+async def job_ws(websocket: WebSocket, job_id: str, db: AsyncSession = Depends(get_db)) -> None:
     token = websocket.query_params.get("token")
     user_id = None
     share_job_id = None
     if token:
+        # Mirror get_current_user: a user JWT is only admitted if the account exists and
+        # is active. Without this check a revoked/deactivated account holding a still-valid
+        # JWT could open the realtime room (REST would reject it) and receive every event
+        # for the job. We resolve the account here rather than trusting the token alone.
         try:
-            user_id = int(decode_token(token)["sub"])
+            payload = decode_token(token)
+            candidate = await db.get(User, int(payload["sub"]))
+            if candidate is not None and candidate.is_active:
+                user_id = candidate.id
         except (JWTError, KeyError, ValueError):
             user_id = None
         # A logged-in session was not found — fall back to a read-only, view-scoped share token
@@ -103,13 +113,19 @@ async def job_ws(websocket: WebSocket, job_id: str) -> None:
 
 
 @router.websocket("/ws/venues/{venue_id}")
-async def venue_ws(websocket: WebSocket, venue_id: str) -> None:
-    # Venues are edited by authenticated admins only (no crew share-token fallback).
+async def venue_ws(websocket: WebSocket, venue_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    # Venues are edited by authenticated users (no crew share-token fallback; the venue
+    # base rig is admin workspace, not the day-of-show crew view). Admit a token only if it
+    # resolves to an existing, active account — mirroring get_current_user so a revoked
+    # account cannot open the room.
     token = websocket.query_params.get("token")
     user_id = None
     if token:
         try:
-            user_id = int(decode_token(token)["sub"])
+            payload = decode_token(token)
+            candidate = await db.get(User, int(payload["sub"]))
+            if candidate is not None and candidate.is_active:
+                user_id = candidate.id
         except (JWTError, KeyError, ValueError):
             user_id = None
     if user_id is None:
