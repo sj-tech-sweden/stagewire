@@ -52,7 +52,7 @@ async function openVideoList(page: Page, request: APIRequestContext) {
     name: 'PGM',
   });
   await page.goto(`/jobs/${job.id}/workspace?view=video`);
-  await expect(page.getByTestId('video-input-table')).toBeVisible();
+  await expect(page.getByTestId('video-video_input-table')).toBeVisible();
   return {
     jobId: job.id as string,
     inputId: input.id as string,
@@ -72,7 +72,10 @@ test('the channel edit dialog exposes the full attribute set and saves it', asyn
   await expect(page.getByTestId('channel-edit-performer')).toBeVisible();
   await expect(page.getByTestId('channel-edit-phantom')).toBeVisible();
   await expect(page.getByTestId('channel-edit-stereo')).toBeVisible();
-  await expect(page.getByTestId('channel-edit-notes')).toBeVisible();
+  // `channel-edit-notes` also exists as the inline edit-notes button in the
+  // table row, so scope this assertion to the dialog to avoid a strict-mode
+  // locator collision.
+  await expect(page.getByTestId('channel-edit-dialog').getByTestId('channel-edit-notes')).toBeVisible();
 
   // switching the kind to Wireless reveals the wireless block
   await page.getByTestId('channel-edit-kind').click();
