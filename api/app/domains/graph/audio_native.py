@@ -105,7 +105,6 @@ OUTPUT_ATTRS = (
     "role",
     "out_endpoints",
     "tap_point",
-    "talkback_destinations",
 )
 # A channel is the logical endpoint of a source signal: a mic or a digital stagebox feeds *into*
 # the channel (`in`), and the channel then feeds *out* to a bus / PA (`out`). These two ports are
@@ -142,7 +141,6 @@ OUTPUT_DEFAULTS = {
     "role": "aux",
     "out_endpoints": None,
     "tap_point": "post_fade",
-    "talkback_destinations": None,
 }
 # a null in an edit clears only these (the rest of the old columns were NOT NULL: null = not sent)
 CLEARABLE = {
@@ -165,7 +163,6 @@ CLEARABLE = {
     "direct_out",
     "out_endpoints",
     "tap_point",
-    "talkback_destinations",
     "bus_tap_points",
     "talkback_presets",
 }

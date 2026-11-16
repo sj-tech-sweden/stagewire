@@ -860,6 +860,7 @@ export default {
     talkbackPresetName: "Preset-namn",
     talkbackPresetDestinations: "Destinationer",
     talkbackPresetAdd: "Lägg till preset",
+    talkbackFeeds: "Talkback: {names}",
     overBudget: "Busspoolen överskriden",
     addAnyway: "Lägg till ändå",
     pairRange: "Par, t.ex. 1-16",

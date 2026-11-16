@@ -200,7 +200,6 @@ class ChannelListOutputBase(BaseModel):
     notes: str = ""
     color_code: str | None = None
     tap_point: str | None = None
-    talkback_destinations: list | None = None
 
 
 def _check_bus_mode(value: str | None) -> str | None:

@@ -541,6 +541,14 @@
               >
                 {{ slotLabel(bus) }}
               </q-item-label>
+              <q-item-label
+                v-if="talkbackForBus(bus.id).length"
+                caption
+                class="q-mt-xs text-grey-7"
+              >
+                <q-icon name="campaign" size="xs" class="q-mr-xs" />
+                {{ t("console.talkbackFeeds", { names: talkbackForBus(bus.id).join(", ") }) }}
+              </q-item-label>
             </q-item-section>
             <q-item-section
               side
@@ -2611,6 +2619,14 @@ const talkbackPresets = computed(() => listData.value?.talkback_presets || []);
 const talkbackDestinations = computed(() =>
   buses.value.filter((b) => b.role !== "fx_send").map((b) => ({ value: b.id, label: b.name || b.id })),
 );
+// Reverse mapping: the names of the talkback presets that route to a given bus, derived from the
+// presets' destination lists (the presets are the source of truth; we never store it per-bus).
+function talkbackForBus(busId) {
+  return talkbackPresets.value
+    .filter((p) => (p.destinations || []).includes(busId))
+    .map((p) => p.name)
+    .filter(Boolean);
+}
 // A linked pair is ONE ganged strip: the secondary is hidden everywhere in this panel.
 const strips = computed(() =>
   (listData.value?.channels || []).filter((c) => c.stereo_link_role !== "secondary").sort((a, b) => a.channel_number - b.channel_number),

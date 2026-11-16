@@ -858,6 +858,7 @@ export default {
     talkbackPresetName: "Preset name",
     talkbackPresetDestinations: "Destinations",
     talkbackPresetAdd: "Add preset",
+    talkbackFeeds: "Talkback: {names}",
     overBudget: "Bus pool exceeded",
     addAnyway: "Add anyway",
     pairRange: "Pairs, e.g. 1-16",
