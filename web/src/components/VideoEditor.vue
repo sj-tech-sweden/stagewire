@@ -63,9 +63,17 @@
           data-testid="add-video-output"
           @click="addRows('outputs', 1)"
         />
+        <q-btn
+          flat
+          no-caps
+          icon="tune"
+          :label="list.attributes.switcher_product_id ? t('video.changeSwitcher') : t('video.setSwitcher')"
+          data-testid="set-switcher"
+          @click="switcherOpen = true"
+        />
         <div
-          v-if="listSwitchers.length"
-          class="row q-gutter-xs"
+          v-if="listSwitchers.length || list.attributes.switcher_product_id"
+          class="row q-gutter-xs items-center"
           data-testid="list-switcher-devices"
         >
           <q-chip
@@ -82,12 +90,19 @@
             <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
           </q-chip>
         </div>
+        <div
+          v-if="list.attributes.switcher_product_id"
+          class="text-caption text-grey-7 q-mt-xs"
+        >
+          {{ t('video.switcherSummary', { name: list.attributes.switcher_product_name, inputs: list.attributes.switcher_inputs ?? '–', outputs: list.attributes.switcher_outputs ?? '–' }) }}
+        </div>
         <q-btn
           v-if="list.attributes.switcher_product_id"
           flat
           no-caps
           icon="auto_fix_high"
           :label="t('workspace.fillFromSwitcher')"
+          data-testid="fill-from-switcher"
           @click="fill"
         />
         <q-space />
@@ -107,8 +122,20 @@
         :key="section.kind"
         class="q-mb-md"
       >
-        <div class="text-subtitle1">
-          {{ section.title }}
+        <div class="row items-center q-gutter-sm">
+          <div class="text-subtitle1">
+            {{ section.title }}
+          </div>
+          <q-space />
+          <q-btn
+            flat
+            dense
+            no-caps
+            icon="playlist_add"
+            :label="section.kind === 'video_input' ? t('video.bulkInputs') : t('video.bulkOutputs')"
+            :data-testid="`bulk-${section.kind === 'video_input' ? 'inputs' : 'outputs'}`"
+            @click="openBulk(section.kind)"
+          />
         </div>
         <!-- Phones get one card per row with the same editors as the table: number, name and the
              chain actions in the header, a summary line, and the rest under "Details". -->
@@ -416,6 +443,20 @@
       :value="videoNotesTarget?.notes || ''"
       @save="(text) => videoNotesTarget && save(videoNotesTarget, { notes: text })"
     />
+
+    <VideoBulkDialog
+      v-model="bulkVideoOpen"
+      :kind="bulkVideoKind"
+      :next-number="nextVideoNumber(bulkVideoKind)"
+      :busy="bulkBusy"
+      @create="(items) => bulkCreate(bulkVideoKind, items)"
+    />
+
+    <SwitcherDialog
+      v-model="switcherOpen"
+      :list="list"
+      @save="saveSwitcher"
+    />
   </div>
 </template>
 
@@ -433,6 +474,8 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import VideoBulkDialog from '@/components/VideoBulkDialog.vue';
+import SwitcherDialog from '@/components/SwitcherDialog.vue';
 import {
   flowTree,
   isPlotElement,
@@ -603,6 +646,62 @@ async function fill() {
     await graph.fillVideoFromSwitcher(scopeId.value, list.value.id);
   } catch (err) {
     failed(err);
+  }
+}
+
+// Bulk-add many inputs or outputs at once through the existing batch endpoint
+// (graph.createVideoRows already publishes a graph.device.upsert per row, so the
+// other client updates live). The dialog builds the item bodies; we only map the
+// section kind to the endpoint's `inputs`/`outputs` vocabulary and persist.
+const bulkVideoOpen = ref(false);
+const bulkVideoKind = ref('inputs'); // 'inputs' | 'outputs' for dialog + endpoint
+const bulkBusy = ref(false);
+function openBulk(sectionKind) {
+  bulkVideoKind.value = sectionKind === 'video_input' ? 'inputs' : 'outputs';
+  bulkVideoOpen.value = true;
+}
+// Continue the existing numbering for the list so bulk rows don't collide with
+// what's already there. Input rows are stored as `video_input`, outputs as
+// `video_destination`; the number lives in `input_number` / `output_number`.
+function nextVideoNumber(kind) {
+  const rowKind = kind === 'inputs' ? 'video_input' : 'video_destination';
+  const numberKey = kind === 'inputs' ? 'input_number' : 'output_number';
+  let max = 0;
+  for (const row of videoRowsOf(graph.devices, listId.value, rowKind)) {
+    const n = Number(row.attributes?.[numberKey]);
+    if (Number.isFinite(n)) max = Math.max(max, n);
+  }
+  return max + 1;
+}
+async function bulkCreate(kind, items) {
+  bulkBusy.value = true;
+  try {
+    await graph.createVideoRows(scopeId.value, list.value.id, kind, items);
+    bulkVideoOpen.value = false;
+  } catch (err) {
+    failed(err);
+  } finally {
+    bulkBusy.value = false;
+  }
+}
+
+// Set (or clear) the list's switcher. Stored on the list node's attributes; the
+// existing "Fill from switcher" then adds empty rows up to size. Saving through
+// updateDevice publishes a graph.device.upsert so the summary updates live.
+const switcherOpen = ref(false);
+async function saveSwitcher({ product, inputs, outputs }) {
+  try {
+    await graph.updateDevice(scopeId.value, list.value.id, {
+      attributes: {
+        switcher_product_id: product?.id ? String(product.id) : null,
+        switcher_product_name: product?.name || null,
+        switcher_inputs: inputs ?? null,
+        switcher_outputs: outputs ?? null,
+      },
+    });
+    switcherOpen.value = false;
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 
