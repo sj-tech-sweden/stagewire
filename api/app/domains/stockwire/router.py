@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio.models import ProductionJob
+from app.domains.audio.ws import publish_job_event
 from app.domains.auth.deps import get_current_user
 from app.domains.graph.models import GraphDevice
 from app.domains.stockwire import client, schemas
@@ -371,7 +372,13 @@ async def request_additions(
 ):
     try:
         sw = await _stockwire_client(db)
-        return await sw.request_additions(job_id, [item.model_dump() for item in payload.items])
+        result = await sw.request_additions(job_id, [item.model_dump() for item in payload.items])
+        await publish_job_event(
+            job_id,
+            "stockwire.gear_request.upsert",
+            {"job_id": str(job_id), "items": [item.model_dump() for item in payload.items]},
+        )
+        return result
     except Exception as exc:  # noqa: BLE001
         detail = f"Stockwire upstream error: {type(exc).__name__}: {exc}"
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
@@ -514,6 +521,11 @@ async def link_job(job_id: str, payload: LinkJobBody | None = None, db=Depends(g
             ) from exc
         job.stockwire_job_id = str(existing_rental.get("id"))
         await db.commit()
+        await publish_job_event(
+            job.id,
+            "stockwire.job.upsert",
+            {"job_id": str(job.id), "stockwire_job_id": job.stockwire_job_id},
+        )
         return {"stockwire_job_id": job.stockwire_job_id, "created": False}
     try:
         created = await sw.create_job(client.rental_job_payload(job))
@@ -522,4 +534,9 @@ async def link_job(job_id: str, payload: LinkJobBody | None = None, db=Depends(g
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
     job.stockwire_job_id = str(created.get("id"))
     await db.commit()
+    await publish_job_event(
+        job.id,
+        "stockwire.job.upsert",
+        {"job_id": str(job.id), "stockwire_job_id": job.stockwire_job_id},
+    )
     return {"stockwire_job_id": job.stockwire_job_id, "created": True}

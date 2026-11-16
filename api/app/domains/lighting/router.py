@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
+from app.domains.audio.ws import publish_job_event, publish_venue_event
 from app.domains.auth.deps import get_current_user
 from app.domains.graph.mirror import MirrorToGraphRoute
 from app.domains.lighting import importers, schemas, service
@@ -62,6 +63,39 @@ async def _venue_or_404(db: AsyncSession, venue_id: UUID | None) -> None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
 
 
+def _event_payload(obj):
+    """Return a JSON-serializable realtime payload for ``obj``.
+
+    The publish path runs ``json.dumps`` on the payload (see ``manager.broadcast``),
+    so it must be a Pydantic ``Read`` schema or a plain dict. Several lighting service
+    methods hand back the SQLAlchemy ORM object, which is neither — passing it would
+    raise inside the websocket broadcast and 500 the originating write. Convert the two
+    ORM types we publish here into their ``Read`` schema (``from_attributes=True``).
+    """
+    if hasattr(obj, "model_dump") or isinstance(obj, dict):
+        return obj
+    from app.domains.lighting.models import FixtureMode, FixtureType
+
+    if isinstance(obj, FixtureType):
+        return schemas.FixtureTypeRead.model_validate(obj)
+    if isinstance(obj, FixtureMode):
+        return schemas.FixtureModeRead.model_validate(obj)
+    return obj
+
+
+async def _publish(job_id: UUID | None, venue_id: UUID | None, event_type: str, payload) -> None:
+    """Emit a realtime event to the correct scope (job or venue).
+
+    AGENTS.md §11 requires every shared mutation to broadcast; the fixture library is
+    shared by jobs and venues, so the event must reach the room the editor is in.
+    """
+    payload = _event_payload(payload)
+    if venue_id is not None:
+        await publish_venue_event(venue_id, event_type, payload)
+    else:
+        await publish_job_event(job_id, event_type, payload)
+
+
 async def _reads(db: AsyncSession, job_id: UUID, fixtures: list) -> list[schemas.FixtureRead]:
     names = {str(d.id): d.name for d in await audio_service.list_devices(db, job_id)}
     flags = service.dmx_flags(fixtures)
@@ -101,7 +135,9 @@ async def create_fixture(
     data = payload.model_dump(exclude_unset=True)
     await _check_links(db, job_id, data)
     fixture = await service.create_fixture(db, job_id, data)
-    return await _read(db, job_id, fixture)
+    read = await _read(db, job_id, fixture)
+    await publish_job_event(job_id, "lighting.fixture.upsert", read)
+    return read
 
 
 @router.patch("/jobs/{job_id}/fixtures/{fixture_id}", response_model=schemas.FixtureRead)
@@ -115,7 +151,9 @@ async def update_fixture(
     data = payload.model_dump(exclude_unset=True)
     await _check_links(db, job_id, data)
     fixture = await service.update_fixture(db, job_id, fixture, data)
-    return await _read(db, job_id, fixture)
+    read = await _read(db, job_id, fixture)
+    await publish_job_event(job_id, "lighting.fixture.upsert", read)
+    return read
 
 
 @router.delete("/jobs/{job_id}/fixtures/{fixture_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -124,6 +162,7 @@ async def delete_fixture(
 ) -> None:
     fixture = await _fixture_or_404(db, job_id, fixture_id)
     await service.delete_fixture(db, fixture)
+    await publish_job_event(job_id, "lighting.fixture.delete", {"id": str(fixture_id)})
 
 
 @router.post("/jobs/{job_id}/fixtures/import", response_model=schemas.FixtureImportResult)
@@ -146,6 +185,11 @@ async def import_fixtures(
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     created, devices_created, cleared = await service.import_rows(db, job_id, rows, clear_imported)
+    await publish_job_event(
+        job_id,
+        "lighting.fixture.imported",
+        {"job_id": str(job_id), "created_count": created, "cleared": cleared},
+    )
     return schemas.FixtureImportResult(
         created=created, devices_created=devices_created, cleared=cleared, errors=errors
     )
@@ -166,7 +210,9 @@ async def create_type(
     job_id: UUID, payload: schemas.FixtureTypeCreate, db: AsyncSession = Depends(get_db)
 ):
     await _job_or_404(db, job_id)
-    return await service.create_type(db, job_id, payload.model_dump())
+    read = await service.create_type(db, job_id, payload.model_dump())
+    await _publish(job_id, None, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.post(
@@ -193,7 +239,9 @@ async def import_type_from_stockwire(
     values = type_from_product(product)
     if not values["name"]:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The product has no name")
-    return await service.import_stockwire_type(db, job_id, payload.product_id, values)
+    read = await service.import_stockwire_type(db, job_id, payload.product_id, values)
+    await _publish(job_id, None, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.patch("/jobs/{job_id}/fixture-types/{type_id}", response_model=schemas.FixtureTypeRead)
@@ -204,13 +252,16 @@ async def update_type(
     db: AsyncSession = Depends(get_db),
 ):
     fixture_type = await _type_or_404(db, type_id, job_id=job_id)
-    return await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
+    read = await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
+    await _publish(job_id, None, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.delete("/jobs/{job_id}/fixture-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_type(job_id: UUID, type_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
     fixture_type = await _type_or_404(db, type_id, job_id=job_id)
     await service.delete_type(db, fixture_type)
+    await _publish(job_id, None, "lighting.fixture_type.delete", {"id": str(type_id)})
 
 
 @router.post(
@@ -225,7 +276,9 @@ async def create_mode(
     db: AsyncSession = Depends(get_db),
 ):
     fixture_type = await _type_or_404(db, type_id, job_id=job_id)
-    return await service.create_mode(db, fixture_type, payload.model_dump())
+    read = await service.create_mode(db, fixture_type, payload.model_dump())
+    await _publish(job_id, None, "lighting.fixture_mode.upsert", read)
+    return read
 
 
 @router.patch(
@@ -245,7 +298,9 @@ async def update_mode(
     )
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
-    return await service.update_mode(db, mode, payload.model_dump(exclude_unset=True))
+    read = await service.update_mode(db, mode, payload.model_dump(exclude_unset=True))
+    await _publish(job_id, None, "lighting.fixture_mode.upsert", read)
+    return read
 
 
 @router.delete(
@@ -260,6 +315,7 @@ async def delete_mode(
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
     await service.delete_mode(db, mode)
+    await _publish(job_id, None, "lighting.fixture_mode.delete", {"id": str(mode_id)})
 
 
 # --- Venue-scoped fixture library -------------------------------------------------------------
@@ -283,7 +339,9 @@ async def create_venue_type(
     venue_id: UUID, payload: schemas.FixtureTypeCreate, db: AsyncSession = Depends(get_db)
 ):
     await _venue_or_404(db, venue_id)
-    return await service.create_type(db, venue_id=venue_id, data=payload.model_dump())
+    read = await service.create_type(db, venue_id=venue_id, data=payload.model_dump())
+    await _publish(None, venue_id, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.post(
@@ -310,9 +368,11 @@ async def import_venue_type_from_stockwire(
     values = type_from_product(product)
     if not values["name"]:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The product has no name")
-    return await service.import_stockwire_type(
+    read = await service.import_stockwire_type(
         db, venue_id=venue_id, product_id=payload.product_id, values=values
     )
+    await _publish(None, venue_id, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.patch("/venues/{venue_id}/fixture-types/{type_id}", response_model=schemas.FixtureTypeRead)
@@ -323,7 +383,9 @@ async def update_venue_type(
     db: AsyncSession = Depends(get_db),
 ):
     fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
-    return await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
+    read = await service.update_type(db, fixture_type, payload.model_dump(exclude_unset=True))
+    await _publish(None, venue_id, "lighting.fixture_type.upsert", read)
+    return read
 
 
 @router.delete("/venues/{venue_id}/fixture-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -332,6 +394,7 @@ async def delete_venue_type(
 ) -> None:
     fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
     await service.delete_type(db, fixture_type)
+    await _publish(None, venue_id, "lighting.fixture_type.delete", {"id": str(type_id)})
 
 
 @router.post(
@@ -346,7 +409,9 @@ async def create_venue_mode(
     db: AsyncSession = Depends(get_db),
 ):
     fixture_type = await _type_or_404(db, type_id, venue_id=venue_id)
-    return await service.create_mode(db, fixture_type, payload.model_dump())
+    read = await service.create_mode(db, fixture_type, payload.model_dump())
+    await _publish(None, venue_id, "lighting.fixture_mode.upsert", read)
+    return read
 
 
 @router.patch(
@@ -365,7 +430,9 @@ async def update_venue_mode(
     mode = next((m for m in type_row.modes if m.id == mode_id), None) if type_row else None
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
-    return await service.update_mode(db, mode, payload.model_dump(exclude_unset=True))
+    read = await service.update_mode(db, mode, payload.model_dump(exclude_unset=True))
+    await _publish(None, venue_id, "lighting.fixture_mode.upsert", read)
+    return read
 
 
 @router.delete(
@@ -380,6 +447,7 @@ async def delete_venue_mode(
     if mode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mode not found")
     await service.delete_mode(db, mode)
+    await _publish(None, venue_id, "lighting.fixture_mode.delete", {"id": str(mode_id)})
 
 
 async def _check_device(db: AsyncSession, job_id: UUID, device_id: UUID | None) -> None:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.domains.audio import service as audio_service
+from app.domains.audio.ws import publish_job_event, publish_venue_event
 from app.domains.auth.deps import get_current_user
 from app.domains.connectors.service import refresh_power_connectors
 from app.domains.graph import devices_native, fixtures_native, plot_native, power_native
@@ -79,6 +80,18 @@ async def _found(obj, detail: str):
     if obj is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail)
     return obj
+
+
+async def _publish(job_id: UUID | None, venue_id: UUID | None, event_type: str, payload) -> None:
+    """Emit a realtime event to the correct scope (job or venue).
+
+    AGENTS.md §11 requires every shared mutation to broadcast; rigging edits are shared by
+    jobs and venues, so the event must reach the room the editor is in.
+    """
+    if venue_id is not None:
+        await publish_venue_event(venue_id, event_type, payload)
+    else:
+        await publish_job_event(job_id, event_type, payload)
 
 
 def _outputs(items: list[schemas.PowerOutput]) -> list[dict]:
@@ -225,7 +238,9 @@ async def create_node(
     await _reject(_problems(evaluation, candidate.name))
     node = await power_native.create_node(db, job_id, {**data, "outputs": outputs}, venue_id)
     await db.commit()
-    return await _read_node(db, node, job_id, venue_id)
+    read = await _read_node(db, node, job_id, venue_id)
+    await _publish(job_id, venue_id, "rigging.power_node.upsert", read)
+    return read
 
 
 @router.get("/jobs/{job_id}/power-nodes/{node_id}", response_model=schemas.PowerNodeRead)
@@ -333,9 +348,11 @@ async def update_node(
     await _reject(_problems(evaluation, *names))
     node = await power_native.update_node(db, job_id, node.id, data, venue_id)
     await db.commit()
-    return await _read_node(
+    read = await _read_node(
         db, await service.get_node(db, job_id, node.id, venue_id), job_id, venue_id
     )
+    await _publish(job_id, venue_id, "rigging.power_node.upsert", read)
+    return read
 
 
 def _descendant_ids(nodes: list, feeds: list, node_id: str) -> set[str]:
@@ -378,6 +395,7 @@ async def delete_node(
         raise HTTPException(status.HTTP_409_CONFLICT, "Unplug the loads on this node first")
     await power_native.delete_node(db, job_id, node.id, venue_id)
     await db.commit()
+    await _publish(job_id, venue_id, "rigging.power_node.delete", {"id": str(node_id)})
 
 
 @router.post(
@@ -446,7 +464,9 @@ async def add_feed(
         venue_id,
     )
     await db.commit()
-    return schemas.PowerNodeFeedRead.model_validate(saved)
+    read = schemas.PowerNodeFeedRead.model_validate(saved)
+    await _publish(job_id, venue_id, "rigging.feed.upsert", read)
+    return read
 
 
 @router.delete("/jobs/{job_id}/power-nodes/{node_id}/feeds/{feed_id}", status_code=204)
@@ -465,6 +485,7 @@ async def remove_feed(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Feed not found")
     await power_native.remove_feed(db, job_id, feed_id, venue_id)
     await db.commit()
+    await _publish(job_id, venue_id, "rigging.feed.delete", {"id": str(feed_id)})
 
 
 @router.get("/jobs/{job_id}/rigging/loads", response_model=list[schemas.LoadRead])
@@ -700,6 +721,7 @@ async def assign_load(
             changes["power_connector"] = data["power_connector"] or ""
         await fixtures_native.update_fixture(db, job_id, load_id, changes, venue_id)
         await db.commit()
+        await _publish(job_id, venue_id, "rigging.load.upsert", {"id": str(load_id), "kind": kind})
         return
     elif kind == "element":
         # plot elements live on the graph: their load links are set by the element store
@@ -708,6 +730,7 @@ async def assign_load(
             changes["power_connector"] = data["power_connector"] or ""
         await plot_native.update_element(db, job_id, load_id, changes, venue_id)
         await db.commit()
+        await _publish(job_id, venue_id, "rigging.load.upsert", {"id": str(load_id), "kind": kind})
         return
     else:
         device = await audio_service.get_device(db, load_id, venue_id=venue_id)
@@ -719,3 +742,4 @@ async def assign_load(
             changes["power_connector"] = data["power_connector"] or ""
         await devices_native.update_device(db, load_id, changes, job_id, venue_id)
         await db.commit()
+        await _publish(job_id, venue_id, "rigging.load.upsert", {"id": str(load_id), "kind": kind})
