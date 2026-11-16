@@ -36,6 +36,13 @@ class VideoInputBase(BaseModel):
     notes: str = ""
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
+    # Signal metadata for the video row. Stored as graph-node attributes (no dedicated column),
+    # surfaced here so the legacy video-lists endpoint and exports stay truthful.
+    resolution: str | None = None
+    frame_rate: str | None = None
+    signal_format: str | None = None
+    color_space: str | None = None
+    aspect_ratio: str | None = None
 
 
 class VideoInputCreate(VideoInputBase):
@@ -61,6 +68,11 @@ class VideoInputRead(BaseModel):
     notes: str
     stockwire_product_id: str | None = None
     stockwire_product_name: str | None = None
+    resolution: str | None = None
+    frame_rate: str | None = None
+    signal_format: str | None = None
+    color_space: str | None = None
+    aspect_ratio: str | None = None
     patch_points: list[VideoPatchPointRead] = []
 
 
@@ -96,6 +108,11 @@ class VideoOutputBase(BaseModel):
     destination_label: str = ""
     connector: str = "sdi"
     notes: str = ""
+    resolution: str | None = None
+    frame_rate: str | None = None
+    signal_format: str | None = None
+    color_space: str | None = None
+    aspect_ratio: str | None = None
 
 
 class VideoOutputCreate(VideoOutputBase):
@@ -119,6 +136,11 @@ class VideoOutputRead(BaseModel):
     destination_label: str
     connector: str
     notes: str
+    resolution: str | None = None
+    frame_rate: str | None = None
+    signal_format: str | None = None
+    color_space: str | None = None
+    aspect_ratio: str | None = None
     patch_points: list[VideoOutputPatchPointRead] = []
 
 

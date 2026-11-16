@@ -113,6 +113,11 @@ async def load_video_lists(
                     notes=node.notes or "",
                     stockwire_product_id=a.get("stockwire_product_id"),
                     stockwire_product_name=a.get("stockwire_product_name"),
+                    resolution=a.get("resolution"),
+                    frame_rate=a.get("frame_rate"),
+                    signal_format=a.get("signal_format"),
+                    color_space=a.get("color_space"),
+                    aspect_ratio=a.get("aspect_ratio"),
                     patch_points=points_of(node, "input_id"),
                 )
             )
@@ -126,6 +131,11 @@ async def load_video_lists(
                     destination_label=a.get("destination_label") or "",
                     connector=a.get("connector") or "",
                     notes=node.notes or "",
+                    resolution=a.get("resolution"),
+                    frame_rate=a.get("frame_rate"),
+                    signal_format=a.get("signal_format"),
+                    color_space=a.get("color_space"),
+                    aspect_ratio=a.get("aspect_ratio"),
                     patch_points=points_of(node, "output_id"),
                 )
             )

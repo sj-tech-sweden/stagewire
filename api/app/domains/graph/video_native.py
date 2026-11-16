@@ -303,6 +303,17 @@ def video_input_node(
             "connector": connector,
             "list_id": str(list_node.id),
             "points": [],
+            **{
+                k: data.get(k)
+                for k in (
+                    "resolution",
+                    "frame_rate",
+                    "signal_format",
+                    "color_space",
+                    "aspect_ratio",
+                )
+                if data.get(k) is not None
+            },
             **({"legacy_id": str(legacy_id)} if legacy_id else {}),
         },
         ports=[
@@ -340,6 +351,17 @@ def video_output_node(
             "list_id": str(list_node.id),
             "points": [],
             "roots": [],
+            **{
+                k: data.get(k)
+                for k in (
+                    "resolution",
+                    "frame_rate",
+                    "signal_format",
+                    "color_space",
+                    "aspect_ratio",
+                )
+                if data.get(k) is not None
+            },
             **({"legacy_id": str(legacy_id)} if legacy_id else {}),
         },
         ports=[

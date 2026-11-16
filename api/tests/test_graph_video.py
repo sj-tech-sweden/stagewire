@@ -323,6 +323,58 @@ async def test_many_video_inputs_can_share_a_switchers_generic_input_port(auth_h
 
 
 @pytest.mark.asyncio
+async def test_video_row_signal_metadata_is_stored_and_served_by_legacy_endpoint(auth_headers):
+    # The new resolution/frame_rate/signal_format/color_space/aspect_ratio fields live on the node's
+    # JSON attributes (no dedicated column), so they round-trip through the graph PATCH and the
+    # legacy video-lists endpoint that the reports and exports read.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, g, lst = await _setup(client, h)
+        cam = (
+            await client.post(
+                f"{g}/video-lists/{lst['id']}/inputs",
+                json={"source_label": "Cam 1", "connector": "sdi"},
+                headers=h,
+            )
+        ).json()
+        out = (
+            await client.post(
+                f"{g}/video-lists/{lst['id']}/outputs", json={"name": "PGM"}, headers=h
+            )
+        ).json()
+
+        meta = {
+            "resolution": "1920x1080",
+            "frame_rate": "50i",
+            "signal_format": "NDI",
+            "color_space": "Rec2020",
+            "aspect_ratio": "16:9",
+        }
+        res = await client.patch(
+            f"{g}/devices/{cam['id']}",
+            json={"attributes": meta, "expected_revision": cam["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        node = next(d for d in (await _graph(client, h, job_id))["devices"] if d["id"] == cam["id"])
+        for key, value in meta.items():
+            assert node["attributes"][key] == value
+
+        res = await client.patch(
+            f"{g}/devices/{out['id']}",
+            json={"attributes": meta, "expected_revision": out["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+
+        legacy = (await _legacy(client, h, job_id))[0]
+        in_meta = {k: legacy["inputs"][0][k] for k in meta}
+        out_meta = {k: legacy["outputs"][0][k] for k in meta}
+        assert in_meta == meta
+        assert out_meta == meta
+
+
+@pytest.mark.asyncio
 async def test_a_video_source_can_be_a_stockwire_product_and_counts_for_the_job(auth_headers):
     from types import SimpleNamespace
 

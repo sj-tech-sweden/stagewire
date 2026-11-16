@@ -239,6 +239,15 @@
                     flat
                     dense
                     round
+                    icon="edit"
+                    :aria-label="t('channels.editChannel')"
+                    data-testid="channel-edit-open"
+                    @click="openChannelEdit(ch)"
+                  />
+                  <q-btn
+                    flat
+                    dense
+                    round
                     icon="account_tree"
                     :aria-label="t('workspace.showFlow')"
                     @click="openFlow(ch, 'channel')"
@@ -773,6 +782,15 @@
                   flat
                   dense
                   round
+                  icon="edit"
+                  :aria-label="t('channels.editChannel')"
+                  data-testid="channel-edit-open"
+                  @click="openChannelEdit(slot.row)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
                   icon="open_in_new"
                   :aria-label="t('workspace.openDevice')"
                   data-testid="open-channel-device"
@@ -990,6 +1008,16 @@
       :value="notesTarget?.notes || ''"
       @save="(text) => notesTarget && save(notesTarget, { notes: text })"
     />
+
+    <!-- Consolidated editor for one sound channel-list row: the full attribute set in one modal. -->
+    <ChannelEditDialog
+      v-model="channelEditOpen"
+      :channel="editChannel"
+      :gear-items="gearItems"
+      data-testid="channel-edit-dialog"
+      @save="(changes) => editChannel && save(editChannel, changes)"
+      @set-stereo="(on) => editChannel && setStereo(editChannel, on)"
+    />
   </div>
 </template>
 
@@ -1010,6 +1038,7 @@ import { useQuasar } from "quasar";
 import { useGraphStore } from "@/stores/graph";
 import { useStockwireStore } from "@/stores/stockwire";
 import ChainDialog from "@/components/ChainDialog.vue";
+import ChannelEditDialog from "@/components/ChannelEditDialog.vue";
 import StockwireProductPicker from "@/components/StockwireProductPicker.vue";
 import NotesDisplay from "@/components/NotesDisplay.vue";
 import MarkdownEditorDialog from "@/components/MarkdownEditorDialog.vue";
@@ -1186,6 +1215,15 @@ const notesTarget = ref(null);
 function openNotes(node) {
   notesTarget.value = node;
   notesOpen.value = true;
+}
+
+// The row edit dialog replaces the cramped inline card expansion with one modal exposing the
+// channel's full attribute set; it emits a diff that save()/setStereo() apply (realtime-synced).
+const channelEditOpen = ref(false);
+const editChannel = ref(null);
+function openChannelEdit(node) {
+  editChannel.value = node;
+  channelEditOpen.value = true;
 }
 
 // Per-channel -> bus tap point overrides
