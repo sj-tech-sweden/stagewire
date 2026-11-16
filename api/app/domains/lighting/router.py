@@ -63,12 +63,33 @@ async def _venue_or_404(db: AsyncSession, venue_id: UUID | None) -> None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Venue not found")
 
 
+def _event_payload(obj):
+    """Return a JSON-serializable realtime payload for ``obj``.
+
+    The publish path runs ``json.dumps`` on the payload (see ``manager.broadcast``),
+    so it must be a Pydantic ``Read`` schema or a plain dict. Several lighting service
+    methods hand back the SQLAlchemy ORM object, which is neither — passing it would
+    raise inside the websocket broadcast and 500 the originating write. Convert the two
+    ORM types we publish here into their ``Read`` schema (``from_attributes=True``).
+    """
+    if hasattr(obj, "model_dump") or isinstance(obj, dict):
+        return obj
+    from app.domains.lighting.models import FixtureMode, FixtureType
+
+    if isinstance(obj, FixtureType):
+        return schemas.FixtureTypeRead.model_validate(obj)
+    if isinstance(obj, FixtureMode):
+        return schemas.FixtureModeRead.model_validate(obj)
+    return obj
+
+
 async def _publish(job_id: UUID | None, venue_id: UUID | None, event_type: str, payload) -> None:
     """Emit a realtime event to the correct scope (job or venue).
 
     AGENTS.md §11 requires every shared mutation to broadcast; the fixture library is
     shared by jobs and venues, so the event must reach the room the editor is in.
     """
+    payload = _event_payload(payload)
     if venue_id is not None:
         await publish_venue_event(venue_id, event_type, payload)
     else:

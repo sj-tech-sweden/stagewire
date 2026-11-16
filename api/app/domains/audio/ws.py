@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -10,6 +11,8 @@ from app.core.db import get_db
 from app.core.realtime_bus import RealtimeBus
 from app.domains.auth.models import User
 from app.domains.auth.security import decode_token, verify_share_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,7 +49,15 @@ class ConnectionManager:
         room = self.rooms.get(job_id)
         if not room:
             return
-        data = json.dumps(message)
+        # The publish path is best-effort (AGENTS.md §11, realtime_bus): a mutation
+        # must never 500 because its realtime event failed to serialize. Guard the
+        # serialization so a non-JSON-serializable payload is skipped (with a warning)
+        # instead of propagating and aborting the originating write.
+        try:
+            data = json.dumps(message)
+        except (TypeError, ValueError):
+            logger.warning("realtime message for %s is not JSON serializable; skipping", job_id)
+            return
         stale: list[WebSocket] = []
         for websocket in list(room):
             try:

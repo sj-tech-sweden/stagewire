@@ -14,9 +14,13 @@ The event-type vocabulary follows the existing convention:
 - stockwire.gear_request.upsert, stockwire.job.upsert
 """
 
+import json
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.domains.audio.ws import manager
 from app.domains.lighting import router as lighting_rtr
+from app.domains.lighting.models import FixtureMode, FixtureType
 from app.domains.rigging import router as rigging_rtr
 from app.domains.stockwire import router as stockwire_rtr
 
@@ -327,3 +331,66 @@ async def test_stockwire_job_link_upsert():
     pub.assert_awaited_once()
     assert pub.call_args.args[1] == "stockwire.job.upsert"
     assert out["stockwire_job_id"] == "rental-1"
+
+
+# --- Payload serialization safety (the e2e fixture-library regression) -------------------------
+# The lighting service returns SQLAlchemy ORM objects (FixtureType/FixtureMode) from its
+# create/update methods. Passing those straight to the publish path 500'd the mutation, because
+# ``manager.broadcast`` runs ``json.dumps`` on the payload and an ORM object is not serializable.
+# ``_event_payload`` must convert the ORM object into its JSON-serializable Pydantic Read schema.
+
+
+async def test_event_payload_converts_orm_fixture_type_to_serializable_read():
+    # Mirror the flushed state the router sees after service.create_type commits/refreshes.
+    ft = FixtureType(
+        id=uuid.uuid4(),
+        job_id=uuid.UUID(JOB_ID),
+        name="Robin",
+        manufacturer="Ayrton",
+        category="",
+        source="manual",
+        notes="",
+    )
+    # Prevent lazy-loading the relationship during model_validate (no session here).
+    ft.modes = []
+    out = lighting_rtr._event_payload(ft)
+    # The converted payload must round-trip through json.dumps (what broadcast does).
+    data = json.loads(json.dumps(out.model_dump(mode="json")))
+    assert data["name"] == "Robin"
+    assert data["manufacturer"] == "Ayrton"
+    assert data["modes"] == []
+
+
+async def test_event_payload_converts_orm_fixture_mode_to_serializable_read():
+    fm = FixtureMode(
+        id=uuid.uuid4(),
+        fixture_type_id=uuid.uuid4(),
+        name="16ch",
+        footprint=16,
+        position=0,
+    )
+    out = lighting_rtr._event_payload(fm)
+    data = json.loads(json.dumps(out.model_dump(mode="json")))
+    assert data["name"] == "16ch"
+    assert data["footprint"] == 16
+
+
+async def test_event_payload_passes_through_dict_and_read_schemas():
+    d = {"id": "x"}
+    assert lighting_rtr._event_payload(d) is d
+    read = MagicMock()
+    read.model_dump.return_value = {"id": "y"}
+    assert lighting_rtr._event_payload(read) is read
+
+
+async def test_broadcast_skips_non_serializable_payload_without_raising():
+    # Defense-in-depth: even if a non-serializable payload reaches broadcast, it must not
+    # propagate and 500 the originating mutation (AGENTS.md §11 / realtime_bus best-effort).
+    ws = MagicMock()
+    ws.send_text = AsyncMock()
+    await manager.connect(ws, "guard-room")
+    try:
+        await manager.broadcast("guard-room", {"type": "x", "payload": object()})
+    finally:
+        manager.disconnect(ws, "guard-room")
+    ws.send_text.assert_not_awaited()
