@@ -52,10 +52,12 @@ test('minimums are respected; when they cannot fit the table scrolls instead of 
 });
 
 test('a column pushed to its minimum frees the rest for the others', () => {
-  // just enough room that Notes (weight 1, min 120) would fall below its minimum by pure weight
-  const { widths } = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1300, visible: all });
+  // just enough room that Notes (weight 1, min 110) gets pinned at its minimum by pure weight and
+  // the rest share what is left; tap_point is a fixed column, so the default set needs a touch more
+  // width than it used to before everything fits
+  const { widths } = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1450, visible: all });
   for (const c of CHANNEL_COLUMNS.filter((x) => x.defaultVisible)) expect(widths[c.name]).toBeGreaterThanOrEqual(c.min);
-  expect(Math.abs(Object.values(widths).reduce((a, b) => a + b, 0) - 1300)).toBeLessThan(8);
+  expect(Math.abs(Object.values(widths).reduce((a, b) => a + b, 0) - 1450)).toBeLessThan(8);
 });
 
 test('hidden columns take no space and required columns cannot be hidden', () => {
@@ -69,11 +71,13 @@ test('hidden columns take no space and required columns cannot be hidden', () =>
 });
 
 test('a dragged width wins (clamped to the minimum) and the others share the remainder', () => {
-  const auto = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1600, visible: all });
-  const wide = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1600, visible: all, overrides: { name: 400 } });
+  // wide enough that Notes (min 110) sits above its minimum in the auto layout, so dragging Name
+  // wider can actually shrink it; tap_point's fixed width is part of the budget now
+  const auto = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1700, visible: all });
+  const wide = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1700, visible: all, overrides: { name: 400 } });
   expect(wide.widths.name).toBe(400);
   expect(wide.widths.notes).toBeLessThan(auto.widths.notes); // the rest got less
-  expect(Math.abs(wide.total - 1600)).toBeLessThan(8);
+  expect(Math.abs(wide.total - 1700)).toBeLessThan(8);
   // below the minimum is clamped up; a compact column can be dragged too
   const small = computeWidths(CHANNEL_COLUMNS, { containerWidth: 1600, visible: all, overrides: { name: 10, stereo: 120 } });
   expect(small.widths.name).toBe(byName('name').min);
@@ -182,7 +186,7 @@ test('hiding a column in one table does not touch another', () => {
 
 test('the instrument group, colour and performer columns are optional and start hidden', () => {
   const optional = CHANNEL_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.name);
-  expect(optional).toEqual(['instrument_group', 'color_code', 'tap_point', 'performer_name']);
+  expect(optional).toEqual(['instrument_group', 'color_code', 'performer_name']);
   expect(visibleColumns(CHANNEL_COLUMNS, all).map((c) => c.name)).not.toContain('color_code');
   // chosen in the Columns menu, they show up (and take space) like any other column
   const names = visibleColumns(CHANNEL_COLUMNS, [...all, 'color_code']).map((c) => c.name);
