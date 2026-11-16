@@ -234,13 +234,17 @@ first-class acceptance question, on the same level as "does the test pass?".
 
 ### Hard limits — do not reintroduce or widen these
 
-- **Broadcast is in-process only.** `ConnectionManager` keeps rooms in memory on the
-  worker that owns them (see the docstring on `publish_job_event`). With more than
-  one API worker/replica, an event published on worker A is **not** delivered to a
-  client connected to worker B. The single-container `docker-compose.yml` dev setup
-  hides this; production with multiple workers/replicas would break fan-out. A shared
-  pub/sub (Valkey, which is already wired via `REDIS_URL`) is the intended fix — do
-  not add a second in-process mechanism in the meantime.
+- **Realtime fan-out across workers is via Valkey pub/sub — keep it that way.**
+  The room `ConnectionManager` (`api/app/domains/audio/ws.py`) is still in-process:
+  rooms live in memory on the worker that owns them. Cross-worker delivery is bridged
+  by `app/core/realtime_bus.py`, which publishes every event to one shared Valkey
+  channel and forwards inbound envelopes into the local rooms (a per-process
+  `sender_id` prevents echo). With a single API worker/replica this is effectively
+  local; with several, Valkey is what makes fan-out work. **Do not** add a second
+  in-process mechanism or bypass the bridge. The bridge degrades gracefully — if
+  Valkey is unreachable, `publish` becomes a no-op and the subscriber retries, so
+  single-worker/local-dev behaviour is unchanged. It is also disabled entirely in the
+  test environment (`APP_ENV=test`) so the suite never touches the network.
 - **Job/venue WebSocket auth must match REST.** The job and venue sockets
   (`/ws/jobs/{id}`, `/ws/venues/{id}`) previously accepted *any* decodable JWT into
   *any* room without confirming the account still exists and is active — strictly
