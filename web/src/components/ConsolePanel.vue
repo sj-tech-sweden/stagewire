@@ -1715,6 +1715,7 @@
                       dense
                       icon="close"
                       :aria-label="t('app.actions.cancel')"
+                      data-testid="console-dca-notes-close"
                       @click="dcaNotesEditing[n] = false"
                     />
                   </template>

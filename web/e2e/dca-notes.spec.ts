@@ -47,18 +47,24 @@ test('DCA notes render as markdown and can be edited back to raw text', async ({
   await input.fill('**Cue:** mute between songs.');
   await input.blur();
 
-  // The change is saved as raw text on the DCA config (server is the source of truth).
+  // The change is saved as raw text on the DCA config (server is the source of truth). The list GET
+  // does not expose dca_config, so we read it back from the console summary's `dcas`.
   await expect
     .poll(async () => {
-      const lists = await (
-        await request.get(`${API_BASE}/api/v1/jobs/${job.id}/channel-lists`, { headers })
+      const summary = await (
+        await request.get(`${API_BASE}/api/v1/jobs/${job.id}/channel-lists/${list.id}/console`, {
+          headers,
+        })
       ).json();
-      const dcaConfig = lists.find((l: { id: string }) => l.id === list.id)?.dca_config || {};
-      return dcaConfig['1']?.notes;
+      return summary.dcas?.['1']?.notes;
     })
     .toBe('**Cue:** mute between songs.');
 
-  // Once the console's list data refreshes, the display renders the markdown again.
+  // Close the edit affordance so the rendered markdown display is shown (the edit stays open until
+  // dismissed, unlike the bus notes which auto-close on change).
+  await dcaEl.getByTestId('console-dca-notes-close').click();
+
+  // Once closed, the display renders the markdown.
   await expect.poll(async () => {
     const el = dcaEl.getByTestId('notes-display');
     return (await el.count()) > 0 && (await el.innerHTML()).includes('<strong>Cue:</strong>');
