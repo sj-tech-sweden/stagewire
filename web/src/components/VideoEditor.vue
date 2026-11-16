@@ -208,14 +208,25 @@
                   :model-value="row.attributes.connector || ''"
                   @update:model-value="(v) => saveAttr(row, 'connector', v)"
                 />
-                <q-input
-                  :model-value="row.notes"
-                  dense
-                  outlined
-                  autogrow
-                  :label="t('workspace.colNotes')"
-                  @change="(v) => save(row, { notes: v })"
-                />
+                <div class="row items-start q-gutter-xs">
+                  <NotesDisplay
+                    v-if="row.notes"
+                    class="col"
+                    :notes="row.notes"
+                    :rows="3"
+                  />
+                  <q-btn
+                    dense
+                    flat
+                    no-caps
+                    size="sm"
+                    :icon="row.notes ? 'edit' : 'add'"
+                    :label="row.notes ? undefined : t('workspace.colNotes')"
+                    :aria-label="t('workspace.editNotes')"
+                    data-testid="video-edit-notes"
+                    @click="openVideoNotes(row)"
+                  />
+                </div>
               </div>
             </q-expansion-item>
           </q-card>
@@ -310,12 +321,25 @@
           </template>
           <template #body-cell-notes="slot">
             <q-td :props="slot">
-              <q-input
-                :model-value="slot.row.notes"
-                dense
-                borderless
-                @change="(v) => save(slot.row, { notes: v })"
-              />
+              <div class="row items-start q-gutter-xs">
+                <NotesDisplay
+                  v-if="slot.row.notes"
+                  class="col"
+                  :notes="slot.row.notes"
+                  :rows="2"
+                />
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  size="sm"
+                  :icon="slot.row.notes ? 'edit' : 'add'"
+                  :label="slot.row.notes ? undefined : t('workspace.colNotes')"
+                  :aria-label="t('workspace.editNotes')"
+                  data-testid="video-edit-notes"
+                  @click="openVideoNotes(slot.row)"
+                />
+              </div>
             </q-td>
           </template>
           <template #body-cell-chain="slot">
@@ -384,11 +408,21 @@
       :branching="chainKind === 'video_output'"
       @save="saveChain"
     />
+
+    <!-- Shared markdown editor for video (input/output) notes; opened from the card and table. -->
+    <MarkdownEditorDialog
+      v-model="videoNotesOpen"
+      :title="t('workspace.colNotes')"
+      :value="videoNotesTarget?.notes || ''"
+      @save="(text) => videoNotesTarget && save(videoNotesTarget, { notes: text })"
+    />
   </div>
 </template>
 
 <script setup>
 import AdaptiveTable from '@/components/AdaptiveTable.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed, ref, watch } from 'vue';
@@ -527,6 +561,15 @@ async function save(node, changes) {
   }
 }
 const saveAttr = (node, key, value) => save(node, { attributes: { [key]: value } });
+
+// Video (input/output) notes open the shared MarkdownEditorDialog; the dialog seeds from the row and
+// saves back through the normal video-device save.
+const videoNotesOpen = ref(false);
+const videoNotesTarget = ref(null);
+function openVideoNotes(row) {
+  videoNotesTarget.value = row;
+  videoNotesOpen.value = true;
+}
 const setNumber = (node, kind, value) =>
   save(node, {
     position: value,

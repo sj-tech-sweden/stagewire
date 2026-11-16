@@ -572,14 +572,25 @@
             :label="t('workspace.powerKind')"
             data-testid="edit-power-kind"
           />
-          <q-input
-            v-model="editForm.notes"
-            class="col-12"
-            dense
-            outlined
-            autogrow
-            :label="t('workspace.nodeNotes')"
-          />
+          <div class="col-12 row items-start q-gutter-xs">
+            <NotesDisplay
+              v-if="editForm.notes"
+              class="col"
+              :notes="editForm.notes"
+              :rows="3"
+            />
+            <q-btn
+              dense
+              flat
+              no-caps
+              size="sm"
+              :icon="editForm.notes ? 'edit' : 'add'"
+              :label="editForm.notes ? undefined : t('workspace.nodeNotes')"
+              :aria-label="t('workspace.editNotes')"
+              data-testid="rigging-edit-notes"
+              @click="riggingNotesOpen = true"
+            />
+          </div>
           <template v-if="editing?.kind !== 'source'">
             <q-select
               v-model="editForm.parent_id"
@@ -691,6 +702,14 @@
           />
         </q-card-actions>
       </q-card>
+
+      <!-- Shared markdown editor for rigging node notes; nested inside the node edit dialog. -->
+      <MarkdownEditorDialog
+        v-model="riggingNotesOpen"
+        :title="t('workspace.nodeNotes')"
+        :value="editForm.notes || ''"
+        @save="(text) => (editForm.notes = text)"
+      />
     </q-dialog>
 
     <q-dialog v-model="extOpen">
@@ -798,6 +817,8 @@ import OutputsField from '@/components/OutputsField.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import PowerPanel from '@/components/PowerPanel.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { cableFor, loadStatusColor, longFeeds, outputsLabel, powerInletLabel, powerTreeRows } from '@/utils/workspace';
 
 // A rigging editor serves both a job and a venue's Standard Base Rig: pass `venueId` (and omit
@@ -824,6 +845,8 @@ const summary = ref(null);
 const catalog = ref([]);
 const createOpen = ref(false);
 const editOpen = ref(false);
+// Rigging node notes editor is the shared MarkdownEditorDialog, nested inside the edit dialog.
+const riggingNotesOpen = ref(false);
 const feedOpen = ref(false);
 const editing = ref(null);
 const form = reactive({});

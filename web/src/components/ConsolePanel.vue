@@ -486,36 +486,8 @@
                   @change="(v) => updateBus(bus, { name: v })"
                 />
                 <!-- Bus notes: rendered as markdown (the common NotesDisplay, with a read-more
-                     toggle) where shown; editing stays raw text in the input below. -->
-                <div
-                  v-if="busNotesEditing[bus.id]"
-                  class="col-12 q-mt-xs"
-                >
-                  <q-input
-                    :model-value="bus.notes"
-                    dense
-                    outlined
-                    autogrow
-                    :label="t('console.busNotes')"
-                    data-testid="console-bus-notes"
-                    @change="(v) => { updateBus(bus, { notes: v }); busNotesEditing[bus.id] = false; }"
-                  >
-                    <template #append>
-                      <q-btn
-                        flat
-                        round
-                        dense
-                        icon="close"
-                        :aria-label="t('app.actions.cancel')"
-                        @click="busNotesEditing[bus.id] = false"
-                      />
-                    </template>
-                  </q-input>
-                </div>
-                <div
-                  v-else
-                  class="col-12 q-mt-xs row items-start q-gutter-xs"
-                >
+                     toggle); editing opens the shared markdown editor (MarkdownEditorDialog). -->
+                <div class="col-12 q-mt-xs row items-start q-gutter-xs">
                   <NotesDisplay
                     v-if="bus.notes"
                     class="col"
@@ -531,7 +503,7 @@
                     :label="bus.notes ? undefined : t('console.busNotes')"
                     :aria-label="t('app.actions.edit')"
                     data-testid="console-bus-edit-notes"
-                    @click="busNotesEditing[bus.id] = true"
+                    @click="openBusNotes(bus)"
                   />
                 </div>
               </div>
@@ -1698,38 +1670,9 @@
                   @update:model-value="dcaSaver.schedule()"
                 />
               </div>
-              <!-- DCA notes: rendered as markdown (the common NotesDisplay) where shown; the
-                   edit affordance reveals the raw-text input, matching the bus notes pattern. -->
-              <div
-                v-if="dcaNotesEditing[n]"
-                class="q-mb-sm"
-              >
-                <q-input
-                  v-model="dcaDraft[n].notes"
-                  dense
-                  outlined
-                  autogrow
-                  :label="t('console.dcaNotes')"
-                  data-testid="console-dca-notes"
-                  @update:model-value="dcaSaver.schedule()"
-                >
-                  <template #append>
-                    <q-btn
-                      flat
-                      round
-                      dense
-                      icon="close"
-                      :aria-label="t('app.actions.cancel')"
-                      data-testid="console-dca-notes-close"
-                      @click="dcaNotesEditing[n] = false"
-                    />
-                  </template>
-                </q-input>
-              </div>
-              <div
-                v-else
-                class="row items-start q-gutter-xs q-mb-sm"
-              >
+              <!-- DCA notes: rendered as markdown (the common NotesDisplay); editing opens the shared
+                   markdown editor, matching the bus notes pattern. -->
+              <div class="row items-start q-gutter-xs q-mb-sm">
                 <NotesDisplay
                   v-if="dcaDraft[n].notes"
                   class="col"
@@ -1745,7 +1688,7 @@
                   :label="dcaDraft[n].notes ? undefined : t('console.dcaNotes')"
                   :aria-label="t('app.actions.edit')"
                   data-testid="console-dca-edit-notes"
-                  @click="dcaNotesEditing[n] = true"
+                  @click="openDcaNotes(n)"
                 />
               </div>
               <StripPicker
@@ -2454,6 +2397,22 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <!-- Shared markdown editor for bus notes; opened from each bus row. -->
+    <MarkdownEditorDialog
+      v-model="busNotesOpen"
+      :title="t('console.busNotes')"
+      :value="busNotesTarget?.notes || ''"
+      @save="(text) => busNotesTarget && updateBus(busNotesTarget, { notes: text })"
+    />
+
+    <!-- Shared markdown editor for DCA notes; opened from each DCA card. -->
+    <MarkdownEditorDialog
+      v-model="dcaNotesOpen"
+      :title="t('console.dcaNotes')"
+      :value="dcaNotesTarget != null ? (dcaDraft[dcaNotesTarget]?.notes || '') : ''"
+      @save="(text) => { if (dcaNotesTarget != null) { dcaDraft[dcaNotesTarget].notes = text; dcaSaver.schedule(); } }"
+    />
   </q-card>
 </template>
 
@@ -2471,6 +2430,7 @@ import { apiErrorText } from "@/utils/errors";
 import { PRESET_COLOURS, colourToHex, normalizeHex } from "@/utils/colour";
 import PatchTileGrid from "@/components/PatchTileGrid.vue";
 import NotesDisplay from "@/components/NotesDisplay.vue";
+import MarkdownEditorDialog from "@/components/MarkdownEditorDialog.vue";
 import StripPicker from "@/components/StripPicker.vue";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
 import {
@@ -2872,6 +2832,15 @@ const addBus = () =>
 const updateBus = (bus, changes) =>
   withForce((params) => api.patch(`${lb.value}/outputs/${bus.id}`, { ...changes, expected_revision: bus.revision }, { params }));
 
+// Bus notes open the shared markdown editor; the dialog seeds from the bus and saves back through the
+// normal bus update (so realtime/versioning behave exactly as the inline editor did).
+const busNotesOpen = ref(false);
+const busNotesTarget = ref(null);
+function openBusNotes(bus) {
+  busNotesTarget.value = bus;
+  busNotesOpen.value = true;
+}
+
 const saveTalkbackPresets = async (presets) => {
   try {
     await api.patch(`/jobs/${props.jobId}/channel-lists/${props.listId}`, { talkback_presets: presets });
@@ -2896,10 +2865,14 @@ const updateTalkbackPreset = (pi, changes) => {
 
 const pendingBusColour = ref(null);
 const pendingDcaColour = ref(null);
-// Per-bus / per-DCA flag tracking which entity is currently in notes-edit mode (raw-text input).
-// Display uses the common NotesDisplay markdown renderer; only one edits at a time.
-const busNotesEditing = ref({});
-const dcaNotesEditing = ref({});
+// DCA notes open the shared MarkdownEditorDialog; dcaNotesTarget is the DCA index being edited and is
+// seeded into the editor on open, saving back through the normal DCA saver.
+const dcaNotesOpen = ref(false);
+const dcaNotesTarget = ref(null);
+function openDcaNotes(n) {
+  dcaNotesTarget.value = n;
+  dcaNotesOpen.value = true;
+}
 function busSwatchStyle(value) {
   if (!value) return {};
   const hex = colourToHex(value);

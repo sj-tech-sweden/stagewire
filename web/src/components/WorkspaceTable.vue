@@ -75,13 +75,25 @@
       </template>
       <template #body-cell-notes="slot">
         <q-td :props="slot">
-          <q-input
-            :model-value="slot.row.notes"
-            dense
-            borderless
-            @click.stop
-            @change="(v) => save(slot.row, { notes: v })"
-          />
+          <div class="row items-start q-gutter-xs">
+            <NotesDisplay
+              v-if="slot.row.notes"
+              class="col"
+              :notes="slot.row.notes"
+              :rows="2"
+            />
+            <q-btn
+              dense
+              flat
+              no-caps
+              size="sm"
+              :icon="slot.row.notes ? 'edit' : 'add'"
+              :label="slot.row.notes ? undefined : t('workspace.colNotes')"
+              :aria-label="t('workspace.editNotes')"
+              data-testid="workspace-table-edit-notes"
+              @click="openNotes(slot.row)"
+            />
+          </div>
         </q-td>
       </template>
       <template
@@ -111,15 +123,24 @@
         </q-td>
       </template>
     </AdaptiveTable>
+
+    <!-- Shared markdown editor for table-row notes; opened from each row's notes cell. -->
+    <MarkdownEditorDialog
+      v-model="notesOpen"
+      :title="t('workspace.colNotes')"
+      :value="notesTarget?.notes || ''"
+      @save="(text) => notesTarget && save(notesTarget, { notes: text })"
+    />
   </div>
 </template>
 
 <script setup>
 import AdaptiveTable from '@/components/AdaptiveTable.vue';
 import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { useGraphStore } from '@/stores/graph';
@@ -155,6 +176,15 @@ const columns = computed(() => {
   // the integration is disabled so no stockwire data is surfaced.
   return stockwire.isEnabled ? cols : cols.filter((c) => c.name !== 'stockwire');
 });
+
+// Table-row notes open the shared MarkdownEditorDialog; the dialog seeds from the row and saves back
+// through the normal device save.
+const notesOpen = ref(false);
+const notesTarget = ref(null);
+function openNotes(row) {
+  notesTarget.value = row;
+  notesOpen.value = true;
+}
 
 async function save(row, changes) {
   try {
