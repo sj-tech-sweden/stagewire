@@ -1,11 +1,10 @@
 <template>
   <div class="text-white">
-    <div
+    <NotesDisplay
       v-if="device.notes"
       class="text-caption text-grey-5 q-mb-xs"
-    >
-      {{ device.notes }}
-    </div>
+      :notes="device.notes"
+    />
 
     <!-- Network: IP/subnet/VLAN/protocols, with a quick-launch link to the device web UI. -->
     <section
@@ -161,6 +160,7 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import StockwireAssetSummary from '@/components/StockwireAssetSummary.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
 import { edgeRows, powerInletLabel, stockwireAssetOf } from '@/utils/workspace';
 
 const { t } = useI18n();

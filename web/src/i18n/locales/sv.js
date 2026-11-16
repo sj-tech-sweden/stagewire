@@ -37,6 +37,8 @@ export default {
       print: "Skriv ut",
       upload: "Ladda upp",
       inspect: "Granska",
+      readMore: "Läs mer",
+      readLess: "Läs mindre",
     },
     language: {
       label: "Språk",

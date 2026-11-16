@@ -20,7 +20,10 @@
             v-if="device.notes"
             caption
           >
-            {{ device.notes }}
+            <NotesDisplay
+              :notes="device.notes"
+              :rows="2"
+            />
           </q-item-label>
         </q-item-section>
         <q-item-section side>
@@ -113,6 +116,7 @@
 
 <script setup>
 import AdaptiveTable from '@/components/AdaptiveTable.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
 import { apiErrorText } from '@/utils/errors';
 import { isRevisionConflict } from '@/utils/graph';
 import { computed } from 'vue';
