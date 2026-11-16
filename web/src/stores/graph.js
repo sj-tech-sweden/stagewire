@@ -38,6 +38,8 @@ export const useGraphStore = defineStore('graph', {
     loads: { L1: 0, L2: 0, L3: 0, imbalance_pct: 0 },
     loading: false,
     error: null,
+    // Coalesced refetch timer for semantic list/channel/device realtime events (see scheduleGraphRefetch).
+    graphRefetchTimer: null,
   }),
   getters: {
     selectedDevice: (state) => state.devices.find((d) => d.id === state.selectedDeviceId) || null,
@@ -80,20 +82,53 @@ export const useGraphStore = defineStore('graph', {
       }
     },
     applyRealtimeEvent(event) {
-      if (!event?.type?.startsWith('graph.')) return;
-      // A NetBox sync event that flags a conflict (e.g. the IP was deleted or
-      // reassigned away from this device) raises a transient alert the UI shows
-      // as a warning banner on the affected device.
-      if (event.type === 'graph.device.netbox' && event.payload?.status === 'conflict') {
-        this.netboxAlert = {
-          deviceId: event.payload.device_id,
-          jobId: event.payload.job_id,
-          message: event.payload.message || 'NetBox IP conflict',
-        };
+      if (!event?.type) return;
+      // graph.* events are the spatial/canvas representation: merged into the store directly so
+      // the canvas and channel-list editor follow co-editors without a refetch.
+      if (event.type.startsWith('graph.')) {
+        // A NetBox sync event that flags a conflict (e.g. the IP was deleted or
+        // reassigned away from this device) raises a transient alert the UI shows
+        // as a warning banner on the affected device.
+        if (event.type === 'graph.device.netbox' && event.payload?.status === 'conflict') {
+          this.netboxAlert = {
+            deviceId: event.payload.device_id,
+            jobId: event.payload.job_id,
+            message: event.payload.message || 'NetBox IP conflict',
+          };
+        }
+        const next = applyGraphEvent({ devices: this.devices, edges: this.edges }, event);
+        this.devices = next.devices;
+        this.edges = next.edges;
+        return;
       }
-      const next = applyGraphEvent({ devices: this.devices, edges: this.edges }, event);
-      this.devices = next.devices;
-      this.edges = next.edges;
+      // The legacy + graph APIs also publish semantic list/channel/device events. These carry the
+      // patch/console data the channel-list editor and the digital console show; although most paths
+      // emit a graph.device.upsert sibling too, routing them here directly keeps the live views
+      // following co-editors even when no graph.* sibling is emitted (mirror/backfill paths). The
+      // channel-list editor and the console both read from this store (via consoleSignature), so a
+      // coalesced refetch is enough to make them update live — the console panel's own 300ms
+      // refreshKey hook then re-reads its summary/maps.
+      switch (event.type) {
+        case 'list.upsert':
+        case 'list.delete':
+        case 'channel.upsert':
+        case 'channel.delete':
+        case 'device.upsert':
+        case 'device.delete':
+          this.scheduleGraphRefetch();
+          break;
+        default:
+          break;
+      }
+    },
+    // Coalesced graph reload triggered by the semantic list/channel/device events above. A bare
+    // setTimeout (not a polling interval) so a burst of co-editor writes collapses into one fetch.
+    scheduleGraphRefetch() {
+      if (this.graphRefetchTimer != null) return;
+      this.graphRefetchTimer = setTimeout(() => {
+        this.graphRefetchTimer = null;
+        if (this.scopeId != null) this.fetchGraph(this.scopeId, this.scopeKind);
+      }, 300);
     },
     async createDevice(jobId, payload) {
       const { data } = await api.post(`${baseFor(this, jobId)}/devices`, payload);

@@ -165,6 +165,7 @@
           outlined
           class="col-12 col-sm-4"
           :label="t('workspace.listName')"
+          data-testid="list-name-input"
           @change="(v) => save(list, { name: v })"
         />
         <q-btn

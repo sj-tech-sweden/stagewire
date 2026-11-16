@@ -1049,6 +1049,17 @@ const socket = useJobSocket(jobId, (event) => {
     onHistoryRestore();
   } else if (event.type === 'job.update') {
     onJobChanged(event.payload);
+  } else if (
+    // Semantic list/channel/device events: apply them to the graph store so the channel-list
+    // editor and the digital console follow co-editors live, not just the activity feed.
+    event.type === 'list.upsert' ||
+    event.type === 'list.delete' ||
+    event.type === 'channel.upsert' ||
+    event.type === 'channel.delete' ||
+    event.type === 'device.upsert' ||
+    event.type === 'device.delete'
+  ) {
+    graph.applyRealtimeEvent(event);
   }
   if (DATA_EVENTS.test(event.type || '') || event.type === 'history.restore') history.scheduleRefresh(800);
 });
