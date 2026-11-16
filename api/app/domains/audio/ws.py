@@ -1,14 +1,31 @@
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from jwt import PyJWTError as JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_db
+from app.core.realtime_bus import RealtimeBus
 from app.domains.auth.models import User
 from app.domains.auth.security import decode_token, verify_share_token
 
 router = APIRouter()
+
+# Per-process identity stamped on every pub/sub envelope so a worker ignores the
+# messages it published itself (it already delivered those locally).
+SENDER_ID = uuid.uuid4().hex
+
+# Cross-worker fan-out bridge. Disabled in the test environment (no Valkey, and the
+# pytest suite exercises the in-process path only) so it never touches the network
+# during tests. In every other environment it publishes to, and subscribes from, the
+# shared Valkey channel; if Valkey is unreachable it degrades to in-process only.
+realtime_bus = RealtimeBus(
+    get_settings().redis_url,
+    SENDER_ID,
+    enabled=get_settings().app_env != "test",
+)
 
 
 class ConnectionManager:
@@ -51,12 +68,14 @@ venue_manager = ConnectionManager()
 async def publish_job_event(job_id, event_type: str, payload) -> None:
     """Broadcast a realtime event to all clients viewing the given job.
 
-    In-process only: with multiple API workers a shared pub/sub (e.g. Valkey)
-    would be required to fan out across workers.
+    Delivered locally (in-process) and, when a Valkey bridge is active, published to
+    the shared channel so other API workers forward it to their own connected clients.
     """
     if hasattr(payload, "model_dump"):
         payload = payload.model_dump(mode="json")
-    await manager.broadcast(str(job_id), {"type": event_type, "payload": payload})
+    message = {"type": event_type, "payload": payload}
+    await manager.broadcast(str(job_id), message)
+    await realtime_bus.publish("job", str(job_id), message)
 
 
 async def publish_venue_event(venue_id, event_type: str, payload) -> None:
@@ -68,7 +87,38 @@ async def publish_venue_event(venue_id, event_type: str, payload) -> None:
     """
     if hasattr(payload, "model_dump"):
         payload = payload.model_dump(mode="json")
-    await venue_manager.broadcast(str(venue_id), {"type": event_type, "payload": payload})
+    message = {"type": event_type, "payload": payload}
+    await venue_manager.broadcast(str(venue_id), message)
+    await realtime_bus.publish("venue", str(venue_id), message)
+
+
+async def deliver_cross_worker(envelope: dict) -> None:
+    """Forward a pub/sub envelope (from another worker) into our local rooms.
+
+    Ignores envelopes we published ourselves via ``sender_id`` to avoid echo, and
+    routes by scope to the matching in-process room manager.
+    """
+    if envelope.get("sender_id") == SENDER_ID:
+        return
+    scope = envelope.get("scope")
+    scope_id = envelope.get("scope_id")
+    message = envelope.get("message")
+    if not scope_id or not message:
+        return
+    if scope == "job":
+        await manager.broadcast(str(scope_id), message)
+    elif scope == "venue":
+        await venue_manager.broadcast(str(scope_id), message)
+
+
+async def start_realtime_bus() -> None:
+    """Start the cross-worker subscriber. No-op in the test environment."""
+    await realtime_bus.start(deliver_cross_worker)
+
+
+async def stop_realtime_bus() -> None:
+    """Stop the cross-worker subscriber and close the Valkey client."""
+    await realtime_bus.stop()
 
 
 @router.websocket("/ws/jobs/{job_id}")
