@@ -44,7 +44,7 @@
     {
       "groupName": "backend dependencies",
       "description": "Group all Python/backend dependency updates into a single PR",
-      "matchManagers": ["pep621", "uv"]
+      "matchManagers": ["pep621"]
     }
   ]
 }
