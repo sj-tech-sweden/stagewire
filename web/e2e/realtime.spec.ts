@@ -107,3 +107,18 @@ test('the job header and the undo state follow another browser', async ({ page, 
   await expect(page.locator('span', { hasText: title }).first()).toBeVisible();
   await expect(page.getByTestId('history-undo')).toBeEnabled();
 });
+
+test('a channel list renamed elsewhere appears without a refresh', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await call(request, headers, 'post', '/jobs', { title: `Realtime ${Date.now()}` });
+  const list = await call(request, headers, 'post', `/jobs/${job.id}/channel-lists`, { name: 'FOH' });
+  await openWorkspace(page, job.id);
+  await expect(page.getByTestId('list-name-input')).toHaveValue('FOH');
+
+  // another browser renames the list through the audio API (emits list.upsert + graph.device.upsert);
+  // the open editor's list name field follows it live, no manual refresh.
+  await call(request, headers, 'patch', `/jobs/${job.id}/channel-lists/${list.id}`, { name: 'Mono' });
+  await expect(page.getByTestId('list-name-input')).toHaveValue('Mono');
+});
+
