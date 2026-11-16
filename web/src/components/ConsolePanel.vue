@@ -610,6 +610,59 @@
             />
           </div>
         </div>
+
+        <!-- Talkback presets ---------------------------------------------------------------->
+        <div class="q-mt-md">
+          <div class="text-subtitle2 q-mb-xs">{{ t("console.talkbackPresets") }}</div>
+          <div class="text-caption text-grey-6 q-mb-sm">{{ t("console.talkbackPresetsHelp") }}</div>
+          <div
+            v-for="(preset, pi) in talkbackPresets"
+            :key="pi"
+            class="row items-center q-gutter-sm q-mb-sm"
+          >
+            <q-input
+              :model-value="preset.name"
+              dense
+              outlined
+              class="col-4"
+              :label="t('console.talkbackPresetName')"
+              data-testid="console-talkback-preset-name"
+              @change="(v) => updateTalkbackPreset(pi, { name: v })"
+            />
+            <q-select
+              :model-value="preset.destinations || []"
+              :options="talkbackDestinations"
+              dense
+              outlined
+              multiple
+              emit-value
+              map-options
+              class="col"
+              :label="t('console.talkbackPresetDestinations')"
+              data-testid="console-talkback-preset-destinations"
+              @update:model-value="(v) => updateTalkbackPreset(pi, { destinations: v })"
+            />
+            <q-btn
+              flat
+              dense
+              round
+              color="negative"
+              icon="delete"
+              :aria-label="t('workspace.remove')"
+              @click="removeTalkbackPreset(pi)"
+            />
+          </div>
+          <q-btn
+            flat
+            dense
+            no-caps
+            icon="add"
+            color="primary"
+            :label="t('console.talkbackPresetAdd')"
+            data-testid="console-talkback-preset-add"
+            @click="addTalkbackPreset"
+          />
+        </div>
       </q-tab-panel>
 
       <!-- Stereo links -------------------------------------------------------------------->
@@ -2472,6 +2525,10 @@ const buses = computed(() => (listData.value?.outputs || []).map((o) => ({ ...o,
 const roles = computed(() => summary.value?.profile?.bus_pool?.allowed_roles || ["aux", "group", "matrix", "main", "fx_send"]);
 const busModes = computed(() => ["mono", "stereo", "lcr"].map((m) => ({ value: m, label: t(`console.busMode.${m}`) })));
 const tapPoints = computed(() => ["pre_eq", "post_eq", "post_fade"].map((m) => ({ value: m, label: t(`console.tapPoint.${m}`) })));
+const talkbackPresets = computed(() => listData.value?.talkback_presets || []);
+const talkbackDestinations = computed(() =>
+  buses.value.filter((b) => b.role !== "fx_send").map((b) => ({ value: b.id, label: b.name || b.id })),
+);
 // A linked pair is ONE ganged strip: the secondary is hidden everywhere in this panel.
 const strips = computed(() =>
   (listData.value?.channels || []).filter((c) => c.stereo_link_role !== "secondary").sort((a, b) => a.channel_number - b.channel_number),
@@ -2715,6 +2772,28 @@ const addBus = () =>
   ).then(() => { newBus.name = ""; });
 const updateBus = (bus, changes) =>
   withForce((params) => api.patch(`${lb.value}/outputs/${bus.id}`, { ...changes, expected_revision: bus.revision }, { params }));
+
+const saveTalkbackPresets = async (presets) => {
+  try {
+    await api.patch(`/jobs/${props.jobId}/channel-lists/${props.listId}`, { talkback_presets: presets });
+    await load();
+  } catch (err) {
+    failed(err);
+  }
+};
+const addTalkbackPreset = () => {
+  const next = [...(listData.value?.talkback_presets || []), { name: "", destinations: [] }];
+  saveTalkbackPresets(next);
+};
+const removeTalkbackPreset = (pi) => {
+  const next = [...(listData.value?.talkback_presets || [])];
+  next.splice(pi, 1);
+  saveTalkbackPresets(next);
+};
+const updateTalkbackPreset = (pi, changes) => {
+  const next = (listData.value?.talkback_presets || []).map((p, i) => (i === pi ? { ...p, ...changes } : p));
+  saveTalkbackPresets(next);
+};
 
 const pendingBusColour = ref(null);
 const pendingDcaColour = ref(null);
