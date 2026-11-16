@@ -3709,6 +3709,17 @@ defineExpose({ settle: settleAll, openTab: (name) => (tab.value = name) });
 </script>
 
 <style scoped>
+.channel-swatch {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.6);
+}
+.channel-swatch--unset {
+  border-style: dashed;
+}
 .fader-bank {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
