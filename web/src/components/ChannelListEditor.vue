@@ -702,15 +702,28 @@
         </template>
         <template #body-cell-tap_point="slot">
           <q-td :props="slot">
-            <q-select
-              :model-value="slot.row.attributes?.tap_point || 'post_fade'"
-              :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
-              dense
-              borderless
-              emit-value
-              map-options
-              @update:model-value="(v) => saveAttr(slot.row, 'tap_point', v)"
-            />
+            <div class="row items-center q-gutter-xs">
+              <q-select
+                :model-value="slot.row.attributes?.tap_point || 'post_fade'"
+                :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
+                dense
+                borderless
+                emit-value
+                map-options
+                style="min-width: 90px"
+                @update:model-value="(v) => saveAttr(slot.row, 'tap_point', v)"
+              />
+              <q-btn
+                flat
+                dense
+                round
+                size="sm"
+                icon="tune"
+                :aria-label="t('console.busTapPoints')"
+                data-testid="channel-bus-tap-points"
+                @click="openBusTapPoints(slot.row)"
+              />
+            </div>
           </q-td>
         </template>
         <template #body-cell-notes="slot">
@@ -1082,6 +1095,37 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="tapPointBusDialog">
+      <q-card style="min-width: 360px">
+        <q-card-section class="text-h6">
+          {{ t("console.busTapPoints") }} — {{ tapPointBusChannel?.source_label || tapPointBusChannel?.attributes?.channel_number }}
+        </q-card-section>
+        <q-card-section>
+          <div
+            v-for="b in busesForTap"
+            :key="b.id"
+            class="row items-center q-gutter-sm q-mb-sm"
+          >
+            <div class="col">{{ b.name }}</div>
+            <q-select
+              :model-value="tapPointBusDraft[b.id]"
+              :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
+              dense
+              outlined
+              emit-value
+              map-options
+              style="min-width: 120px"
+              @update:model-value="(v) => (tapPointBusDraft[b.id] = v)"
+            />
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat :label="t('workspace.cancel')" v-close-popup />
+          <q-btn color="primary" unelevated :label="t('workspace.save')" @click="saveBusTapPoints" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -1275,6 +1319,28 @@ async function save(node, changes) {
 }
 const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
+
+// Per-channel -> bus tap point overrides
+const tapPointBusDialog = ref(false);
+const tapPointBusChannel = ref(null);
+const tapPointBusDraft = ref({});
+const busesForTap = computed(() => (outputs.value || []).map((o) => ({ id: o.id, name: o.name || o.id })));
+function openBusTapPoints(row) {
+  tapPointBusChannel.value = row;
+  const existing = row.attributes?.bus_tap_points || {};
+  const draft = {};
+  for (const b of busesForTap.value) {
+    draft[b.id] = existing[b.id] || row.attributes?.tap_point || 'post_fade';
+  }
+  tapPointBusDraft.value = draft;
+  tapPointBusDialog.value = true;
+}
+async function saveBusTapPoints() {
+  const row = tapPointBusChannel.value;
+  if (!row) return;
+  await saveAttr(row, 'bus_tap_points', { ...tapPointBusDraft.value });
+  tapPointBusDialog.value = false;
+}
 
 // --- optional columns: instrument group, colour, performer ----------------------------------------
 const groupOptions = computed(() =>
