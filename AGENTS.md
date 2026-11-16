@@ -241,11 +241,14 @@ first-class acceptance question, on the same level as "does the test pass?".
   hides this; production with multiple workers/replicas would break fan-out. A shared
   pub/sub (Valkey, which is already wired via `REDIS_URL`) is the intended fix — do
   not add a second in-process mechanism in the meantime.
-- **Job WebSocket authorization is currently shallow.** `job_ws` accepts *any* valid
-  user token into *any* job's room (it only checks that the token decodes; it does
-  not verify the user belongs to that job/tenant). The crew share-token path IS
-  correctly scoped to the job. Before expanding what the job socket reveals, close
-  this multi-tenant gap: verify job/tenant membership for the user-token path.
+- **Job/venue WebSocket auth must match REST.** The job and venue sockets
+  (`/ws/jobs/{id}`, `/ws/venues/{id}`) previously accepted *any* decodable JWT into
+  *any* room without confirming the account still exists and is active — strictly
+  weaker than REST's `get_current_user` (which requires an existing, active account).
+  They now resolve the user from the token and reject otherwise (closed with `1008`),
+  mirroring `get_current_user`. The crew **share-token** path was already correctly
+  scoped to the job. If/when an application tenant/ownership model is introduced, the
+  socket must additionally scope the room to that tenant — do not reopen the gap.
 - **Crew (share) view is read-only by design** — it receives events but must not be
   given mutation events that bypass the share scope.
 
