@@ -2172,8 +2172,9 @@ test('on a phone lights and video rows are cards with every editor, and power lo
   await expect(input.locator('input').first()).toHaveValue('Cam 1');
   await expect(input).toContainText(/sdi/i);
   await input.getByText(/^details$|^detaljer$/i).click();
-  await input.getByLabel(/notes|anteckningar/i).fill('Wide shot');
-  await input.getByLabel(/notes|anteckningar/i).press('Tab');
+  await input.getByTestId('video-edit-notes').click();
+  await page.getByTestId('markdown-editor-input').fill('Wide shot');
+  await page.getByTestId('markdown-editor-save').click();
   await expect
     .poll(async () => (await graphNow()).devices.find((d: any) => d.kind === 'video_input')?.notes)
     .toBe('Wide shot');

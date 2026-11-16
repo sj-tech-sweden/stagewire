@@ -312,12 +312,25 @@
             </div>
           </div>
 
-          <q-input
-            v-model="form.notes"
-            :label="t('venues.fieldNotes')"
-            type="textarea"
-            autogrow
-          />
+          <div class="row items-start q-gutter-xs">
+            <NotesDisplay
+              v-if="form.notes"
+              class="col"
+              :notes="form.notes"
+              :rows="3"
+            />
+            <q-btn
+              dense
+              flat
+              no-caps
+              size="sm"
+              :icon="form.notes ? 'edit' : 'add'"
+              :label="form.notes ? undefined : t('venues.fieldNotes')"
+              :aria-label="t('workspace.editNotes')"
+              data-testid="venue-edit-notes"
+              @click="notesOpen = true"
+            />
+          </div>
 
           <div
             v-if="editingId"
@@ -377,6 +390,14 @@
           />
         </q-card-actions>
       </q-card>
+
+      <!-- Shared markdown editor for venue notes; nested inside the venue edit dialog. -->
+      <MarkdownEditorDialog
+        v-model="notesOpen"
+        :title="t('venues.fieldNotes')"
+        :value="form.notes || ''"
+        @save="(text) => (form.notes = text)"
+      />
     </q-dialog>
   </q-page>
 </template>
@@ -391,6 +412,8 @@ import { getApiBaseUrl } from '@/utils/runtime-config';
 import { polygonBounds } from '@/utils/plotFrame';
 import { useVenuesStore } from '@/stores/venues';
 import VenueGeometryCanvas from '@/components/VenueGeometryCanvas.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 
 const { t } = useI18n({ useScope: 'global' });
 const $q = useQuasar();
@@ -407,6 +430,8 @@ const editingVenue = ref(null);
 const saving = ref(false);
 const uploading = ref(false);
 const propagating = ref(false);
+// Venue notes editor is the shared MarkdownEditorDialog, nested inside the venue edit dialog.
+const notesOpen = ref(false);
 // Draw mode is owned by the parent so activating "Draw" can also flip the matching
 // shape to custom_polygon. Without that flip, the clicked points are appended to an
 // array that is never rendered, so the canvas would appear to do nothing.
