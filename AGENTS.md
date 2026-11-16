@@ -189,3 +189,69 @@ functionality must remain usable on small screens:
   reachable on desktop must also be reachable by tap on mobile.
 - Verify with a narrow viewport (Quasar devtools device toolbar / `lt.sm`) before
   declaring a UI task done.
+
+## 11. Realtime sync is the default for shared data
+
+**Any shared, user-facing, editable data must be realtime-synced across clients.**
+If two people open the same job (or venue) in two browsers, every change one makes
+must appear in the other's view without a manual refresh. This is not optional for
+new features and must not regress for existing ones. Treat "is this data live?" as a
+first-class acceptance question, on the same level as "does the test pass?".
+
+### The mechanism (reuse it — do not invent a new one)
+
+- **Backend publish:** call `publish_job_event(job_id, type, payload)` or
+  `publish_venue_event(venue_id, type, payload)` (both in
+  `api/app/domains/audio/ws.py`). `payload` is a Pydantic model or dict that
+  serializes to JSON. Event `type` is a dotted string; the established convention is
+  `<entity>.<verb>` (e.g. `graph.device.upsert`, `list.upsert`, `channel.delete`).
+- **Backend rooms:** clients join a room keyed by job id (`/ws/jobs/{job_id}`) or
+  venue id (`/ws/venues/{venue_id}`). A client in the room receives every event for
+  that scope.
+- **Frontend subscribe:** open the socket with `useJobSocket(jobId, onEvent, …)`
+  (`web/src/composables/useJobSocket.js`) or `useVenueSocket(venueId, onEvent, …)`
+  (`web/src/composables/useVenueSocket.js`). Both auto-reconnect (3s) and accept a
+  crew share-token for the read-only mobile view.
+- **Frontend apply:** `graph.*` events are applied by the graph store
+  (`web/src/stores/graph.js` → `applyRealtimeEvent`). Other scopes (list/channel/
+  device/history) are applied in the page-level `onEvent` handler in
+  `JobWorkspacePage.vue` / `JobShareViewPage.vue` / `VenueBaseRigPage.vue`.
+
+### The rule for every change
+
+1. **Publish on every mutation.** If a router/service writes shared data, it must
+   also emit an event of the right type. A written row with no event is a latent
+   bug: the other client silently goes stale. There is no shared-data mutation in
+   this repo that is exempt from this.
+2. **Consume what you publish.** Emitting an event is not enough — the frontend must
+   apply it to the relevant view/store so the other client updates live. Do not rely
+   on a polling refresh timer as the primary sync path; polling is a fallback, not
+   the design. (The console panel's 300ms `load()` timer is a known exception and a
+   gap to be closed, not a pattern to copy.)
+3. **Keep the type vocabulary consistent.** Add a new `<entity>.<verb>` type only
+   when needed; prefer reusing an existing one. Document the new type where the
+   others are documented.
+
+### Hard limits — do not reintroduce or widen these
+
+- **Broadcast is in-process only.** `ConnectionManager` keeps rooms in memory on the
+  worker that owns them (see the docstring on `publish_job_event`). With more than
+  one API worker/replica, an event published on worker A is **not** delivered to a
+  client connected to worker B. The single-container `docker-compose.yml` dev setup
+  hides this; production with multiple workers/replicas would break fan-out. A shared
+  pub/sub (Valkey, which is already wired via `REDIS_URL`) is the intended fix — do
+  not add a second in-process mechanism in the meantime.
+- **Job/venue WebSocket auth must match REST.** The job and venue sockets
+  (`/ws/jobs/{id}`, `/ws/venues/{id}`) previously accepted *any* decodable JWT into
+  *any* room without confirming the account still exists and is active — strictly
+  weaker than REST's `get_current_user` (which requires an existing, active account).
+  They now resolve the user from the token and reject otherwise (closed with `1008`),
+  mirroring `get_current_user`. The crew **share-token** path was already correctly
+  scoped to the job. If/when an application tenant/ownership model is introduced, the
+  socket must additionally scope the room to that tenant — do not reopen the gap.
+- **Crew (share) view is read-only by design** — it receives events but must not be
+  given mutation events that bypass the share scope.
+
+When in doubt about whether something counts as "shared, user-facing, editable
+data" (rule 0), ask. The safe default is: if a human can see or change it in the UI
+and someone else could be looking at the same job/venue, it gets realtime sync.
