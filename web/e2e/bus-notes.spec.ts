@@ -77,3 +77,39 @@ test('bus notes render as markdown and can be edited via the markdown editor', a
     return (await el.count()) > 0 && (await el.innerHTML()).includes('<strong>Updated:</strong>');
   }).toBe(true);
 });
+
+// The toolbar lets non-Markdown users apply formatting: clicking Bold wraps the selection in **.
+test('toolbar inserts markdown around the selection', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await call(request, headers, 'post', '/jobs', { title: `Bus toolbar E2E ${Date.now()}` });
+  const list = await call(request, headers, 'post', `/jobs/${job.id}/channel-lists`, { name: 'FOH' });
+  const base = `/jobs/${job.id}/channel-lists/${list.id}`;
+  await call(request, headers, 'put', `${base}/console-profile`, { preset: 'gld-80' });
+  const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge 1' });
+
+  await page.goto(`/jobs/${job.id}/workspace?view=lists`);
+  await page.getByTestId('open-console').click();
+  await expect(page.getByTestId('console-panel')).toBeVisible();
+  await page.getByTestId('console-tab-buses').click();
+
+  const busEl = page.getByTestId('console-bus').first();
+  await busEl.getByTestId('console-bus-edit-notes').click();
+
+  const editor = page.getByTestId('markdown-editor-input');
+  await expect(editor).toBeVisible();
+  await editor.fill('Hello');
+  await editor.press('Control+a');
+  await page.getByTestId('markdown-toolbar-bold').click();
+  await page.getByTestId('markdown-editor-save').click();
+
+  await expect
+    .poll(async () => {
+      const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${job.id}/channel-lists`, { headers })).json();
+      const out = (lists.find((l: { id: string }) => l.id === list.id)?.outputs || []).find(
+        (o: { id: string }) => o.id === bus.id,
+      );
+      return out?.notes;
+    })
+    .toBe('**Hello**');
+});
