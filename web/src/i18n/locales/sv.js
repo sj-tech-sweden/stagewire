@@ -61,6 +61,8 @@ export default {
     discard: "Släng mina ändringar",
   },
   workspace: {
+    cancel: "Avbryt",
+    save: "Spara",
     library: "Armaturbibliotek",
     typeName: "Typnamn",
     addType: "Lägg till typ",

@@ -61,6 +61,8 @@ export default {
     discard: "Discard my changes",
   },
   workspace: {
+    cancel: "Cancel",
+    save: "Save",
     library: "Fixture library",
     typeName: "Type name",
     addType: "Add type",
