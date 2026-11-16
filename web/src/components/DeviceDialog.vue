@@ -12,6 +12,7 @@
       </q-card-section>
       <q-card-section class="q-pt-none q-gutter-sm">
         <StockwireProductPicker
+          v-if="stockwire.isEnabled"
           :model-value="null"
           :label="t('devices.fromStockwire')"
           :hint="t('devices.fromStockwireHint')"
