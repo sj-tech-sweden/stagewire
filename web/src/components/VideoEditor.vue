@@ -101,30 +101,34 @@
         />
       </div>
 
-      <q-tabs
-        v-model="videoTab"
-        dense
-        align="left"
-        class="q-mb-sm"
-        active-color="primary"
-        indicator-color="primary"
-        inline-label
-        mobile-arrows
-        data-testid="video-io-tabs"
-      >
-        <q-tab
-          name="video_input"
-          :label="t('workspace.videoInputs')"
-          no-caps
-          data-testid="video-tab-inputs"
-        />
-        <q-tab
-          name="video_output"
-          :label="t('workspace.videoOutputs')"
-          no-caps
-          data-testid="video-tab-outputs"
-        />
-      </q-tabs>
+      <!-- Same tab-bar styling as the sound channel list: a left-aligned, inline-label tab row
+           that takes the full width of a flex row, so the two UIs read as one product. -->
+      <div class="row items-center q-gutter-sm q-mb-md">
+        <q-tabs
+          v-model="videoTab"
+          dense
+          align="left"
+          class="col"
+          active-color="primary"
+          indicator-color="primary"
+          inline-label
+          mobile-arrows
+          data-testid="video-io-tabs"
+        >
+          <q-tab
+            name="video_input"
+            :label="t('workspace.videoInputs')"
+            no-caps
+            data-testid="video-tab-inputs"
+          />
+          <q-tab
+            name="video_output"
+            :label="t('workspace.videoOutputs')"
+            no-caps
+            data-testid="video-tab-outputs"
+          />
+        </q-tabs>
+      </div>
       <q-tab-panels
         v-model="videoTab"
         animated
@@ -294,6 +298,8 @@
             flat
             dense
             bordered
+            virtual-scroll
+            :virtual-scroll-item-size="80"
             :rows="section.rows"
             :columns="section.columns"
             row-key="id"
