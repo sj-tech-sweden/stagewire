@@ -67,12 +67,12 @@
           flat
           no-caps
           icon="tune"
-          :label="list.attributes.switcher_product_id ? t('video.changeSwitcher') : t('video.setSwitcher')"
+          :label="hasSwitcher ? t('video.changeSwitcher') : t('video.setSwitcher')"
           data-testid="set-switcher"
           @click="switcherOpen = true"
         />
         <div
-          v-if="listSwitchers.length || list.attributes.switcher_product_id"
+          v-if="listSwitchers.length || hasSwitcher"
           class="row q-gutter-xs items-center"
           data-testid="list-switcher-devices"
         >
@@ -91,13 +91,13 @@
           </q-chip>
         </div>
         <div
-          v-if="list.attributes.switcher_product_id"
+          v-if="hasSwitcher"
           class="text-caption text-grey-7 q-mt-xs"
         >
           {{ t('video.switcherSummary', { name: list.attributes.switcher_product_name, inputs: list.attributes.switcher_inputs ?? '–', outputs: list.attributes.switcher_outputs ?? '–' }) }}
         </div>
         <q-btn
-          v-if="list.attributes.switcher_product_id"
+          v-if="hasSwitcher"
           flat
           no-caps
           icon="auto_fix_high"
@@ -514,6 +514,16 @@ const sourceTypes = ['camera', 'computer', 'other'].map((v) => ({
 }));
 
 const list = computed(() => graph.videoLists.find((l) => l.id === listId.value) || null);
+// A switcher is "set" either by picking a catalog product or by entering manual
+// input/output counts on a house switcher. Both must reveal the summary and the
+// fill action — and both should fill the list when set (parity with the sound
+// mixer, which pads its channels on set).
+const hasSwitcher = computed(
+  () =>
+    !!list.value?.attributes?.switcher_product_id ||
+    list.value?.attributes?.switcher_inputs != null ||
+    list.value?.attributes?.switcher_outputs != null,
+);
 const gear = computed(() => graph.devices.filter((d) => !isVirtual(d) && !isPlotElement(d)));
 
 // The gear in a chain is edited from the signal flow or the chain dialog (an edit button on each
@@ -685,11 +695,14 @@ async function bulkCreate(kind, items) {
   }
 }
 
-// Set (or clear) the list's switcher. Stored on the list node's attributes; the
-// existing "Fill from switcher" then adds empty rows up to size. Saving through
-// updateDevice publishes a graph.device.upsert so the summary updates live.
+// Set (or clear) the list's switcher. Stored on the list node's attributes, then —
+// like the sound mixer, which pads its channels the moment a mixer is chosen — the
+// list is filled up to the switcher's size (manual counts or product-derived).
+// Saving through updateDevice publishes a graph.device.upsert so the summary
+// updates live; fillVideoFromSwitcher wires the rows to the switcher device too.
 const switcherOpen = ref(false);
 async function saveSwitcher({ product, inputs, outputs }) {
+  const setting = !!product || inputs != null || outputs != null;
   try {
     await graph.updateDevice(scopeId.value, list.value.id, {
       attributes: {
@@ -699,6 +712,8 @@ async function saveSwitcher({ product, inputs, outputs }) {
         switcher_outputs: outputs ?? null,
       },
     });
+    // Only fill when actually setting a switcher; clearing (all null) just removes it.
+    if (setting) await graph.fillVideoFromSwitcher(scopeId.value, list.value.id);
     switcherOpen.value = false;
   } catch (err) {
     if (!isRevisionConflict(err)) failed(err);

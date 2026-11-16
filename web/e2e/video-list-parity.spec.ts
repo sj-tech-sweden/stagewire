@@ -92,3 +92,32 @@ test('the set-switcher button opens the switcher dialog', async ({ page, request
   await expect(page.getByTestId('switcher-inputs')).toBeVisible();
   await expect(page.getByTestId('switcher-outputs')).toBeVisible();
 });
+
+test('setting a manual switcher fills the list to its size', async ({ page, request }) => {
+  const { jobId, listId } = await openVideoList(page, request);
+
+  // No rows before setting a switcher.
+  expect(
+    (await graphNodes(page, request, jobId)).filter((d) => d.kind === 'video_input' && d.attributes.list_id === listId)
+      .length,
+  ).toBe(0);
+
+  await page.getByTestId('set-switcher').click();
+  await page.getByTestId('switcher-inputs').fill('3');
+  await page.getByTestId('switcher-outputs').fill('2');
+  await page.getByTestId('switcher-save').click();
+
+  // Mirrors the sound mixer: setting a switcher pads the list to its size.
+  await expect
+    .poll(async () => {
+      const nodes = await graphNodes(page, request, jobId);
+      return {
+        inputs: nodes.filter((d) => d.kind === 'video_input' && d.attributes.list_id === listId).length,
+        outputs: nodes.filter((d) => d.kind === 'video_destination' && d.attributes.list_id === listId).length,
+      };
+    })
+    .toEqual({ inputs: 3, outputs: 2 });
+
+  // The summary and the (now reachable) fill action show for a manually-set switcher.
+  await expect(page.getByTestId('fill-from-switcher')).toBeVisible();
+});
