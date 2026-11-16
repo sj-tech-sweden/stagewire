@@ -91,6 +91,18 @@
           :options="modeOptions"
           :label="t('channels.outputMode')"
         />
+        <q-select
+          v-if="outputs && roles.length"
+          v-model="form.role"
+          class="col-12 col-sm-6"
+          dense
+          outlined
+          emit-value
+          map-options
+          :options="roleOptions"
+          :label="t('workspace.bulkRole')"
+          data-testid="list-bulk-role"
+        />
         <ConnectorSelect
           v-model="form.connector"
           class="col-12 col-sm-6"
@@ -137,6 +149,9 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   // gear a new channel can be patched into straight away (its first connection)
   devices: { type: Array, default: () => [] },
+  // allowed bus roles for a bulk bus add (e.g. aux/group/matrix/main/fx_send); when empty the
+  // role selector is hidden and every new bus defaults to "aux"
+  roles: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['update:modelValue', 'create']);
 const { t } = useI18n();
@@ -149,6 +164,7 @@ const form = reactive({
   phantom_power: false,
   patch_device_id: null,
   mode: 'mono',
+  role: 'aux',
   connector: '',
 });
 
@@ -161,6 +177,7 @@ const groupOptions = INSTRUMENT_GROUP_KEYS.map((v) => ({ value: v, label: t(`cha
 const modeOptions = computed(() =>
   OUTPUT_MODES.map((m) => ({ value: m.value, label: t(`workspace.busMode.${m.value.replace(/[._]/g, '')}`) })),
 );
+const roleOptions = computed(() => props.roles.map((r) => ({ value: r, label: r })));
 
 watch(
   () => props.modelValue,
@@ -177,7 +194,7 @@ function create() {
     const number = (Number(form.start) || 1) + i;
     const label = form.prefix.trim() ? `${form.prefix.trim()} ${props.outputs ? i + 1 : number}` : '';
     if (props.outputs) {
-      return { name: label || undefined, mode: form.mode, connector: form.connector || undefined };
+      return { name: label || undefined, mode: form.mode, role: form.role, connector: form.connector || undefined };
     }
     return {
       channel_number: number,

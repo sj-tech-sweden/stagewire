@@ -36,7 +36,6 @@ async function seed(request: APIRequestContext, headers: Record<string, string>)
 
 async function openConsole(page: Page, jobId: string) {
   await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
 }
 
@@ -104,7 +103,6 @@ test('the Inputs-page Stereo toggle links a pair, the console tile shows it and 
   // one concept: the Inputs toggle goes through the validated link endpoint
   await page.getByTestId('channel-stereo').first().click();
   await expect(page.getByTestId('stereo-side').first()).toBeVisible();
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-links').click();
   // the tile grid is the whole UI: the pair is one linked tile that names its legs
   const tile = page.getByTestId('console-pair-tile').first();
@@ -377,7 +375,7 @@ test('a fader strip can be dragged from the tray onto a fader', async ({ page, r
   expect(stored.custom).toBe(true);
 });
 
-test('the Inputs page shows the bus-pool budget and a role per output on a digital console', async ({
+test('the console Buses tab shows the bus-pool budget and a role per bus on a digital console', async ({
   page,
   request,
 }) => {
@@ -391,9 +389,26 @@ test('the Inputs page shows the bus-pool budget and a role per output on a digit
     name: 'IEM',
     mode: 'stereo',
   });
-  await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await expect(page.getByTestId('outputs-budget-text')).toContainText('2 / 4');
-  await expect(page.getByTestId('output-role')).toBeVisible();
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await expect(page.getByTestId('console-budget-text')).toContainText('2 / 4');
+  await expect(page.getByTestId('console-bus-role')).toBeVisible();
+});
+
+test('the console Buses tab bulk-adds buses with a chosen role', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  await call(request, headers, 'put', `/jobs/${jobId}/channel-lists/${listId}/console-profile`, {
+    profile: { bus_pool: { total_slots: 40, allowed_roles: ['aux', 'group', 'matrix', 'main', 'fx_send'] } },
+  });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bulk-buses').click();
+  await page.getByTestId('list-bulk-count').fill('3');
+  await page.getByTestId('list-bulk-prefix').fill('Aux');
+  await page.getByTestId('list-bulk-create').click();
+  await expect(page.getByTestId('console-bus')).toHaveCount(3);
 });
 
 test('the strip picker selects by range, search and kind, and a DCA can hold FX sends', async ({ page, request }) => {
@@ -534,7 +549,6 @@ test('nothing needs saving: edits persist by themselves and there is one status 
   await page.getByTestId('console-tab-buses').click();
   await expect(status).toHaveAttribute('data-status', 'saved');
   await page.reload();
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-dca').click();
   await expect(page.getByTestId('console-dca-name').first()).toHaveValue('Drums 2');
   // an FX engine set up in the FX tab is stored without a click, and a DCA can hold its send at once
@@ -807,7 +821,6 @@ test('a pair linked from the console tab shows on the Inputs page, and the Input
     });
   }
   await page.goto(`/jobs/${jobId}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await page.getByTestId('console-tab-links').click();
   // link 1-2 from the console tab: the tile turns linked and the Inputs page shows the L/R badges
   const tile = page.getByTestId('console-pair-tile').first();

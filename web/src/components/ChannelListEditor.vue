@@ -129,17 +129,6 @@
           :loading="wwbImporting || wwbParsing"
           @click="wwbFileInput?.click()"
         />
-        <q-btn
-          v-if="jobId"
-          outline
-          no-caps
-          color="primary"
-          icon="settings_input_component"
-          :label="t('console.openPanel')"
-          :aria-pressed="consoleOpen"
-          data-testid="open-console"
-          @click="toggleConsole"
-        />
         <input
           ref="wwbFileInput"
           type="file"
@@ -151,799 +140,635 @@
       </q-card>
 
       <ConsolePanel
-        v-if="consoleOpen && jobId && !venueId"
+        v-if="jobId && !venueId"
         ref="consolePanel"
         :job-id="jobId"
         :list-id="list.id"
         :refresh-key="consoleSignature"
         @changed="graph.fetchGraph(contextId, contextKind)"
-      />
-      <div class="row items-center q-gutter-sm q-mb-sm">
-        <q-input
-          :model-value="list.name"
-          dense
-          outlined
-          class="col-12 col-sm-4"
-          :label="t('workspace.listName')"
-          data-testid="list-name-input"
-          @change="(v) => save(list, { name: v })"
-        />
-        <q-btn
-          color="primary"
-          no-caps
-          icon="add"
-          :label="t('workspace.addChannel')"
-          data-testid="add-channel"
-          @click="addChannels(1)"
-        />
-        <q-btn
-          flat
-          no-caps
-          icon="playlist_add"
-          :label="t('workspace.bulkAdd')"
-          data-testid="bulk-channels"
-          @click="bulkChannels = true"
-        />
-        <q-btn
-          v-if="contextKind === 'job' && stockwire.isEnabled"
-          flat
-          no-caps
-          icon="cloud_upload"
-          :loading="syncing"
-          :label="t('workspace.syncStockwire')"
-          data-testid="sync-stockwire"
-          @click="syncStockwire"
-        />
-        <q-space />
-        <q-btn
-          flat
-          dense
-          no-caps
-          color="negative"
-          icon="delete"
-          :label="t('workspace.deleteList')"
-          @click="removeList"
-        />
-      </div>
-
-      <div class="text-subtitle1 q-mt-md">
-        {{ t("workspace.inputs") }}
-      </div>
-      <!-- On phones every channel is a card with the same editors as the table row: the header
-           has the number, name and actions, the summary line says what is set, and "Details"
-           opens kind, source, stand, mixer input, 48V, stereo, wireless and notes. -->
-      <div
-        v-if="$q.screen.lt.sm"
-        class="column q-gutter-sm"
-        data-testid="channel-cards"
       >
-        <q-card
-          v-for="ch in channels"
-          :key="ch.id"
-          flat
-          bordered
-          data-testid="channel-card"
-        >
-          <q-card-section class="q-pa-sm">
-            <div class="row items-center no-wrap">
-              <div class="text-subtitle2 q-pr-sm">
-                {{ ch.attributes.channel_number }}
-              </div>
-              <q-input
-                :model-value="ch.name"
-                dense
-                borderless
-                class="col"
-                data-testid="channel-card-label"
-                @change="(v) => save(ch, { name: v })"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="route"
-                :aria-label="t('workspace.editChain')"
-                @click="openChain(ch, 'channel')"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="account_tree"
-                :aria-label="t('workspace.showFlow')"
-                @click="openFlow(ch, 'channel')"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeNode(ch)"
-              />
-            </div>
-            <div class="text-caption text-grey-6">
-              {{ channelSummary(ch) || t("workspace.chainEmpty") }}
-            </div>
-            <div class="text-caption text-grey-6">
-              {{ chain(ch) || t("workspace.chainEmpty") }}
-            </div>
-          </q-card-section>
-          <q-expansion-item
-            dense
-            :label="t('workspace.details')"
-            header-class="text-caption"
-            data-testid="channel-card-details"
+        <template #inputs>
+          <div class="row items-center q-gutter-sm q-mb-sm">
+            <q-input
+              :model-value="list.name"
+              dense
+              outlined
+              class="col-12 col-sm-4"
+              :label="t('workspace.listName')"
+              data-testid="list-name-input"
+              @change="(v) => save(list, { name: v })"
+            />
+            <q-btn
+              color="primary"
+              no-caps
+              icon="add"
+              :label="t('workspace.addChannel')"
+              data-testid="add-channel"
+              @click="addChannels(1)"
+            />
+            <q-btn
+              flat
+              no-caps
+              icon="playlist_add"
+              :label="t('workspace.bulkAdd')"
+              data-testid="bulk-channels"
+              @click="bulkChannels = true"
+            />
+            <q-btn
+              v-if="contextKind === 'job' && stockwire.isEnabled"
+              flat
+              no-caps
+              icon="cloud_upload"
+              :loading="syncing"
+              :label="t('workspace.syncStockwire')"
+              data-testid="sync-stockwire"
+              @click="syncStockwire"
+            />
+            <q-space />
+            <q-btn
+              flat
+              dense
+              no-caps
+              color="negative"
+              icon="delete"
+              :label="t('workspace.deleteList')"
+              @click="removeList"
+            />
+          </div>
+
+          <div class="text-subtitle1 q-mt-md">
+            {{ t("workspace.inputs") }}
+          </div>
+          <!-- On phones every channel is a card with the same editors as the table row: the header
+               has the number, name and actions, the summary line says what is set, and "Details"
+               opens kind, source, stand, mixer input, 48V, stereo, wireless and notes. -->
+          <div
+            v-if="$q.screen.lt.sm"
+            class="column q-gutter-sm"
+            data-testid="channel-cards"
           >
-            <div class="q-pa-sm q-gutter-sm">
-              <q-select
-                :model-value="ch.attributes.input_type"
+            <q-card
+              v-for="ch in channels"
+              :key="ch.id"
+              flat
+              bordered
+              data-testid="channel-card"
+            >
+              <q-card-section class="q-pa-sm">
+                <div class="row items-center no-wrap">
+                  <div class="text-subtitle2 q-pr-sm">
+                    {{ ch.attributes.channel_number }}
+                  </div>
+                  <q-input
+                    :model-value="ch.name"
+                    dense
+                    borderless
+                    class="col"
+                    data-testid="channel-card-label"
+                    @change="(v) => save(ch, { name: v })"
+                  />
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="route"
+                    :aria-label="t('workspace.editChain')"
+                    @click="openChain(ch, 'channel')"
+                  />
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="account_tree"
+                    :aria-label="t('workspace.showFlow')"
+                    @click="openFlow(ch, 'channel')"
+                  />
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    color="negative"
+                    icon="delete"
+                    :aria-label="t('workspace.remove')"
+                    @click="removeNode(ch)"
+                  />
+                </div>
+                <div class="text-caption text-grey-6">
+                  {{ channelSummary(ch) || t("workspace.chainEmpty") }}
+                </div>
+                <div class="text-caption text-grey-6">
+                  {{ chain(ch) || t("workspace.chainEmpty") }}
+                </div>
+              </q-card-section>
+              <q-expansion-item
                 dense
-                outlined
-                clearable
-                emit-value
-                map-options
-                :options="inputTypes"
-                :label="t('workspace.colKind')"
-                @update:model-value="(v) => saveAttr(ch, 'input_type', v)"
-              />
-              <div
-                v-if="ch.attributes.input_type === 'wireless'"
-                class="row q-col-gutter-sm"
+                :label="t('workspace.details')"
+                header-class="text-caption"
+                data-testid="channel-card-details"
               >
+                <div class="q-pa-sm q-gutter-sm">
+                  <q-select
+                    :model-value="ch.attributes.input_type"
+                    dense
+                    outlined
+                    clearable
+                    emit-value
+                    map-options
+                    :options="inputTypes"
+                    :label="t('workspace.colKind')"
+                    @update:model-value="(v) => saveAttr(ch, 'input_type', v)"
+                  />
+                  <div
+                    v-if="ch.attributes.input_type === 'wireless'"
+                    class="row q-col-gutter-sm"
+                  >
+                    <q-input
+                      :model-value="ch.attributes.wireless_pack"
+                      class="col-12 col-sm-6"
+                      dense
+                      outlined
+                      :label="t('channels.fieldWirelessPack')"
+                      @change="(v) => saveAttr(ch, 'wireless_pack', v)"
+                    />
+                    <q-input
+                      :model-value="ch.attributes.wireless_frequency_mhz"
+                      class="col-6"
+                      dense
+                      outlined
+                      type="number"
+                      step="0.001"
+                      :label="t('channels.fieldWirelessFrequencyMhz')"
+                      @change="
+                        (v) =>
+                          saveAttr(
+                            ch,
+                            'wireless_frequency_mhz',
+                            v === '' || v === null ? null : Number(v),
+                          )
+                      "
+                    />
+                    <q-input
+                      :model-value="ch.attributes.wireless_group"
+                      class="col-3"
+                      dense
+                      outlined
+                      :label="t('channels.fieldWirelessGroup')"
+                      @change="(v) => saveAttr(ch, 'wireless_group', v || null)"
+                    />
+                    <q-input
+                      :model-value="ch.attributes.wireless_channel"
+                      class="col-3"
+                      dense
+                      outlined
+                      :label="t('channels.fieldWirelessChannel')"
+                      @change="(v) => saveAttr(ch, 'wireless_channel', v || null)"
+                    />
+                  </div>
+                  <StockwireProductPicker
+                    :model-value="sourceOf(ch)"
+                    own
+                    :local-items="gearItems"
+                    :label="t('channels.fieldDevice')"
+                    :hint="''"
+                    @update:model-value="(p) => setSource(ch, p)"
+                  />
+                  <q-btn
+                    v-if="sourceDevice(ch)"
+                    flat
+                    dense
+                    no-caps
+                    icon="edit"
+                    :label="t('workspace.editSource')"
+                    @click="editDevice(sourceDevice(ch))"
+                  />
+                  <StockwireProductPicker
+                    :model-value="standOf(ch)"
+                    gear-type="stand"
+                    own
+                    :label="t('stockwire.selectStand')"
+                    :hint="''"
+                    @update:model-value="(p) => setStand(ch, p)"
+                  />
+                  <q-select
+                    :model-value="ch.attributes.mixer_input || null"
+                    dense
+                    outlined
+                    emit-value
+                    map-options
+                    clearable
+                    :options="mixerInputChoices(ch, graph.devices, graph.edges)"
+                    :label="t('workspace.colMixerInput')"
+                    :hint="t('workspace.colMixerInputHint')"
+                    data-testid="channel-mixer-input"
+                    @update:model-value="(v) => saveAttr(ch, 'mixer_input', v || null)"
+                  />
+                  <div class="row items-center">
+                    <q-checkbox
+                      :model-value="!!ch.attributes.phantom_power"
+                      :disable="ch.attributes.stereo_link_role === 'secondary'"
+                      label="48V"
+                      @update:model-value="(v) => saveAttr(ch, 'phantom_power', v)"
+                    />
+                    <q-checkbox
+                      :model-value="!!ch.attributes.stereo"
+                      :label="t('channels.fieldStereo')"
+                      @update:model-value="(v) => setStereo(ch, v)"
+                    />
+                    <q-chip
+                      v-if="stereoView(ch, channels).linked"
+                      dense
+                      color="primary"
+                      text-color="white"
+                      size="sm"
+                    >
+                      {{ stereoView(ch, channels).isL ? "L" : "R" }}
+                    </q-chip>
+                  </div>
+                  <q-input
+                    :model-value="ch.notes"
+                    dense
+                    outlined
+                    autogrow
+                    :label="t('workspace.colNotes')"
+                    @change="(v) => save(ch, { notes: v })"
+                  />
+                </div>
+              </q-expansion-item>
+            </q-card>
+          </div>
+          <AdaptiveTable
+            v-else
+            table-id="channels"
+            test-prefix="channel"
+            :columns="columns"
+            flat
+            dense
+            bordered
+            virtual-scroll
+            :virtual-scroll-item-size="80"
+            :rows="channels"
+            row-key="id"
+            :rows-per-page-options="[0]"
+            hide-bottom
+            class="sticky-header-table channel-table"
+            style="max-height: 70vh"
+            data-testid="channel-table"
+          >
+            <template #body-cell-number="slot">
+              <q-td :props="slot">
                 <q-input
-                  :model-value="ch.attributes.wireless_pack"
-                  class="col-12 col-sm-6"
+                  :model-value="slot.row.attributes.channel_number"
                   dense
-                  outlined
-                  :label="t('channels.fieldWirelessPack')"
-                  @change="(v) => saveAttr(ch, 'wireless_pack', v)"
-                />
-                <q-input
-                  :model-value="ch.attributes.wireless_frequency_mhz"
-                  class="col-6"
-                  dense
-                  outlined
+                  borderless
                   type="number"
-                  step="0.001"
-                  :label="t('channels.fieldWirelessFrequencyMhz')"
-                  @change="
-                    (v) =>
-                      saveAttr(
-                        ch,
-                        'wireless_frequency_mhz',
-                        v === '' || v === null ? null : Number(v),
-                      )
-                  "
+                  @change="(v) => setNumber(slot.row, Number(v))"
                 />
+              </q-td>
+            </template>
+            <template #body-cell-name="slot">
+              <q-td :props="slot">
                 <q-input
-                  :model-value="ch.attributes.wireless_group"
-                  class="col-3"
+                  :model-value="slot.row.name"
                   dense
-                  outlined
-                  :label="t('channels.fieldWirelessGroup')"
-                  @change="(v) => saveAttr(ch, 'wireless_group', v || null)"
+                  borderless
+                  data-testid="channel-label"
+                  @change="(v) => save(slot.row, { name: v })"
                 />
-                <q-input
-                  :model-value="ch.attributes.wireless_channel"
-                  class="col-3"
+              </q-td>
+            </template>
+            <template #body-cell-input_type="slot">
+              <q-td :props="slot">
+                <div class="row items-center q-gutter-x-xs no-wrap">
+                  <q-select
+                    :model-value="slot.row.attributes.input_type"
+                    dense
+                    borderless
+                    clearable
+                    emit-value
+                    map-options
+                    :options="inputTypes"
+                    class="col"
+                    style="min-width: 0"
+                    @update:model-value="(v) => saveAttr(slot.row, 'input_type', v)"
+                  />
+                  <q-input
+                    v-if="slot.row.attributes.input_type === 'wireless'"
+                    :model-value="slot.row.attributes.wireless_pack"
+                    dense
+                    borderless
+                    class="col"
+                    style="min-width: 0"
+                    :placeholder="t('channels.fieldWirelessPack')"
+                    data-testid="wireless-pack"
+                    @change="(v) => saveAttr(slot.row, 'wireless_pack', v)"
+                  />
+                </div>
+                <div
+                  v-if="slot.row.attributes.input_type === 'wireless'"
+                  class="row items-start q-gutter-x-xs q-mt-xs"
+                  style="flex-wrap: wrap"
+                >
+                  <q-input
+                    :model-value="slot.row.attributes.wireless_frequency_mhz"
+                    dense
+                    borderless
+                    type="number"
+                    step="0.001"
+                    class="col"
+                    style="min-width: 90px"
+                    :placeholder="t('channels.fieldWirelessFrequencyMhz')"
+                    data-testid="wireless-frequency-mhz"
+                    @change="
+                      (v) =>
+                        saveAttr(
+                          slot.row,
+                          'wireless_frequency_mhz',
+                          v === '' || v === null ? null : Number(v),
+                        )
+                    "
+                  />
+                  <q-input
+                    :model-value="slot.row.attributes.wireless_group"
+                    dense
+                    borderless
+                    style="width: 56px; flex: 0 0 56px"
+                    :placeholder="t('channels.fieldWirelessGroup')"
+                    data-testid="wireless-group"
+                    @change="(v) => saveAttr(slot.row, 'wireless_group', v || null)"
+                  />
+                  <q-input
+                    :model-value="slot.row.attributes.wireless_channel"
+                    dense
+                    borderless
+                    style="width: 56px; flex: 0 0 56px"
+                    :placeholder="t('channels.fieldWirelessChannel')"
+                    data-testid="wireless-channel"
+                    @change="
+                      (v) => saveAttr(slot.row, 'wireless_channel', v || null)
+                    "
+                  />
+                </div>
+              </q-td>
+            </template>
+            <template #body-cell-device="slot">
+              <q-td :props="slot">
+                <StockwireProductPicker
+                  :model-value="sourceOf(slot.row)"
+                  own
+                  :local-items="gearItems"
+                  :label="t('channels.fieldDevice')"
+                  :hint="''"
+                  borderless
+                  data-testid="source-picker"
+                  @update:model-value="(p) => setSource(slot.row, p)"
+                />
+                <q-btn
+                  v-if="sourceDevice(slot.row)"
+                  flat
                   dense
-                  outlined
-                  :label="t('channels.fieldWirelessChannel')"
-                  @change="(v) => saveAttr(ch, 'wireless_channel', v || null)"
+                  no-caps
+                  size="sm"
+                  icon="edit"
+                  :label="t('workspace.editSource')"
+                  data-testid="open-source-device"
+                  @click="editDevice(sourceDevice(slot.row))"
                 />
-              </div>
-              <StockwireProductPicker
-                :model-value="sourceOf(ch)"
-                own
-                :local-items="gearItems"
-                :label="t('channels.fieldDevice')"
-                :hint="''"
-                @update:model-value="(p) => setSource(ch, p)"
-              />
-              <q-btn
-                v-if="sourceDevice(ch)"
-                flat
-                dense
-                no-caps
-                icon="edit"
-                :label="t('workspace.editSource')"
-                @click="editDevice(sourceDevice(ch))"
-              />
-              <StockwireProductPicker
-                :model-value="standOf(ch)"
-                gear-type="stand"
-                own
-                :label="t('stockwire.selectStand')"
-                :hint="''"
-                @update:model-value="(p) => setStand(ch, p)"
-              />
-              <q-select
-                :model-value="ch.attributes.mixer_input || null"
-                dense
-                outlined
-                emit-value
-                map-options
-                clearable
-                :options="mixerInputChoices(ch, graph.devices, graph.edges)"
-                :label="t('workspace.colMixerInput')"
-                :hint="t('workspace.colMixerInputHint')"
-                data-testid="channel-mixer-input"
-                @update:model-value="(v) => saveAttr(ch, 'mixer_input', v || null)"
-              />
-              <div class="row items-center">
-                <q-checkbox
-                  :model-value="!!ch.attributes.phantom_power"
-                  :disable="ch.attributes.stereo_link_role === 'secondary'"
-                  label="48V"
-                  @update:model-value="(v) => saveAttr(ch, 'phantom_power', v)"
+              </q-td>
+            </template>
+            <template #body-cell-stand_type="slot">
+              <q-td :props="slot">
+                <StockwireProductPicker
+                  :model-value="standOf(slot.row)"
+                  gear-type="stand"
+                  own
+                  :label="t('stockwire.selectStand')"
+                  :hint="''"
+                  borderless
+                  data-testid="stand-picker"
+                  @update:model-value="(p) => setStand(slot.row, p)"
                 />
+              </q-td>
+            </template>
+            <template #body-cell-stereo="slot">
+              <q-td :props="slot">
                 <q-checkbox
-                  :model-value="!!ch.attributes.stereo"
-                  :label="t('channels.fieldStereo')"
-                  @update:model-value="(v) => setStereo(ch, v)"
+                  :model-value="!!slot.row.attributes.stereo"
+                  dense
+                  data-testid="channel-stereo"
+                  @update:model-value="(v) => setStereo(slot.row, v)"
                 />
                 <q-chip
-                  v-if="stereoView(ch, channels).linked"
+                  v-if="stereoView(slot.row, channels).linked"
                   dense
                   color="primary"
                   text-color="white"
                   size="sm"
+                  data-testid="stereo-side"
                 >
-                  {{ stereoView(ch, channels).isL ? "L" : "R" }}
+                  {{ stereoView(slot.row, channels).isL ? "L" : "R" }}
+                  <q-tooltip>
+                    {{
+                      t("channels.stereoLinkedTo", {
+                        ch: slot.row.attributes.stereo_channel,
+                      })
+                    }}
+                  </q-tooltip>
                 </q-chip>
-              </div>
-              <q-input
-                :model-value="ch.notes"
-                dense
-                outlined
-                autogrow
-                :label="t('workspace.colNotes')"
-                @change="(v) => save(ch, { notes: v })"
-              />
-            </div>
-          </q-expansion-item>
-        </q-card>
-      </div>
-      <AdaptiveTable
-        v-else
-        table-id="channels"
-        test-prefix="channel"
-        :columns="columns"
-        flat
-        dense
-        bordered
-        virtual-scroll
-        :virtual-scroll-item-size="80"
-        :rows="channels"
-        row-key="id"
-        :rows-per-page-options="[0]"
-        hide-bottom
-        class="sticky-header-table channel-table"
-        style="max-height: 70vh"
-        data-testid="channel-table"
-      >
-        <template #body-cell-number="slot">
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.attributes.channel_number"
-              dense
-              borderless
-              type="number"
-              @change="(v) => setNumber(slot.row, Number(v))"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-name="slot">
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.name"
-              dense
-              borderless
-              data-testid="channel-label"
-              @change="(v) => save(slot.row, { name: v })"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-input_type="slot">
-          <q-td :props="slot">
-            <div class="row items-center q-gutter-x-xs no-wrap">
-              <q-select
-                :model-value="slot.row.attributes.input_type"
-                dense
-                borderless
-                clearable
-                emit-value
-                map-options
-                :options="inputTypes"
-                class="col"
-                style="min-width: 0"
-                @update:model-value="(v) => saveAttr(slot.row, 'input_type', v)"
-              />
-              <q-input
-                v-if="slot.row.attributes.input_type === 'wireless'"
-                :model-value="slot.row.attributes.wireless_pack"
-                dense
-                borderless
-                class="col"
-                style="min-width: 0"
-                :placeholder="t('channels.fieldWirelessPack')"
-                data-testid="wireless-pack"
-                @change="(v) => saveAttr(slot.row, 'wireless_pack', v)"
-              />
-            </div>
-            <div
-              v-if="slot.row.attributes.input_type === 'wireless'"
-              class="row items-start q-gutter-x-xs q-mt-xs"
-              style="flex-wrap: wrap"
+              </q-td>
+            </template>
+            <template
+              v-for="flag in ['phantom_power']"
+              #[`body-cell-${flag}`]="slot"
+              :key="flag"
             >
-              <q-input
-                :model-value="slot.row.attributes.wireless_frequency_mhz"
-                dense
-                borderless
-                type="number"
-                step="0.001"
-                class="col"
-                style="min-width: 90px"
-                :placeholder="t('channels.fieldWirelessFrequencyMhz')"
-                data-testid="wireless-frequency-mhz"
-                @change="
-                  (v) =>
-                    saveAttr(
-                      slot.row,
-                      'wireless_frequency_mhz',
-                      v === '' || v === null ? null : Number(v),
-                    )
-                "
-              />
-              <q-input
-                :model-value="slot.row.attributes.wireless_group"
-                dense
-                borderless
-                style="width: 56px; flex: 0 0 56px"
-                :placeholder="t('channels.fieldWirelessGroup')"
-                data-testid="wireless-group"
-                @change="(v) => saveAttr(slot.row, 'wireless_group', v || null)"
-              />
-              <q-input
-                :model-value="slot.row.attributes.wireless_channel"
-                dense
-                borderless
-                style="width: 56px; flex: 0 0 56px"
-                :placeholder="t('channels.fieldWirelessChannel')"
-                data-testid="wireless-channel"
-                @change="
-                  (v) => saveAttr(slot.row, 'wireless_channel', v || null)
-                "
-              />
-            </div>
-          </q-td>
-        </template>
-        <template #body-cell-device="slot">
-          <q-td :props="slot">
-            <StockwireProductPicker
-              :model-value="sourceOf(slot.row)"
-              own
-              :local-items="gearItems"
-              :label="t('channels.fieldDevice')"
-              :hint="''"
-              borderless
-              data-testid="source-picker"
-              @update:model-value="(p) => setSource(slot.row, p)"
-            />
-            <q-btn
-              v-if="sourceDevice(slot.row)"
-              flat
-              dense
-              no-caps
-              size="sm"
-              icon="edit"
-              :label="t('workspace.editSource')"
-              data-testid="open-source-device"
-              @click="editDevice(sourceDevice(slot.row))"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-stand_type="slot">
-          <q-td :props="slot">
-            <StockwireProductPicker
-              :model-value="standOf(slot.row)"
-              gear-type="stand"
-              own
-              :label="t('stockwire.selectStand')"
-              :hint="''"
-              borderless
-              data-testid="stand-picker"
-              @update:model-value="(p) => setStand(slot.row, p)"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-stereo="slot">
-          <q-td :props="slot">
-            <q-checkbox
-              :model-value="!!slot.row.attributes.stereo"
-              dense
-              data-testid="channel-stereo"
-              @update:model-value="(v) => setStereo(slot.row, v)"
-            />
-            <q-chip
-              v-if="stereoView(slot.row, channels).linked"
-              dense
-              color="primary"
-              text-color="white"
-              size="sm"
-              data-testid="stereo-side"
-            >
-              {{ stereoView(slot.row, channels).isL ? "L" : "R" }}
-              <q-tooltip>
-                {{
-                  t("channels.stereoLinkedTo", {
-                    ch: slot.row.attributes.stereo_channel,
-                  })
-                }}
-              </q-tooltip>
-            </q-chip>
-          </q-td>
-        </template>
-        <template
-          v-for="flag in ['phantom_power']"
-          #[`body-cell-${flag}`]="slot"
-          :key="flag"
-        >
-          <q-td :props="slot">
-            <q-checkbox
-              :model-value="!!slot.row.attributes[flag]"
-              dense
-              :disable="
-                flag === 'phantom_power' &&
-                  slot.row.attributes.stereo_link_role === 'secondary'
-              "
-              @update:model-value="(v) => saveAttr(slot.row, flag, v)"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-instrument_group="slot">
-          <q-td :props="slot">
-            <q-select
-              :model-value="slot.row.attributes.instrument_group || 'other'"
-              :options="groupOptions"
-              emit-value
-              map-options
-              dense
-              borderless
-              :disable="isSecondaryLeg(slot.row)"
-              data-testid="channel-group"
-              @update:model-value="(v) => saveAttr(slot.row, 'instrument_group', v)"
-            >
-              <q-tooltip v-if="isSecondaryLeg(slot.row)">
-                {{ t("workspace.colourFollowsPrimary") }}
-              </q-tooltip>
-            </q-select>
-          </q-td>
-        </template>
-        <template #body-cell-color_code="slot">
-          <q-td :props="slot">
-            <q-btn
-              dense
-              flat
-              no-caps
-              class="channel-swatch"
-              :class="{ 'channel-swatch--unset': !slot.row.attributes.color_code }"
-              :style="swatchStyle(slot.row.attributes.color_code)"
-              :disable="isSecondaryLeg(slot.row)"
-              :aria-label="t('workspace.colourPick')"
-              data-testid="channel-colour"
-            >
-              <q-tooltip>
-                {{
-                  isSecondaryLeg(slot.row)
-                    ? t("workspace.colourFollowsPrimary")
-                    : slot.row.attributes.color_code || t("workspace.colourUnset")
-                }}
-              </q-tooltip>
-              <q-popup-proxy
-                v-if="!isSecondaryLeg(slot.row)"
-                @hide="commitColour(slot.row)"
-              >
-                <q-card
-                  class="q-pa-sm"
-                  style="width: 260px"
+              <q-td :props="slot">
+                <q-checkbox
+                  :model-value="!!slot.row.attributes[flag]"
+                  dense
+                  :disable="
+                    flag === 'phantom_power' &&
+                      slot.row.attributes.stereo_link_role === 'secondary'
+                  "
+                  @update:model-value="(v) => saveAttr(slot.row, flag, v)"
+                />
+              </q-td>
+            </template>
+            <template #body-cell-instrument_group="slot">
+              <q-td :props="slot">
+                <q-select
+                  :model-value="slot.row.attributes.instrument_group || 'other'"
+                  :options="groupOptions"
+                  emit-value
+                  map-options
+                  dense
+                  borderless
+                  :disable="isSecondaryLeg(slot.row)"
+                  data-testid="channel-group"
+                  @update:model-value="(v) => saveAttr(slot.row, 'instrument_group', v)"
                 >
-                  <div class="row q-gutter-xs q-mb-sm">
-                    <q-btn
-                      v-for="preset in PRESET_COLOURS"
-                      :key="preset"
-                      dense
-                      unelevated
-                      round
-                      size="sm"
-                      :style="{ background: preset }"
-                      :aria-label="preset"
-                      :data-testid="`channel-colour-preset-${preset.slice(1)}`"
-                      @click="pickPreset(slot.row, preset)"
-                    />
-                  </div>
-                  <q-color
-                    :model-value="colourDraft(slot.row)"
-                    format-model="hex"
-                    no-header
-                    no-footer
-                    default-view="spectrum"
-                    flat
-                    @update:model-value="(v) => (pendingColour = { id: slot.row.id, value: v })"
-                    @change="(v) => setColour(slot.row, v)"
-                  />
-                  <q-btn
-                    v-close-popup
-                    flat
-                    dense
-                    no-caps
-                    icon="format_color_reset"
-                    :label="t('workspace.colourClear')"
-                    :disable="!slot.row.attributes.color_code"
-                    data-testid="channel-colour-clear"
-                    @click="setColour(slot.row, null)"
-                  />
-                </q-card>
-              </q-popup-proxy>
-            </q-btn>
-          </q-td>
-        </template>
-        <template #body-cell-performer_name="slot">
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.attributes.performer_name || ''"
-              dense
-              borderless
-              data-testid="channel-performer"
-              @change="(v) => saveAttr(slot.row, 'performer_name', String(v || '').trim() || null)"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-tap_point="slot">
-          <q-td :props="slot">
-            <div class="row items-center q-gutter-xs">
-              <q-select
-                :model-value="slot.row.attributes?.tap_point || 'post_fade'"
-                :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
-                dense
-                borderless
-                emit-value
-                map-options
-                style="min-width: 90px"
-                @update:model-value="(v) => saveAttr(slot.row, 'tap_point', v)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                size="sm"
-                icon="tune"
-                :aria-label="t('console.busTapPoints')"
-                data-testid="channel-bus-tap-points"
-                @click="openBusTapPoints(slot.row)"
+                  <q-tooltip v-if="isSecondaryLeg(slot.row)">
+                    {{ t("workspace.colourFollowsPrimary") }}
+                  </q-tooltip>
+                </q-select>
+              </q-td>
+            </template>
+            <template #body-cell-color_code="slot">
+              <q-td :props="slot">
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  class="channel-swatch"
+                  :class="{ 'channel-swatch--unset': !slot.row.attributes.color_code }"
+                  :style="swatchStyle(slot.row.attributes.color_code)"
+                  :disable="isSecondaryLeg(slot.row)"
+                  :aria-label="t('workspace.colourPick')"
+                  data-testid="channel-colour"
+                >
+                  <q-tooltip>
+                    {{
+                      isSecondaryLeg(slot.row)
+                        ? t("workspace.colourFollowsPrimary")
+                        : slot.row.attributes.color_code || t("workspace.colourUnset")
+                    }}
+                  </q-tooltip>
+                  <q-popup-proxy
+                    v-if="!isSecondaryLeg(slot.row)"
+                    @hide="commitColour(slot.row)"
+                  >
+                    <q-card
+                      class="q-pa-sm"
+                      style="width: 260px"
+                    >
+                      <div class="row q-gutter-xs q-mb-sm">
+                        <q-btn
+                          v-for="preset in PRESET_COLOURS"
+                          :key="preset"
+                          dense
+                          unelevated
+                          round
+                          size="sm"
+                          :style="{ background: preset }"
+                          :aria-label="preset"
+                          :data-testid="`channel-colour-preset-${preset.slice(1)}`"
+                          @click="pickPreset(slot.row, preset)"
+                        />
+                      </div>
+                      <q-color
+                        :model-value="colourDraft(slot.row)"
+                        format-model="hex"
+                        no-header
+                        no-footer
+                        default-view="spectrum"
+                        flat
+                        @update:model-value="(v) => (pendingColour = { id: slot.row.id, value: v })"
+                        @change="(v) => setColour(slot.row, v)"
+                      />
+                      <q-btn
+                        v-close-popup
+                        flat
+                        dense
+                        no-caps
+                        icon="format_color_reset"
+                        :label="t('workspace.colourClear')"
+                        :disable="!slot.row.attributes.color_code"
+                        data-testid="channel-colour-clear"
+                        @click="setColour(slot.row, null)"
+                      />
+                    </q-card>
+                  </q-popup-proxy>
+                </q-btn>
+              </q-td>
+            </template>
+            <template #body-cell-performer_name="slot">
+              <q-td :props="slot">
+                <q-input
+                  :model-value="slot.row.attributes.performer_name || ''"
+                  dense
+                  borderless
+                  data-testid="channel-performer"
+                  @change="(v) => saveAttr(slot.row, 'performer_name', String(v || '').trim() || null)"
+                />
+              </q-td>
+            </template>
+            <template #body-cell-tap_point="slot">
+              <q-td :props="slot">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  size="sm"
+                  icon="tune"
+                  :aria-label="t('console.busTapPoints')"
+                  data-testid="channel-bus-tap-points"
+                  @click="openBusTapPoints(slot.row)"
+                >
+                  <q-tooltip>{{ t("console.busTapPoints") }}</q-tooltip>
+                </q-btn>
+              </q-td>
+            </template>
+            <template #body-cell-notes="slot">
+              <q-td :props="slot">
+                <q-input
+                  :model-value="slot.row.notes"
+                  dense
+                  borderless
+                  @change="(v) => save(slot.row, { notes: v })"
+                />
+              </q-td>
+            </template>
+            <template #body-cell-chain="slot">
+              <q-td
+                :props="slot"
+                class="chain-cell"
               >
-                <q-tooltip>{{ t("console.busTapPoints") }}</q-tooltip>
-              </q-btn>
-            </div>
-          </q-td>
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  icon="route"
+                  :label="chain(slot.row) || t('workspace.chainEmpty')"
+                  :title="chain(slot.row)"
+                  class="chain-main"
+                  data-testid="edit-chain"
+                  @click="openChain(slot.row, 'channel')"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="account_tree"
+                  :aria-label="t('workspace.showFlow')"
+                  data-testid="show-flow"
+                  @click="openFlow(slot.row, 'channel')"
+                />
+              </q-td>
+            </template>
+            <template #body-cell-actions="slot">
+              <q-td :props="slot">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="open_in_new"
+                  :aria-label="t('workspace.openDevice')"
+                  data-testid="open-channel-device"
+                  @click="editDevice(slot.row)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  color="negative"
+                  icon="delete"
+                  :aria-label="t('workspace.remove')"
+                  @click="removeNode(slot.row)"
+                />
+              </q-td>
+            </template>
+          </AdaptiveTable>
         </template>
-        <template #body-cell-notes="slot">
-          <q-td :props="slot">
-            <q-input
-              :model-value="slot.row.notes"
-              dense
-              borderless
-              @change="(v) => save(slot.row, { notes: v })"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-chain="slot">
-          <q-td
-            :props="slot"
-            class="chain-cell"
-          >
-            <q-btn
-              flat
-              dense
-              no-caps
-              icon="route"
-              :label="chain(slot.row) || t('workspace.chainEmpty')"
-              :title="chain(slot.row)"
-              class="chain-main"
-              data-testid="edit-chain"
-              @click="openChain(slot.row, 'channel')"
-            />
-            <q-btn
-              flat
-              dense
-              round
-              icon="account_tree"
-              :aria-label="t('workspace.showFlow')"
-              data-testid="show-flow"
-              @click="openFlow(slot.row, 'channel')"
-            />
-          </q-td>
-        </template>
-        <template #body-cell-actions="slot">
-          <q-td :props="slot">
-            <q-btn
-              flat
-              dense
-              round
-              icon="open_in_new"
-              :aria-label="t('workspace.openDevice')"
-              data-testid="open-channel-device"
-              @click="editDevice(slot.row)"
-            />
-            <q-btn
-              flat
-              dense
-              round
-              color="negative"
-              icon="delete"
-              :aria-label="t('workspace.remove')"
-              @click="removeNode(slot.row)"
-            />
-          </q-td>
-        </template>
-      </AdaptiveTable>
-
-      <div class="row items-center q-mt-lg q-mb-sm">
-        <div class="text-subtitle1 col">
-          {{ t("workspace.outputs") }}
-        </div>
-        <q-btn
-          flat
-          no-caps
-          icon="add"
-          :label="t('workspace.addOutput')"
-          data-testid="add-output"
-          @click="addOutput"
-        />
-        <q-btn
-          flat
-          no-caps
-          icon="playlist_add"
-          :label="t('workspace.bulkAdd')"
-          data-testid="bulk-outputs"
-          @click="bulkOutputs = true"
-        />
-      </div>
-      <!-- The same bus-pool budget the console panel shows: these rows and the panel's Buses tab
-           edit the same output records, so the budget is visible wherever they are changed. The
-           rows save through the graph, which does not block, so an overflow is only a warning. -->
-      <div
-        v-if="consoleSummary?.budget?.enabled"
-        class="q-mb-sm"
-        data-testid="outputs-budget"
-      >
-        <div class="row items-center q-mb-xs">
-          <div class="text-caption col">
-            {{ t("console.budget") }}
-          </div>
-          <div
-            class="text-caption"
-            data-testid="outputs-budget-text"
-          >
-            {{ consoleSummary.budget.used_slots }} / {{ consoleSummary.budget.total_slots }}
-            {{ t("console.slots") }}
-          </div>
-        </div>
-        <q-linear-progress
-          :value="
-            consoleSummary.budget.total_slots
-              ? Math.min(consoleSummary.budget.used_slots / consoleSummary.budget.total_slots, 1)
-              : 0
-          "
-          size="10px"
-          rounded
-          :color="consoleSummary.budget.ok ? 'positive' : 'negative'"
-        />
-        <q-banner
-          v-if="!consoleSummary.budget.ok"
-          dense
-          rounded
-          class="bg-warning text-black q-mt-xs"
-          data-testid="outputs-budget-warning"
-        >
-          <div
-            v-for="v in consoleSummary.budget.violations"
-            :key="v"
-          >
-            {{ v }}
-          </div>
-        </q-banner>
-      </div>
-      <q-list
-        bordered
-        separator
-      >
-        <q-item
-          v-for="out in outputs"
-          :key="out.id"
-          data-testid="output-row"
-        >
-          <q-item-section>
-            <q-input
-              :model-value="out.name"
-              dense
-              borderless
-              @change="(v) => save(out, { name: v })"
-            />
-            <q-item-label caption>
-              {{ chain(out) || t("workspace.chainEmpty") }}
-            </q-item-label>
-          </q-item-section>
-          <q-item-section
-            side
-            style="min-width: 150px"
-          >
-            <q-select
-              :model-value="out.attributes.mode || 'mono'"
-              :options="modeOptions"
-              emit-value
-              map-options
-              dense
-              outlined
-              :label="t('channels.outputMode')"
-              data-testid="output-mode"
-              @update:model-value="(v) => saveAttr(out, 'mode', v)"
-            />
-          </q-item-section>
-          <q-item-section
-            v-if="consoleSummary && !consoleSummary.simple"
-            side
-            style="min-width: 130px"
-          >
-            <q-select
-              :model-value="out.attributes.role || 'aux'"
-              :options="busRoles"
-              dense
-              outlined
-              :label="t('console.role')"
-              data-testid="output-role"
-              @update:model-value="(v) => saveAttr(out, 'role', v)"
-            />
-          </q-item-section>
-          <q-item-section side>
-            <div class="row">
-              <q-btn
-                flat
-                dense
-                round
-                icon="route"
-                :aria-label="t('workspace.editChain')"
-                @click="openChain(out, 'output')"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="account_tree"
-                :aria-label="t('workspace.showFlow')"
-                data-testid="show-output-flow"
-                @click="openFlow(out, 'output')"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeNode(out)"
-              />
-            </div>
-          </q-item-section>
-        </q-item>
-        <q-item v-if="!outputs.length">
-          <q-item-section class="text-grey-6">
-            {{ t("workspace.noOutputs") }}
-          </q-item-section>
-        </q-item>
-      </q-list>
+      </ConsolePanel>
     </template>
 
     <ListBulkDialog
@@ -952,12 +777,6 @@
       :busy="bulkBusy"
       :devices="gear"
       @create="(items, opts) => bulkCreate('channels', items, opts)"
-    />
-    <ListBulkDialog
-      v-model="bulkOutputs"
-      outputs
-      :busy="bulkBusy"
-      @create="(items) => bulkCreate('outputs', items)"
     />
     <MixerDialog
       v-model="mixerOpen"
@@ -1110,7 +929,9 @@
             :key="b.id"
             class="row items-center q-gutter-sm q-mb-sm"
           >
-            <div class="col">{{ b.name }}</div>
+            <div class="col">
+              {{ b.name }}
+            </div>
             <q-select
               :model-value="tapPointBusDraft[b.id]"
               :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
@@ -1124,8 +945,17 @@
           </div>
         </q-card-section>
         <q-card-actions align="right">
-          <q-btn flat :label="t('workspace.cancel')" v-close-popup />
-          <q-btn color="primary" unelevated :label="t('workspace.save')" @click="saveBusTapPoints" />
+          <q-btn
+            v-close-popup
+            flat
+            :label="t('workspace.cancel')"
+          />
+          <q-btn
+            color="primary"
+            unelevated
+            :label="t('workspace.save')"
+            @click="saveBusTapPoints"
+          />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1143,7 +973,7 @@ import {
   mixerGraphPorts,
   mixerImportPlan,
 } from "@/utils/workspace";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useQuasar } from "quasar";
 import { useGraphStore } from "@/stores/graph";
@@ -1169,7 +999,6 @@ import {
   patchSummary,
   flowTree,
   channelFlowTree,
-  OUTPUT_MODES,
   channelsOf,
   isPlotElement,
   isOrphanedBySource,
@@ -1202,19 +1031,13 @@ const chainKind = ref("channel");
 const chainInitial = ref([]);
 const wwbFileInput = ref(null);
 const wwbImporting = ref(false);
-const consoleOpen = ref(false);
 const consolePanel = ref(null);
 // "Change in Soft patch" from the chain editor: close it and show the console panel's soft patch tab.
+// The console is always open in the lists view, so we only need to switch its tab.
 async function openSoftPatch() {
   chainOpen.value = false;
-  consoleOpen.value = true;
   await nextTick();
   consolePanel.value?.openTab("patch");
-}
-// Closing the console panel first lets a pending (debounced) edit land: nothing needs saving.
-async function toggleConsole() {
-  if (consoleOpen.value && consolePanel.value) await consolePanel.value.settle();
-  consoleOpen.value = !consoleOpen.value;
 }
 
 const list = computed(
@@ -1719,7 +1542,6 @@ async function saveMixer({ product, inputs, buses }) {
 }
 
 const bulkChannels = ref(false);
-const bulkOutputs = ref(false);
 const bulkBusy = ref(false);
 
 async function bulkCreate(kind, items, opts = {}) {
@@ -1738,9 +1560,8 @@ async function bulkCreate(kind, items, opts = {}) {
           [{ device_id: opts.deviceId }],
         );
       }
-    } else await graph.createOutputs(contextId.value, list.value.id, items);
+    }
     bulkChannels.value = false;
-    bulkOutputs.value = false;
   } catch (err) {
     failed(err);
   } finally {
@@ -1906,62 +1727,11 @@ async function syncStockwire() {
   }
 }
 
-async function addOutput() {
-  try {
-    await graph.createOutput(contextId.value, list.value.id, {
-      name: `${t("workspace.output")} ${outputs.value.length + 1}`,
-    });
-  } catch (err) {
-    failed(err);
-  }
-}
-
-// Digital-console state for the list (job lists only): the bus-pool budget and the roles the
-// console allows, shown next to the output rows. It is re-read whenever the list's outputs or
-// channels change in the graph store, wherever the change was made (these rows or the panel).
-const consoleSummary = ref(null);
-const busRoles = computed(
-  () =>
-    consoleSummary.value?.profile?.bus_pool?.allowed_roles || [
-      "aux",
-      "group",
-      "matrix",
-      "main",
-      "fx_send",
-    ],
-);
 // Changes made in another browser arrive through the realtime graph events, which update the store;
-// this signature makes the console panel (and its summary) reload when anything it shows changed.
+// this signature makes the channels table reload when anything it shows changed.
 const consoleSignature = computed(() =>
   consoleSignatureOf(list.value, channels.value, outputs.value, graph.devices),
 );
-let summaryTimer = null;
-async function loadConsoleSummary() {
-  if (props.venueId || !props.jobId || !list.value) {
-    consoleSummary.value = null;
-    return;
-  }
-  try {
-    consoleSummary.value = (
-      await api.get(`/jobs/${props.jobId}/channel-lists/${list.value.id}/console`)
-    ).data;
-  } catch {
-    consoleSummary.value = null;
-  }
-}
-watch([consoleSignature, () => list.value?.id], () => {
-  clearTimeout(summaryTimer);
-  summaryTimer = setTimeout(loadConsoleSummary, 300);
-});
-onMounted(loadConsoleSummary);
-
-const modeOptions = computed(() =>
-  OUTPUT_MODES.map((m) => ({
-    value: m.value,
-    label: t(`workspace.busMode.${m.value.replace(/[._]/g, "")}`),
-  })),
-);
-
 const flowOpen = ref(false);
 // The chain as a diagram; its branches follow the parent of each step (outputs branch). Computed
 // from the live graph store, so a soft patch or chain change made while the diagram is open (or

@@ -39,7 +39,6 @@ test('a bus displays the talkback presets that feed it', async ({ page, request 
   });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 
@@ -64,7 +63,6 @@ test('talkback destinations are chosen from the grid strip picker', async ({ pag
   await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge', mode: 'mono' });
 
   await page.goto(`/jobs/${job.id}/workspace?view=lists`);
-  await page.getByTestId('open-console').click();
   await expect(page.getByTestId('console-panel')).toBeVisible();
   await page.getByTestId('console-tab-buses').click();
 

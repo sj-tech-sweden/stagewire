@@ -557,8 +557,10 @@ test('a channel list is built in the channel list editor and ends up in the expo
     .toEqual(['Kick', 1]);
   expect(box.id).toBeTruthy();
 
-  await page.getByTestId('add-output').click();
-  await expect(page.getByTestId('output-row')).toHaveCount(1);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-new-bus-name').fill('Bus 1');
+  await page.getByTestId('console-add-bus').click();
+  await expect(page.getByTestId('console-bus')).toHaveCount(1);
 });
 
 test('a device is created and edited in the device editor, with ports and camera specs', async ({ page, request }) => {
@@ -1207,7 +1209,8 @@ test('the sound editor adds channels and outputs in bulk, sets a stand per chann
     }[];
   await expect.poll(async () => (await lists())[0]?.channels.map((c) => c.source_label)).toEqual(['Tom 1', 'Tom 2', 'Tom 3', 'Tom 4']);
 
-  await page.getByTestId('bulk-outputs').click();
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bulk-buses').click();
   await page.getByTestId('list-bulk-count').fill('3');
   await page.getByTestId('list-bulk-prefix').fill('Aux');
   await page.getByTestId('list-bulk-create').click();
@@ -1501,7 +1504,8 @@ test('bus channels are set on an output chain and a plugged device is unplugged 
   });
   await page.goto(`/jobs/${jobId}/workspace`);
   await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
-  await page.getByTestId('output-row').getByRole('button', { name: /edit patch|redigera patch/i }).click();
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bus-edit-chain').first().click();
   await page.getByTestId('chain-add-step').click();
   await page.getByTestId('chain-device').first().click();
   await page.locator('.q-menu .q-item', { hasText: 'Sub amp' }).click();
