@@ -700,6 +700,19 @@
             />
           </q-td>
         </template>
+        <template #body-cell-tap_point="slot">
+          <q-td :props="slot">
+            <q-select
+              :model-value="slot.row.attributes?.tap_point || 'post_fade'"
+              :options="[{ value: 'pre_eq', label: t('console.tapPoint.pre_eq') }, { value: 'post_eq', label: t('console.tapPoint.post_eq') }, { value: 'post_fade', label: t('console.tapPoint.post_fade') }]"
+              dense
+              borderless
+              emit-value
+              map-options
+              @update:model-value="(v) => saveAttr(slot.row, 'tap_point', v)"
+            />
+          </q-td>
+        </template>
         <template #body-cell-notes="slot">
           <q-td :props="slot">
             <q-input
@@ -1186,12 +1199,13 @@ const columnLabels = computed(() => ({
   stereo: "ST",
   instrument_group: t("workspace.colInstrumentGroup"),
   color_code: t("workspace.colColour"),
+  tap_point: t("workspace.colTapPoint"),
   performer_name: t("workspace.colPerformer"),
   notes: t("workspace.colNotes"),
   chain: t("workspace.chain"),
   actions: "",
 }));
-const ALIGN = { phantom_power: "center", stereo: "center", color_code: "center", actions: "right" };
+const ALIGN = { phantom_power: "center", stereo: "center", color_code: "center", tap_point: "center", actions: "right" };
 const columns = computed(() =>
   CHANNEL_COLUMNS.map((c) => ({
     ...c,
@@ -1246,7 +1260,7 @@ const failed = (err) =>
 
 // What a stereo link binds (console.py SHARED_FIELDS): a change to one of these on the primary is
 // copied onto the secondary by the server's graph sync.
-const LINK_SHARED = ["phantom_power", "color_code", "instrument_group", "source_label"];
+const LINK_SHARED = ["phantom_power", "color_code", "instrument_group", "source_label", "tap_point"];
 async function save(node, changes) {
   try {
     await graph.updateDevice(contextId.value, node.id, changes);
