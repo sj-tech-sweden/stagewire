@@ -878,25 +878,52 @@ test('the same channel can sit on two faders and the cells show x2', async ({ pa
 
 test('source and stand selectors are usable when the Stockwire integration is disabled', async ({ page, request }) => {
   // The catalog picker only shows with the integration on; with it off the selectors must still render
-  // as plain inputs so a source/stand can be named (regression: they used to vanish entirely).
+  // and let you pick an existing job device (the unassigned audio devices) or type a new name.
   await setStockwireEnabled(request, false);
   await login(page);
   const headers = await authedHeaders(page);
   const { jobId } = await seed(request, headers);
+  // an audio device already in the job: picking it should link it as the channel source
+  await call(request, headers, 'post', `/jobs/${jobId}/graph/audio-devices`, {
+    name: 'Shure SM58',
+    device_type: 'microphone',
+  });
   await openConsole(page, jobId);
   const source = page.getByTestId('source-picker').first();
   const stand = page.getByTestId('stand-picker').first();
   await expect(source).toBeVisible();
   await expect(stand).toBeVisible();
-  await source.fill('SM58');
-  await stand.fill('K&M 210');
-  await expect(source).toHaveValue('SM58');
-  await expect(stand).toHaveValue('K&M 210');
-  // a typed name is stored as the channel's source/stand and made into a device like a catalog product
+
+  // pick an existing unassigned audio device from the job
+  await source.click();
+  await page.keyboard.type('SM58');
+  await page.locator('.q-menu .q-item:not(.text-primary)', { hasText: 'Shure SM58' }).click();
   await expect
     .poll(async () =>
       ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
         ?.channels[0],
     )
-    .toMatchObject({ device: 'SM58', stand_type: 'K&M 210' });
+    .toMatchObject({ device: 'Shure SM58' });
+
+  // a typed name is stored as a new source device (the free-text option is the primary-coloured one)
+  await source.click();
+  await page.keyboard.type('Neumann');
+  await page.locator('.q-menu .q-item.text-primary').click();
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
+        ?.channels[0],
+    )
+    .toMatchObject({ device: 'Neumann' });
+
+  // stand: no local devices, so a typed name becomes the stand type
+  await stand.click();
+  await page.keyboard.type('K&M 210');
+  await page.locator('.q-menu .q-item.text-primary').click();
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json()) as any[])[0]
+        ?.channels[0],
+    )
+    .toMatchObject({ stand_type: 'K&M 210' });
 });

@@ -1,15 +1,15 @@
 <template>
-  <!-- The catalog picker is the mechanism behind every "from Stockwire" control, so it only shows when
-       the integration is enabled. When it is off we still need a place to set a source/stand/mixer by
-       name (the store keeps a free-text name for lists and exports), so fall back to a plain text input
-       instead of vanishing entirely - otherwise there is not even a hint of where to type it. -->
+  <!-- One select serves both states. With the integration on it searches the Stockwire catalog (plus the
+       job's own devices, passed as localItems); with it off there is no catalog, so it offers the job's
+       own devices and a typed name instead of vanishing - that is how an unassigned audio device can
+       still be picked as a channel source without the integration. -->
   <q-select
-    v-if="store.isEnabled"
     v-bind="$attrs"
     :model-value="modelValue"
     :options="options"
     :label="label"
-    :hint="hint === null ? t('stockwire.pickerHint') : hint"
+    :hint="hint === null ? (store.isEnabled ? t('stockwire.pickerHint') : '') : hint"
+    :borderless="borderless"
     use-input
     input-debounce="300"
     clearable
@@ -49,18 +49,6 @@
       </q-item>
     </template>
   </q-select>
-  <q-input
-    v-else
-    v-bind="$attrs"
-    :model-value="modelValue?.name || ''"
-    :label="label"
-    :hint="hint === null ? '' : hint"
-    :borderless="borderless"
-    dense
-    clearable
-    @update:model-value="onFallback"
-    @clear="onClear"
-  />
 </template>
 
 <script setup>
@@ -145,6 +133,19 @@ async function onFilter(val, update) {
     });
     return;
   }
+  const needle = q.toLowerCase();
+  // No integration: there is no catalog to search, so offer the job's own devices (the parent passes
+  // them as localItems - for the channel source that is the unassigned audio devices) plus the typed
+  // name. Picking a job device links it; typing a new name makes a device from it.
+  if (!store.isEnabled) {
+    const local = props.localItems
+      .filter((d) => d.name.toLowerCase().includes(needle))
+      .map((d) => ({ __local: true, id: d.stockwire_product_id || null, name: d.name, job_device_id: d.id, sku: null }));
+    update(() => {
+      options.value = [{ __freetext: true, name: q }, ...local];
+    });
+    return;
+  }
   if (!Object.keys(store.categoryMap).length) {
     try {
       await store.loadCategoryMap();
@@ -168,7 +169,6 @@ async function onFilter(val, update) {
     searchFailed.value = apiErrorText(err);
     Notify.create({ type: 'warning', message: `${t('stockwire.searchFailed')}: ${searchFailed.value}` });
   }
-  const needle = q.toLowerCase();
   const local = props.localItems
     .filter((d) => d.name.toLowerCase().includes(needle))
     .map((d) => ({ __local: true, id: d.stockwire_product_id || null, name: d.name, job_device_id: d.id, sku: null }));
@@ -204,12 +204,5 @@ function onPick(value) {
 
 function onClear() {
   emit('update:modelValue', null);
-}
-
-// When the integration is off there is no catalog to search, so the fallback input just emits a
-// free-text name; the parent stores it as a plain source/stand/mixer name (see setSource/setStand).
-function onFallback(value) {
-  const name = (value || '').toString().trim();
-  emit('update:modelValue', name ? freetext(name) : null);
 }
 </script>

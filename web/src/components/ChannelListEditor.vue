@@ -1592,6 +1592,8 @@ const setStand = (node, product) =>
 const gearItems = computed(() =>
   graph.devices
     .filter((d) => !isVirtual(d) && !isPlotElement(d))
+    // only devices not already used as a source in this list, so the picker offers the unassigned ones
+    .filter((d) => !channels.value.some((c) => c.attributes.source_device_id === d.id))
     .map((d) => ({
       id: d.id,
       name: d.name,
