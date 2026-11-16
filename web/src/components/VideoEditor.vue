@@ -148,6 +148,15 @@
                   flat
                   dense
                   round
+                  icon="edit"
+                  :aria-label="t('workspace.editVideoInput')"
+                  data-testid="video-edit-open"
+                  @click="openVideoRowEdit(row, section.kind)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
                   icon="account_tree"
                   :aria-label="t('workspace.showFlow')"
                   @click="openFlow(row, section.kind)"
@@ -380,6 +389,15 @@
                 flat
                 dense
                 round
+                icon="edit"
+                :aria-label="t('workspace.editVideoInput')"
+                data-testid="video-edit-open"
+                @click="openVideoRowEdit(slot.row, section.kind)"
+              />
+              <q-btn
+                flat
+                dense
+                round
                 color="negative"
                 icon="delete"
                 :aria-label="t('workspace.remove')"
@@ -416,6 +434,16 @@
       :value="videoNotesTarget?.notes || ''"
       @save="(text) => videoNotesTarget && save(videoNotesTarget, { notes: text })"
     />
+
+    <!-- Consolidated editor for one video row: source, connector and signal metadata in one modal. -->
+    <VideoRowEditDialog
+      v-model="videoRowEditOpen"
+      :row="editRow"
+      :kind="editKind"
+      :gear-items="gearItems"
+      data-testid="video-edit-dialog"
+      @save="(changes) => editRow && save(editRow, changes)"
+    />
   </div>
 </template>
 
@@ -433,6 +461,7 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import VideoRowEditDialog from '@/components/VideoRowEditDialog.vue';
 import {
   flowTree,
   isPlotElement,
@@ -569,6 +598,17 @@ const videoNotesTarget = ref(null);
 function openVideoNotes(row) {
   videoNotesTarget.value = row;
   videoNotesOpen.value = true;
+}
+
+// The row edit dialog replaces the cramped inline card expansion with one modal exposing the row's
+// source, connector and signal metadata; it emits a diff that save() applies (realtime-synced).
+const videoRowEditOpen = ref(false);
+const editRow = ref(null);
+const editKind = ref('video_input');
+function openVideoRowEdit(row, kind) {
+  editRow.value = row;
+  editKind.value = kind;
+  videoRowEditOpen.value = true;
 }
 const setNumber = (node, kind, value) =>
   save(node, {
