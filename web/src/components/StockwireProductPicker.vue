@@ -1,8 +1,11 @@
 <template>
-  <!-- The whole picker is the mechanism behind every "from Stockwire" control; hide it entirely when
-       the integration is disabled so none of those controls can be reached. -->
+  <!-- The catalog picker is the mechanism behind every "from Stockwire" control, so it only shows when
+       the integration is enabled. When it is off we still need a place to set a source/stand/mixer by
+       name (the store keeps a free-text name for lists and exports), so fall back to a plain text input
+       instead of vanishing entirely - otherwise there is not even a hint of where to type it. -->
   <q-select
     v-if="store.isEnabled"
+    v-bind="$attrs"
     :model-value="modelValue"
     :options="options"
     :label="label"
@@ -46,6 +49,18 @@
       </q-item>
     </template>
   </q-select>
+  <q-input
+    v-else
+    v-bind="$attrs"
+    :model-value="modelValue?.name || ''"
+    :label="label"
+    :hint="hint === null ? '' : hint"
+    :borderless="borderless"
+    dense
+    clearable
+    @update:model-value="onFallback"
+    @clear="onClear"
+  />
 </template>
 
 <script setup>
@@ -65,8 +80,13 @@ const props = defineProps({
   own: { type: Boolean, default: false },
   // things already in the job to offer first: [{ id, name, stockwire_product_id }]
   localItems: { type: Array, default: () => [] },
+  // match the q-select's borderless look in the compact editors (table cells, phone cards)
+  borderless: { type: Boolean, default: false },
 });
 const emit = defineEmits(['update:modelValue']);
+// Two roots (catalog select / disabled fallback input); forward fall-through attrs (testid, class) to
+// whichever renders instead of letting them land on a fragment.
+defineOptions({ inheritAttrs: false });
 
 const { t } = useI18n({ useScope: 'global' });
 const store = useStockwireStore();
@@ -184,5 +204,12 @@ function onPick(value) {
 
 function onClear() {
   emit('update:modelValue', null);
+}
+
+// When the integration is off there is no catalog to search, so the fallback input just emits a
+// free-text name; the parent stores it as a plain source/stand/mixer name (see setSource/setStand).
+function onFallback(value) {
+  const name = (value || '').toString().trim();
+  emit('update:modelValue', name ? freetext(name) : null);
 }
 </script>

@@ -725,10 +725,9 @@
                 <q-btn
                   flat
                   dense
-                  no-caps
+                  round
                   icon="route"
-                  :label="chain(slot.row) || t('workspace.chainEmpty')"
-                  :title="chain(slot.row)"
+                  :title="chain(slot.row) || t('workspace.chainEmpty')"
                   class="chain-main"
                   data-testid="edit-chain"
                   @click="openChain(slot.row, 'channel')"

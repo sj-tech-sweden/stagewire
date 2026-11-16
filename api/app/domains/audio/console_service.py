@@ -59,15 +59,17 @@ async def guard_bus_budget(
     list_id: uuid.UUID,
     *,
     new: dict | None = None,
+    new_many: list[dict] | None = None,
     replace: tuple[str, dict] | None = None,
     force: bool = False,
 ) -> dict:
     """Refuse (409) a bus write that would break the pool budget; returns the resulting budget.
 
-    ``new`` is a bus about to be added; ``replace`` is ``(output_id, changed_fields)`` for an edit.
-    Only a write that *makes things worse* is blocked: an already-over-budget list (e.g. a profile
-    tightened later) can still be edited towards a valid state. ``force`` lets the engineer
-    knowingly exceed the pool (the UI offers it as "add anyway").
+    ``new`` is a single bus about to be added; ``new_many`` is several at once (a bulk add);
+    ``replace`` is ``(output_id, changed_fields)`` for an edit. Only a write that *makes things
+    worse* is blocked: an already-over-budget list (e.g. a profile tightened later) can still be
+    edited towards a valid state. ``force`` lets the engineer knowingly exceed the pool (the UI
+    offers it as "add anyway").
     """
     row = await _list_row(db, list_id, job_id)
     profile = profile_of(row)
@@ -78,6 +80,23 @@ async def guard_bus_budget(
         for bus in after:
             if bus["id"] == target:
                 bus.update({k: v for k, v in changes.items() if v is not None and k in bus})
+        after.sort(key=lambda b: b["position"])
+    # A bulk add is one logical write: every new bus is placed and the budget is checked against the
+    # finished list, so e.g. "8 stereo buses" is rejected as a whole rather than passing one by one.
+    if new_many is not None:
+        next_pos = max((b["position"] for b in after), default=0) + 1
+        for i, bus in enumerate(new_many):
+            after.append(
+                {
+                    "id": f"new{i}",
+                    "name": bus.get("name") or "Output",
+                    "mode": bus.get("mode") or "mono",
+                    "role": bus.get("role") or "aux",
+                    "position": bus.get("position")
+                    if bus.get("position") is not None
+                    else next_pos + i,
+                }
+            )
         after.sort(key=lambda b: b["position"])
     if new is not None:
         after.append(
