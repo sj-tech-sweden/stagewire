@@ -182,7 +182,7 @@ test('hiding a column in one table does not touch another', () => {
 
 test('the instrument group, colour and performer columns are optional and start hidden', () => {
   const optional = CHANNEL_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.name);
-  expect(optional).toEqual(['instrument_group', 'color_code', 'performer_name']);
+  expect(optional).toEqual(['instrument_group', 'color_code', 'tap_point', 'performer_name']);
   expect(visibleColumns(CHANNEL_COLUMNS, all).map((c) => c.name)).not.toContain('color_code');
   // chosen in the Columns menu, they show up (and take space) like any other column
   const names = visibleColumns(CHANNEL_COLUMNS, [...all, 'color_code']).map((c) => c.name);
