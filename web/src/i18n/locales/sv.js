@@ -63,6 +63,10 @@ export default {
   workspace: {
     cancel: "Avbryt",
     save: "Spara",
+    editNotes: "Redigera anteckningar",
+    markdownHint: "Stöder Markdown",
+    preview: "Förhandsgranska",
+    previewEmpty: "Inget att förhandsgranska än",
     library: "Armaturbibliotek",
     typeName: "Typnamn",
     addType: "Lägg till typ",

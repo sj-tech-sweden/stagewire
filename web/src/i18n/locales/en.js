@@ -63,6 +63,10 @@ export default {
   workspace: {
     cancel: "Cancel",
     save: "Save",
+    editNotes: "Edit notes",
+    markdownHint: "Supports Markdown",
+    preview: "Preview",
+    previewEmpty: "Nothing to preview yet",
     library: "Fixture library",
     typeName: "Type name",
     addType: "Add type",
