@@ -148,7 +148,10 @@
         @changed="graph.fetchGraph(contextId, contextKind)"
       >
         <template #inputs>
-          <div class="row items-center q-gutter-sm q-mb-sm">
+          <!-- The name and the primary actions are grouped so that, on narrower laptops where the
+               row would overflow, the destructive delete button drops to its own line (pushed right by
+               q-ml-auto) instead of being clipped at the right edge of the tab panel. -->
+          <div class="row items-center q-gutter-sm q-mb-sm wrap">
             <q-input
               :model-value="list.name"
               dense
@@ -158,32 +161,34 @@
               data-testid="list-name-input"
               @change="(v) => save(list, { name: v })"
             />
-            <q-btn
-              color="primary"
-              no-caps
-              icon="add"
-              :label="t('workspace.addChannel')"
-              data-testid="add-channel"
-              @click="addChannels(1)"
-            />
-            <q-btn
-              flat
-              no-caps
-              icon="playlist_add"
-              :label="t('workspace.bulkAdd')"
-              data-testid="bulk-channels"
-              @click="bulkChannels = true"
-            />
-            <q-btn
-              v-if="contextKind === 'job' && stockwire.isEnabled"
-              flat
-              no-caps
-              icon="cloud_upload"
-              :loading="syncing"
-              :label="t('workspace.syncStockwire')"
-              data-testid="sync-stockwire"
-              @click="syncStockwire"
-            />
+            <div class="row items-center q-gutter-sm">
+              <q-btn
+                color="primary"
+                no-caps
+                icon="add"
+                :label="t('workspace.addChannel')"
+                data-testid="add-channel"
+                @click="addChannels(1)"
+              />
+              <q-btn
+                flat
+                no-caps
+                icon="playlist_add"
+                :label="t('workspace.bulkAdd')"
+                data-testid="bulk-channels"
+                @click="bulkChannels = true"
+              />
+              <q-btn
+                v-if="contextKind === 'job' && stockwire.isEnabled"
+                flat
+                no-caps
+                icon="cloud_upload"
+                :loading="syncing"
+                :label="t('workspace.syncStockwire')"
+                data-testid="sync-stockwire"
+                @click="syncStockwire"
+              />
+            </div>
             <q-space />
             <q-btn
               flat
@@ -192,6 +197,7 @@
               color="negative"
               icon="delete"
               :label="t('workspace.deleteList')"
+              class="q-ml-auto"
               @click="removeList"
             />
           </div>
