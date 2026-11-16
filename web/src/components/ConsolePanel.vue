@@ -485,15 +485,55 @@
                   class="col"
                   @change="(v) => updateBus(bus, { name: v })"
                 />
-                <q-input
-                  :model-value="bus.notes"
-                  dense
-                  outlined
+                <!-- Bus notes: rendered as markdown (the common NotesDisplay, with a read-more
+                     toggle) where shown; editing stays raw text in the input below. -->
+                <div
+                  v-if="busNotesEditing[bus.id]"
                   class="col-12 q-mt-xs"
-                  :label="t('console.busNotes')"
-                  data-testid="console-bus-notes"
-                  @change="(v) => updateBus(bus, { notes: v })"
-                />
+                >
+                  <q-input
+                    :model-value="bus.notes"
+                    dense
+                    outlined
+                    autogrow
+                    :label="t('console.busNotes')"
+                    data-testid="console-bus-notes"
+                    @change="(v) => { updateBus(bus, { notes: v }); busNotesEditing[bus.id] = false; }"
+                  >
+                    <template #append>
+                      <q-btn
+                        flat
+                        round
+                        dense
+                        icon="close"
+                        :aria-label="t('app.actions.cancel')"
+                        @click="busNotesEditing[bus.id] = false"
+                      />
+                    </template>
+                  </q-input>
+                </div>
+                <div
+                  v-else
+                  class="col-12 q-mt-xs row items-start q-gutter-xs"
+                >
+                  <NotesDisplay
+                    v-if="bus.notes"
+                    class="col"
+                    :notes="bus.notes"
+                    :rows="3"
+                  />
+                  <q-btn
+                    dense
+                    flat
+                    no-caps
+                    size="sm"
+                    :icon="bus.notes ? 'edit' : 'add'"
+                    :label="bus.notes ? undefined : t('console.busNotes')"
+                    :aria-label="t('app.actions.edit')"
+                    data-testid="console-bus-edit-notes"
+                    @click="busNotesEditing[bus.id] = true"
+                  />
+                </div>
               </div>
               <q-item-label
                 v-if="slotLabel(bus)"
@@ -2384,6 +2424,7 @@ import { api } from "@/boot/api";
 import { apiErrorText } from "@/utils/errors";
 import { PRESET_COLOURS, colourToHex, normalizeHex } from "@/utils/colour";
 import PatchTileGrid from "@/components/PatchTileGrid.vue";
+import NotesDisplay from "@/components/NotesDisplay.vue";
 import StripPicker from "@/components/StripPicker.vue";
 import { combineStatus, createAutosaver } from "@/utils/autosave";
 import {
@@ -2797,6 +2838,9 @@ const updateTalkbackPreset = (pi, changes) => {
 
 const pendingBusColour = ref(null);
 const pendingDcaColour = ref(null);
+// Per-bus flag tracking which bus is currently in notes-edit mode (raw-text input).
+// Display uses the common NotesDisplay markdown renderer; only one bus edits at a time.
+const busNotesEditing = ref({});
 function busSwatchStyle(value) {
   if (!value) return {};
   const hex = colourToHex(value);
