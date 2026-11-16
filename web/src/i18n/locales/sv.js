@@ -859,6 +859,7 @@ export default {
     talkbackPresetsHelp: "Namngivna presets som routar talkback till flera destinationer (alla bussar/outputs utom FX-sends).",
     talkbackPresetName: "Preset-namn",
     talkbackPresetDestinations: "Destinationer",
+    talkbackPickTitle: "Talkback-destinationer",
     talkbackPresetAdd: "Lägg till preset",
     talkbackFeeds: "Talkback: {names}",
     overBudget: "Busspoolen överskriden",

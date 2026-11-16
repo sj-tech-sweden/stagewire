@@ -677,19 +677,16 @@
               data-testid="console-talkback-preset-name"
               @change="(v) => updateTalkbackPreset(pi, { name: v })"
             />
-            <q-select
-              :model-value="preset.destinations || []"
-              :options="talkbackDestinations"
-              dense
-              outlined
-              multiple
-              emit-value
-              map-options
-              class="col"
-              :label="t('console.talkbackPresetDestinations')"
-              data-testid="console-talkback-preset-destinations"
-              @update:model-value="(v) => updateTalkbackPreset(pi, { destinations: v })"
-            />
+            <div class="col">
+              <StripPicker
+                :model-value="preset.destinations || []"
+                :items="talkbackDestinationItems"
+                :label="t('console.talkbackPresetDestinations')"
+                :title="t('console.talkbackPickTitle')"
+                data-testid="console-talkback-preset-destinations"
+                @update:model-value="(v) => updateTalkbackPreset(pi, { destinations: v })"
+              />
+            </div>
             <q-btn
               flat
               dense
@@ -2616,8 +2613,12 @@ const roles = computed(() => summary.value?.profile?.bus_pool?.allowed_roles || 
 const busModes = computed(() => ["mono", "stereo", "lcr"].map((m) => ({ value: m, label: t(`console.busMode.${m}`) })));
 const tapPoints = computed(() => ["pre_eq", "post_eq", "post_fade"].map((m) => ({ value: m, label: t(`console.tapPoint.${m}`) })));
 const talkbackPresets = computed(() => listData.value?.talkback_presets || []);
-const talkbackDestinations = computed(() =>
-  buses.value.filter((b) => b.role !== "fx_send").map((b) => ({ value: b.id, label: b.name || b.id })),
+// StripPicker items for the talkback destinations: every bus/output except FX sends. The preset's
+// destination list is the source of truth; this is just the picker's catalogue.
+const talkbackDestinationItems = computed(() =>
+  buses.value
+    .filter((b) => b.role !== "fx_send")
+    .map((b) => ({ id: b.id, kind: "mix", label: b.role, number: b.name || b.id })),
 );
 // Reverse mapping: the names of the talkback presets that route to a given bus, derived from the
 // presets' destination lists (the presets are the source of truth; we never store it per-bus).

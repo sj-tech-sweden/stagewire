@@ -857,6 +857,7 @@ export default {
     talkbackPresetsHelp: "Named presets routing talkback to multiple destinations (any bus/output except FX sends).",
     talkbackPresetName: "Preset name",
     talkbackPresetDestinations: "Destinations",
+    talkbackPickTitle: "Talkback destinations",
     talkbackPresetAdd: "Add preset",
     talkbackFeeds: "Talkback: {names}",
     overBudget: "Bus pool exceeded",

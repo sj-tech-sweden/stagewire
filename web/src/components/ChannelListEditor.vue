@@ -722,7 +722,9 @@
                 :aria-label="t('console.busTapPoints')"
                 data-testid="channel-bus-tap-points"
                 @click="openBusTapPoints(slot.row)"
-              />
+              >
+                <q-tooltip>{{ t("console.busTapPoints") }}</q-tooltip>
+              </q-btn>
             </div>
           </q-td>
         </template>
