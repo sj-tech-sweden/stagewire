@@ -2549,3 +2549,47 @@ async def test_a_card_cannot_be_removed_while_a_direct_out_or_bus_uses_its_outpu
         assert (
             await client.put(f"{base}/expansion", json={"installed": []}, headers=h)
         ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_talkback_presets_and_tap_points_round_trip(auth_headers):
+    """Talkback presets live on the list; tap points live on channels and outputs; both survive a
+    save/load round-trip and the per-channel bus override wins over the channel default."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        out = await post(f"channel-lists/{lst['id']}/outputs", {"name": "Wedge", "mode": "mono"})
+        out_id = out["id"]
+        # talkback presets are saved on the list and round-trip, destinations referencing outputs
+        presets = [
+            {"name": "Stage", "destinations": [out_id]},
+            {"name": "Crew", "destinations": []},
+        ]
+        res = await client.patch(
+            f"{api}/channel-lists/{lst['id']}", json={"talkback_presets": presets}, headers=h
+        )
+        assert res.status_code == 200, res.text
+        got = (await client.get(f"{api}/channel-lists", headers=h)).json()[0]
+        assert got["talkback_presets"] == presets
+        # a channel carries a global tap point...
+        ch = await post(
+            f"channel-lists/{lst['id']}/channels",
+            {"channel_number": 1, "source_label": "Vox", "tap_point": "pre_eq"},
+        )
+        assert ch["tap_point"] == "pre_eq"
+        # ...and a per-bus override that wins for that bus
+        res = await client.patch(
+            f"{api}/channels/{ch['id']}",
+            json={"bus_tap_points": {out_id: "post_eq"}, "expected_revision": ch["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["bus_tap_points"] == {out_id: "post_eq"}
+        # an output also carries its own tap point
+        res = await client.patch(
+            f"{api}/channel-lists/{lst['id']}/outputs/{out_id}",
+            json={"tap_point": "post_eq", "expected_revision": out["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["tap_point"] == "post_eq"

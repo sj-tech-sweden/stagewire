@@ -1693,15 +1693,55 @@
                   @update:model-value="dcaSaver.schedule()"
                 />
               </div>
-              <q-input
-                v-model="dcaDraft[n].notes"
-                dense
-                outlined
+              <!-- DCA notes: rendered as markdown (the common NotesDisplay) where shown; the
+                   edit affordance reveals the raw-text input, matching the bus notes pattern. -->
+              <div
+                v-if="dcaNotesEditing[n]"
                 class="q-mb-sm"
-                :label="t('console.dcaNotes')"
-                data-testid="console-dca-notes"
-                @update:model-value="dcaSaver.schedule()"
-              />
+              >
+                <q-input
+                  v-model="dcaDraft[n].notes"
+                  dense
+                  outlined
+                  autogrow
+                  :label="t('console.dcaNotes')"
+                  data-testid="console-dca-notes"
+                  @update:model-value="dcaSaver.schedule()"
+                >
+                  <template #append>
+                    <q-btn
+                      flat
+                      round
+                      dense
+                      icon="close"
+                      :aria-label="t('app.actions.cancel')"
+                      @click="dcaNotesEditing[n] = false"
+                    />
+                  </template>
+                </q-input>
+              </div>
+              <div
+                v-else
+                class="row items-start q-gutter-xs q-mb-sm"
+              >
+                <NotesDisplay
+                  v-if="dcaDraft[n].notes"
+                  class="col"
+                  :notes="dcaDraft[n].notes"
+                  :rows="3"
+                />
+                <q-btn
+                  dense
+                  flat
+                  no-caps
+                  size="sm"
+                  :icon="dcaDraft[n].notes ? 'edit' : 'add'"
+                  :label="dcaDraft[n].notes ? undefined : t('console.dcaNotes')"
+                  :aria-label="t('app.actions.edit')"
+                  data-testid="console-dca-edit-notes"
+                  @click="dcaNotesEditing[n] = true"
+                />
+              </div>
               <StripPicker
                 v-model="dcaDraft[n].members"
                 :items="dcaItems"
@@ -2838,9 +2878,10 @@ const updateTalkbackPreset = (pi, changes) => {
 
 const pendingBusColour = ref(null);
 const pendingDcaColour = ref(null);
-// Per-bus flag tracking which bus is currently in notes-edit mode (raw-text input).
-// Display uses the common NotesDisplay markdown renderer; only one bus edits at a time.
+// Per-bus / per-DCA flag tracking which entity is currently in notes-edit mode (raw-text input).
+// Display uses the common NotesDisplay markdown renderer; only one edits at a time.
 const busNotesEditing = ref({});
+const dcaNotesEditing = ref({});
 function busSwatchStyle(value) {
   if (!value) return {};
   const hex = colourToHex(value);
