@@ -2143,8 +2143,10 @@ test('on a phone every channel is a card with its kind, source, stand, connector
   await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).fill('Shure P10T');
   await card.getByLabel(/bodypack|beltpack|fick|bältespaket/i).press('Enter');
   await expect.poll(async () => (await node()).attributes.wireless_pack).toBe('Shure P10T');
-  await card.getByLabel(/notes|anteckningar/i).last().fill('Hand over at soundcheck');
-  await card.getByLabel(/notes|anteckningar/i).last().press('Tab');
+  // Notes open the shared markdown editor; fill it and save.
+  await card.getByTestId('channel-edit-notes').click();
+  await page.getByTestId('markdown-editor-input').fill('Hand over at soundcheck');
+  await page.getByTestId('markdown-editor-save').click();
   await expect.poll(async () => (await node()).notes).toBe('Hand over at soundcheck');
   const box = await page.getByTestId('channel-cards').boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
@@ -2193,8 +2195,9 @@ test('on a phone lights and video rows are cards with every editor, and power lo
   await expect(input.locator('input').first()).toHaveValue('Cam 1');
   await expect(input).toContainText(/sdi/i);
   await input.getByText(/^details$|^detaljer$/i).click();
-  await input.getByLabel(/notes|anteckningar/i).fill('Wide shot');
-  await input.getByLabel(/notes|anteckningar/i).press('Tab');
+  await input.getByTestId('video-edit-notes').click();
+  await page.getByTestId('markdown-editor-input').fill('Wide shot');
+  await page.getByTestId('markdown-editor-save').click();
   await expect
     .poll(async () => (await graphNow()).devices.find((d: any) => d.kind === 'video_input')?.notes)
     .toBe('Wide shot');

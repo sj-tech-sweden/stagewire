@@ -46,14 +46,25 @@
             data-testid="job-end-date"
           />
         </div>
-        <q-input
-          v-model="form.notes"
-          dense
-          outlined
-          type="textarea"
-          autogrow
-          :label="t('jobs.fieldNotes')"
-        />
+        <div class="row items-start q-gutter-xs">
+          <NotesDisplay
+            v-if="form.notes"
+            class="col"
+            :notes="form.notes"
+            :rows="3"
+          />
+          <q-btn
+            dense
+            flat
+            no-caps
+            size="sm"
+            :icon="form.notes ? 'edit' : 'add'"
+            :label="form.notes ? undefined : t('jobs.fieldNotes')"
+            :aria-label="t('workspace.editNotes')"
+            data-testid="job-edit-notes"
+            @click="notesOpen = true"
+          />
+        </div>
 
         <template v-if="stockwire.isEnabled">
           <q-separator class="q-my-md" />
@@ -218,6 +229,14 @@
         />
       </q-card-actions>
     </q-card>
+
+    <!-- Shared markdown editor for job notes; nested inside the job details dialog. -->
+    <MarkdownEditorDialog
+      v-model="notesOpen"
+      :title="t('jobs.fieldNotes')"
+      :value="form.notes || ''"
+      @save="(text) => (form.notes = text)"
+    />
   </q-dialog>
 </template>
 
@@ -228,6 +247,8 @@ import { useI18n } from 'vue-i18n';
 import { api } from '@/boot/api';
 import DateTimePicker from '@/components/DateTimePicker.vue';
 import DatePicker from '@/components/DatePicker.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { useVenuesStore } from '@/stores/venues';
 import { useStockwireStore } from '@/stores/stockwire';
 import { useNetboxStore } from '@/stores/netbox';
@@ -245,6 +266,8 @@ const { t } = useI18n();
 const venues = useVenuesStore();
 const stockwire = useStockwireStore();
 const netbox = useNetboxStore();
+// Job notes editor is the shared MarkdownEditorDialog, nested inside this dialog.
+const notesOpen = ref(false);
 const form = reactive({
   title: '',
   venue_id: null,

@@ -47,15 +47,25 @@
         data-testid="inspector-edit-details"
         @click="detailsOpen = true"
       />
-      <q-input
-        :model-value="device.notes"
-        dense
-        outlined
-        autogrow
-        :label="t('workspace.colNotes')"
-        class="q-mb-sm"
-        @change="(v) => save({ notes: v })"
-      />
+      <div class="row items-start q-gutter-xs">
+        <NotesDisplay
+          v-if="device.notes"
+          class="col"
+          :notes="device.notes"
+          :rows="3"
+        />
+        <q-btn
+          dense
+          flat
+          no-caps
+          size="sm"
+          :icon="device.notes ? 'edit' : 'add'"
+          :label="device.notes ? undefined : t('workspace.colNotes')"
+          :aria-label="t('workspace.editNotes')"
+          data-testid="inspector-edit-notes"
+          @click="notesOpen = true"
+        />
+      </div>
       <q-select
         v-if="device.kind === 'channel'"
         :model-value="device.attributes?.mixer_input || null"
@@ -782,6 +792,14 @@
     :stockwire-product-id="stockwireProductId"
     @bound="onAssetBound"
   />
+
+  <!-- Reusable markdown editor for device notes; opened from the inspector. -->
+  <MarkdownEditorDialog
+    v-model="notesOpen"
+    :title="t('workspace.colNotes')"
+    :value="device.notes || ''"
+    @save="(text) => save({ notes: text })"
+  />
 </template>
 
 <script setup>
@@ -815,6 +833,8 @@ import DeviceEditDialog from '@/components/DeviceEditDialog.vue';
 import BindStockwireDialog from '@/components/BindStockwireDialog.vue';
 import StockwireAssetSummary from '@/components/StockwireAssetSummary.vue';
 import SignalFlowDiagram from '@/components/SignalFlowDiagram.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { isSpeakerType } from '@/utils/plotObjects';
 import {
   DEVICE_BOX_CM,
@@ -1133,6 +1153,8 @@ async function assignNetboxIp() {
 // power, camera specs. It opens from here so any device reached through the inspector can use it.
 const detailsOpen = ref(false);
 const bindOpen = ref(false);
+// Device-notes editor is the shared MarkdownEditorDialog.
+const notesOpen = ref(false);
 const stockwireProductId = computed(
   () => props.device?.stockwire_product_id || props.device?.attributes?.stockwire_product_id || null,
 );

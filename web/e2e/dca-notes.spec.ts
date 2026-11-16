@@ -22,9 +22,9 @@ async function call(
   return res.json();
 }
 
-// The common NotesDisplay renders DCA notes as markdown (with a read-more toggle); editing keeps
-// raw text in the input, matching the bus notes pattern added alongside it.
-test('DCA notes render as markdown and can be edited back to raw text', async ({ page, request }) => {
+// The common NotesDisplay renders DCA notes as markdown (with a read-more toggle). Editing opens the
+// shared MarkdownEditorDialog; saving persists the notes through the normal DCA saver.
+test('DCA notes render as markdown and can be edited via the markdown editor', async ({ page, request }) => {
   await login(page);
   const headers = await authedHeaders(page);
   const job = await call(request, headers, 'post', '/jobs', { title: `DCA notes E2E ${Date.now()}` });
@@ -41,13 +41,13 @@ test('DCA notes render as markdown and can be edited back to raw text', async ({
 
   // With no notes yet, editing is offered via an "add" affordance.
   await dcaEl.getByTestId('console-dca-edit-notes').click();
-  const input = dcaEl.getByTestId('console-dca-notes');
-  await expect(input).toBeVisible();
-  await input.fill('**Cue:** mute between songs.');
-  await input.blur();
+  const editor = page.getByTestId('markdown-editor-input');
+  await expect(editor).toBeVisible();
+  await editor.fill('**Cue:** mute between songs.');
+  await page.getByTestId('markdown-editor-save').click();
 
-  // The change is saved as raw text on the DCA config (server is the source of truth). The list GET
-  // does not expose dca_config, so we read it back from the console summary's `dcas`.
+  // The change is saved on the DCA config (server is the source of truth). The list GET does not
+  // expose dca_config, so we read it back from the console summary's `dcas`.
   await expect
     .poll(async () => {
       const summary = await (
@@ -59,11 +59,7 @@ test('DCA notes render as markdown and can be edited back to raw text', async ({
     })
     .toBe('**Cue:** mute between songs.');
 
-  // Close the edit affordance so the rendered markdown display is shown (the edit stays open until
-  // dismissed, unlike the bus notes which auto-close on change).
-  await dcaEl.getByTestId('console-dca-notes-close').click();
-
-  // Once closed, the display renders the markdown.
+  // Once saved, the display renders the markdown.
   await expect.poll(async () => {
     const el = dcaEl.getByTestId('notes-display');
     return (await el.count()) > 0 && (await el.innerHTML()).includes('<strong>Cue:</strong>');

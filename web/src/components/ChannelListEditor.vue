@@ -384,14 +384,25 @@
                       {{ stereoView(ch, channels).isL ? "L" : "R" }}
                     </q-chip>
                   </div>
-                  <q-input
-                    :model-value="ch.notes"
-                    dense
-                    outlined
-                    autogrow
-                    :label="t('workspace.colNotes')"
-                    @change="(v) => save(ch, { notes: v })"
-                  />
+                  <div class="row items-start q-gutter-xs">
+                    <NotesDisplay
+                      v-if="ch.notes"
+                      class="col"
+                      :notes="ch.notes"
+                      :rows="3"
+                    />
+                    <q-btn
+                      dense
+                      flat
+                      no-caps
+                      size="sm"
+                      :icon="ch.notes ? 'edit' : 'add'"
+                      :label="ch.notes ? undefined : t('workspace.colNotes')"
+                      :aria-label="t('workspace.editNotes')"
+                      data-testid="channel-edit-notes"
+                      @click="openNotes(ch)"
+                    />
+                  </div>
                 </div>
               </q-expansion-item>
             </q-card>
@@ -709,12 +720,25 @@
             </template>
             <template #body-cell-notes="slot">
               <q-td :props="slot">
-                <q-input
-                  :model-value="slot.row.notes"
-                  dense
-                  borderless
-                  @change="(v) => save(slot.row, { notes: v })"
-                />
+                <div class="row items-start q-gutter-xs">
+                  <NotesDisplay
+                    v-if="slot.row.notes"
+                    class="col"
+                    :notes="slot.row.notes"
+                    :rows="2"
+                  />
+                  <q-btn
+                    dense
+                    flat
+                    no-caps
+                    size="sm"
+                    :icon="slot.row.notes ? 'edit' : 'add'"
+                    :label="slot.row.notes ? undefined : t('workspace.colNotes')"
+                    :aria-label="t('workspace.editNotes')"
+                    data-testid="channel-edit-notes"
+                    @click="openNotes(slot.row)"
+                  />
+                </div>
               </q-td>
             </template>
             <template #body-cell-chain="slot">
@@ -958,6 +982,14 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <!-- Reusable markdown editor for channel notes; opened from the card and table notes cells. -->
+    <MarkdownEditorDialog
+      v-model="notesOpen"
+      :title="t('workspace.colNotes')"
+      :value="notesTarget?.notes || ''"
+      @save="(text) => notesTarget && save(notesTarget, { notes: text })"
+    />
   </div>
 </template>
 
@@ -979,6 +1011,8 @@ import { useGraphStore } from "@/stores/graph";
 import { useStockwireStore } from "@/stores/stockwire";
 import ChainDialog from "@/components/ChainDialog.vue";
 import StockwireProductPicker from "@/components/StockwireProductPicker.vue";
+import NotesDisplay from "@/components/NotesDisplay.vue";
+import MarkdownEditorDialog from "@/components/MarkdownEditorDialog.vue";
 import { api } from "@/boot/api";
 import { CHANNEL_COLUMNS } from "@/utils/columnLayout";
 import { INSTRUMENT_GROUP_KEYS } from "@/utils/instrumentGroups";
@@ -1144,6 +1178,15 @@ async function save(node, changes) {
 }
 const saveAttr = (node, key, value) =>
   save(node, { attributes: { [key]: value } });
+
+// Channel notes open the shared markdown editor (MarkdownEditorDialog). notesTarget is the channel
+// being edited; the dialog seeds itself from it and saves back through the normal channel save.
+const notesOpen = ref(false);
+const notesTarget = ref(null);
+function openNotes(node) {
+  notesTarget.value = node;
+  notesOpen.value = true;
+}
 
 // Per-channel -> bus tap point overrides
 const tapPointBusDialog = ref(false);

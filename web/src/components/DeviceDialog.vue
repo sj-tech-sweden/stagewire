@@ -92,13 +92,25 @@
             data-testid="device-type"
           />
         </div>
-        <q-input
-          v-model="form.notes"
-          dense
-          outlined
-          autogrow
-          :label="t('channels.fieldNotes')"
-        />
+        <div class="row items-start q-gutter-xs">
+          <NotesDisplay
+            v-if="form.notes"
+            class="col"
+            :notes="form.notes"
+            :rows="3"
+          />
+          <q-btn
+            dense
+            flat
+            no-caps
+            size="sm"
+            :icon="form.notes ? 'edit' : 'add'"
+            :label="form.notes ? undefined : t('channels.fieldNotes')"
+            :aria-label="t('workspace.editNotes')"
+            data-testid="device-edit-notes"
+            @click="notesOpen = true"
+          />
+        </div>
 
         <PortUsage
           v-if="node"
@@ -420,6 +432,14 @@
       </q-card-actions>
     </q-card>
   </q-dialog>
+
+  <!-- Reusable markdown editor for device notes; nested inside the device dialog. -->
+  <MarkdownEditorDialog
+    v-model="notesOpen"
+    :title="t('channels.fieldNotes')"
+    :value="form.notes || ''"
+    @save="(text) => (form.notes = text)"
+  />
 </template>
 
 <script setup>
@@ -428,6 +448,8 @@ import { computed, reactive, ref, watch } from 'vue';
 import PortUsage from '@/components/PortUsage.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import NotesDisplay from '@/components/NotesDisplay.vue';
+import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
 import { api } from '@/boot/api';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
@@ -467,6 +489,9 @@ const { t } = useI18n();
 const $q = useQuasar();
 const stockwire = useStockwireStore();
 const form = reactive(deviceForm(null));
+
+// Device-notes editor is the shared MarkdownEditorDialog, nested inside this dialog.
+const notesOpen = ref(false);
 
 // Inline availability: when the device is linked to a Stockwire product and we know the job,
 // reuse the cached availability so the user sees stock vs need without opening the panel.
