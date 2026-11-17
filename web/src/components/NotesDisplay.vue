@@ -1,18 +1,19 @@
 <template>
   <div
-    v-if="html"
+    v-if="nodes.length"
     class="notes-display"
     data-testid="notes-display"
   >
-    <!-- Rendered markdown. The HTML comes from marked and is sanitized with DOMPurify before
-         v-html, so user-authored notes cannot inject scripts or event handlers (XSS). -->
+    <!-- Rendered markdown. The DOMPurify output is turned into Vue vnodes (SafeNodes) rather than
+         injected with v-html, so no raw HTML sink exists and only allowlisted attributes reach the DOM. -->
     <div
       ref="bodyRef"
       class="notes-body"
       :class="{ 'notes-clamp': !expanded && overflowing }"
       :style="clampStyle"
-      v-html="html"
-    />
+    >
+      <SafeNodes :nodes="nodes" />
+    </div>
     <q-btn
       v-if="overflowing"
       flat
@@ -30,7 +31,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
@@ -48,13 +49,33 @@ const expanded = ref(false);
 const overflowing = ref(false);
 const bodyRef = ref(null);
 
-const html = computed(() => {
+// Only these attributes are copied from sanitized markup. DOMPurify already strips event handlers
+// and unsafe URLs; this allowlist is a second guard so a future DOMPurify config change cannot
+// pass arbitrary attributes through.
+const ALLOWED_ATTRS = new Set(['href', 'title', 'alt', 'src', 'colspan', 'rowspan', 'align', 'target', 'rel']);
+
+// async:false forces a synchronous string; breaks:true turns single newlines into <br>.
+const nodes = computed(() => {
   const text = (props.notes || '').trim();
-  if (!text) return '';
-  // async:false forces a synchronous string; breaks:true turns single newlines into <br>.
+  if (!text) return [];
   const parsed = marked.parse(text, { async: false, breaks: true, gfm: true });
-  return DOMPurify.sanitize(parsed);
+  // RETURN_DOM_FRAGMENT yields DOM nodes instead of an HTML string, so nothing is re-parsed as HTML.
+  return Array.from(DOMPurify.sanitize(parsed, { RETURN_DOM_FRAGMENT: true }).childNodes);
 });
+
+function toVNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  const attrs = {};
+  for (const { name, value } of node.attributes) {
+    if (ALLOWED_ATTRS.has(name)) attrs[name] = value;
+  }
+  const children = Array.from(node.childNodes).map(toVNode).filter((c) => c !== null);
+  return h(node.tagName.toLowerCase(), attrs, children);
+}
+
+const SafeNodes = ({ nodes: list }) => list.map(toVNode).filter((v) => v !== null);
+SafeNodes.props = ['nodes'];
 
 const clampStyle = computed(() => {
   if (expanded.value || !props.rows) return {};
