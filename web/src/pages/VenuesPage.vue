@@ -414,6 +414,7 @@ import { useVenuesStore } from '@/stores/venues';
 import VenueGeometryCanvas from '@/components/VenueGeometryCanvas.vue';
 import NotesDisplay from '@/components/NotesDisplay.vue';
 import MarkdownEditorDialog from '@/components/MarkdownEditorDialog.vue';
+import { formatDateTime } from '@/utils/datetime';
 
 const { t } = useI18n({ useScope: 'global' });
 const $q = useQuasar();
@@ -499,7 +500,9 @@ const filteredVenues = computed(() => {
 const lastPropagatedText = computed(() => {
   const at = editingVenue.value?.propagated_at;
   if (!at) return t('venues.neverPropagated');
-  return t('venues.lastPropagated', { date: new Date(at).toLocaleString() });
+  // Fixed YYYY-MM-DD HH:mm (24h) so the timestamp matches the picker's date format and is
+  // not reformatted by the browser locale (which previously showed 12h in Swedish).
+  return t('venues.lastPropagated', { date: formatDateTime(at) });
 });
 
 function fullImageUrl(value) {

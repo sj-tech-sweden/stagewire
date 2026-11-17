@@ -48,7 +48,7 @@
         >
           <span>{{ job.title }}</span>
           <span v-if="job.venue_name">· {{ job.venue_name }}</span>
-          <span v-if="job.event_date">· {{ new Date(job.event_date).toLocaleDateString() }}</span>
+          <span v-if="job.event_date">· {{ formatEventDate(job.event_date) }}</span>
           <q-chip
             v-if="stockwireStore.isEnabled"
             dense
@@ -784,6 +784,7 @@
 
 <script setup>
 import { apiErrorText } from '@/utils/errors';
+import { formatDateTime } from '@/utils/datetime';
 import { isRevisionConflict } from '@/utils/graph';
 import OutletInspector from '@/components/OutletInspector.vue';
 import CableRoutingPanel from '@/components/CableRoutingPanel.vue';
@@ -874,6 +875,12 @@ const handTool = ref(false);
 const spaceHeld = ref(false);
 const pan = ref({ x: 0, y: 0 });
 const typing = (event) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target?.tagName) || event.target?.isContentEditable;
+// Fixed YYYY-MM-DD HH:mm (24h) display so the date matches what the picker edits and is not
+// reformatted by the browser locale (which previously showed 12h in Swedish).
+function formatEventDate(value) {
+  return formatDateTime(value);
+}
+
 function onKey(event) {
   if (event.code !== 'Space' || typing(event) || graph.mode !== 'canvas') return;
   event.preventDefault();

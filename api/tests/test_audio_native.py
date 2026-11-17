@@ -457,3 +457,27 @@ async def test_a_graph_rename_is_the_label_and_a_position_is_the_number(auth_hea
             False,  # a null keeps the old column's default
         )
         assert res.json()["name"] == "Lead vox" and res.json()["position"] == 7
+
+
+@pytest.mark.asyncio
+async def test_channel_reads_show_the_defaults_that_writes_store(auth_headers):
+    # The client merges a stale edit against the row it last read. If the read omitted a default
+    # that the write stores, a concurrent edit to that key would look like a conflict.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id, api, post, lst, ch, box, desk = await _setup(client, h)
+
+        node = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}[ch["id"]]
+        assert node["attributes"]["instrument_group"] == "other"
+        assert node["attributes"]["phantom_power"] is False
+
+        res = await client.patch(
+            f"{api}/graph/devices/{ch['id']}",
+            json={"attributes": {"performer_name": "Anna"}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["attributes"]["instrument_group"] == "other"
+        node = {d["id"]: d for d in (await _graph(client, h, api))["devices"]}[ch["id"]]
+        assert node["attributes"]["instrument_group"] == "other"
+        assert node["attributes"]["performer_name"] == "Anna"

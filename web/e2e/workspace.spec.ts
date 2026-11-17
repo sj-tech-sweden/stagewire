@@ -1954,8 +1954,8 @@ test('the device dialog says which weight and power value is in use', async ({ p
   await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
   await page.getByTestId('edit-device').first().click();
   // typed in here for the weight, nothing set for the power
-  await expect(page.locator('.q-field', { has: page.getByTestId('device-weight') })).toContainText(/value entered here is in use|värde som anges här/i);
-  await expect(page.locator('.q-field', { has: page.getByTestId('device-power') })).toContainText(/not set|inte satt|ej satt/i);
+  await expect(page.locator('.q-field', { has: page.getByTestId('device-weight') })).toContainText(/value entered here is in use|värdet som anges här/i);
+  await expect(page.locator('.q-field', { has: page.getByTestId('device-power') })).toContainText(/not set|inte angivet/i);
 });
 
 test('the gear behind a channel or a video input is edited from its list', async ({ page, request }) => {
@@ -2184,8 +2184,8 @@ test('on a phone lights and video rows are cards with every editor, and power lo
   await expect(fixture).toContainText('MAC Aura');
   await expect(fixture).toContainText('8 ch');
   await fixture.getByText(/^details$|^detaljer$/i).click();
-  await fixture.getByLabel(/location|placering/i).fill('Truss 2');
-  await fixture.getByLabel(/location|placering/i).press('Tab');
+  await fixture.getByLabel(/location|plats/i).fill('Truss 2');
+  await fixture.getByLabel(/location|plats/i).press('Tab');
   await expect
     .poll(async () => (await graphNow()).devices.find((d: any) => d.kind === 'fixture')?.attributes.location)
     .toBe('Truss 2');

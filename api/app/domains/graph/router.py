@@ -139,6 +139,9 @@ def _device_payload(device: GraphDevice) -> dict:
     # before the `in` port was introduced, so the frontend shows channels as valid endpoints.
     if device.kind == "channel" and isinstance(payload.get("ports"), list):
         payload["ports"] = audio_native.normalize_channel_ports(payload["ports"])
+    # Read the same defaults the write path stores, so the client's row matches the server's.
+    if device.kind == "channel":
+        payload["attributes"] = audio_native.with_channel_defaults(payload.get("attributes"))
     return payload
 
 

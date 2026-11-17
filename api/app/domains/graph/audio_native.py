@@ -136,6 +136,22 @@ CHANNEL_DEFAULTS = {
     "tap_point": "post_fade",
     "bus_tap_points": None,
 }
+
+
+def with_channel_defaults(attributes: dict | None) -> dict:
+    """Return the channel attributes with CHANNEL_DEFAULTS filled in for every unset key.
+
+    Writes store these defaults, so reads must return them too. Otherwise a client's copy of a
+    channel lacks keys the server already holds, and a concurrent edit to such a key looks like a
+    conflict with someone else's change (see the web store's threeWayMerge).
+    """
+    filled = dict(attributes or {})
+    for key, default in CHANNEL_DEFAULTS.items():
+        if filled.get(key) is None:
+            filled[key] = default
+    return filled
+
+
 OUTPUT_DEFAULTS = {
     "mode": "mono",
     "role": "aux",
@@ -881,9 +897,7 @@ async def after_patch(db: AsyncSession, node: GraphDevice, data: dict) -> None:
             attributes["source_label"] = data["name"]
         if data.get("position") is not None and "channel_number" not in sent:
             attributes["channel_number"] = data["position"]
-        for key, default in CHANNEL_DEFAULTS.items():
-            if attributes.get(key) is None:
-                attributes[key] = default
+        attributes = with_channel_defaults(attributes)
         if attributes.get("channel_number") is None:
             attributes["channel_number"] = node.position
         node.attributes = attributes

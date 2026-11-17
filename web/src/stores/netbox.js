@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
+import { withRetry } from '@/utils/retry';
 
 // NetBox IPAM/DCIM integration store. Mirrors the Stockwire store: it owns the
 // integration config (so every NetBox-dependent control can be hidden when the
@@ -30,10 +31,17 @@ export const useNetboxStore = defineStore('netbox', {
     isEnabled: (state) => !!state.integration.enabled,
   },
   actions: {
+    // Same policy as the stockwire store: retry transient failures, and log rather than reject if
+    // every attempt fails, so the integration stays disabled instead of raising an unhandled error.
     async loadIntegration() {
-      const { data } = await api.get('/netbox');
-      this.integration = data;
-      return data;
+      try {
+        const { data } = await withRetry(() => api.get('/netbox'));
+        this.integration = data;
+        return data;
+      } catch (error) {
+        console.warn('Could not load the NetBox integration status', error);
+        return null;
+      }
     },
     async saveIntegration(payload) {
       const { data } = await api.put('/netbox', payload);
