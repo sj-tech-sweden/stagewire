@@ -80,3 +80,45 @@ test('talkback destinations are chosen from the grid strip picker', async ({ pag
   // The chosen bus reports the preset that feeds it (reverse mapping, derived from the preset).
   await expect(page.getByTestId('console-bus').filter({ hasText: 'Talkback: Stage' })).toHaveCount(1);
 });
+
+// Regression: naming a preset saves on blur, and choosing its destination right after must not undo
+// the name. Each save sends the whole preset list, so the second save used to build on the stale list.
+// The preset saves are held back so the second edit is always made while the first is in flight.
+test('a talkback preset keeps its name when a destination is chosen while the name is still saving', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await call(request, headers, 'post', '/jobs', { title: `Talkback race E2E ${Date.now()}` });
+  const list = await call(request, headers, 'post', `/jobs/${job.id}/channel-lists`, { name: 'FOH' });
+  const base = `/jobs/${job.id}/channel-lists/${list.id}`;
+  await call(request, headers, 'put', `${base}/console-profile`, { preset: 'gld-80' });
+  await call(request, headers, 'post', `${base}/outputs`, { name: 'Wedge', mode: 'mono' });
+
+  await page.route(`**${base}`, async (route) => {
+    if (route.request().method() === 'PATCH') await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  await page.goto(`/jobs/${job.id}/workspace?view=lists`);
+  await expect(page.getByTestId('console-panel')).toBeVisible();
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-talkback-preset-add').click();
+  const nameInput = page.getByTestId('console-talkback-preset-name').last();
+  await nameInput.fill('Stage');
+  await page.getByTestId('console-talkback-preset-destinations').getByTestId('strip-picker-open').click();
+  await page.getByTestId('strip-picker-tile').filter({ hasText: 'Wedge' }).first().click();
+  await page.getByTestId('strip-picker-done').click();
+
+  await expect
+    .poll(async () => {
+      const lists = (await (await request.get(`${API_BASE}/api/v1/jobs/${job.id}/channel-lists`, { headers })).json()) as Array<{
+        id: string;
+        talkback_presets: Array<{ name: string; destinations: unknown[] }>;
+      }>;
+      const preset = lists.find((l) => l.id === list.id)?.talkback_presets?.[0];
+      return { name: preset?.name, destinations: preset?.destinations?.length ?? 0 };
+    }, { timeout: 15000 })
+    .toEqual({ name: 'Stage', destinations: 1 });
+});

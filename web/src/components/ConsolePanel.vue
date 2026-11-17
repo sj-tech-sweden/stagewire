@@ -2967,27 +2967,28 @@ function openBusNotes(bus) {
   busNotesOpen.value = true;
 }
 
-const saveTalkbackPresets = async (presets) => {
-  try {
-    await api.patch(`/jobs/${props.jobId}/channel-lists/${props.listId}`, { talkback_presets: presets });
+// Every preset edit PATCHes the whole list, so edits must not overlap. They run one at a time on a
+// queue: each builds its list from the latest server state at the moment it runs, and reloads before
+// the next starts. Otherwise a late reload could overwrite an edit that is still in flight (e.g. a
+// name saved on blur, then a destination chosen).
+let talkbackQueue = Promise.resolve();
+const mutateTalkbackPresets = (mutate) => {
+  talkbackQueue = talkbackQueue.then(async () => {
+    const next = mutate([...(listData.value?.talkback_presets || [])]);
+    try {
+      await api.patch(`/jobs/${props.jobId}/channel-lists/${props.listId}`, { talkback_presets: next });
+    } catch (err) {
+      failed(err);
+    }
     await load();
-  } catch (err) {
-    failed(err);
-  }
+  });
+  return talkbackQueue;
 };
-const addTalkbackPreset = () => {
-  const next = [...(listData.value?.talkback_presets || []), { name: "", destinations: [] }];
-  saveTalkbackPresets(next);
-};
-const removeTalkbackPreset = (pi) => {
-  const next = [...(listData.value?.talkback_presets || [])];
-  next.splice(pi, 1);
-  saveTalkbackPresets(next);
-};
-const updateTalkbackPreset = (pi, changes) => {
-  const next = (listData.value?.talkback_presets || []).map((p, i) => (i === pi ? { ...p, ...changes } : p));
-  saveTalkbackPresets(next);
-};
+const addTalkbackPreset = () => mutateTalkbackPresets((presets) => [...presets, { name: "", destinations: [] }]);
+const removeTalkbackPreset = (pi) =>
+  mutateTalkbackPresets((presets) => presets.filter((_, i) => i !== pi));
+const updateTalkbackPreset = (pi, changes) =>
+  mutateTalkbackPresets((presets) => presets.map((p, i) => (i === pi ? { ...p, ...changes } : p)));
 
 const pendingBusColour = ref(null);
 const pendingDcaColour = ref(null);
