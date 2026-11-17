@@ -135,3 +135,57 @@ test('the event date is visible in the picker as soon as the date is picked (bef
     .toBeTruthy();
 });
 
+test('the event date and time are chosen together in one picker popup', async ({ page, request }) => {
+  await login(page);
+  const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
+
+  const title = `Combined ${Date.now()}`;
+  await page.getByRole('button', { name: /new job/i }).click();
+  const dialog = page.locator('.q-dialog');
+  await dialog.locator('input').nth(0).fill(title);
+
+  const picker = dialog.locator('.q-input', { hasText: /event date|evenemangsdatum/i });
+  await picker.click();
+
+  // The combined picker opens a single popup holding BOTH the calendar (q-date) and the clock
+  // (q-time) — not two separate icon popups.
+  await expect(page.locator('.q-date')).toBeVisible();
+  await expect(page.locator('.q-time')).toBeVisible();
+
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const expectedDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+  // Pick a date (Today) and a time (14:30 via the clock dial). The q-time needs both an hour and a
+  // minute before it emits a complete value, so click hour 14 then minute 30. Both update one field.
+  await page.locator('.q-date').getByRole('button', { name: 'Today', exact: true }).first().click();
+  await expect(picker.locator('input')).toHaveValue(expectedDate);
+
+  await page.locator('.q-time .q-time__clock-pos-14').click();
+  // The minute ring is labelled in 5-minute steps; pick "30" by its exact text (the position
+  // class collides with the hour ring, so match the label instead).
+  await page.locator('.q-time').getByText('30', { exact: true }).click();
+  // The field now shows date + 24h time once both parts are chosen.
+  await expect(picker.locator('input')).toHaveValue(new RegExp(`^${expectedDate} 14:30$`));
+
+  // Close via the popup's OK button and save.
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
+  await dialog.getByTestId('job-create').click();
+  await dialog.waitFor({ state: 'hidden', timeout: 10000 });
+
+  // The persisted event_date carries the chosen time (date + HH:mm), not just the date.
+  await expect
+    .poll(
+      async () => {
+        const listings = await (
+          await request.get(`${API_BASE}/api/v1/jobs`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        ).json();
+        return listings.find((j) => j.title === title)?.event_date ?? '';
+      },
+      { timeout: 10000 },
+    )
+    .toMatch(/14:30/);
+});
+

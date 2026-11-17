@@ -5,25 +5,39 @@
     readonly
     :rules="rules"
     :hint="hint"
-    @click="popupDate = true"
+    @click="popup = true"
   >
     <template #append>
+      <!-- A single trigger opens one popup holding both the calendar and the clock, so the
+           event date and time are chosen together rather than via two separate icons. -->
       <q-icon
         name="event"
         class="cursor-pointer"
       >
         <q-popup-proxy
-          v-model="popupDate"
+          v-model="popup"
           cover
           transition-show="scale"
           transition-hide="scale"
         >
-          <q-date
-            :model-value="datePart"
-            mask="YYYY-MM-DD"
-            today-btn
-            @update:model-value="onDatePick"
-          >
+          <div class="q-pa-sm">
+            <div
+              class="q-gutter-sm"
+              :class="$q.screen.lt.sm ? 'column' : 'row'"
+            >
+              <q-date
+                :model-value="datePart"
+                mask="YYYY-MM-DD"
+                today-btn
+                @update:model-value="onDatePick"
+              />
+              <q-time
+                :model-value="timePart"
+                mask="HH:mm"
+                format24h
+                @update:model-value="onTimePick"
+              />
+            </div>
             <div class="row items-center justify-end">
               <q-btn
                 v-close-popup
@@ -32,34 +46,7 @@
                 flat
               />
             </div>
-          </q-date>
-        </q-popup-proxy>
-      </q-icon>
-      <q-icon
-        name="access_time"
-        class="cursor-pointer"
-      >
-        <q-popup-proxy
-          v-model="popupTime"
-          cover
-          transition-show="scale"
-          transition-hide="scale"
-        >
-          <q-time
-            :model-value="timePart"
-            mask="HH:mm"
-            format24h
-            @update:model-value="onTimePick"
-          >
-            <div class="row items-center justify-end">
-              <q-btn
-                v-close-popup
-                label="OK"
-                color="primary"
-                flat
-              />
-            </div>
-          </q-time>
+          </div>
         </q-popup-proxy>
       </q-icon>
     </template>
@@ -68,6 +55,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useQuasar } from 'quasar'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -76,9 +64,9 @@ const props = defineProps({
   rules: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:modelValue'])
+const $q = useQuasar()
 
-const popupDate = ref(false)
-const popupTime = ref(false)
+const popup = ref(false)
 const datePart = ref('')
 const timePart = ref('')
 
