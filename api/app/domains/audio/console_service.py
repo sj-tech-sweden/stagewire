@@ -312,14 +312,16 @@ async def unlink_pair(
 
 
 async def job_hardware(db: AsyncSession, job_id: uuid.UUID) -> list[GraphDevice]:
-    """The job's real gear (graph nodes behind a ``device:`` ref) that can own audio sockets.
+    """The job's real gear (any physical device node) that can own audio sockets.
 
-    Logical nodes (channels, outputs, lists, plot elements) and nodes without a device ref are left
-    out: a patch point can only reference a real device, so a socket on anything else could never
-    be mirrored into the patch chain.
+    A device is "real gear" by its kind, not by whether it carries a ``device:`` legacy ref: gear
+    added through the generic device endpoints (the Stockwire catalog import, the manual add-device
+    dialog) is stored without a legacy ref, and excluding it here silently dropped whole stageboxes
+    from the soft-patch target list. Logical nodes (channels, outputs, lists) and plot elements are
+    excluded by kind; ``audio_sockets`` also skips them as a belt-and-braces guard.
     """
     rows = await db.scalars(select(GraphDevice).where(GraphDevice.job_id == job_id))
-    return [n for n in rows.all() if n.legacy_ref and n.legacy_ref.startswith("device:")]
+    return [n for n in rows.all() if n.kind not in devices_native.NON_GEAR_KINDS]
 
 
 async def job_channel_nodes(db: AsyncSession, job_id: uuid.UUID) -> list[GraphDevice]:

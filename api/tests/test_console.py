@@ -551,6 +551,58 @@ async def test_unlink_restores_two_mono_channels(auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_catalog_imported_device_is_a_soft_patch_target(auth_headers):
+    """A device added through the graph batch endpoint (the Stockwire catalog import / manual add
+    dialog) carries no ``device:`` legacy ref, yet must still show up as a soft-patch source. The
+    hardware enumeration must not key on ``legacy_ref`` — see ``job_hardware``.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = (await client.post(f"{BASE}/jobs", json={"title": "Catalog"}, headers=h)).json()[
+            "id"
+        ]
+        api = f"{BASE}/jobs/{job_id}"
+        # Mirrors web/src/utils/workspace.js::deviceFromProduct for a digital stagebox.
+        box = (
+            await client.post(
+                f"{api}/graph/devices/batch",
+                json=[
+                    {
+                        "domain": "audio",
+                        "kind": "Digital Stagebox",
+                        "name": "Repro Stagebox",
+                        "attributes": {},
+                        "ports": [
+                            {
+                                "id": "in-xlr3",
+                                "direction": "in",
+                                "signal": "audio",
+                                "connector": "xlr3",
+                                "channels": 8,
+                            },
+                            {
+                                "id": "out-xlr3",
+                                "direction": "out",
+                                "signal": "audio",
+                                "connector": "xlr3",
+                                "channels": 8,
+                            },
+                        ],
+                        "stockwire_product_id": "999",
+                        "stockwire_product_name": "Repro Stagebox",
+                    }
+                ],
+                headers=h,
+            )
+        ).json()[0]
+        assert box["legacy_ref"] is None  # the bug's precondition: no legacy ref
+        lst = (await client.post(f"{api}/channel-lists", json={"name": "FOH"}, headers=h)).json()
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        box_sockets = [s for s in view["sockets"] if s["device_id"] == box["id"]]
+        assert {s["direction"] for s in box_sockets} == {"in", "out"}
+        assert len([s for s in box_sockets if s["direction"] == "in"]) == 8
+
+
 async def test_soft_patch_and_direct_outs_use_any_device_and_never_double_book(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
