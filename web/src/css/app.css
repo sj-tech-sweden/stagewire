@@ -124,13 +124,20 @@ h6,
 
 /* Tables in the workspace keep their column headers visible while the rows scroll. The table
    gets a max-height (so it is the scroll container) and this class; virtual-scroll tables are
-   already sticky in Quasar, this makes the plain ones match. */
-.sticky-header-table thead tr th {
+   already sticky in Quasar, this makes the plain ones match.
+
+   The header cell is a Quasar `q-th`, whose own `.q-th { position: relative }` rule has the same
+   specificity as a bare element selector and would win on source order. Target the cell class
+   too (higher specificity) so the sticky actually applies and the header stays put when the
+   table is scrolled on its own, not only when the whole page scrolls. */
+.sticky-header-table thead tr th,
+.sticky-header-table thead tr th.adaptive-th {
   position: sticky;
   top: 0;
   z-index: 2;
   background: #fff;
 }
-.body--dark .sticky-header-table thead tr th {
+.body--dark .sticky-header-table thead tr th,
+.body--dark .sticky-header-table thead tr th.adaptive-th {
   background: #1d1d1d;
 }

@@ -139,3 +139,75 @@ test('the floating header disappears when the table is hidden by switching view'
   await expect(table).toHaveCount(0);
   await expect(floating).toHaveCount(0);
 });
+
+test('the video table floating header follows a table scrolled past its header', async ({ page, request }) => {
+  // The video inputs/outputs tables share the same AdaptiveTable floating-header behaviour as the
+  // sound channel list, so pin it down the same way: no floating copy while the real header is in
+  // view, one appears when the table is scrolled past, and it is gone again back at the top.
+  await page.setViewportSize({ width: 1500, height: 520 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await post(request, headers, '/jobs', { title: `Video float ${Date.now()}` });
+  const list = await post(request, headers, `/jobs/${job.id}/graph/video-lists`, { name: 'Cams' });
+  await post(
+    request,
+    headers,
+    `/jobs/${job.id}/graph/video-lists/${list.id}/inputs/batch`,
+    Array.from({ length: 60 }, (_, i) => ({ name: `Cam ${i + 1}` })),
+  );
+  await page.goto(`/jobs/${job.id}/workspace?view=video`);
+  const table = page.getByTestId('video-video_input-table');
+  await expect(table).toBeVisible();
+  const floating = page.getByTestId('video-inputs-floating-header');
+  await expect(floating).toHaveCount(0); // real header is in view
+  await page.evaluate(() => {
+    document.body.style.paddingBottom = '3000px';
+  });
+  const tableTop = async () => Math.round((await table.boundingBox())!.y);
+  await page.evaluate((by) => window.scrollBy(0, by), (await tableTop()) + 120);
+  await expect(floating).toBeVisible();
+  // back at the top: the real header is shown again, no floating copy
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(floating).toHaveCount(0);
+  await expect(table.locator('thead')).toBeVisible();
+});
+
+test('the video table header stays put when only the table itself is scrolled', async ({ page, request }) => {
+  // The floating header covers page scroll; the real header must also stay stuck when the table is
+  // scrolled on its own (its own max-height scroller). A Quasar q-th's own position:relative would
+  // otherwise win over the sticky rule, so assert the cell is actually sticky and stuck to the top
+  // of its scroll container rather than scrolled out of view.
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const job = await post(request, headers, '/jobs', { title: `Video sticky ${Date.now()}` });
+  const list = await post(request, headers, `/jobs/${job.id}/graph/video-lists`, { name: 'Cams' });
+  await post(
+    request,
+    headers,
+    `/jobs/${job.id}/graph/video-lists/${list.id}/inputs/batch`,
+    Array.from({ length: 80 }, (_, i) => ({ name: `Cam ${i + 1}` })),
+  );
+  await page.goto(`/jobs/${job.id}/workspace?view=video`);
+  const table = page.getByTestId('video-video_input-table');
+  await expect(table).toBeVisible();
+  const middle = table.locator('.q-table__middle');
+  await expect(middle).toBeVisible();
+  await middle.evaluate((el) => {
+    el.scrollTop = 500;
+  });
+  await page.waitForTimeout(150);
+  const res = await page.evaluate(() => {
+    const t = document.querySelector('[data-testid="video-video_input-table"]') as HTMLElement;
+    const m = t?.closest('.q-table__container')?.querySelector('.q-table__middle') as HTMLElement;
+    const th = t?.querySelector('thead tr th') as HTMLElement;
+    return {
+      thPosition: th ? getComputedStyle(th).position : null,
+      thTop: th?.getBoundingClientRect().top,
+      middleTop: m?.getBoundingClientRect().top,
+    };
+  });
+  expect(res.thPosition).toBe('sticky');
+  // stuck to the top of its own scroll container, not scrolled away with the rows
+  expect(Math.abs((res.thTop ?? 0) - (res.middleTop ?? 0))).toBeLessThan(2);
+});

@@ -48,24 +48,16 @@
           @change="(v) => save(list, { name: v })"
         />
         <q-btn
-          color="primary"
-          no-caps
-          icon="add"
-          :label="t('workspace.addVideoInput')"
-          data-testid="add-video-input"
-          @click="addRows('inputs', 1)"
-        />
-        <q-btn
           flat
           no-caps
-          icon="add"
-          :label="t('workspace.addVideoOutput')"
-          data-testid="add-video-output"
-          @click="addRows('outputs', 1)"
+          icon="tune"
+          :label="hasSwitcher ? t('video.changeSwitcher') : t('video.setSwitcher')"
+          data-testid="set-switcher"
+          @click="switcherOpen = true"
         />
         <div
-          v-if="listSwitchers.length"
-          class="row q-gutter-xs"
+          v-if="listSwitchers.length || hasSwitcher"
+          class="row q-gutter-xs items-center"
           data-testid="list-switcher-devices"
         >
           <q-chip
@@ -82,12 +74,19 @@
             <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
           </q-chip>
         </div>
+        <div
+          v-if="hasSwitcher"
+          class="text-caption text-grey-7 q-mt-xs"
+        >
+          {{ t('video.switcherSummary', { name: list.attributes.switcher_product_name, inputs: list.attributes.switcher_inputs ?? '–', outputs: list.attributes.switcher_outputs ?? '–' }) }}
+        </div>
         <q-btn
-          v-if="list.attributes.switcher_product_id"
+          v-if="hasSwitcher"
           flat
           no-caps
           icon="auto_fix_high"
           :label="t('workspace.fillFromSwitcher')"
+          data-testid="fill-from-switcher"
           @click="fill"
         />
         <q-space />
@@ -102,311 +101,375 @@
         />
       </div>
 
-      <div
-        v-for="section in sections"
-        :key="section.kind"
+      <!-- Match the sound channel list's console view: the inputs/outputs tabs live inside a card
+           with icons (like the console's profile/inputs/buses tabs), so the two editors read as
+           one product. -->
+      <q-card
+        flat
+        bordered
         class="q-mb-md"
+        data-testid="video-io-card"
       >
-        <div class="text-subtitle1">
-          {{ section.title }}
-        </div>
-        <!-- Phones get one card per row with the same editors as the table: number, name and the
-             chain actions in the header, a summary line, and the rest under "Details". -->
-        <div
-          v-if="$q.screen.lt.sm"
-          class="column q-gutter-sm"
-          :data-testid="`video-${section.kind}-cards`"
+        <q-tabs
+          v-model="videoTab"
+          dense
+          align="left"
+          active-color="primary"
+          indicator-color="primary"
+          inline-label
+          mobile-arrows
+          data-testid="video-io-tabs"
         >
-          <q-card
-            v-for="row in section.rows"
-            :key="row.id"
-            flat
-            bordered
-            data-testid="video-card"
+          <q-tab
+            name="video_input"
+            icon="input"
+            :label="t('workspace.videoInputs')"
+            no-caps
+            data-testid="video-tab-inputs"
+          />
+          <q-tab
+            name="video_output"
+            icon="output"
+            :label="t('workspace.videoOutputs')"
+            no-caps
+            data-testid="video-tab-outputs"
+          />
+        </q-tabs>
+        <q-separator />
+        <q-tab-panels
+          v-model="videoTab"
+          animated
+        >
+          <q-tab-panel
+            v-for="section in sections"
+            :key="section.kind"
+            :name="section.kind"
           >
-            <q-card-section class="q-pa-sm">
-              <div class="row items-center no-wrap">
-                <div class="text-subtitle2 q-pr-sm">
-                  {{ row.position }}
-                </div>
-                <q-input
-                  :model-value="row.name"
-                  dense
-                  borderless
-                  class="col"
-                  @change="(v) => save(row, { name: v })"
-                />
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="route"
-                  :aria-label="t('workspace.editChain')"
-                  @click="openChain(row, section.kind)"
-                />
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="edit"
-                  :aria-label="t('workspace.editVideoInput')"
-                  data-testid="video-edit-open"
-                  @click="openVideoRowEdit(row, section.kind)"
-                />
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="account_tree"
-                  :aria-label="t('workspace.showFlow')"
-                  @click="openFlow(row, section.kind)"
-                />
-                <q-btn
-                  flat
-                  dense
-                  round
-                  color="negative"
-                  icon="delete"
-                  :aria-label="t('workspace.remove')"
-                  @click="removeNode(row)"
-                />
+            <div class="row items-center q-gutter-sm">
+              <div class="text-subtitle1">
+                {{ section.title }}
               </div>
-              <div class="text-caption text-grey-6">
-                {{ videoSummary(row, section.kind) || t('workspace.chainEmpty') }}
-              </div>
-              <div class="text-caption text-grey-6">
-                {{ chain(row) || t('workspace.chainEmpty') }}
-              </div>
-            </q-card-section>
-            <q-expansion-item
-              dense
-              :label="t('workspace.details')"
-              header-class="text-caption"
+              <q-space />
+              <q-btn
+                flat
+                dense
+                no-caps
+                icon="add"
+                :label="section.kind === 'video_input' ? t('workspace.addVideoInput') : t('workspace.addVideoOutput')"
+                :data-testid="section.kind === 'video_input' ? 'add-video-input' : 'add-video-output'"
+                @click="addRows(section.kind === 'video_input' ? 'inputs' : 'outputs', 1)"
+              />
+              <q-btn
+                flat
+                dense
+                no-caps
+                icon="playlist_add"
+                :label="section.kind === 'video_input' ? t('video.bulkInputs') : t('video.bulkOutputs')"
+                :data-testid="`bulk-${section.kind === 'video_input' ? 'inputs' : 'outputs'}`"
+                @click="openBulk(section.kind)"
+              />
+            </div>
+            <!-- Phones get one card per row with the same editors as the table: number, name and the
+             chain actions in the header, a summary line, and the rest under "Details". -->
+            <div
+              v-if="$q.screen.lt.sm"
+              class="column q-gutter-sm"
+              :data-testid="`video-${section.kind}-cards`"
             >
-              <div class="q-pa-sm q-gutter-sm">
-                <template v-if="section.kind === 'video_input'">
+              <q-card
+                v-for="row in section.rows"
+                :key="row.id"
+                flat
+                bordered
+                data-testid="video-card"
+              >
+                <q-card-section class="q-pa-sm">
+                  <div class="row items-center no-wrap">
+                    <div class="text-subtitle2 q-pr-sm">
+                      {{ row.position }}
+                    </div>
+                    <q-input
+                      :model-value="row.name"
+                      dense
+                      borderless
+                      class="col"
+                      @change="(v) => save(row, { name: v })"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      icon="route"
+                      :aria-label="t('workspace.editChain')"
+                      @click="openChain(row, section.kind)"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      icon="edit"
+                      :aria-label="t('workspace.editVideoInput')"
+                      data-testid="video-edit-open"
+                      @click="openVideoRowEdit(row, section.kind)"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      icon="account_tree"
+                      :aria-label="t('workspace.showFlow')"
+                      @click="openFlow(row, section.kind)"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      color="negative"
+                      icon="delete"
+                      :aria-label="t('workspace.remove')"
+                      @click="removeNode(row)"
+                    />
+                  </div>
+                  <div class="text-caption text-grey-6">
+                    {{ videoSummary(row, section.kind) || t('workspace.chainEmpty') }}
+                  </div>
+                  <div class="text-caption text-grey-6">
+                    {{ chain(row) || t('workspace.chainEmpty') }}
+                  </div>
+                </q-card-section>
+                <q-expansion-item
+                  dense
+                  :label="t('workspace.details')"
+                  header-class="text-caption"
+                >
+                  <div class="q-pa-sm q-gutter-sm">
+                    <template v-if="section.kind === 'video_input'">
+                      <StockwireProductPicker
+                        :model-value="sourceOf(row)"
+                        own
+                        :local-items="gearItems"
+                        gear-type="video"
+                        :label="t('workspace.videoSource')"
+                        :hint="''"
+                        @update:model-value="(p) => setSource(row, p)"
+                      />
+                      <q-select
+                        :model-value="row.attributes.source_type"
+                        :options="sourceTypes"
+                        emit-value
+                        map-options
+                        dense
+                        outlined
+                        :label="t('workspace.colSourceType')"
+                        @update:model-value="(v) => saveAttr(row, 'source_type', v)"
+                      />
+                    </template>
+                    <q-input
+                      v-else
+                      :model-value="row.attributes.name"
+                      dense
+                      outlined
+                      :label="t('workspace.colName')"
+                      @change="(v) => saveAttr(row, 'name', v)"
+                    />
+                    <ConnectorSelect
+                      :model-value="row.attributes.connector || ''"
+                      @update:model-value="(v) => saveAttr(row, 'connector', v)"
+                    />
+                    <div class="row items-start q-gutter-xs">
+                      <NotesDisplay
+                        v-if="row.notes"
+                        class="col"
+                        :notes="row.notes"
+                        :rows="3"
+                      />
+                      <q-btn
+                        dense
+                        flat
+                        no-caps
+                        size="sm"
+                        :icon="row.notes ? 'edit' : 'add'"
+                        :label="row.notes ? undefined : t('workspace.colNotes')"
+                        :aria-label="t('workspace.editNotes')"
+                        data-testid="video-edit-notes"
+                        @click="openVideoNotes(row)"
+                      />
+                    </div>
+                  </div>
+                </q-expansion-item>
+              </q-card>
+            </div>
+            <AdaptiveTable
+              v-else
+              :table-id="section.kind === 'video_input' ? 'video-inputs' : 'video-outputs'"
+              flat
+              dense
+              bordered
+              virtual-scroll
+              :virtual-scroll-item-size="80"
+              :rows="section.rows"
+              :columns="section.columns"
+              row-key="id"
+              :rows-per-page-options="[0]"
+              hide-bottom
+              class="sticky-header-table"
+              style="max-height: 70vh"
+              :data-testid="`video-${section.kind}-table`"
+            >
+              <template #body-cell-number="slot">
+                <q-td :props="slot">
+                  <q-input
+                    :model-value="slot.row.position"
+                    type="number"
+                    dense
+                    borderless
+                    style="width: 56px"
+                    @change="(v) => setNumber(slot.row, section.kind, Number(v))"
+                  />
+                </q-td>
+              </template>
+              <template #body-cell-name="slot">
+                <q-td :props="slot">
+                  <q-input
+                    :model-value="slot.row.name"
+                    dense
+                    borderless
+                    data-testid="video-name"
+                    @change="(v) => save(slot.row, { name: v })"
+                  />
+                </q-td>
+              </template>
+              <template #body-cell-source="slot">
+                <q-td
+                  :props="slot"
+                  style="min-width: 170px; max-width: 220px"
+                >
                   <StockwireProductPicker
-                    :model-value="sourceOf(row)"
+                    :model-value="sourceOf(slot.row)"
                     own
                     :local-items="gearItems"
                     gear-type="video"
                     :label="t('workspace.videoSource')"
                     :hint="''"
-                    @update:model-value="(p) => setSource(row, p)"
+                    borderless
+                    data-testid="video-source-picker"
+                    @update:model-value="(p) => setSource(slot.row, p)"
                   />
+                </q-td>
+              </template>
+              <template #body-cell-source_type="slot">
+                <q-td :props="slot">
                   <q-select
-                    :model-value="row.attributes.source_type"
+                    :model-value="slot.row.attributes.source_type"
                     :options="sourceTypes"
                     emit-value
                     map-options
                     dense
-                    outlined
-                    :label="t('workspace.colSourceType')"
-                    @update:model-value="(v) => saveAttr(row, 'source_type', v)"
+                    borderless
+                    @update:model-value="(v) => saveAttr(slot.row, 'source_type', v)"
                   />
-                </template>
-                <q-input
-                  v-else
-                  :model-value="row.attributes.name"
-                  dense
-                  outlined
-                  :label="t('workspace.colName')"
-                  @change="(v) => saveAttr(row, 'name', v)"
-                />
-                <ConnectorSelect
-                  :model-value="row.attributes.connector || ''"
-                  @update:model-value="(v) => saveAttr(row, 'connector', v)"
-                />
-                <div class="row items-start q-gutter-xs">
-                  <NotesDisplay
-                    v-if="row.notes"
-                    class="col"
-                    :notes="row.notes"
-                    :rows="3"
+                </q-td>
+              </template>
+              <template #body-cell-connector="slot">
+                <q-td :props="slot">
+                  <ConnectorSelect
+                    :model-value="slot.row.attributes.connector || ''"
+                    borderless
+                    @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
+                  />
+                </q-td>
+              </template>
+              <template #body-cell-output_name="slot">
+                <q-td :props="slot">
+                  <q-input
+                    :model-value="slot.row.attributes.name"
+                    dense
+                    borderless
+                    @change="(v) => saveAttr(slot.row, 'name', v)"
+                  />
+                </q-td>
+              </template>
+              <template #body-cell-notes="slot">
+                <q-td :props="slot">
+                  <div class="row items-start q-gutter-xs">
+                    <NotesDisplay
+                      v-if="slot.row.notes"
+                      class="col"
+                      :notes="slot.row.notes"
+                      :rows="2"
+                    />
+                    <q-btn
+                      dense
+                      flat
+                      no-caps
+                      size="sm"
+                      :icon="slot.row.notes ? 'edit' : 'add'"
+                      :label="slot.row.notes ? undefined : t('workspace.colNotes')"
+                      :aria-label="t('workspace.editNotes')"
+                      data-testid="video-edit-notes"
+                      @click="openVideoNotes(slot.row)"
+                    />
+                  </div>
+                </q-td>
+              </template>
+              <template #body-cell-chain="slot">
+                <q-td :props="slot">
+                  <!-- a long chain shortens its label instead of pushing the flow button under the
+                   next column, where it cannot be clicked -->
+                  <div class="row no-wrap items-center video-chain-cell">
+                    <q-btn
+                      flat
+                      dense
+                      no-caps
+                      icon="route"
+                      class="video-chain-btn"
+                      :label="chain(slot.row) || t('workspace.chainEmpty')"
+                      :title="chain(slot.row)"
+                      data-testid="edit-video-chain"
+                      @click="openChain(slot.row, section.kind)"
+                    />
+                    <q-btn
+                      flat
+                      dense
+                      round
+                      icon="account_tree"
+                      class="col-auto"
+                      :aria-label="t('workspace.showFlow')"
+                      data-testid="show-video-flow"
+                      @click="openFlow(slot.row, section.kind)"
+                    />
+                  </div>
+                </q-td>
+              </template>
+              <template #body-cell-actions="slot">
+                <q-td
+                  :props="slot"
+                  class="text-right"
+                >
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="edit"
+                    :aria-label="t('workspace.editVideoInput')"
+                    data-testid="video-edit-open"
+                    @click="openVideoRowEdit(slot.row, section.kind)"
                   />
                   <q-btn
-                    dense
                     flat
-                    no-caps
-                    size="sm"
-                    :icon="row.notes ? 'edit' : 'add'"
-                    :label="row.notes ? undefined : t('workspace.colNotes')"
-                    :aria-label="t('workspace.editNotes')"
-                    data-testid="video-edit-notes"
-                    @click="openVideoNotes(row)"
+                    dense
+                    round
+                    color="negative"
+                    icon="delete"
+                    :aria-label="t('workspace.remove')"
+                    @click="removeNode(slot.row)"
                   />
-                </div>
-              </div>
-            </q-expansion-item>
-          </q-card>
-        </div>
-        <AdaptiveTable
-          v-else
-          :table-id="section.kind === 'video_input' ? 'video-inputs' : 'video-outputs'"
-          flat
-          dense
-          bordered
-          :rows="section.rows"
-          :columns="section.columns"
-          row-key="id"
-          :rows-per-page-options="[0]"
-          hide-bottom
-          class="sticky-header-table"
-          style="max-height: 70vh"
-          :data-testid="`video-${section.kind}-table`"
-        >
-          <template #body-cell-number="slot">
-            <q-td :props="slot">
-              <q-input
-                :model-value="slot.row.position"
-                type="number"
-                dense
-                borderless
-                style="width: 56px"
-                @change="(v) => setNumber(slot.row, section.kind, Number(v))"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-name="slot">
-            <q-td :props="slot">
-              <q-input
-                :model-value="slot.row.name"
-                dense
-                borderless
-                data-testid="video-name"
-                @change="(v) => save(slot.row, { name: v })"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-source="slot">
-            <q-td
-              :props="slot"
-              style="min-width: 170px; max-width: 220px"
-            >
-              <StockwireProductPicker
-                :model-value="sourceOf(slot.row)"
-                own
-                :local-items="gearItems"
-                gear-type="video"
-                :label="t('workspace.videoSource')"
-                :hint="''"
-                borderless
-                data-testid="video-source-picker"
-                @update:model-value="(p) => setSource(slot.row, p)"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-source_type="slot">
-            <q-td :props="slot">
-              <q-select
-                :model-value="slot.row.attributes.source_type"
-                :options="sourceTypes"
-                emit-value
-                map-options
-                dense
-                borderless
-                @update:model-value="(v) => saveAttr(slot.row, 'source_type', v)"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-connector="slot">
-            <q-td :props="slot">
-              <ConnectorSelect
-                :model-value="slot.row.attributes.connector || ''"
-                borderless
-                @update:model-value="(v) => saveAttr(slot.row, 'connector', v)"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-output_name="slot">
-            <q-td :props="slot">
-              <q-input
-                :model-value="slot.row.attributes.name"
-                dense
-                borderless
-                @change="(v) => saveAttr(slot.row, 'name', v)"
-              />
-            </q-td>
-          </template>
-          <template #body-cell-notes="slot">
-            <q-td :props="slot">
-              <div class="row items-start q-gutter-xs">
-                <NotesDisplay
-                  v-if="slot.row.notes"
-                  class="col"
-                  :notes="slot.row.notes"
-                  :rows="2"
-                />
-                <q-btn
-                  dense
-                  flat
-                  no-caps
-                  size="sm"
-                  :icon="slot.row.notes ? 'edit' : 'add'"
-                  :label="slot.row.notes ? undefined : t('workspace.colNotes')"
-                  :aria-label="t('workspace.editNotes')"
-                  data-testid="video-edit-notes"
-                  @click="openVideoNotes(slot.row)"
-                />
-              </div>
-            </q-td>
-          </template>
-          <template #body-cell-chain="slot">
-            <q-td :props="slot">
-              <!-- a long chain shortens its label instead of pushing the flow button under the
-                   next column, where it cannot be clicked -->
-              <div class="row no-wrap items-center video-chain-cell">
-                <q-btn
-                  flat
-                  dense
-                  no-caps
-                  icon="route"
-                  class="video-chain-btn"
-                  :label="chain(slot.row) || t('workspace.chainEmpty')"
-                  :title="chain(slot.row)"
-                  data-testid="edit-video-chain"
-                  @click="openChain(slot.row, section.kind)"
-                />
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="account_tree"
-                  class="col-auto"
-                  :aria-label="t('workspace.showFlow')"
-                  data-testid="show-video-flow"
-                  @click="openFlow(slot.row, section.kind)"
-                />
-              </div>
-            </q-td>
-          </template>
-          <template #body-cell-actions="slot">
-            <q-td
-              :props="slot"
-              class="text-right"
-            >
-              <q-btn
-                flat
-                dense
-                round
-                icon="edit"
-                :aria-label="t('workspace.editVideoInput')"
-                data-testid="video-edit-open"
-                @click="openVideoRowEdit(slot.row, section.kind)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="delete"
-                :aria-label="t('workspace.remove')"
-                @click="removeNode(slot.row)"
-              />
-            </q-td>
-          </template>
-        </AdaptiveTable>
-      </div>
+                </q-td>
+              </template>
+            </AdaptiveTable>
+          </q-tab-panel>
+        </q-tab-panels>
+      </q-card>
     </template>
 
     <ChainFlowDialog
@@ -435,6 +498,20 @@
       @save="(text) => videoNotesTarget && save(videoNotesTarget, { notes: text })"
     />
 
+    <VideoBulkDialog
+      v-model="bulkVideoOpen"
+      :kind="bulkVideoKind"
+      :next-number="nextVideoNumber(bulkVideoKind)"
+      :busy="bulkBusy"
+      @create="(items) => bulkCreate(bulkVideoKind, items)"
+    />
+
+    <SwitcherDialog
+      v-model="switcherOpen"
+      :list="list"
+      @save="saveSwitcher"
+    />
+
     <!-- Consolidated editor for one video row: source, connector and signal metadata in one modal. -->
     <VideoRowEditDialog
       v-model="videoRowEditOpen"
@@ -461,6 +538,8 @@ import ChainDialog from '@/components/ChainDialog.vue';
 import ChainFlowDialog from '@/components/ChainFlowDialog.vue';
 import ConnectorSelect from '@/components/ConnectorSelect.vue';
 import StockwireProductPicker from '@/components/StockwireProductPicker.vue';
+import VideoBulkDialog from '@/components/VideoBulkDialog.vue';
+import SwitcherDialog from '@/components/SwitcherDialog.vue';
 import VideoRowEditDialog from '@/components/VideoRowEditDialog.vue';
 import {
   flowTree,
@@ -483,6 +562,9 @@ const { t } = useI18n();
 const $q = useQuasar();
 const graph = useGraphStore();
 const listId = ref(null);
+// Inputs and outputs live on their own tabs (like the sound channel list), so only the active
+// section's rows are in the DOM — the bulk/add controls for each live in that tab's header.
+const videoTab = ref('video_input');
 const chainOpen = ref(false);
 const chainNode = ref(null);
 const chainKind = ref('video_input');
@@ -500,6 +582,16 @@ const sourceTypes = ['camera', 'computer', 'other'].map((v) => ({
 }));
 
 const list = computed(() => graph.videoLists.find((l) => l.id === listId.value) || null);
+// A switcher is "set" either by picking a catalog product or by entering manual
+// input/output counts on a house switcher. Both must reveal the summary and the
+// fill action — and both should fill the list when set (parity with the sound
+// mixer, which pads its channels on set).
+const hasSwitcher = computed(
+  () =>
+    !!list.value?.attributes?.switcher_product_id ||
+    list.value?.attributes?.switcher_inputs != null ||
+    list.value?.attributes?.switcher_outputs != null,
+);
 const gear = computed(() => graph.devices.filter((d) => !isVirtual(d) && !isPlotElement(d)));
 
 // The gear in a chain is edited from the signal flow or the chain dialog (an edit button on each
@@ -643,6 +735,67 @@ async function fill() {
     await graph.fillVideoFromSwitcher(scopeId.value, list.value.id);
   } catch (err) {
     failed(err);
+  }
+}
+
+// Bulk-add many inputs or outputs at once through the existing batch endpoint
+// (graph.createVideoRows already publishes a graph.device.upsert per row, so the
+// other client updates live). The dialog builds the item bodies; we only map the
+// section kind to the endpoint's `inputs`/`outputs` vocabulary and persist.
+const bulkVideoOpen = ref(false);
+const bulkVideoKind = ref('inputs'); // 'inputs' | 'outputs' for dialog + endpoint
+const bulkBusy = ref(false);
+function openBulk(sectionKind) {
+  bulkVideoKind.value = sectionKind === 'video_input' ? 'inputs' : 'outputs';
+  bulkVideoOpen.value = true;
+}
+// Continue the existing numbering for the list so bulk rows don't collide with
+// what's already there. Input rows are stored as `video_input`, outputs as
+// `video_destination`; the number lives in `input_number` / `output_number`.
+function nextVideoNumber(kind) {
+  const rowKind = kind === 'inputs' ? 'video_input' : 'video_destination';
+  const numberKey = kind === 'inputs' ? 'input_number' : 'output_number';
+  let max = 0;
+  for (const row of videoRowsOf(graph.devices, listId.value, rowKind)) {
+    const n = Number(row.attributes?.[numberKey]);
+    if (Number.isFinite(n)) max = Math.max(max, n);
+  }
+  return max + 1;
+}
+async function bulkCreate(kind, items) {
+  bulkBusy.value = true;
+  try {
+    await graph.createVideoRows(scopeId.value, list.value.id, kind, items);
+    bulkVideoOpen.value = false;
+  } catch (err) {
+    failed(err);
+  } finally {
+    bulkBusy.value = false;
+  }
+}
+
+// Set (or clear) the list's switcher. Stored on the list node's attributes, then —
+// like the sound mixer, which pads its channels the moment a mixer is chosen — the
+// list is filled up to the switcher's size (manual counts or product-derived).
+// Saving through updateDevice publishes a graph.device.upsert so the summary
+// updates live; fillVideoFromSwitcher wires the rows to the switcher device too.
+const switcherOpen = ref(false);
+async function saveSwitcher({ product, inputs, outputs }) {
+  const setting = !!product || inputs != null || outputs != null;
+  try {
+    await graph.updateDevice(scopeId.value, list.value.id, {
+      attributes: {
+        switcher_product_id: product?.id ? String(product.id) : null,
+        switcher_product_name: product?.name || null,
+        switcher_inputs: inputs ?? null,
+        switcher_outputs: outputs ?? null,
+      },
+    });
+    // Only fill when actually setting a switcher; clearing (all null) just removes it.
+    if (setting) await graph.fillVideoFromSwitcher(scopeId.value, list.value.id);
+    switcherOpen.value = false;
+  } catch (err) {
+    if (!isRevisionConflict(err)) failed(err);
   }
 }
 

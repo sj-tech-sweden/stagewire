@@ -1852,6 +1852,8 @@ export default {
     destinationPlaceholder: "e.g. Front LED wall",
     deleteOutput: "Delete output",
     pickSwitcher: "Pick switcher from Stockwire",
+    setSwitcher: "Set switcher",
+    changeSwitcher: "Change switcher",
     switcherTitle: "Switcher for this list",
     switcherSummary: "{name} · {inputs} in · {outputs} out",
     switcherInputs: "Inputs",

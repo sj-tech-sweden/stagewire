@@ -810,6 +810,8 @@ test('a video list is built in the video editor: inputs, outputs and a patch cha
   const kinds = (await (await request.get(`${API_BASE}/api/v1/connector-kinds`, { headers })).json()) as { label: string }[];
   expect(kinds.map((k) => k.label)).toContain(kind);
 
+  // Outputs live on their own tab now; switch to it before the output controls are in the DOM.
+  await page.getByTestId('video-tab-outputs').click();
   await page.getByTestId('add-video-output').click();
   await expect(page.getByTestId('video-video_output-table').locator('tbody tr').filter({ has: page.locator('input') })).toHaveCount(1);
   await expect.poll(async () => (await legacy())[0]?.outputs.length).toBe(1);

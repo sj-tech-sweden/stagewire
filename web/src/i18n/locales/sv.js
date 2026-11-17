@@ -1857,6 +1857,8 @@ export default {
     destinationPlaceholder: "t.ex. Främre LED-vägg",
     deleteOutput: "Ta bort utgång",
     pickSwitcher: "Välj switch från Stockwire",
+    setSwitcher: "Välj switch",
+    changeSwitcher: "Byt switch",
     switcherTitle: "Switch för den här listan",
     switcherSummary: "{name} · {inputs} in · {outputs} ut",
     switcherInputs: "Ingångar",
