@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.1...stagewire-v1.6.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **audio:** include catalog-imported devices as soft-patch targets ([#137](https://github.com/sj-tech-sweden/stagewire/issues/137)) ([6c39d17](https://github.com/sj-tech-sweden/stagewire/commit/6c39d17301eb32551cf21933c772d46a10d7453b))
+
 ## [1.6.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.0...stagewire-v1.6.1) (2026-11-17)
 
 
