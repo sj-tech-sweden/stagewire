@@ -4,6 +4,22 @@ on:
   push:
     branches:
       - main
+  # Let a dependency bump (Renovate) also kick the workflow, and allow manual runs.
+  # The actual release is still cut from main; on a PR release-please just no-ops / keeps the
+  # release PR in sync rather than publishing from a feature branch.
+  pull_request:
+    paths:
+      - "api/pyproject.toml"
+      - "api/uv.lock"
+      - "api/requirements*.txt"
+      - "web/package.json"
+      - "web/package-lock.json"
+      - "web/**/package.json"
+      - "web/**/package-lock.json"
+      - ".github/renovate.json"
+      - "k8s/**"
+      - "charts/**"
+  workflow_dispatch:
 
 permissions:
   contents: write
