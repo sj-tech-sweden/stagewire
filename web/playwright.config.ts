@@ -10,7 +10,10 @@ export const STACK_COMPOSE =
 
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts',
   timeout: 120_000,
+  // The default 5s expect timeout is too short when two workers share one API under load.
+  expect: { timeout: 10_000 },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -19,9 +22,18 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || 'http://localhost:9010',
     trace: 'on-first-retry',
   },
+  // The history spec switches the shared test admin to Swedish while it runs. It runs in its own
+  // project that depends on the main one, so no other spec sees Swedish mid-run.
   projects: [
     {
       name: 'chromium',
+      testIgnore: /history\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'locale',
+      testMatch: /history\.spec\.ts/,
+      dependencies: ['chromium'],
       use: { ...devices['Desktop Chrome'] },
     },
   ],

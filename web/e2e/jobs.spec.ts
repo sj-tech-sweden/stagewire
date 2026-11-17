@@ -17,12 +17,21 @@ test('create a production job from the UI', async ({ page }) => {
 
   // The venue is a searchable picker; typing a name that does not match offers a "create" action.
   await dialog.locator('.q-select input').fill(venue);
+  // Wait for the venue to exist and be linked to the form before submitting: the venue is shown in
+  // the picker as soon as it is created, but the form only holds its id once the response returns.
+  const venueCreated = page.waitForResponse((r) => r.request().method() === 'POST' && /\/venues$/.test(r.url()));
   await dialog.getByRole('button', { name: /create new venue/i }).click();
+  await venueCreated;
   await expect(dialog.getByText(venue)).toBeVisible();
+  // The venue list stays expanded after creating a venue and covers the Create button. Clicking
+  // the dialog heading closes it without dismissing the dialog.
+  await dialog.getByText('New production job').click();
 
   // The dialog also holds an inline "Create new venue …" button; match the job's own "Create"
   // exactly so the inline venue action isn't picked up by the same selector.
+  const venueAssigned = page.waitForResponse((r) => r.request().method() === 'PUT' && /\/jobs\/[^/]+\/venue$/.test(r.url()));
   await dialog.getByRole('button', { name: 'Create', exact: true }).click();
+  await venueAssigned;
 
   // The venue name legitimately appears in two places on the job (the job card and the venue
   // field), so scope to the first match instead of failing strict mode.
@@ -65,23 +74,35 @@ test('the jobs list renders the event date as YYYY-MM-DD HH:mm (locale-independe
   await page.goto('/');
 
   // Switch to Swedish to prove the rendering is fixed (YYYY-MM-DD HH:mm) and NOT localized to
-  // sv-SE. We must NOT reload afterwards: on reload the app re-resolves the locale from the
-  // server's stored preferred_language (the admin test user has none), overriding back to English.
-  await page.getByTestId('language-switcher').click();
-  await page.getByTestId('lang-sv').click();
+  // sv-SE. The switcher saves the language to the shared admin account, so restore English in
+  // finally: other specs in the run expect it. We must NOT reload in between: on reload the app
+  // re-resolves the locale from the stored preferred_language.
+  try {
+    // Wait for the save to land: the switcher's PUT is fire-and-forget, so without this the restore
+    // below could race it and leave Swedish stored on the shared account.
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === 'PUT' && /\/auth\/users\//.test(r.url()),
+    );
+    await page.getByTestId('language-switcher').click();
+    await page.getByTestId('lang-sv').click();
+    await saved;
 
-  const item = page.locator('.q-item', { hasText: title });
-  // The read-only display formats as YYYY-MM-DD HH:mm in the viewer's local time (matching the
-  // picker). Compute the expected string the same way in the browser so the assertion is
-  // timezone-independent.
-  const expected = await page.evaluate((iso) => {
-    const dt = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-  }, created.event_date);
-  await expect(item).toContainText(expected);
-  // A 12-hour marker must never appear (fixed 24h format).
-  await expect(item).not.toContainText(/AM|PM/i);
+    const item = page.locator('.q-item', { hasText: title });
+    // The read-only display formats as YYYY-MM-DD HH:mm in the viewer's local time (matching the
+    // picker). Compute the expected string the same way in the browser so the assertion is
+    // timezone-independent.
+    const expected = await page.evaluate((iso) => {
+      const dt = new Date(iso);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    }, created.event_date);
+    await expect(item).toContainText(expected);
+    // A 12-hour marker must never appear (fixed 24h format).
+    await expect(item).not.toContainText(/AM|PM/i);
+  } finally {
+    const me = await (await request.get(`${API_BASE}/api/v1/auth/me`, { headers })).json();
+    await request.put(`${API_BASE}/api/v1/auth/users/${me.id}`, { headers, data: { preferred_language: 'en' } });
+  }
 });
 
 test('the event date is visible in the picker as soon as the date is picked (before any time)', async ({ page, request }) => {
