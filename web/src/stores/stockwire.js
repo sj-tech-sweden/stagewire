@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '@/boot/api';
+import { withRetry } from '@/utils/retry';
 
 export const useStockwireStore = defineStore('stockwire', {
   state: () => ({
@@ -31,9 +32,16 @@ export const useStockwireStore = defineStore('stockwire', {
       const found = this.categories.find((c) => c.id === id);
       return found ? found.path : '';
     },
+    // Retries transient failures so a slow or dropped first request does not leave the integration
+    // UI hidden for the whole session. If every attempt fails, the flags stay disabled (the safe
+    // default) and the failure is logged instead of surfacing as an unhandled rejection.
     async loadIntegration() {
-      const { data } = await api.get('/settings/stockwire');
-      this.integration = data;
+      try {
+        const { data } = await withRetry(() => api.get('/settings/stockwire'));
+        this.integration = data;
+      } catch (error) {
+        console.warn('Could not load the stockwire integration status', error);
+      }
     },
     categoriesForGearType(gearType) {
       if (!gearType) return [];
