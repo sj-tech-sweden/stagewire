@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.0...stagewire-v1.6.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **web:** render event dates as fixed YYYY-MM-DD HH:mm and surface the date immediately in the picker ([#135](https://github.com/sj-tech-sweden/stagewire/issues/135)) ([2aaa264](https://github.com/sj-tech-sweden/stagewire/commit/2aaa264e2fe22745e4eee63f48392f2113f596ff))
+
 ## [1.6.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.5.0...stagewire-v1.6.0) (2026-11-17)
 
 
