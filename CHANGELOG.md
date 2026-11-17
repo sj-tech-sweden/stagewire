@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.6.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.5.0...stagewire-v1.6.0) (2026-11-17)
+
+
+### Features
+
+* **audio:** expand bus & output model with color, notes, tap points, talkback presets ([#106](https://github.com/sj-tech-sweden/stagewire/issues/106)) ([094d172](https://github.com/sj-tech-sweden/stagewire/commit/094d172fc0c3ff73ce3d7ef538e1a538f6ff400c))
+* **console:** move inputs into console as a tab, add bulk bus add + bus chain editor ([#124](https://github.com/sj-tech-sweden/stagewire/issues/124)) ([8c23f80](https://github.com/sj-tech-sweden/stagewire/commit/8c23f806d73fb12c67ea05a24d9b4de5a4b255e6))
+* **notes:** render notes as markdown with a reusable read-more display ([#109](https://github.com/sj-tech-sweden/stagewire/issues/109)) ([27ebef2](https://github.com/sj-tech-sweden/stagewire/commit/27ebef20568e2f3368b8e19c54779873b666237d))
+* **realtime:** backfill publish on mutations for lighting, rigging, stockwire ([#116](https://github.com/sj-tech-sweden/stagewire/issues/116)) ([#122](https://github.com/sj-tech-sweden/stagewire/issues/122)) ([d8bab87](https://github.com/sj-tech-sweden/stagewire/commit/d8bab87e8d955538292b95be3151878dba13906d))
+* **video:** bulk add and switcher selection for video lists ([#131](https://github.com/sj-tech-sweden/stagewire/issues/131)) ([0c8fa96](https://github.com/sj-tech-sweden/stagewire/commit/0c8fa961809c3bf7cb5457949418686316ae0a27))
+* **ws:** cross-worker realtime fan-out via Valkey pub/sub (closes [#114](https://github.com/sj-tech-sweden/stagewire/issues/114)) ([#119](https://github.com/sj-tech-sweden/stagewire/issues/119)) ([bbefb4e](https://github.com/sj-tech-sweden/stagewire/commit/bbefb4e29e3c08ff027007c6d10513fc3f8d4899))
+
+
+### Bug Fixes
+
+* **console/realtime:** make console + list/channel/device views event-driven ([#115](https://github.com/sj-tech-sweden/stagewire/issues/115)) ([#121](https://github.com/sj-tech-sweden/stagewire/issues/121)) ([98436d5](https://github.com/sj-tech-sweden/stagewire/commit/98436d594f1483d49421ef3b7aa414529e21905d))
+* **console:** include all non-power ports as soft-patch targets ([#105](https://github.com/sj-tech-sweden/stagewire/issues/105)) ([733daa6](https://github.com/sj-tech-sweden/stagewire/commit/733daa6c150c6565177b9462085fae0861dbf051))
+* **renovate:** remove invalid 'uv' matchManager ([#127](https://github.com/sj-tech-sweden/stagewire/issues/127)) ([57dd124](https://github.com/sj-tech-sweden/stagewire/commit/57dd124aeb4c98baf5d8ebfd9c37b8b27d609628))
+* **renovate:** use valid backend manager names (pep621, uv) instead of pyproject ([#123](https://github.com/sj-tech-sweden/stagewire/issues/123)) ([fee5e8a](https://github.com/sj-tech-sweden/stagewire/commit/fee5e8a0504b84d0effd8970353f7b69ba1be61f))
+* **ws:** align job/venue WebSocket auth with REST (require existing, active account) ([#117](https://github.com/sj-tech-sweden/stagewire/issues/117)) ([d0a7cc0](https://github.com/sj-tech-sweden/stagewire/commit/d0a7cc003483aaddfab217db763cc44aff3f731b))
+
+
+### Other
+
+* **AGENTS:** add realtime-sync directive ([#112](https://github.com/sj-tech-sweden/stagewire/issues/112)) ([a444e1e](https://github.com/sj-tech-sweden/stagewire/commit/a444e1ed5128bf33aba15070555ae206b7fadce4))
+* **AGENTS:** update realtime fan-out note — Valkey pub/sub bridge now implemented ([#114](https://github.com/sj-tech-sweden/stagewire/issues/114)) ([#120](https://github.com/sj-tech-sweden/stagewire/issues/120)) ([2115356](https://github.com/sj-tech-sweden/stagewire/commit/2115356d8a53a082e5d6cd023f4a1ab27cc4dfd3))
+* **deps:** update dependency marked to v18.2.1 ([#128](https://github.com/sj-tech-sweden/stagewire/issues/128)) ([21ddbf6](https://github.com/sj-tech-sweden/stagewire/commit/21ddbf6b4f86e6fa3b36fbf37e6ace50be48371b))
+* **deps:** update dependency vue-i18n to v11.4.21 ([#132](https://github.com/sj-tech-sweden/stagewire/issues/132)) ([ce6015b](https://github.com/sj-tech-sweden/stagewire/commit/ce6015b6d96a271bff7a056904aeb95f9de719c8))
+* **deps:** update frontend dependencies ([#134](https://github.com/sj-tech-sweden/stagewire/issues/134)) ([1b060c3](https://github.com/sj-tech-sweden/stagewire/commit/1b060c3ea04214d5c32dce6a02f549ecee03b42c))
+* **release:** dependency triggers + Dependencies/Other changelog sections ([#133](https://github.com/sj-tech-sweden/stagewire/issues/133)) ([eaab828](https://github.com/sj-tech-sweden/stagewire/commit/eaab8283fd9b2522de370092c10190962384635d))
+
 ## [1.5.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.4.1...stagewire-v1.5.0) (2026-11-15)
 
 
