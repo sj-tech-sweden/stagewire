@@ -160,6 +160,7 @@
             :label="t('jobs.create')"
             color="primary"
             :disable="!form.title"
+            data-testid="job-create"
             @click="create"
           />
         </q-card-actions>
@@ -176,6 +177,7 @@ import { useJobsStore } from '@/stores/jobs';
 import { useVenuesStore } from '@/stores/venues';
 import { useStockwireStore } from '@/stores/stockwire';
 import DateTimePicker from '@/components/DateTimePicker.vue';
+import { formatDateTime } from '@/utils/datetime';
 
 const { t } = useI18n({ useScope: "global" })
 const router = useRouter()
@@ -240,6 +242,8 @@ async function create() {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleString();
+  // Fixed YYYY-MM-DD HH:mm (24h) display so the date matches what the picker edits and is
+  // not reformatted by the browser locale (which previously showed 12h in Swedish).
+  return formatDateTime(value);
 }
 </script>

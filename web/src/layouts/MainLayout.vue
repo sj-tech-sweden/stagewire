@@ -68,6 +68,7 @@
             flat
             dense
             icon="language"
+            data-testid="language-switcher"
             :label="t(`app.language.${locale}`)"
           >
             <q-list>
@@ -76,6 +77,7 @@
                 :key="l"
                 v-close-popup
                 clickable
+                :data-testid="`lang-${l}`"
                 @click="switchLocale(l)"
               >
                 <q-item-section>{{ t(`app.language.${l}`) }}</q-item-section>
@@ -166,6 +168,7 @@
                 :key="l"
                 v-close-popup
                 clickable
+                :data-testid="`lang-drawer-${l}`"
                 @click="switchLocale(l)"
               >
                 <q-item-section avatar>
