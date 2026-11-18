@@ -237,6 +237,26 @@ export const useGraphStore = defineStore('graph', {
       });
       this.applyRealtimeEvent({ type: 'graph.edge.delete', payload: { id } });
     },
+    // Phase D convenience: put two Dante / network devices on a shared Dante network. If
+    // `networkDeviceId` is given the endpoints are wired to that switch; otherwise a `network`
+    // switch node is auto-inserted and both endpoints are linked through it. The server returns the
+    // (possibly new) switch device plus the two `data` edges; both are applied as realtime events so
+    // co-editors follow without a refetch.
+    async joinDanteNetwork(jobId, { aDeviceId, bDeviceId, networkDeviceId = null, name = null }) {
+      const { data } = await api.post(`${baseFor(this, jobId)}/network-join`, {
+        a_device_id: aDeviceId,
+        b_device_id: bDeviceId,
+        network_device_id: networkDeviceId,
+        name,
+      });
+      if (data.device) {
+        this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data.device });
+      }
+      (data.edges || []).forEach((edge) =>
+        this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: edge }),
+      );
+      return data;
+    },
     async requestStockwireBooking(jobId, id) {
       const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/request-stockwire`);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });

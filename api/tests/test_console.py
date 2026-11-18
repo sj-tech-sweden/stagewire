@@ -2938,3 +2938,43 @@ async def test_talkback_presets_and_tap_points_round_trip(auth_headers):
         )
         assert res.status_code == 200, res.text
         assert res.json()["tap_point"] == "post_eq"
+
+
+# --- Dante / network patch domain (Phase E) ---------------------------------------------------
+
+def _ndev(kind, ports, **attrs):
+    return SimpleNamespace(id=kind, kind=kind, name=kind, attributes=attrs, ports=ports)
+
+
+def test_network_ports_picks_dante_and_network_connectors():
+    d = _ndev(
+        "digital_stagebox",
+        [
+            {"id": "in-dante", "direction": "in", "connector": "dante"},
+            {"id": "out-dante", "direction": "out", "connector": "dante"},
+            {"id": "in-xlr", "direction": "in", "connector": "xlr3"},
+        ],
+    )
+    ports = console.network_ports(d)
+    assert {p["id"] for p in ports} == {"in-dante", "out-dante"}
+
+
+def test_network_devices_is_not_mixer_anchored():
+    mixer = _ndev("mixer", [{"id": "in-dante", "direction": "in", "connector": "dante"}])
+    box_a = _ndev(
+        "digital_stagebox", [{"id": "out-dante", "direction": "out", "connector": "dante"}]
+    )
+    box_b = _ndev("analog_stagebox", [{"id": "in-xlr", "direction": "in", "connector": "xlr3"}])
+    cam = _ndev("camera", [{"id": "out-sdi", "direction": "out", "connector": "sdi"}])
+    found = console.network_devices([mixer, box_a, box_b, cam])
+    ids = {d.id for d in found}
+    # A Dante mixer and a Dante stagebox appear; an analog stagebox and a camera do not.
+    assert ids == {"mixer", "digital_stagebox"}
+
+
+def test_is_network_connector_vocabulary():
+    assert console.is_network_connector("dante")
+    assert console.is_network_connector("DSNAKE")
+    assert console.is_network_connector("ethernet")
+    assert not console.is_network_connector("xlr3")
+    assert not console.is_network_connector(None)

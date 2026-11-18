@@ -923,6 +923,41 @@ def console_input_devices(
     return [d for d in devices if is_stagebox(d) and _dev_id(d) in wired]
 
 
+# --- Dante / network patch domain (Phase E, distinct from the mixer soft patch) ---------------
+
+# Digital transports and the switched fabric they ride over that belong to the Dante / network
+# patch surface (Phase E) — *not* the mixer soft patch. dSnake/Dante/AES50/AVB/MADI are the
+# digital transports; ethernet/ethercon are the point-to-point/network carriers. Kept as a
+# frozenset so it can be imported unchanged by the graph router's network-join endpoint.
+NETWORK_CONNECTORS = frozenset(
+    {"dsnake", "dante", "aes50", "avb", "madi", "ethernet", "ethercon"}
+)
+
+
+def is_network_connector(connector: str | None) -> bool:
+    return bool(connector) and connector.lower() in NETWORK_CONNECTORS
+
+
+def network_ports(device: Any) -> list[dict]:
+    """The device's ports that carry a Dante / network digital transport (transmitter/receiver
+    capable). A 'both' connector group is stored as two ports (one in, one out) with the same
+    connector (see web/src/utils/workspace.js), so this returns both the in and out sides."""
+    return [
+        p
+        for p in (getattr(device, "ports", None) or [])
+        if is_network_connector(p.get("connector"))
+    ]
+
+
+def network_devices(devices: Iterable[Any]) -> list[Any]:
+    """Every device carrying at least one Dante / network connector — the peer mesh of the Dante
+    domain (Phase E). Unlike ``console_input_devices`` this is NOT mixer-anchored: a Dante
+    stagebox, I/O rack, switch or laptop all appear, independently of whether a console is present,
+    because Dante/AVB/MADI routing is a device-to-device network concern, not console input
+    patching."""
+    return [d for d in devices if network_ports(d)]
+
+
 def socket_key(ref: dict | None) -> str | None:
     """Canonical key of a stored ``{device_id, port_id, socket}`` reference."""
     if not ref:

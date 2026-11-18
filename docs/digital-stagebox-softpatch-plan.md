@@ -125,7 +125,34 @@ passive-gear fallback in `fillFormFromSpecs` (`workspace.js:1375`).
 - Later convenience: a one-click "add to Dante network" that auto-inserts a network/switch
   node and links both ends. **Out of scope for the initial implementation.**
 
+> **Implemented (Phase D).** A one-click `POST /jobs/{job_id}/graph/network-join` endpoint
+> (`api/app/domains/graph/router.py`) auto-inserts a `network` switch node (kind `"network"`,
+> in/out `data` ports named after the endpoint's network connector) and links both ends through
+> it — or wires both ends to an existing switch when `network_device_id` is supplied. It tolerates
+> a legacy `audio` signal on the endpoints' network ports (a `signal_mismatch` is not blocking for
+> this endpoint, since it explicitly builds `data` edges over network connectors). The frontend
+> `NetworkPatchPanel.vue` exposes this as "Add to Dante network".
+
 ### 4.6 Later: separate Dante / network patch surface (Phase E, distinct from the mixer soft patch)
+
+> **Implemented (Phase E).** `NetworkPatchPanel.vue` is a job-level panel (mounted in
+> `JobWorkspacePage.vue`, *not* inside the mixer-only `ConsolePanel`, so it is reachable with or
+> without a console). It lists every device carrying a Dante / network connector
+> (`networkDevices` in `web/src/utils/workspace.js`, mirroring the backend
+> `app/domains/audio/console.py` `network_devices`), lets the user pick a transmitter → receiver
+> and either create a point-to-point `data` edge ("Connect directly") or run the Phase D
+> "Add to Dante network" convenience, and shows the existing network `data` links for removal.
+> The mixer soft patch (§2) remains the source of truth for *console input* patching; this panel
+> is the source of truth for *network flow* routing.
+>
+> **Signal convention (carried by this work).** A digital transport port (dSnake/Dante/AES50/AVB/
+> MADI) now carries link `signal` `"data"` (audio *over* the network fabric), while console
+> expansion cards (io_card/option_card/waves/other) stay `"audio"`. This is what lets Phase E
+> route Dante/network flows as `data` edges through `topology.validate_edge` (which rejects a
+> `data` edge into a port whose signal is neither `data` nor null), and `"data"` is still a feed
+> signal for the §2 stagebox walk. Imported devices (Phase C, `device_specs.py`) and the frontend
+> connector presets (`CONNECTOR_PRESETS` in `workspace.js`) both emit `"data"` for the network
+> transports.
 
 The §2 soft patch is **mixer-centric**: it answers "which physical sockets feed this
 console's strips." Dante (and other switched-network transports like AVB/MADI-over-IP) is
@@ -189,10 +216,11 @@ different mental models (console input patching vs. network routing). So Phase E
   connected-stagebox sockets are offered (camera/mic/DI absent).
 
 ## 7. Out of scope / follow-ups
-- One-click "add to Dante network" auto node (§4.5).
 - Treating wireless racks / audio interfaces with digital outs as **direct** soft-patch
   targets. Current decision: mixer + stageboxes only; other digital sources are modelled as
   upstream chain devices.
+- Venue-scoped `network-join` (the endpoint is job-scoped only, mirroring the job scope of the
+  mixer soft patch; a venue equivalent is a follow-up).
 - Adding `dsnake` to the backend connector doc list (`device_specs.py:10`) and
   `docs/stockwire-integration-spec.md` so Stockwire-side data stays consistent.
 
@@ -277,9 +305,11 @@ count: 48}`, but:
 - [x] **Phase B** — `dsnake` (+`avb`/`madi`) connector presets, bidirectional, multiple (§4.3)
       + dsnake test.
 - [x] **Phase C** — Stockwire mixer expansion ports into device specs (§4.4) + imported-mixer test. **Done.**
-- [ ] **Phase D** — easy-link / Dante convenience (§4.5, later).
-- [ ] **Phase E** — separate Dante / network patch surface, distinct from the mixer soft patch
-      (§4.6, later).
+- [x] **Phase D** — one-click "add to Dante network" (`network-join` endpoint) auto-inserts a
+      switch and links both ends (§4.5). **Done.**
+- [x] **Phase E** — separate Dante / network patch surface, distinct from the mixer soft patch
+      (§4.6): job-level `NetworkPatchPanel` lists every network-connector device and routes
+      transmitter → receiver as `data` edges. **Done.**
 
 ### stockwire-rental phases (§8)
 

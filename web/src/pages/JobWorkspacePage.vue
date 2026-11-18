@@ -700,6 +700,7 @@
             :update-edge="(id, changes) => graph.updateEdge(jobId, id, changes)"
             :delete-edge="(id) => graph.deleteEdge(jobId, id)"
           />
+          <NetworkPatchPanel :job-id="jobId" />
         </div>
       </div>
 
@@ -823,6 +824,7 @@ import {
 import ConflictDialog from '@/components/ConflictDialog.vue';
 import DeviceInspector from '@/components/DeviceInspector.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
+import NetworkPatchPanel from '@/components/NetworkPatchPanel.vue';
 import StockwireCatalogDrawer from '@/components/StockwireCatalogDrawer.vue';
 import ChannelListEditor from '@/components/ChannelListEditor.vue';
 import DeviceEditor from '@/components/DeviceEditor.vue';

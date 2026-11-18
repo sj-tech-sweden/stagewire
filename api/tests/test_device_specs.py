@@ -64,10 +64,10 @@ def test_mixer_expansion_ports_become_input_output_sockets():
         }
     }
     groups = product_connector_groups(product)
-    # dSnake carries both in and out sockets; io_card has no out channels so only in appears.
+    # dSnake (a network transport) carries data links; io_card is a local audio card -> audio.
     assert groups == [
-        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "audio"},
-        {"connector": "dsnake", "direction": "out", "count": 24, "signal": "audio"},
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "data"},
+        {"connector": "dsnake", "direction": "out", "count": 24, "signal": "data"},
         {"connector": "io_card", "direction": "in", "count": 8, "signal": "audio"},
     ]
 
@@ -85,9 +85,9 @@ def test_stagebox_digital_io_becomes_input_output_sockets():
     }
     groups = product_connector_groups(product)
     assert groups == [
-        {"connector": "dante", "direction": "in", "count": 64, "signal": "audio"},
-        {"connector": "dante", "direction": "out", "count": 64, "signal": "audio"},
-        {"connector": "avb", "direction": "out", "count": 16, "signal": "audio"},
+        {"connector": "dante", "direction": "in", "count": 64, "signal": "data"},
+        {"connector": "dante", "direction": "out", "count": 64, "signal": "data"},
+        {"connector": "avb", "direction": "out", "count": 16, "signal": "data"},
     ]
 
 
@@ -101,8 +101,8 @@ def test_expansion_and_stagebox_groups_combine_with_explicit_connectors():
     }
     assert product_connector_groups(product) == [
         {"connector": "xlr3", "direction": "in", "count": 8, "signal": None},
-        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "audio"},
-        {"connector": "dante", "direction": "out", "count": 32, "signal": "audio"},
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "data"},
+        {"connector": "dante", "direction": "out", "count": 32, "signal": "data"},
     ]
 
 

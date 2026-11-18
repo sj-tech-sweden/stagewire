@@ -93,3 +93,157 @@ async def test_effective_values_report_overrides_and_sources(auth_headers):
         assert values["input_count"] == 48 and values["input_source"] == "override"
         assert values["weight_kg_effective"] == 12 and values["weight_source"] == "manual"
         assert values["power_watts_effective"] == 300
+
+
+@pytest.mark.asyncio
+async def test_network_join_auto_inserts_switch_and_links(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dante(name, extra=None):
+            ports = [
+                {"id": "in-dante", "direction": "in", "signal": "data", "connector": "dante"},
+                {
+                    "id": "out-dante",
+                    "direction": "out",
+                    "signal": "data",
+                    "connector": "dante",
+                },
+            ]
+            if extra:
+                ports.append(extra)
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": "digital_stagebox",
+                    "attributes": {"device_type": "digital_stagebox"},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        a = (await dante("Stagebox A")).json()
+        b = (await dante("Stagebox B")).json()
+
+        res = await client.post(
+            f"{g}/network-join",
+            json={"a_device_id": a["id"], "b_device_id": b["id"], "name": "My Switch"},
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        body = res.json()
+        assert body["device"]["kind"] == "network"
+        assert body["device"]["name"] == "My Switch"
+        assert len(body["edges"]) == 2
+        # One edge leaves A (out) and one arrives at B (in), both over data.
+        assert {e["src_device_id"] for e in body["edges"]} == {a["id"], body["device"]["id"]}
+        assert {e["dst_device_id"] for e in body["edges"]} == {b["id"], body["device"]["id"]}
+        assert all(e["signal"] == "data" for e in body["edges"])
+
+        graph = (await client.get(g, headers=h)).json()
+        nets = [d for d in graph["devices"] if d["kind"] == "network"]
+        assert len(nets) == 1
+        assert len([e for e in graph["edges"] if e["signal"] == "data"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_network_join_rejects_device_without_network_connector(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        xlr = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "name": "Analog only",
+                    "domain": "audio",
+                    "kind": "analog_stagebox",
+                    "attributes": {"device_type": "analog_stagebox"},
+                    "ports": [{"id": "in-xlr", "direction": "in", "connector": "xlr3"}],
+                },
+                headers=h,
+            )
+        ).json()
+        dante = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "name": "Dante box",
+                    "domain": "audio",
+                    "kind": "digital_stagebox",
+                    "attributes": {"device_type": "digital_stagebox"},
+                    "ports": [
+                        {
+                            "id": "in-dante",
+                            "direction": "in",
+                            "signal": "data",
+                            "connector": "dante",
+                        },
+                        {
+                            "id": "out-dante",
+                            "direction": "out",
+                            "signal": "data",
+                            "connector": "dante",
+                        },
+                    ],
+                },
+                headers=h,
+            )
+        ).json()
+        res = await client.post(
+            f"{g}/network-join",
+            json={"a_device_id": xlr["id"], "b_device_id": dante["id"]},
+            headers=h,
+        )
+        assert res.status_code == 422, res.text
+
+
+@pytest.mark.asyncio
+async def test_network_join_tolerates_legacy_audio_signal_on_network_ports(auth_headers):
+    # Devices whose Dante ports were stored with the legacy `audio` signal (pre-normalisation)
+    # must still join: signal_mismatch is not a blocking issue for this endpoint.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def legacy_dante(name):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": "digital_stagebox",
+                    "attributes": {"device_type": "digital_stagebox"},
+                    "ports": [
+                        {
+                            "id": "in-dante",
+                            "direction": "in",
+                            "signal": "audio",
+                            "connector": "dante",
+                        },
+                        {
+                            "id": "out-dante",
+                            "direction": "out",
+                            "signal": "audio",
+                            "connector": "dante",
+                        },
+                    ],
+                },
+                headers=h,
+            )
+
+        a = (await legacy_dante("Legacy A")).json()
+        b = (await legacy_dante("Legacy B")).json()
+        res = await client.post(
+            f"{g}/network-join",
+            json={"a_device_id": a["id"], "b_device_id": b["id"]},
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        assert len(res.json()["edges"]) == 2

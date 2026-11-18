@@ -2399,4 +2399,23 @@ export default {
       "Exports the channel list inputs, outputs and channel names for loading onto a console or as a generic sheet.",
     fromList: "Channel list",
   },
+  networkPatch: {
+    title: "Dante / network patch",
+    help:
+      "Route Dante and other network transports (dSnake, AES50, AVB, MADI) device-to-device. This is the network flow surface, separate from the console soft patch: it lists every device carrying a network connector, not just what feeds the mixer.",
+    transmitter: "From (transmitter)",
+    receiver: "To (receiver)",
+    addToNetwork: "Add to Dante network",
+    addToNetworkHint:
+      "Inserts a Dante switch and links both ends through it — the one-click way to put two devices on a shared network.",
+    connectDirect: "Connect directly",
+    connectDirectHint: "Draws a point-to-point data link between the two devices.",
+    switchName: "Switch name",
+    empty: "No Dante / network devices yet. Add a device with a Dante, dSnake, AES50, AVB, MADI or Ethernet connector.",
+    existing: "Network links",
+    noLinks: "No network links yet.",
+    deleteLink: "Remove link",
+    needTwo: "Pick a transmitter and a receiver.",
+    sameDevice: "Pick two different devices.",
+  },
 };

@@ -330,6 +330,39 @@ export const isStagebox = (d) =>
   d.device_type === 'analog_stagebox';
 export const isMixerDevice = (d) => d.kind === 'mixer' || d.device_type === 'mixer';
 
+// Digital transports and the switched fabric they ride over that belong to the Dante / network
+// patch surface (Phase E) — *not* the mixer soft patch. dSnake/Dante/AES50/AVB/MADI are the network
+// transports; ethernet/ethercon are the point-to-point/network carriers. Kept in sync with the
+// backend vocabulary in app/domains/audio/console.py (NETWORK_CONNECTORS) so a port labelled as a
+// network connector on either side routes as a `data` edge.
+export const NETWORK_CONNECTORS = new Set([
+  'dsnake',
+  'dante',
+  'aes50',
+  'avb',
+  'madi',
+  'ethernet',
+  'ethercon',
+]);
+
+export const isNetworkConnector = (connector) =>
+  !!connector && NETWORK_CONNECTORS.has(String(connector).toLowerCase());
+
+// The device's ports that carry a Dante / network digital transport (transmitter/receiver capable).
+// A 'both' connector group is stored as two ports (one in, one out) with the same connector, so
+// this returns both the in and out sides.
+export function networkPorts(device) {
+  return (device?.ports || []).filter((p) => isNetworkConnector(p.connector));
+}
+
+// Every device carrying at least one Dante / network connector — the peer mesh of the Dante domain
+// (Phase E). Unlike the console soft patch this is NOT mixer-anchored: a Dante stagebox, I/O rack,
+// switch or laptop all appear, independently of whether a console is present, because Dante/AVB/MADI
+// routing is a device-to-device network concern, not console input patching.
+export function networkDevices(devices) {
+  return (devices || []).filter((d) => networkPorts(d).length);
+}
+
 // The stageboxes that reach a mixer, directly or indirectly: a stagebox patched into the mixer (or
 // one of its channels) with an audio cable, or through any chain of network gear (switches,
 // routers, computers) in between. The walk is undirected over audio/data edges, never expands into
@@ -925,16 +958,21 @@ export const CONNECTOR_CHOICES = [
 ];
 
 // One-tap additions for the connector editor. Adding one that already exists adds to its count.
+// The digital transports (Dante/dSnake/AES50/AVB/MADI) and the switched fabric (Ethernet) carry
+// audio *over* the network, so their link signal is `data` (not `audio`): that is what lets Phase E
+// route Dante/network flows as `data` edges and still be treated as a feed signal by the stagebox
+// walk. Adding `signal` here means a device built from a preset gets the right port signal without a
+// manual step.
 export const CONNECTOR_PRESETS = [
   { label: 'XLR ×8 in', connector: 'xlr3', direction: 'in', count: 8 },
   { label: 'XLR ×8 out', connector: 'xlr3', direction: 'out', count: 8 },
   { label: 'Speakon ×4 out', connector: 'speakon', direction: 'out', count: 4 },
-  { label: 'Dante', connector: 'dante', direction: 'both', count: 1 },
-  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: 1 },
-  { label: 'AES50', connector: 'aes50', direction: 'both', count: 1 },
-  { label: 'AVB', connector: 'avb', direction: 'both', count: 1 },
-  { label: 'MADI', connector: 'madi', direction: 'both', count: 1 },
-  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1 },
+  { label: 'Dante', connector: 'dante', direction: 'both', count: 1, signal: 'data' },
+  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: 1, signal: 'data' },
+  { label: 'AES50', connector: 'aes50', direction: 'both', count: 1, signal: 'data' },
+  { label: 'AVB', connector: 'avb', direction: 'both', count: 1, signal: 'data' },
+  { label: 'MADI', connector: 'madi', direction: 'both', count: 1, signal: 'data' },
+  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1, signal: 'data' },
   { label: 'SDI in', connector: 'sdi', direction: 'in', count: 1 },
   { label: 'SDI out', connector: 'sdi', direction: 'out', count: 1 },
   { label: 'HDMI in', connector: 'hdmi', direction: 'in', count: 1 },
@@ -954,7 +992,11 @@ export function addConnector(groups, preset) {
   const hit = groups.find(
     (g) => String(g.connector).toLowerCase() === key && g.direction === preset.direction,
   );
-  if (!hit) return [...groups, { direction: preset.direction, connector: key, count: preset.count }];
+  if (!hit)
+    return [
+      ...groups,
+      { direction: preset.direction, connector: key, count: preset.count, signal: preset.signal },
+    ];
   return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + preset.count } : g));
 }
 

@@ -49,6 +49,11 @@ DIRECTIONS = {
 }
 SIGNALS = {"audio", "video", "dmx", "power", "data"}
 
+# The digital transports that ride over a network fabric (as opposed to console expansion cards
+# like io_card/option_card/waves/other). A stagebox/mixer link on one of these carries audio *over*
+# the network, so its link signal is ``data``; console cards stay ``audio``.
+DIGITAL_TRANSPORTS = frozenset({"dsnake", "dante", "aes50", "avb", "madi"})
+
 
 def _expansion_connector_groups(ports: Any, in_key: str, out_key: str) -> list[dict]:
     """Turn structured digital links into connector groups.
@@ -58,7 +63,10 @@ def _expansion_connector_groups(ports: Any, in_key: str, out_key: str) -> list[d
     transport (dSnake / Dante / AES50 / AVB / MADI) carrying separate input and output channel
     counts. Each becomes an ``in`` group and/or an ``out`` group whose ``connector`` is the
     protocol, so an imported device actually gains those sockets (and the soft patch surfaces
-    them). Ports without a protocol, or with no channel count on a side, are skipped.
+    them). The link carries audio *over* the network fabric, so its link ``signal`` is ``data``
+    (not ``audio``): that is what lets Phase E route Dante/network flows as ``data`` edges and is
+    still treated as a feed signal by the stagebox walk. Ports without a protocol, or with no
+    channel count on a side, are skipped.
     """
     if not isinstance(ports, list):
         return []
@@ -71,13 +79,16 @@ def _expansion_connector_groups(ports: Any, in_key: str, out_key: str) -> list[d
             continue
         ch_in = _count(port.get(in_key))
         ch_out = _count(port.get(out_key))
+        # A console expansion card (io_card/option_card/waves/other) is a local audio link; only a
+        # network transport (dSnake/Dante/AES50/AVB/MADI) is a data-over-network link.
+        signal = "data" if protocol in DIGITAL_TRANSPORTS else "audio"
         if ch_in:
             groups.append(
-                {"connector": protocol, "direction": "in", "count": ch_in, "signal": "audio"}
+                {"connector": protocol, "direction": "in", "count": ch_in, "signal": signal}
             )
         if ch_out:
             groups.append(
-                {"connector": protocol, "direction": "out", "count": ch_out, "signal": "audio"}
+                {"connector": protocol, "direction": "out", "count": ch_out, "signal": signal}
             )
     return groups
 

@@ -2407,4 +2407,23 @@ export default {
       "Exporterar kanalListans ingångar, utgångar och kanalnamn för att laddas in på en mixer eller som ett generiskt blad.",
     fromList: "Kanallista",
   },
+  networkPatch: {
+    title: "Dante / nätverkspatch",
+    help:
+      "Rutta Dante och andra nätverkstransporter (dSnake, AES50, AVB, MADI) enhet till enhet. Detta är nätverksflödesytan, skild från mixerens mjukpatch: den listar varje enhet med en nätverkskontakt, inte bara det som matar mixern.",
+    transmitter: "Från (sändare)",
+    receiver: "Till (mottagare)",
+    addToNetwork: "Lägg till i Dante-nätverk",
+    addToNetworkHint:
+      "Sätter in en Dante-switch och kopplar båda ändarna genom den — det snabbaste sättet att lägga två enheter på ett delat nätverk.",
+    connectDirect: "Koppla direkt",
+    connectDirectHint: "Ritar en punkt-till-punkt-datalänk mellan de två enheterna.",
+    switchName: "Switchnamn",
+    empty: "Inga Dante-/nätverksenheter ännu. Lägg till en enhet med en Dante-, dSnake-, AES50-, AVB-, MADI- eller Ethernet-kontakt.",
+    existing: "Nätverkslänkar",
+    noLinks: "Inga nätverkslänkar ännu.",
+    deleteLink: "Ta bort länk",
+    needTwo: "Välj en sändare och en mottagare.",
+    sameDevice: "Välj två olika enheter.",
+  },
 };
