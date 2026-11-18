@@ -260,9 +260,11 @@ export const useGraphStore = defineStore('graph', {
     // Phase D/E follow-up: one-click quick-connect of a stagebox into the console over dSnake/Dante.
     // The server picks the stagebox network out port and the console network in port and creates a
     // `data` edge, which is what makes the stagebox appear in the console soft patch (the §2 walk).
-    async connectStagebox(jobId, stageboxId) {
+    async connectStagebox(jobId, stageboxId, options = {}) {
       const { data } = await api.post(`${baseFor(this, jobId)}/connect-stagebox`, {
         stagebox_id: stageboxId,
+        ...(options.stageboxPort ? { stagebox_port: options.stageboxPort } : {}),
+        ...(options.consolePort ? { console_port: options.consolePort } : {}),
       });
       this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: data.edge });
       return data;

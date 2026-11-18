@@ -15,7 +15,9 @@ class Port(BaseModel):
     connector: str | None = None
     channels: int | None = Field(default=None, ge=1)
     max_connections: int | None = Field(default=None, ge=1)
-    label: str = ""
+    # An interface name (e.g. "dSnake", "dSnake Expander"); a port without one has no label. The
+    # frontend sends null for those, so this must accept Optional rather than a bare str.
+    label: str | None = None
 
 
 class GraphDeviceBase(BaseModel):

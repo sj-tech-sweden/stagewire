@@ -1056,6 +1056,7 @@ export function portGroups(ports) {
       connector: p.connector || '',
       count: p.channels || 0,
       name: p.label || null,
+      signal: p.signal || null,
     }));
   const folded = [];
   const used = new Set();
@@ -1085,10 +1086,10 @@ export const expandGroups = (groups) =>
   groups.flatMap((g) =>
     g.direction === 'both'
       ? [
-          { ...g, direction: 'in', label: g.name || null },
-          { ...g, direction: 'out', label: g.name || null },
+          { ...g, direction: 'in', label: g.name || '' },
+          { ...g, direction: 'out', label: g.name || '' },
         ]
-      : [{ ...g, label: g.name || null }],
+      : [{ ...g, label: g.name || '' }],
   );
 
 // Graph ports for a set of connector groups, keeping the device's own generic ports as they are.
@@ -1107,7 +1108,7 @@ export function portsFromGroups(groups, existing, type) {
       signal: g.signal || signal,
       connector: g.connector ? g.connector.toLowerCase() : null,
       channels: g.count || null,
-      label: g.label || null,
+      label: g.label || '',
     };
   });
   return [...fromGroups, ...generic];

@@ -848,9 +848,11 @@
           …
         </div>
         <template v-else>
-          <!-- Quick-connect: link a stagebox into the console over its dSnake/Dante port with one tap.
-               Every stagebox that carries a network connector is listed, with its link state: linked
-               ones read "Linked", unlinked ones get a Connect button that wires them in. -->
+          <!-- Quick-connect: link a stagebox into the console over its dSnake/Dante port. Every
+               stagebox that carries a network connector is listed with its link state. Unlinked ones
+               let you pick exactly which stagebox output and console input to wire (so a console
+               with several interfaces — dSnake base + expander, or dSnake and Dante — links the
+               port you intend); linked ones read "Linked". -->
           <q-card
             v-if="stageboxLinkRows.length"
             flat
@@ -865,29 +867,57 @@
               <div class="text-caption text-grey-6">
                 {{ t('console.linkStageboxHint') }}
               </div>
-              <div class="row q-gutter-xs q-mt-xs items-center">
-                <template
+              <div class="column q-gutter-xs q-mt-xs">
+                <div
                   v-for="row in stageboxLinkRows"
                   :key="row.device.id"
+                  class="row q-gutter-xs items-center wrap"
                 >
                   <q-chip
-                    v-if="!row.connected"
-                    clickable
-                    :disable="!!connectingId"
-                    :icon="connectingId === row.device.id ? 'loop' : 'cable'"
-                    :label="row.device.name"
-                    data-testid="console-connect-stagebox"
-                    @click="connectStagebox(row.device.id)"
-                  />
-                  <q-chip
-                    v-else
+                    v-if="row.connected"
                     :icon="'link'"
                     :label="`${row.device.name} — ${t('console.stageboxLinked')}`"
                     color="positive"
                     text-color="white"
                     data-testid="console-stagebox-linked"
                   />
-                </template>
+                  <template v-else>
+                    <span class="text-body2 q-mr-xs">{{ row.device.name }}</span>
+                    <q-select
+                      v-model="linkSelections[row.device.id].src"
+                      :options="stageboxOutPorts(row.device)"
+                      :label="t('console.fromPort')"
+                      dense
+                      emit-value
+                      map-options
+                      class="col-12 col-sm-3"
+                      data-testid="console-stagebox-src-port"
+                    />
+                    <q-select
+                      v-model="linkSelections[row.device.id].dst"
+                      :options="consoleInPorts"
+                      :label="t('console.toPort')"
+                      dense
+                      emit-value
+                      map-options
+                      class="col-12 col-sm-3"
+                      data-testid="console-stagebox-dst-port"
+                    />
+                    <q-btn
+                      :disable="
+                        !!connectingId ||
+                        !linkSelections[row.device.id].src ||
+                        !linkSelections[row.device.id].dst
+                      "
+                      :icon="connectingId === row.device.id ? 'loop' : 'cable'"
+                      :label="t('console.connect')"
+                      color="primary"
+                      dense
+                      data-testid="console-connect-stagebox"
+                      @click="connectStagebox(row.device.id)"
+                    />
+                  </template>
+                </div>
               </div>
             </q-card-section>
           </q-card>
@@ -3535,11 +3565,59 @@ const stageboxLinkRows = computed(() =>
     .filter((d) => isStagebox(d) && networkPorts(d).length)
     .map((d) => ({ device: d, connected: connectedStageboxIds.value.has(d.id) })),
 );
+// The console/mixer this soft patch belongs to: its network input ports are the destinations a
+// stagebox can be linked to (so a console with several interfaces — dSnake base + expander, or
+// dSnake and Dante — can be wired to the exact one intended).
+const consoleDevice = computed(() => graph.devices.find((d) => isMixerDevice(d)) || null);
+// A human-readable option for a network port: connector + direction glyph + optional interface name.
+function portOption(p) {
+  const glyph = p.direction === "both" ? "↔" : p.direction === "out" ? "→" : "←";
+  const name = p.label || "";
+  return { label: `${String(p.connector || "?").toUpperCase()} ${glyph}${name ? ` ${name}` : ""}`, value: p.id };
+}
+// Network output ports on a stagebox (the sources a link can start from).
+function stageboxOutPorts(device) {
+  return networkPorts(device)
+    .filter((p) => p.direction === "out" || p.direction === "both")
+    .map(portOption);
+}
+// Network input ports on the console (the destinations a link can end at).
+const consoleInPorts = computed(() =>
+  networkPorts(consoleDevice.value || {})
+    .filter((p) => p.direction === "in" || p.direction === "both")
+    .map(portOption),
+);
+// Per-stagebox port choice (src = stagebox output, dst = console input). Defaults are seeded from the
+// auto-pick the server would use so the one-tap flow still works; the user can override either side.
+const linkSelections = reactive({});
+function defaultSelection(device) {
+  const outs = stageboxOutPorts(device);
+  const src = outs[0]?.value || null;
+  if (!src) return { src: null, dst: null };
+  const srcConn = (networkPorts(device).find((p) => p.id === src) || {}).connector;
+  const dst =
+    consoleInPorts.value.find((o) => {
+      const p = networkPorts(consoleDevice.value || {}).find((pp) => pp.id === o.value);
+      return p && p.connector === srcConn;
+    })?.value || consoleInPorts.value[0]?.value || null;
+  return { src, dst };
+}
+watch(
+  stageboxLinkRows,
+  (rows) => {
+    for (const row of rows) {
+      if (row.connected || linkSelections[row.device.id]) continue;
+      linkSelections[row.device.id] = defaultSelection(row.device);
+    }
+  },
+  { immediate: true },
+);
 const connectingId = ref(null);
 async function connectStagebox(id) {
+  const sel = linkSelections[id] || {};
   connectingId.value = id;
   try {
-    await graph.connectStagebox(props.jobId, id);
+    await graph.connectStagebox(props.jobId, id, { stageboxPort: sel.src, consolePort: sel.dst });
     await load(); // immediate soft-patch refresh so the new device's sockets show up at once
     $q.notify({ type: "positive", message: t("console.stageboxConnected") });
   } catch (err) {

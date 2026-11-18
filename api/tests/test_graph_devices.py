@@ -368,6 +368,149 @@ async def test_connect_stagebox_prefers_matching_console_interface(auth_headers)
 
 
 @pytest.mark.asyncio
+async def test_connect_stagebox_honours_explicit_ports(auth_headers):
+    # The user can override the auto-pick: choose a specific stagebox output (e.g. the expander) and a
+    # specific console input (e.g. the expander's dSnake in) and the link uses exactly those ports.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        mixer = (
+            await dev(
+                "GLD-80",
+                "mixer",
+                [
+                    {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
+                    {
+                        "id": "dsnake-exp-in",
+                        "direction": "in",
+                        "signal": "data",
+                        "connector": "dsnake",
+                        "label": "dSnake Expander",
+                    },
+                ],
+            )
+        ).json()
+        box = (
+            await dev(
+                "Stagebox",
+                "digital_stagebox",
+                [
+                    {"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"},
+                    {
+                        "id": "dsnake-exp-out",
+                        "direction": "out",
+                        "signal": "data",
+                        "connector": "dsnake",
+                        "label": "dSnake Expander",
+                    },
+                ],
+            )
+        ).json()
+
+        res = await client.post(
+            f"{g}/connect-stagebox",
+            json={
+                "stagebox_id": box["id"],
+                "stagebox_port": "dsnake-exp-out",
+                "console_port": "dsnake-exp-in",
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        edge = res.json()["edge"]
+        assert edge["src_port"] == "dsnake-exp-out"
+        assert edge["dst_port"] == "dsnake-exp-in"
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_rejects_bad_explicit_port(auth_headers):
+    # An explicit port that is not a real network port on the named device (or the wrong direction)
+    # is rejected with a clear message rather than silently mis-linked.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        mixer = (
+            await dev(
+                "GLD-80",
+                "mixer",
+                [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+        box = (
+            await dev(
+                "Stagebox",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+
+        res = await client.post(
+            f"{g}/connect-stagebox",
+            json={"stagebox_id": box["id"], "console_port": "does-not-exist"},
+            headers=h,
+        )
+        assert res.status_code == 422, res.text
+        assert "console_port" in res.text
+
+
+@pytest.mark.asyncio
+async def test_device_ports_accept_null_label(auth_headers):
+    # Most ports are unnamed, so the frontend sends label=null. The Port schema must accept that
+    # rather than rejecting the whole device with "Input should be a valid string" (label was a
+    # non-optional str). Regression guard for the stagebox-with-XLR-ports save 422.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        res = await client.post(
+            f"{g}/devices",
+            json={
+                "name": "Box",
+                "domain": "audio",
+                "kind": "digital_stagebox",
+                "attributes": {"device_type": "digital_stagebox"},
+                "ports": [
+                    {"id": "xlr-in", "direction": "in", "connector": "xlr3", "channels": 8, "label": None},
+                    {"id": "xlr-out", "direction": "out", "connector": "xlr3", "channels": 8, "label": None},
+                ],
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        assert all(p["label"] is None for p in res.json()["ports"])
+
+
+@pytest.mark.asyncio
 async def test_connect_stagebox_rejects_non_stagebox(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers

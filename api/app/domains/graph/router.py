@@ -623,12 +623,15 @@ async def join_network(
 class ConnectStageboxBody(BaseModel):
     """Link a stagebox into the console over its Dante / network connector (quick-connect).
 
-    Picks the stagebox's network ``out`` port and the console's network ``in`` port (falling back to
-    any network port) and creates a ``data`` edge, which is what makes the stagebox appear in the
-    console soft patch (the §2 walk).
+    When ``stagebox_port`` / ``console_port`` are omitted the server auto-picks a compatible network
+    pair (preferring a console port whose connector matches the stagebox's). Pass them to choose the
+    exact ports to link — useful when a console carries several interfaces (e.g. a dSnake base and a
+    dSnake expander, or dSnake and Dante) and the default is not the one you want.
     """
 
     stagebox_id: UUID
+    stagebox_port: str | None = None
+    console_port: str | None = None
 
 
 @router.post("/connect-stagebox", status_code=201)
@@ -658,12 +661,34 @@ async def connect_stagebox(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "The console has no Dante / network connector — add one (e.g. dSnake) first",
         )
-    src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
-    # Prefer a console port whose connector matches the stagebox's (dSnake stagebox -> dSnake
-    # console port, not a Dante one it also carries), so a compatible link is chosen automatically.
-    dst_port = _pick_network_port(mixer, "in", prefer=_port_connector(stagebox, src_port)) or (
-        _pick_network_port(mixer, None)
-    )
+    # An explicit stagebox port (a network output) wins; otherwise auto-pick a network out.
+    if body.stagebox_port:
+        sport = next(
+            (p for p in network_ports(stagebox) if p.get("id") == body.stagebox_port), None
+        )
+        if sport is None or sport.get("direction") not in ("out", "both"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "stagebox_port must name an output network port on the stagebox",
+            )
+        src_port = sport.get("id")
+    else:
+        src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
+    # Destination: an explicit console port (must be a network input) wins, else prefer a console
+    # port whose connector matches the stagebox's (dSnake stagebox -> dSnake console port, not a
+    # Dante one it also carries), so a compatible link is chosen automatically.
+    if body.console_port:
+        dport = next((p for p in mixer_net if p.get("id") == body.console_port), None)
+        if dport is None or dport.get("direction") not in ("in", "both"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "console_port must name an input network port on the console",
+            )
+        dst_port = dport.get("id")
+    else:
+        dst_port = _pick_network_port(mixer, "in", prefer=_port_connector(stagebox, src_port)) or (
+            _pick_network_port(mixer, None)
+        )
     edge_dict = {
         "signal": "data",
         "src_device_id": stagebox.id,
