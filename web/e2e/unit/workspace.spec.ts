@@ -1695,3 +1695,11 @@ test('the socket grid carries the routed strip name, and a stereo bus socket say
   const bus = { mode: 'stereo', out_endpoints: [{ side: 'L', refs: [{ socket: 3 }] }, { refs: [{ socket: 5 }] }] };
   expect(endpointShortages(bus)).toHaveLength(1);
 });
+
+
+test('an LCR endpoint reads L, C, R in socket order', async () => {
+  const { endpointSides } = await import('../../src/utils/workspace');
+  const refs = [5, 6, 7].map((socket) => ({ device_id: 'd', port_id: 'out', socket }));
+  expect(endpointSides({ refs }, 'lcr')).toBe('L 5, C 6, R 7');
+  expect(endpointSides({ refs: refs.slice(0, 2) }, 'stereo')).toBe('L 5, R 6');
+});

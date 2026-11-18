@@ -646,14 +646,14 @@ async def assign_output_endpoints(
     """Set the physical endpoints a bus leaves from; ``None`` / ``[]`` clears them.
 
     An endpoint is a list of refs, or ``{"refs": [...], "side": "L"|"R"|"C"}``. A ``side`` endpoint
-    is *one* socket carrying just that part of a stereo (L, R) or LCR (L, R, C) bus (e.g. only the
+    is *one* socket carrying just that part of a stereo (L, R) or LCR (L, C, R) bus (e.g. only the
     left, into a mono monitor send); it is stored as ``{"id", "refs": [one ref], "side"}``.
     Without ``append`` a side endpoint replaces only the endpoints already on that side, so the
     left and the right can be patched one after the other without the second wiping the first.
 
     A bus may leave from several places (main to FOH *and* to a recording box), so it holds a list
     of endpoints. Each endpoint is one socket for a mono bus, two (L, R) for stereo, three
-    (L, R, C) for LCR; given only its first socket the rest follow on the same port. Sockets must be
+    (L, C, R) for LCR; given only its first socket the rest follow on the same port. Sockets must be
     real output sockets and are exclusive: used once by one bus endpoint or one direct out. With
     ``append`` the endpoints are added to the existing ones instead of replacing them. The bus's
     output chain is kept in step (``sync_output_to_chain``).

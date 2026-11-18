@@ -1266,11 +1266,11 @@ def validate_expansion(profile: MixerProfile | None, installed: list[dict]) -> l
 
 BUS_WIDTH = {"mono": 1, "stereo": 2, "lcr": 3}
 # the parts of a multi-channel bus that can be routed on their own (mono has none)
-BUS_SIDES = {"stereo": ("L", "R"), "lcr": ("L", "R", "C")}
+BUS_SIDES = {"stereo": ("L", "R"), "lcr": ("L", "C", "R")}
 
 
 def bus_width(mode: str | None) -> int:
-    """Sockets one bus endpoint needs: mono 1, stereo 2 (L, R), LCR 3 (L, R, C)."""
+    """Sockets one bus endpoint needs: mono 1, stereo 2 (L, R), LCR 3 (L, C, R, in that order)."""
     return BUS_WIDTH.get(str(mode or "mono"), 1)
 
 
@@ -1447,7 +1447,7 @@ def endpoint_keys(endpoint: dict) -> list[str]:
 
 
 def endpoint_side(endpoint: dict, key: str) -> str | None:
-    """Which half ("L", "R", "C") of the bus the socket ``key`` carries; ``None`` for a mono bus.
+    """Which part ("L", "R", "C") of the bus the socket ``key`` carries; ``None`` for a mono bus.
 
     A one-sided endpoint stores its ``side``; a full stereo / LCR endpoint is L, R (, C) in ref
     order. A single-ref endpoint without a ``side`` is a mono bus's output (no side).
@@ -1457,7 +1457,7 @@ def endpoint_side(endpoint: dict, key: str) -> str | None:
     refs = endpoint.get("refs") or []
     if len(refs) < 2:
         return None
-    for ref, side in zip(refs, ("L", "R", "C"), strict=False):
+    for ref, side in zip(refs, ("L", "C", "R"), strict=False):
         if socket_key(ref) == key:
             return side
     return None

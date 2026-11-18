@@ -2091,7 +2091,7 @@ export function autoPatchBody(field, ids, port, { start = 1, skip = true, dry = 
 // L, R) or 3 (LCR). The server claims the following sockets when it is given only the first one.
 export const BUS_WIDTH = { mono: 1, stereo: 2, lcr: 3 };
 export const busWidth = (mode) => BUS_WIDTH[mode] || 1;
-const SIDES = { 1: [''], 2: ['L', 'R'], 3: ['L', 'R', 'C'] };
+const SIDES = { 1: [''], 2: ['L', 'R'], 3: ['L', 'C', 'R'] };
 
 // "3–4" for adjacent sockets, "3 / 7" otherwise.
 export function socketRunText(sockets) {
