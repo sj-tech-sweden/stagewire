@@ -148,9 +148,9 @@ def validate_edge(
         add("unknown_port", f"{dst['name']} has no port {edge['dst_port']!r}")
     if sport is None or dport is None:
         return issues
-    if sport.get("direction") != "out":
+    if sport.get("direction") not in ("out", "both"):
         add("direction", f"{src['name']}:{sport['id']} is not an output")
-    if dport.get("direction") != "in":
+    if dport.get("direction") not in ("in", "both"):
         add("direction", f"{dst['name']}:{dport['id']} is not an input")
     for port, owner in ((sport, src), (dport, dst)):
         if port.get("signal") and port["signal"] != edge["signal"]:

@@ -340,3 +340,32 @@ async def test_connect_stagebox_rejects_non_stagebox(auth_headers):
         ).json()
         res = await client.post(f"{g}/connect-stagebox", json={"stagebox_id": mic["id"]}, headers=h)
         assert res.status_code == 422, res.text
+
+
+def test_validate_edge_accepts_bidirectional_both_port():
+    # A 'both' transport port is an input AND an output, so it may sit at either end of an edge.
+    from app.domains.graph import topology
+
+    src = {
+        "name": "Box",
+        "id": "b",
+        "ports": [{"id": "dsnake", "direction": "both", "connector": "dsnake", "signal": "data"}],
+    }
+    dst = {
+        "name": "Mixer",
+        "id": "m",
+        "ports": [{"id": "dsnake", "direction": "both", "connector": "dsnake", "signal": "data"}],
+    }
+    issues = topology.validate_edge(
+        {
+            "signal": "data",
+            "src_device_id": "b",
+            "src_port": "dsnake",
+            "dst_device_id": "m",
+            "dst_port": "dsnake",
+        },
+        src,
+        dst,
+        [],
+    )
+    assert not any(i.code == "direction" for i in issues)
