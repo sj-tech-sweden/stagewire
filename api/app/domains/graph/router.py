@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio import wwb_store
-from app.domains.audio.console import network_ports
+from app.domains.audio.console import (
+    is_mixer_device,
+    is_stagebox,
+    network_ports,
+)
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
@@ -570,18 +574,17 @@ async def join_network(
             [_as_dict(e) for e in existing],
         )
         # A `signal_mismatch` here only means the endpoint's network port was stored with the legacy
-        # `audio` signal (pre-normalisation) — the join explicitly builds a `data` edge over a network
-        # connector, so that stale signal is exactly what this endpoint is migrating away from. Real
-        # shape errors (missing/unknown port, wrong direction, incompatible connector) still block.
+        # `audio` signal (pre-normalisation) — the join explicitly builds a `data` edge over a
+        # network connector, so that stale signal is exactly what this endpoint migrates away from.
+        # Real shape errors (missing/unknown port, wrong direction, incompatible connector)
+        # still block.
         blocking = [i for i in issues if i.code != "signal_mismatch"]
         if blocking:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={
                     "code": "invalid_connection",
-                    "issues": [
-                        schemas.IssueRead(**vars(i)).model_dump() for i in blocking
-                    ],
+                    "issues": [schemas.IssueRead(**vars(i)).model_dump() for i in blocking],
                 },
             )
         edge = ConnectionEdge(job_id=job_id, **edge_dict)
@@ -595,6 +598,82 @@ async def join_network(
     if created_device is not None:
         await publish_job_event(job_id, "graph.device.upsert", created_device)
     return {"device": created_device, "edges": new_edges}
+
+
+class ConnectStageboxBody(BaseModel):
+    """Link a stagebox into the console over its Dante / network connector (quick-connect).
+
+    Picks the stagebox's network ``out`` port and the console's network ``in`` port (falling back to
+    any network port) and creates a ``data`` edge, which is what makes the stagebox appear in the
+    console soft patch (the §2 walk).
+    """
+
+    stagebox_id: UUID
+
+
+@router.post("/connect-stagebox", status_code=201)
+async def connect_stagebox(
+    job_id: UUID,
+    body: ConnectStageboxBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Phase D/E follow-up: one click to wire a stagebox into the console over dSnake/Dante."""
+    stagebox = await _device(db, job_id, body.stagebox_id)
+    if not is_stagebox(stagebox):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The target must be a stagebox")
+    if not network_ports(stagebox):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The stagebox must carry a Dante / network connector",
+        )
+    devices = await _all_devices(db, job_id)
+    mixer = next((d for d in devices if is_mixer_device(d)), None)
+    if mixer is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "No console/mixer device to connect to"
+        )
+    mixer_net = network_ports(mixer)
+    if not mixer_net:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The console has no Dante / network connector — add one (e.g. dSnake) first",
+        )
+    src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
+    dst_port = _pick_network_port(mixer, "in") or _pick_network_port(mixer, None)
+    edge_dict = {
+        "signal": "data",
+        "src_device_id": stagebox.id,
+        "src_port": src_port,
+        "dst_device_id": mixer.id,
+        "dst_port": dst_port,
+        "channels": 1,
+    }
+    existing = list(await _all_edges(db, job_id))
+    if topology.would_create_cycle(
+        [_as_dict(e) for e in existing if getattr(e, "signal", None) == "data"],
+        str(stagebox.id),
+        str(mixer.id),
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Connection would form a loop")
+    issues = topology.validate_edge(
+        edge_dict, _as_dict(stagebox), _as_dict(mixer), [_as_dict(e) for e in existing]
+    )
+    blocking = [i for i in issues if i.code != "signal_mismatch"]
+    if blocking:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_connection",
+                "issues": [schemas.IssueRead(**vars(i)).model_dump() for i in blocking],
+            },
+        )
+    edge = ConnectionEdge(job_id=job_id, **edge_dict)
+    db.add(edge)
+    await db.commit()
+    await db.refresh(edge)
+    payload = schemas.ConnectionEdgeRead.model_validate(edge).model_dump(mode="json")
+    await publish_job_event(job_id, "graph.edge.upsert", payload)
+    return {"edge": payload}
 
 
 @router.patch("/edges/{edge_id}", response_model=schemas.ConnectionEdgeRead)

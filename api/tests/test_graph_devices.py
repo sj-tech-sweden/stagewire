@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -247,3 +249,94 @@ async def test_network_join_tolerates_legacy_audio_signal_on_network_ports(auth_
         )
         assert res.status_code == 201, res.text
         assert len(res.json()["edges"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_links_over_dante_and_makes_it_reachable(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        mixer = (
+            await dev(
+                "GLD-80",
+                "mixer",
+                [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+        box = (
+            await dev(
+                "Stagebox",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+
+        res = await client.post(f"{g}/connect-stagebox", json={"stagebox_id": box["id"]}, headers=h)
+        assert res.status_code == 201, res.text
+        edge = res.json()["edge"]
+        assert edge["signal"] == "data"
+        assert edge["src_device_id"] == box["id"]
+        assert edge["dst_device_id"] == mixer["id"]
+
+        # The stagebox is now reachable from the mixer over the data edge (the §2 walk).
+        from app.domains.audio import console
+
+        edges = (await client.get(g, headers=h)).json()["edges"]
+        edge_rows = [
+            SimpleNamespace(
+                signal=e["signal"],
+                src_device_id=e["src_device_id"],
+                dst_device_id=e["dst_device_id"],
+            )
+            for e in edges
+        ]
+        mixer_row = SimpleNamespace(
+            id=mixer["id"], kind="mixer", name="GLD-80", attributes={}, ports=mixer["ports"]
+        )
+        box_row = SimpleNamespace(
+            id=box["id"],
+            kind="digital_stagebox",
+            name="Stagebox",
+            attributes={},
+            ports=box["ports"],
+        )
+        reached = console.feedingStageboxes(mixer_row, [mixer_row, box_row], edge_rows)
+        assert any(console.is_stagebox(d) for d in reached)
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_rejects_non_stagebox(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        mic = (
+            await client.post(
+                f"{g}/devices",
+                json={
+                    "name": "Mic",
+                    "domain": "audio",
+                    "kind": "other",
+                    "attributes": {"device_type": "other"},
+                    "ports": [],
+                },
+                headers=h,
+            )
+        ).json()
+        res = await client.post(f"{g}/connect-stagebox", json={"stagebox_id": mic["id"]}, headers=h)
+        assert res.status_code == 422, res.text

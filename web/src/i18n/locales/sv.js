@@ -1019,6 +1019,11 @@ export default {
     splitSocketInfo: "Uttag {n} matar {who}.",
     sharesSocket: "delar uttag med {who}",
     splitTabHint: "Ett ingångsuttag kan mata flera kanaler (en splittad källa): använd en andra kanal för samma källa när FOH och monitor behöver separat bearbetning.",
+    unconnectedStageboxesTitle: "Koppla en stagebox",
+    unconnectedStageboxesHint:
+      "Dessa stageboxar har en dSnake/Dante-port men är inte kopplade till konsolen än. Koppla en så dyker dess in- och utgångar upp i patchen direkt.",
+    stageboxConnected: "Stagebox inkopplad — dess uttag finns nu i patchen.",
+    stageboxConnectFailed: "Kunde inte koppla stageboxen.",
     pickerChoose: "Välj…",
     pickerMore: "+{n} till",
     pickerGroup: "Instrumentgrupp",
@@ -2156,6 +2161,8 @@ export default {
     port: "Port",
     count: "Antal",
     addPort: "Lägg till port",
+    interfaceName: "Gränssnittsnamn",
+    interfaceNameHint: "Namnge denna digitala transport (t.ex. ”dSnake”, ”dSnake Expander”). Namnet etiketterar dess kanaler i patchen istället för en generisk port.",
     physicalHint:
       "Vikt och effekt används för riggning och strömplanering. Ett värde från Stockwire ersätter det som anges här.",
     weight: "Vikt (kg)",

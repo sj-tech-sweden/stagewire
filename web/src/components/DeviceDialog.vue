@@ -158,9 +158,18 @@
           />
           <ConnectorSelect
             v-model="port.connector"
-            class="col-5 col-sm-5"
+            class="col-4 col-sm-4"
             :label="t('channels.patchPoint.connector')"
             data-testid="port-connector"
+          />
+          <q-input
+            v-model="port.name"
+            class="col-4 col-sm-3"
+            dense
+            outlined
+            :label="t('devices.interfaceName')"
+            :hint="isNetworkConnector(port.connector) ? t('devices.interfaceNameHint') : null"
+            data-testid="port-name"
           />
           <q-input
             v-model.number="port.count"
@@ -187,7 +196,7 @@
           icon="add"
           :label="t('devices.addPort')"
           data-testid="add-port"
-          @click="form.ports.push({ direction: 'in', connector: '', count: 1 })"
+          @click="form.ports.push({ direction: 'in', connector: '', count: 1, name: null })"
         />
 
         <div class="row q-col-gutter-sm q-mt-md">

@@ -2942,6 +2942,7 @@ async def test_talkback_presets_and_tap_points_round_trip(auth_headers):
 
 # --- Dante / network patch domain (Phase E) ---------------------------------------------------
 
+
 def _ndev(kind, ports, **attrs):
     return SimpleNamespace(id=kind, kind=kind, name=kind, attributes=attrs, ports=ports)
 
@@ -2978,3 +2979,53 @@ def test_is_network_connector_vocabulary():
     assert console.is_network_connector("ethernet")
     assert not console.is_network_connector("xlr3")
     assert not console.is_network_connector(None)
+
+
+def test_audio_sockets_excludes_unconfigured_network_port_but_keeps_channels():
+    # A dSnake port with no channel count is the link, not a socket: it must not appear. Once it
+    # carries an explicit channel count it yields per-channel sockets (the real I/O over the link).
+    dev = SimpleNamespace(
+        id="sb",
+        kind="digital_stagebox",
+        name="SB",
+        attributes={},
+        ports=[
+            {"id": "dsnake-both", "direction": "both", "connector": "dsnake", "channels": None},
+            {"id": "xlr-in", "direction": "in", "connector": "xlr3", "channels": 4},
+        ],
+    )
+    sockets = console.audio_sockets([dev])
+    keys = {(s["port_id"], s["socket"]) for s in sockets}
+    # the unconfigured dSnake port contributes nothing; the XLR port yields 4 sockets
+    assert ("dsnake-both", 1) not in keys
+    assert {("xlr-in", n) for n in range(1, 5)} <= keys
+
+
+def test_audio_sockets_channelises_configured_network_port():
+    dev = SimpleNamespace(
+        id="gld",
+        kind="mixer",
+        name="GLD-80",
+        attributes={},
+        ports=[
+            {
+                "id": "dsnake-in",
+                "direction": "in",
+                "connector": "dsnake",
+                "channels": 32,
+                "label": "dSnake",
+            },
+            {
+                "id": "dsnake-out",
+                "direction": "out",
+                "connector": "dsnake",
+                "channels": 16,
+                "label": "dSnake",
+            },
+        ],
+    )
+    sockets = console.audio_sockets([dev])
+    ins = [s for s in sockets if s["direction"] == "in"]
+    outs = [s for s in sockets if s["direction"] == "out"]
+    assert len(ins) == 32 and len(outs) == 16
+    assert all(s["port_label"] == "dSnake" for s in sockets)

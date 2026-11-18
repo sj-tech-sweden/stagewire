@@ -789,6 +789,14 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
     (stagebox, wireless rack, Dante card, the console itself) contributes sockets, so adding or
     hot-swapping a stagebox makes its sockets appear here with no extra step. A port group with
     ``channels`` = 24 yields sockets 1..24. Channel/output/list nodes are logical, not hardware.
+
+    Network transports (dSnake/Dante/AES50/AVB/MADI) are the *basis* of the soft patch — the §2
+    walk over audio/data edges decides which stageboxes are in scope — but a transport port is
+    **not** itself a patch socket. It only contributes per-channel sockets when it carries an
+    explicit channel count (the real I/O carried over the link, e.g. dSnake In 1–32 / Out 1–16). An
+    unconfigured transport port (no count) is purely the link and yields no socket, so you can never
+    assign a console strip to "the dSnake port itself"; you pick a specific channel that maps to the
+    linked stagebox's input/output.
     """
     sockets: list[dict] = []
     for device in devices:
@@ -803,17 +811,26 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
             # filters by direction, so the signal check here is unnecessary.
             if port.get("signal") == "power":
                 continue
+            connector = port.get("connector")
+            if is_network_connector(connector):
+                # A transport port is the link, not a socket: only its explicit channel slots are
+                # patchable. An unconfigured transport (no count) yields nothing here.
+                count = port.get("channels")
+                if not count:
+                    continue
+            else:
+                count = port.get("channels") or 1
             direction = port.get("direction") or "in"
-            count = port.get("channels") or 1
             for index in range(1, int(count) + 1):
                 sockets.append(
                     {
                         "device_id": str(device.id),
                         "device_name": device.name,
                         "port_id": port.get("id"),
+                        "port_label": port.get("label") or None,
                         "socket": index,
                         "direction": direction,
-                        "connector": port.get("connector"),
+                        "connector": connector,
                         "key": f"{device.id}:{port.get('id')}:{index}",
                     }
                 )
@@ -929,9 +946,7 @@ def console_input_devices(
 # patch surface (Phase E) — *not* the mixer soft patch. dSnake/Dante/AES50/AVB/MADI are the
 # digital transports; ethernet/ethercon are the point-to-point/network carriers. Kept as a
 # frozenset so it can be imported unchanged by the graph router's network-join endpoint.
-NETWORK_CONNECTORS = frozenset(
-    {"dsnake", "dante", "aes50", "avb", "madi", "ethernet", "ethercon"}
-)
+NETWORK_CONNECTORS = frozenset({"dsnake", "dante", "aes50", "avb", "madi", "ethernet", "ethercon"})
 
 
 def is_network_connector(connector: str | None) -> bool:

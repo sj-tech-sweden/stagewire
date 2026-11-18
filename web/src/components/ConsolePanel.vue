@@ -848,6 +848,37 @@
           …
         </div>
         <template v-else>
+          <!-- Quick-connect: link a stagebox into the console over its dSnake/Dante port with one tap.
+               The stagebox only appears in this list while it has a network connector but no data edge
+               to the console; once connected the open soft patch refreshes immediately. -->
+          <q-card
+            v-if="unconnectedStageboxes.length"
+            flat
+            bordered
+            class="q-mb-md"
+            data-testid="console-unconnected-stageboxes"
+          >
+            <q-card-section class="q-py-sm">
+              <div class="text-subtitle2">
+                {{ t('console.unconnectedStageboxesTitle') }}
+              </div>
+              <div class="text-caption text-grey-6">
+                {{ t('console.unconnectedStageboxesHint') }}
+              </div>
+              <div class="row q-gutter-xs q-mt-xs">
+                <q-chip
+                  v-for="sb in unconnectedStageboxes"
+                  :key="sb.id"
+                  clickable
+                  :disable="!!connectingId"
+                  :icon="connectingId === sb.id ? 'loop' : 'cable'"
+                  :label="sb.name"
+                  data-testid="console-connect-stagebox"
+                  @click="connectStagebox(sb.id)"
+                />
+              </div>
+            </q-card-section>
+          </q-card>
           <div class="row items-center q-gutter-sm q-mb-sm">
             <q-btn-toggle
               v-model="patchMode"
@@ -924,9 +955,9 @@
                     @click="selectPort(p)"
                   >
                     <q-item-section>
-                      <q-item-label>{{ p.connector || p.port_id }}</q-item-label>
+                      <q-item-label>{{ p.label || p.connector || p.port_id }}</q-item-label>
                       <q-item-label caption>
-                        {{ p.port_id }}
+                        {{ p.label ? `${p.connector || p.port_id}` : p.port_id }}
                       </q-item-label>
                     </q-item-section>
                     <q-item-section side>
@@ -2546,6 +2577,9 @@ import {
   fxIsConfigured,
   fxResetEngine,
   groupPortsByDevice,
+  isMixerDevice,
+  isStagebox,
+  networkPorts,
   idsInRanges,
   invertIds,
   moveFaderStrip,
@@ -3465,6 +3499,44 @@ const targetPrefix = computed(() => (patchMode.value === "bus" ? t("console.mixS
 const portGroups = computed(() => groupPortsByDevice(soft.value?.ports, isOutMode.value ? "out" : "in"));
 const allPorts = computed(() => portGroups.value.flatMap((g) => g.ports));
 const selPort = computed(() => allPorts.value.find((p) => portKey(p) === selPortKey.value) || null);
+// Stageboxes reachable over the graph: which ids already have a `data` edge to/from the console.
+const deviceById = computed(() => new Map(graph.devices.map((d) => [d.id, d])));
+const connectedStageboxIds = computed(() => {
+  const set = new Set();
+  for (const e of graph.edges) {
+    if (e.signal !== "data") continue;
+    const s = deviceById.value.get(e.src_device_id);
+    const d = deviceById.value.get(e.dst_device_id);
+    if (s && d) {
+      if (isStagebox(s) && isMixerDevice(d)) set.add(s.id);
+      if (isStagebox(d) && isMixerDevice(s)) set.add(d.id);
+    }
+  }
+  return set;
+});
+// Quick-connect targets: stageboxes that carry a network (dSnake/Dante/...) connector but are not
+// yet linked into the console. Connecting one wires it in and the open soft patch refreshes at once.
+const unconnectedStageboxes = computed(() =>
+  graph.devices.filter(
+    (d) => isStagebox(d) && networkPorts(d).length && !connectedStageboxIds.value.has(d.id),
+  ),
+);
+const connectingId = ref(null);
+async function connectStagebox(id) {
+  connectingId.value = id;
+  try {
+    await graph.connectStagebox(props.jobId, id);
+    await load(); // immediate soft-patch refresh so the new device's sockets show up at once
+    $q.notify({ type: "positive", message: t("console.stageboxConnected") });
+  } catch (err) {
+    $q.notify({
+      type: "negative",
+      message: t("console.stageboxConnectFailed"),
+    });
+  } finally {
+    connectingId.value = null;
+  }
+}
 const channelNumbers = computed(() => new Map(softStrips.value.map((c) => [c.id, c.channel_number])));
 // buses look like channels to the shared list code: a number (their order), a name, their socket
 const softBusStrips = computed(() =>

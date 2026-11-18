@@ -967,12 +967,15 @@ export const CONNECTOR_PRESETS = [
   { label: 'XLR ×8 in', connector: 'xlr3', direction: 'in', count: 8 },
   { label: 'XLR ×8 out', connector: 'xlr3', direction: 'out', count: 8 },
   { label: 'Speakon ×4 out', connector: 'speakon', direction: 'out', count: 4 },
-  { label: 'Dante', connector: 'dante', direction: 'both', count: 1, signal: 'data' },
-  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: 1, signal: 'data' },
-  { label: 'AES50', connector: 'aes50', direction: 'both', count: 1, signal: 'data' },
-  { label: 'AVB', connector: 'avb', direction: 'both', count: 1, signal: 'data' },
-  { label: 'MADI', connector: 'madi', direction: 'both', count: 1, signal: 'data' },
-  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1, signal: 'data' },
+  // Digital transports are the *basis* of the soft patch, not a socket: a transport preset starts
+  // as an unconfigured link (count null) with no patchable socket. The user sets the channel count
+  // (and an optional name like "dSnake" / "dSnake Expander") so the per-channel sockets appear.
+  { label: 'Dante', connector: 'dante', direction: 'both', count: null, signal: 'data' },
+  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: null, signal: 'data' },
+  { label: 'AES50', connector: 'aes50', direction: 'both', count: null, signal: 'data' },
+  { label: 'AVB', connector: 'avb', direction: 'both', count: null, signal: 'data' },
+  { label: 'MADI', connector: 'madi', direction: 'both', count: null, signal: 'data' },
+  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: null, signal: 'data' },
   { label: 'SDI in', connector: 'sdi', direction: 'in', count: 1 },
   { label: 'SDI out', connector: 'sdi', direction: 'out', count: 1 },
   { label: 'HDMI in', connector: 'hdmi', direction: 'in', count: 1 },
@@ -987,17 +990,29 @@ export const connectorLabel = (value) =>
   CONNECTOR_CHOICES.find((c) => c.value === String(value || '').toLowerCase())?.label || value || '';
 
 // Add a preset to a list of groups: bump the count of the same connector and direction, else append.
+// Named groups (e.g. a "dSnake" base and a "dSnake Expander") are never merged, so the user can
+// model several physical connections that share a connector.
 export function addConnector(groups, preset) {
   const key = String(preset.connector).toLowerCase();
   const hit = groups.find(
-    (g) => String(g.connector).toLowerCase() === key && g.direction === preset.direction,
+    (g) =>
+      String(g.connector).toLowerCase() === key &&
+      g.direction === preset.direction &&
+      !g.name &&
+      !preset.name,
   );
   if (!hit)
     return [
       ...groups,
-      { direction: preset.direction, connector: key, count: preset.count, signal: preset.signal },
+      {
+        direction: preset.direction,
+        connector: key,
+        count: preset.count,
+        signal: preset.signal,
+        name: preset.name || undefined,
+      },
     ];
-  return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + preset.count } : g));
+  return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + (preset.count || 0) } : g));
 }
 
 // Connector groups the editor shows: the ports that carry a connector or a channel count, with a
@@ -1005,7 +1020,12 @@ export function addConnector(groups, preset) {
 export function portGroups(ports) {
   const groups = (ports || [])
     .filter((p) => p.connector || p.channels)
-    .map((p) => ({ direction: p.direction, connector: p.connector || '', count: p.channels || 0 }));
+    .map((p) => ({
+      direction: p.direction,
+      connector: p.connector || '',
+      count: p.channels || 0,
+      name: p.label || null,
+    }));
   const folded = [];
   const used = new Set();
   groups.forEach((g, i) => {
@@ -1029,14 +1049,15 @@ export function portGroups(ports) {
 }
 
 // Groups as plain in/out groups (a 'both' group becomes two), the form the create endpoint takes.
+// The interface `name` is carried as `label` so the resulting ports/soft-patch sockets are named.
 export const expandGroups = (groups) =>
   groups.flatMap((g) =>
     g.direction === 'both'
       ? [
-          { ...g, direction: 'in' },
-          { ...g, direction: 'out' },
+          { ...g, direction: 'in', label: g.name || null },
+          { ...g, direction: 'out', label: g.name || null },
         ]
-      : [g],
+      : [{ ...g, label: g.name || null }],
   );
 
 // Graph ports for a set of connector groups, keeping the device's own generic ports as they are.
@@ -1055,6 +1076,7 @@ export function portsFromGroups(groups, existing, type) {
       signal: g.signal || signal,
       connector: g.connector ? g.connector.toLowerCase() : null,
       channels: g.count || null,
+      label: g.label || null,
     };
   });
   return [...fromGroups, ...generic];

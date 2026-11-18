@@ -529,6 +529,7 @@ async def get_soft_patch(job_id: UUID, list_id: UUID, db: AsyncSession = Depends
                 "port_id": socket["port_id"],
                 "direction": socket["direction"],
                 "connector": socket["connector"],
+                "label": socket.get("port_label") or None,
                 "channels": 0,
             },
         )

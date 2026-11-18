@@ -178,6 +178,45 @@ different mental models (console input patching vs. network routing). So Phase E
   to. A Dante flow that ultimately lands on a console input still shows up in §2 as that
   console's input; Phase E records the *network* leg separately.
 
+### 4.7 dSnake is the basis, not a socket; named channel layouts (implemented)
+
+This closes the gap the user flagged: a dSnake (or Dante/AES50/AVB/MADI) *port* must never
+appear as one generic, assignable socket — you assign a console strip to a specific *channel*
+that maps to the linked stagebox's input/output, not "to the dSnake port itself."
+
+- **Backend `audio_sockets` (`api/app/domains/audio/console.py`).** A network-transport port is
+  the *link*, not a socket. It contributes per-channel sockets **only** when it carries an
+  explicit `channels` count — the real I/O over the link (e.g. dSnake In 1–32 / Out 1–16). An
+  *unconfigured* transport port (no count) yields **no** socket: it is purely the link that
+  brings the stagebox into the §2 input-domain walk. Removing the single generic "dSnake port"
+  socket is exactly this change. Non-network ports keep their old behaviour (count defaults to 1).
+- **Customisable interface name.** A connector group can carry an optional `name`, persisted on
+  the resulting `Port.label`. `addConnector` no longer merges two groups that have a name, so a
+  base interface and its expander coexist as separate physical ports. `portGroups` round-trips
+  `label` ↔ `name`, and `portsFromGroups` / `expandGroups` write `label` onto every resulting
+  port. The soft-patch `ports` view and each socket carry `label` so the UI reads "dSnake In 5"
+  (or the user's chosen name), not a bare port id.
+- **GLD-80 channel layout = two ports.** Model it as two named connector groups sharing the
+  dSnake connector: "dSnake" (in 1–32 / out 1–16) and "dSnake Expander" (in 33–40 / out 17–20).
+  Give each its own `name` so they don't merge. A `both` group folds to a single count, so set
+  in≠out counts by adding separate `in` and `out` groups with the same name (a `both` group only
+  when in and out share a count). Each group with a `channels` count becomes the matching run of
+  soft-patch sockets; an unconfigured (count-null) transport stays a link with no sockets until
+  you set the count.
+- **Digital-transport presets start unconfigured.** The `CONNECTOR_PRESETS` dSnake/Dante/AES50/
+  AVB/MADI/Ethernet presets now carry `count: null` (and `signal: "data"`). Adding one is
+  therefore a pure link; the user types the channel count and an optional name to channelise it.
+  The `DeviceDialog` connector-group editor gains a "Interface name" input (only hinted for
+  network connectors).
+- **Quick-connect from the soft patch + immediate update.** `ConsolePanel` (patch tab) shows a
+  "Link a stagebox" card listing stageboxes that carry a network connector but have no `data`
+  edge to the console. One tap calls the new `POST /jobs/{job_id}/graph/connect-stagebox`
+  (`api/app/domains/graph/router.py`), which picks the stagebox network `out` port and the
+  console network `in` port and creates a `data` edge (tolerating a legacy `audio` signal on
+  those ports, like `network-join`). The handler then immediately refetches the soft patch, so
+  the open view updates at once; co-editors see it via the existing realtime edge event (the
+  §2 walk re-scopes). It rejects non-stageboxes and a console with no network connector.
+
 ## 5. Device origins (all supported once §4.1–4.3 land)
 - **Stockwire-spec**: import path exists; §4.2 + §4.4 make the type/ports correct.
 - **Manual-port**: `web/src/components/DeviceDialog.vue` already lets you add ports by hand.

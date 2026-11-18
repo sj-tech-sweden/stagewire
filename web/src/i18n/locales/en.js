@@ -1017,6 +1017,11 @@ export default {
     splitSocketInfo: "Socket {n} feeds {who}.",
     sharesSocket: "shares socket with {who}",
     splitTabHint: "One input socket can feed several channels (a split source): use a second channel for the same source when FOH and monitors need separate processing.",
+    unconnectedStageboxesTitle: "Link a stagebox",
+    unconnectedStageboxesHint:
+      "These stageboxes carry a dSnake/Dante port but are not yet linked to the console. Connect one to make its inputs and outputs appear in this patch at once.",
+    stageboxConnected: "Stagebox connected — its sockets are now in the patch.",
+    stageboxConnectFailed: "Could not connect the stagebox.",
     pickerChoose: "Choose…",
     pickerMore: "+{n} more",
     pickerGroup: "Instrument group",
@@ -2152,6 +2157,8 @@ export default {
     port: "Port",
     count: "Count",
     addPort: "Add port",
+    interfaceName: "Interface name",
+    interfaceNameHint: "Name this digital transport (e.g. “dSnake”, “dSnake Expander”). The name labels its channels in the soft patch instead of a generic port.",
     physicalHint:
       "Weight and power are used for rigging and power planning. A Stockwire value overrides the one entered here.",
     weight: "Weight (kg)",
