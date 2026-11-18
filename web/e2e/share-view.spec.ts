@@ -763,3 +763,34 @@ test('a crew share link carries its creator locale and renders the UI in that la
   // And a localised string is actually shown (not just the lang attribute).
   await expect(page.getByText('Skrivskyddad')).toBeVisible();
 });
+
+test('the crew view has read-only sound, lights and video sheets that update live', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Crew sheets ${Date.now()}` })).id;
+  const list = await post(request, headers, `/jobs/${jobId}/channel-lists`, { name: 'FOH' });
+  await post(request, headers, `/jobs/${jobId}/channel-lists/${list.id}/channels`, { channel_number: 1, source_label: 'Kick' });
+  await post(request, headers, `/jobs/${jobId}/channel-lists/${list.id}/outputs`, { name: 'IEM', mode: 'stereo' });
+  await post(request, headers, `/jobs/${jobId}/fixtures`, { device_name: 'Wash 1', universe: 2, dmx_address: 17 });
+  await post(request, headers, `/jobs/${jobId}/graph/video-lists`, { name: 'Screens' });
+  const { token } = await (await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers })).json();
+
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  await page.getByTestId('share-tab-sound').click();
+  await expect(page.getByTestId('crew-inputs').getByText('Kick')).toBeVisible();
+  await page.getByTestId('crew-sound-tab-buses').click();
+  await expect(page.getByTestId('crew-buses').getByText('IEM')).toBeVisible();
+  await page.getByTestId('share-tab-lights').click();
+  const row = page.getByTestId('crew-universe').getByText('Wash 1');
+  await expect(row).toBeVisible();
+  await expect(page.getByTestId('crew-lights')).toContainText('Universe 2');
+  await page.getByTestId('share-tab-video').click();
+  await expect(page.getByTestId('crew-video')).toContainText('Screens');
+
+  // a change made in the editor reaches the open crew view without a reload
+  await post(request, headers, `/jobs/${jobId}/fixtures`, { device_name: 'Spot 9', universe: 2, dmx_address: 40 });
+  await page.getByTestId('share-tab-lights').click();
+  await expect(page.getByTestId('crew-universe').getByText('Spot 9')).toBeVisible();
+  // read-only: no editing controls
+  await expect(page.getByTestId('crew-lights').getByRole('button')).toHaveCount(0);
+});

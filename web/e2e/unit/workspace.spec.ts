@@ -1703,3 +1703,38 @@ test('an LCR endpoint reads L, C, R in socket order', async () => {
   expect(endpointSides({ refs }, 'lcr')).toBe('L 5, C 6, R 7');
   expect(endpointSides({ refs: refs.slice(0, 2) }, 'stereo')).toBe('L 5, R 6');
 });
+
+test('crew sheets: input rows carry the patched socket, universes sort by address, one-sided bus outputs say the side', async () => {
+  const { crewInputRows, crewBusRows, crewUniverses, crewSocketRows } = await import('../../src/utils/crewSheets');
+  const entry = {
+    list: {
+      channels: [
+        { id: 'c2', channel_number: 2, source_label: 'Snare', phantom_power: true },
+        { id: 'c1', channel_number: 1, source_label: 'Kick', input_type: 'Beta 91' },
+      ],
+      outputs: [{ id: 'b1', name: 'IEM', mode: 'stereo', out_endpoints: [{ side: 'L', refs: [{ device_id: 'd1', port_id: 'out', socket: 3 }] }] }],
+    },
+    soft_patch: {
+      ports: [{ device_id: 'd1', device_name: 'Rio' }],
+      channels: [{ id: 'c1', dsp_source: { device_id: 'd1', port_id: 'in', socket: 5 } }],
+      sockets: [
+        { key: 'k1', device_name: 'Rio', port_id: 'in', socket: 5, direction: 'in', dsp_source_channel_ids: ['c1'] },
+        { key: 'k2', device_name: 'Rio', port_id: 'out', socket: 3, direction: 'out', out_socket_bus_id: 'b1', out_socket_side: 'L' },
+        { key: 'k3', device_name: 'Rio', port_id: 'out', socket: 4, direction: 'out' },
+      ],
+    },
+  };
+  const rows = crewInputRows(entry);
+  expect(rows.map((r) => r.number)).toEqual([1, 2]);
+  expect(rows[0]).toMatchObject({ name: 'Kick', patch: 'Rio · 5', source: 'Beta 91' });
+  expect(rows[1].phantom).toBe(true);
+  expect(crewBusRows(entry)[0].outputs[0]).toContain('(L)');
+  expect(crewSocketRows(entry).map((r) => r.who)).toEqual(['1 Kick', 'IEM L']);
+  const u = crewUniverses([
+    { id: 'a', universe: 2, dmx_address: 40, footprint: 10, device_name: 'B', position: 1 },
+    { id: 'b', universe: 2, dmx_address: 17, footprint: 18, device_name: 'A', position: 0 },
+    { id: 'c', universe: 1, dmx_address: 1, device_name: 'C', position: 2 },
+  ]);
+  expect(u.map((g) => g.universe)).toEqual([1, 2]);
+  expect(u[1].fixtures.map((f) => [f.name, f.range])).toEqual([['A', '17–34'], ['B', '40–49']]);
+});

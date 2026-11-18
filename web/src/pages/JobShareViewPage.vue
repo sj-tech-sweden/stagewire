@@ -70,6 +70,27 @@
               data-testid="share-tab-map"
             />
             <q-tab
+              v-if="crewSheets.sound?.length"
+              name="sound"
+              icon="graphic_eq"
+              :label="t('workspace.share.tabSound')"
+              data-testid="share-tab-sound"
+            />
+            <q-tab
+              v-if="crewSheets.lights?.length"
+              name="lights"
+              icon="lightbulb"
+              :label="t('workspace.share.tabLights')"
+              data-testid="share-tab-lights"
+            />
+            <q-tab
+              v-if="crewSheets.video?.lists?.length"
+              name="video"
+              icon="videocam"
+              :label="t('workspace.share.tabVideo')"
+              data-testid="share-tab-video"
+            />
+            <q-tab
               name="scan"
               icon="qr_code_scanner"
               :label="t('workspace.scan.openScan')"
@@ -299,6 +320,17 @@
                 </q-item>
               </q-list>
             </q-tab-panel>
+            <q-tab-panel
+              v-for="section in ['sound', 'lights', 'video']"
+              :key="section"
+              :name="section"
+              class="q-pa-sm"
+            >
+              <CrewSheets
+                :section="section"
+                :sheets="crewSheets"
+              />
+            </q-tab-panel>
             <!-- Patch-list view: the full multi-domain patch table, read-only. Tapping a
              device name selects it (and opens its inspector below) so a crew member can
              trace a channel's cable flow without editing anything. -->
@@ -380,6 +412,7 @@ import { frameFromJob, fitWidthZoom } from '@/utils/plotFrame';
 import WorkspaceCanvas from '@/components/WorkspaceCanvas.vue';
 import DeviceInspector from '@/components/DeviceInspector.vue';
 import DeviceShareDetail from '@/components/DeviceShareDetail.vue';
+import CrewSheets from '@/components/CrewSheets.vue';
 import ScanCapture from '@/components/ScanCapture.vue';
 import MultiDomainPatchDrawer from '@/components/MultiDomainPatchDrawer.vue';
 import { useJobSocket } from '@/composables/useJobSocket';
@@ -407,8 +440,28 @@ const { connect: connectSocket } = useJobSocket(
   },
 );
 
+// The read-only sound / lights / video sheets (crew-sheets). They are derived server-side from several
+// places (lists, channels, soft patch, fixtures, video), so any event touching those refetches the
+// payload, debounced so a burst of edits is one request. This is the live-sync path for the sheets.
+const crewSheets = ref({});
+let sheetsTimer = null;
+async function loadSheets() {
+  try {
+    const { data } = await shareApi.get(`/jobs/${jobId}/crew-sheets`, { params: { token } });
+    crewSheets.value = data;
+  } catch {
+    // keep the last good sheets; the gear views do not depend on them
+  }
+}
+function scheduleSheets() {
+  clearTimeout(sheetsTimer);
+  sheetsTimer = setTimeout(loadSheets, 400);
+}
+const SHEET_EVENT = /^(list\.|channel\.|lighting\.|graph\.(device|edge)\.|device\.)/;
+
 function handleSocketEvent(event) {
   if (!event || !event.type) return;
+  if (SHEET_EVENT.test(event.type)) scheduleSheets();
   if (event.type === 'graph.device.upsert' || event.type === 'device.upsert') {
     const payload = event.payload;
     const idx = devices.value.findIndex((d) => d.id === payload.id);
@@ -532,6 +585,7 @@ async function load() {
     // language the creator shared it in, not their own browser default.
     if (data.locale) applyLocale(data.locale);
     loaded.value = true;
+    loadSheets();
     // Now that we have a baseline, follow live graph updates (mixer channels/buses, map moves, …).
     connectSocket();
   } catch {
