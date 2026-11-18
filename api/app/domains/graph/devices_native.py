@@ -52,6 +52,10 @@ NON_GEAR_KINDS = frozenset(
     }
 )
 SPEC_FIELDS = (
+    # the box the device is drawn with on the stage plot (cm); ``height_cm`` is the plot's vertical
+    # extent, i.e. the gear's depth. Unset means the default box.
+    "width_cm",
+    "height_cm",
     "sensor_width_mm",
     "focal_min_mm",
     "focal_max_mm",
@@ -75,6 +79,8 @@ COLUMN_ATTR = {
 }
 # a null in an edit clears only these (elsewhere a null means "not sent", as the row's did)
 CLEARABLE = {
+    "width_cm",
+    "height_cm",
     "weight_kg",
     "power_watts",
     "fixture_type",

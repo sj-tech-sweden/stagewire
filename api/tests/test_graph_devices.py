@@ -578,3 +578,34 @@ def test_validate_edge_accepts_bidirectional_both_port():
         [],
     )
     assert not any(i.code == "direction" for i in issues)
+
+
+@pytest.mark.asyncio
+async def test_a_device_made_with_a_plot_footprint_keeps_it_as_attributes(auth_headers):
+    """The stage plot draws gear with attributes width_cm / height_cm (height = depth on the plot);
+    a device created from a Stockwire product carries them from the start."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+        made = await client.post(
+            f"{g}/audio-devices",
+            json={"name": "Monitor", "device_type": "monitor", "width_cm": 60, "height_cm": 45},
+            headers=h,
+        )
+        assert made.status_code == 201, made.text
+        node = made.json()
+        assert node["attributes"]["width_cm"] == 60 and node["attributes"]["height_cm"] == 45
+        # a device without one has none stored, so the plot falls back to its default box
+        plain = await client.post(
+            f"{g}/audio-devices", json={"name": "DI", "device_type": "di"}, headers=h
+        )
+        assert "width_cm" not in plain.json()["attributes"]
+        # clearing it in an edit goes back to the default
+        cleared = await client.patch(
+            f"{g}/devices/{node['id']}",
+            json={"attributes": {"width_cm": None}, "expected_revision": node["revision"]},
+            headers=h,
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert "width_cm" not in cleared.json()["attributes"]
