@@ -1130,7 +1130,7 @@
                   toggle-color="primary"
                   class="q-mt-xs"
                   :options="[
-                    { label: t('console.sideBoth'), value: 'both' },
+                    { label: selChannel.mode === 'lcr' ? t('console.sideAll') : t('console.sideBoth'), value: 'both' },
                     { label: t('console.sideLeft'), value: 'L' },
                     ...(selChannel.mode === 'lcr' ? [{ label: t('console.sideCenter'), value: 'C' }] : []),
                     { label: t('console.sideRight'), value: 'R' },

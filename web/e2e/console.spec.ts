@@ -802,6 +802,9 @@ test('an LCR bus can be patched one side at a time, centre included', async ({ p
   // each step waits for the toggle to show the side and for the endpoint to land before the next
   // one: the side is read when the socket is tapped, and taps during a refresh are dropped
   const side = page.getByTestId('console-bus-side');
+  // an LCR bus routes all three by default, so its first option is "All", not "Both"
+  await expect(side.getByRole('button', { name: /^all$/i })).toBeVisible();
+  await expect(side.getByRole('button', { name: /^both$/i })).toHaveCount(0);
   let landed = 0;
   for (const [label, socket] of [['left', 1], ['right', 2], ['center', 9]] as const) {
     const button = side.getByRole('button', { name: new RegExp(`^${label}$`, 'i') });
