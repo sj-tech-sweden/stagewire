@@ -1019,9 +1019,10 @@ export default {
     splitSocketInfo: "Uttag {n} matar {who}.",
     sharesSocket: "delar uttag med {who}",
     splitTabHint: "Ett ingångsuttag kan mata flera kanaler (en splittad källa): använd en andra kanal för samma källa när FOH och monitor behöver separat bearbetning.",
-    unconnectedStageboxesTitle: "Koppla en stagebox",
-    unconnectedStageboxesHint:
-      "Dessa stageboxar har en dSnake/Dante-port men är inte kopplade till konsolen än. Koppla en så dyker dess in- och utgångar upp i patchen direkt.",
+    linkStageboxTitle: "Stageboxar (digitala länkar)",
+    linkStageboxHint:
+      "Varje stagebox med en dSnake/Dante/AES50/AVB/MADI-port listas med sin länkstatus. En stagebox syns i patchen först när den är kopplad till konsolen via sin nätverksport. Saknas en stagebox, lägg till en dSnake/Dante-port på den först (se enhetsinställningar).",
+    stageboxLinked: "Kopplad",
     stageboxConnected: "Stagebox inkopplad — dess uttag finns nu i patchen.",
     stageboxConnectFailed: "Kunde inte koppla stageboxen.",
     pickerChoose: "Välj…",
@@ -2161,8 +2162,11 @@ export default {
     port: "Port",
     count: "Antal",
     addPort: "Lägg till port",
+    countHint: "Kanaler över denna länk. 0 / tomt betyder att det bara är en länk utan patchbara uttag; ange antalet (t.ex. dSnake In 1–32 / Ut 1–16) för att visa kanalerna i patchen.",
     interfaceName: "Gränssnittsnamn",
-    interfaceNameHint: "Namnge denna digitala transport (t.ex. ”dSnake”, ”dSnake Expander”). Namnet etiketterar dess kanaler i patchen istället för en generisk port.",
+    interfaceNameHint: "Valfritt. Namnge denna digitala transport (t.ex. ”dSnake”, ”dSnake Expander”). Namnet etiketterar dess kanaler i patchen istället för en generisk port.",
+    interfaceNameOptional: "valfritt",
+    portsHint: "Lägg till en dSnake/Dante/AES50/AVB/MADI-port som länk, ange därefter kanalantalet för att visa dess in-/utgångar som patchbara uttag. Ge den ett namn (t.ex. ”dSnake”, ”dSnake Expander”) så etiketteras kanalerna i patchen. Två fysiska portar (bas + expander) behålls som separata om de har olika namn.",
     physicalHint:
       "Vikt och effekt används för riggning och strömplanering. Ett värde från Stockwire ersätter det som anges här.",
     weight: "Vikt (kg)",

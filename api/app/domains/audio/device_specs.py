@@ -82,13 +82,28 @@ def _expansion_connector_groups(ports: Any, in_key: str, out_key: str) -> list[d
         # A console expansion card (io_card/option_card/waves/other) is a local audio link; only a
         # network transport (dSnake/Dante/AES50/AVB/MADI) is a data-over-network link.
         signal = "data" if protocol in DIGITAL_TRANSPORTS else "audio"
+        # Carry an optional interface name (e.g. "dSnake", "dSnake Expander") so an imported product
+        # surfaces its channels under that label instead of a bare connector in the soft patch.
+        name = str(port.get("name") or "").strip() or None
         if ch_in:
             groups.append(
-                {"connector": protocol, "direction": "in", "count": ch_in, "signal": signal}
+                {
+                    "connector": protocol,
+                    "direction": "in",
+                    "count": ch_in,
+                    "signal": signal,
+                    "name": name,
+                }
             )
         if ch_out:
             groups.append(
-                {"connector": protocol, "direction": "out", "count": ch_out, "signal": signal}
+                {
+                    "connector": protocol,
+                    "direction": "out",
+                    "count": ch_out,
+                    "signal": signal,
+                    "name": name,
+                }
             )
     return groups
 
@@ -132,12 +147,14 @@ def product_connector_groups(product: dict | None) -> list[dict]:
             if not name:
                 continue
             signal = str(entry.get("signal") or "").lower()
+            label = str(entry.get("name") or "").strip() or None
             groups.append(
                 {
                     "connector": name.lower(),
                     "direction": DIRECTIONS.get(str(entry.get("direction") or "").lower(), "both"),
                     "count": _count(entry.get("count")) or 1,
                     "signal": signal if signal in SIGNALS else None,
+                    "name": label,
                 }
             )
     # Structured digital links become real sockets on import.

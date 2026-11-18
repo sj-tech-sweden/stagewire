@@ -849,10 +849,10 @@
         </div>
         <template v-else>
           <!-- Quick-connect: link a stagebox into the console over its dSnake/Dante port with one tap.
-               The stagebox only appears in this list while it has a network connector but no data edge
-               to the console; once connected the open soft patch refreshes immediately. -->
+               Every stagebox that carries a network connector is listed, with its link state: linked
+               ones read "Linked", unlinked ones get a Connect button that wires them in. -->
           <q-card
-            v-if="unconnectedStageboxes.length"
+            v-if="stageboxLinkRows.length"
             flat
             bordered
             class="q-mb-md"
@@ -860,22 +860,34 @@
           >
             <q-card-section class="q-py-sm">
               <div class="text-subtitle2">
-                {{ t('console.unconnectedStageboxesTitle') }}
+                {{ t('console.linkStageboxTitle') }}
               </div>
               <div class="text-caption text-grey-6">
-                {{ t('console.unconnectedStageboxesHint') }}
+                {{ t('console.linkStageboxHint') }}
               </div>
-              <div class="row q-gutter-xs q-mt-xs">
-                <q-chip
-                  v-for="sb in unconnectedStageboxes"
-                  :key="sb.id"
-                  clickable
-                  :disable="!!connectingId"
-                  :icon="connectingId === sb.id ? 'loop' : 'cable'"
-                  :label="sb.name"
-                  data-testid="console-connect-stagebox"
-                  @click="connectStagebox(sb.id)"
-                />
+              <div class="row q-gutter-xs q-mt-xs items-center">
+                <template
+                  v-for="row in stageboxLinkRows"
+                  :key="row.device.id"
+                >
+                  <q-chip
+                    v-if="!row.connected"
+                    clickable
+                    :disable="!!connectingId"
+                    :icon="connectingId === row.device.id ? 'loop' : 'cable'"
+                    :label="row.device.name"
+                    data-testid="console-connect-stagebox"
+                    @click="connectStagebox(row.device.id)"
+                  />
+                  <q-chip
+                    v-else
+                    :icon="'link'"
+                    :label="`${row.device.name} — ${t('console.stageboxLinked')}`"
+                    color="positive"
+                    text-color="white"
+                    data-testid="console-stagebox-linked"
+                  />
+                </template>
               </div>
             </q-card-section>
           </q-card>
@@ -3514,12 +3526,14 @@ const connectedStageboxIds = computed(() => {
   }
   return set;
 });
-// Quick-connect targets: stageboxes that carry a network (dSnake/Dante/...) connector but are not
-// yet linked into the console. Connecting one wires it in and the open soft patch refreshes at once.
-const unconnectedStageboxes = computed(() =>
-  graph.devices.filter(
-    (d) => isStagebox(d) && networkPorts(d).length && !connectedStageboxIds.value.has(d.id),
-  ),
+// All stageboxes that carry a network (dSnake/Dante/...) connector, with whether they are already
+// linked into the console over a data edge. Linked ones read "Linked"; unlinked ones get a Connect
+// button that wires them in and refreshes the open soft patch at once. Showing every network
+// stagebox (not just the unlinked) makes the link state visible in the soft patch.
+const stageboxLinkRows = computed(() =>
+  graph.devices
+    .filter((d) => isStagebox(d) && networkPorts(d).length)
+    .map((d) => ({ device: d, connected: connectedStageboxIds.value.has(d.id) })),
 );
 const connectingId = ref(null);
 async function connectStagebox(id) {
@@ -3529,10 +3543,12 @@ async function connectStagebox(id) {
     await load(); // immediate soft-patch refresh so the new device's sockets show up at once
     $q.notify({ type: "positive", message: t("console.stageboxConnected") });
   } catch (err) {
-    $q.notify({
-      type: "negative",
-      message: t("console.stageboxConnectFailed"),
-    });
+    const detail = err?.response?.data?.detail;
+    const msg =
+      typeof detail === "string"
+        ? detail
+        : (detail && detail.message) || t("console.stageboxConnectFailed");
+    $q.notify({ type: "negative", message: msg });
   } finally {
     connectingId.value = null;
   }

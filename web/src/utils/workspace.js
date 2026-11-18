@@ -57,22 +57,53 @@ const PRODUCT_DIRECTIONS = { in: 'in', input: 'in', out: 'out', output: 'out', b
 // list of names, or of {connector, direction, count}. Returns editor groups (direction in, out or both).
 export function connectorGroupsFromProduct(product) {
   const raw = product?.specs?.connectors;
-  if (!Array.isArray(raw)) return [];
   const groups = [];
-  for (const entry of raw) {
-    const item = typeof entry === 'string' ? { connector: entry } : entry;
-    if (!item || typeof item !== 'object') continue;
-    const name = String(item.connector || item.type || item.name || '').trim().toLowerCase();
-    if (!name) continue;
-    const count = Number.parseInt(item.count, 10);
-    groups.push({
-      direction: PRODUCT_DIRECTIONS[String(item.direction || '').toLowerCase()] || 'both',
-      connector: name,
-      count: count >= 1 ? count : 1,
-      signal: ['audio', 'video', 'dmx', 'power', 'data'].includes(item.signal) ? item.signal : null,
-    });
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const item = typeof entry === 'string' ? { connector: entry } : entry;
+      if (!item || typeof item !== 'object') continue;
+      const name = String(item.connector || item.type || item.name || '').trim().toLowerCase();
+      if (!name) continue;
+      const count = Number.parseInt(item.count, 10);
+      groups.push({
+        direction: PRODUCT_DIRECTIONS[String(item.direction || '').toLowerCase()] || 'both',
+        connector: name,
+        count: count >= 1 ? count : 1,
+        signal: ['audio', 'video', 'dmx', 'power', 'data'].includes(item.signal) ? item.signal : null,
+      });
+    }
   }
+  // Structured digital links (dSnake/Dante/AES50/AVB/MADI) carry separate in/out channel counts and
+  // an optional interface name — expand them into real sockets so an imported digital stagebox or
+  // mixer actually gains the dSnake channels (mirrors api/app/domains/audio/device_specs.py).
+  groups.push(...digitalIoGroupsFromProduct(product));
   return groups;
+}
+
+// Expand a product's structured digital links into connector groups. Returns [] when there is no
+// such block, so callers can treat it as optional. Each protocol becomes an `in` and/or `out`
+// group with the channel counts and an optional name (e.g. "dSnake", "dSnake Expander").
+export function digitalIoGroupsFromProduct(product) {
+  const specs = product?.specs;
+  if (!specs || typeof specs !== 'object') return [];
+  const out = [];
+  const blocks = [];
+  if (Array.isArray(specs?.stagebox?.digital_io)) blocks.push(specs.stagebox.digital_io);
+  if (Array.isArray(specs?.mixer?.expansion_ports)) blocks.push(specs.mixer.expansion_ports);
+  for (const ports of blocks) {
+    for (const port of ports) {
+      if (!port || typeof port !== 'object') continue;
+      const protocol = String(port.protocol || '').trim().toLowerCase();
+      if (!protocol) continue;
+      const signal = NETWORK_CONNECTORS.has(protocol) ? 'data' : 'audio';
+      const name = String(port.name || '').trim() || undefined;
+      const chIn = Number.parseInt(port.channels_in ?? port.max_channels_in, 10);
+      const chOut = Number.parseInt(port.channels_out ?? port.max_channels_out, 10);
+      if (chIn >= 1) out.push({ connector: protocol, direction: 'in', count: chIn, signal, name });
+      if (chOut >= 1) out.push({ connector: protocol, direction: 'out', count: chOut, signal, name });
+    }
+  }
+  return out;
 }
 
 export function deviceFromProduct(product, { parentId = null } = {}) {
@@ -1405,6 +1436,7 @@ export function fillFormFromSpecs(form, product, specs) {
       connector: group.connector,
       direction: group.direction,
       count: group.count,
+      name: group.name || undefined,
     });
   }
   if (specs.power_inlet) form.power_inlet = specs.power_inlet;

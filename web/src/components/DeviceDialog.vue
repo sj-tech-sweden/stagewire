@@ -120,6 +120,9 @@
         <div class="text-subtitle2 q-mt-md">
           {{ t('devices.ports') }}
         </div>
+        <div class="text-caption text-grey-6 q-mb-xs">
+          {{ t('devices.portsHint') }}
+        </div>
         <div
           class="row q-gutter-xs q-mb-sm"
           data-testid="connector-presets"
@@ -168,6 +171,7 @@
             dense
             outlined
             :label="t('devices.interfaceName')"
+            :placeholder="t('devices.interfaceNameOptional')"
             :hint="isNetworkConnector(port.connector) ? t('devices.interfaceNameHint') : null"
             data-testid="port-name"
           />
@@ -179,6 +183,8 @@
             type="number"
             min="0"
             :label="t('devices.count')"
+            :hint="isNetworkConnector(port.connector) ? t('devices.countHint') : null"
+            data-testid="port-count"
           />
           <q-btn
             flat

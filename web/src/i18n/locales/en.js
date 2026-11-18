@@ -1017,9 +1017,10 @@ export default {
     splitSocketInfo: "Socket {n} feeds {who}.",
     sharesSocket: "shares socket with {who}",
     splitTabHint: "One input socket can feed several channels (a split source): use a second channel for the same source when FOH and monitors need separate processing.",
-    unconnectedStageboxesTitle: "Link a stagebox",
-    unconnectedStageboxesHint:
-      "These stageboxes carry a dSnake/Dante port but are not yet linked to the console. Connect one to make its inputs and outputs appear in this patch at once.",
+    linkStageboxTitle: "Stageboxes (digital links)",
+    linkStageboxHint:
+      "Every stagebox that carries a dSnake/Dante/AES50/AVB/MADI port is listed with its link state. A stagebox only appears in this patch once it is linked to the console over its network port. If a stagebox is missing, add a dSnake/Dante port to it first (see device setup).",
+    stageboxLinked: "Linked",
     stageboxConnected: "Stagebox connected — its sockets are now in the patch.",
     stageboxConnectFailed: "Could not connect the stagebox.",
     pickerChoose: "Choose…",
@@ -2155,10 +2156,13 @@ export default {
     outputConnector: "Output connector",
     ports: "Ports",
     port: "Port",
+    portsHint: "Add a dSnake/Dante/AES50/AVB/MADI port as the link, then set the channel count to expose its inputs/outputs as patchable sockets. Name it (e.g. “dSnake”, “dSnake Expander”) so its channels are labelled in the soft patch. Two physical ports (base + expander) stay separate when they have different names.",
     count: "Count",
     addPort: "Add port",
+    countHint: "Channels carried over this link. 0 / empty means it is just a link with no patchable sockets; set the count (e.g. dSnake In 1–32 / Out 1–16) to expose its channels in the soft patch.",
     interfaceName: "Interface name",
-    interfaceNameHint: "Name this digital transport (e.g. “dSnake”, “dSnake Expander”). The name labels its channels in the soft patch instead of a generic port.",
+    interfaceNameHint: "Optional. Name this digital transport (e.g. “dSnake”, “dSnake Expander”). The name labels its channels in the soft patch instead of a generic port.",
+    interfaceNameOptional: "optional",
     physicalHint:
       "Weight and power are used for rigging and power planning. A Stockwire value overrides the one entered here.",
     weight: "Weight (kg)",
