@@ -1023,7 +1023,9 @@ export default {
     linkStageboxHint:
       "Varje stagebox med en dSnake/Dante/AES50/AVB/MADI-port listas med sin länkstatus. En stagebox syns i patchen först när den är kopplad till konsolen via sin nätverksport. Saknas en stagebox, lägg till en dSnake/Dante-port på den först (se enhetsinställningar).",
     fromPort: "Från port",
-    toPort: "Till konsolport",
+    toPort: "Till port",
+    linkTarget: "Koppla till",
+    linkTargetConsole: "Konsol",
     connect: "Koppla",
     stageboxLinked: "Kopplad",
     stageboxConnected: "Stagebox inkopplad — dess uttag finns nu i patchen.",
