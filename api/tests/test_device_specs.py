@@ -111,8 +111,20 @@ def test_stagebox_digital_io_name_carries_to_group_label():
     }
     groups = product_connector_groups(product)
     assert groups == [
-        {"connector": "dsnake", "direction": "in", "count": 32, "signal": "data", "name": "dSnake"},
-        {"connector": "dsnake", "direction": "out", "count": 16, "signal": "data", "name": "dSnake"},
+        {
+            "connector": "dsnake",
+            "direction": "in",
+            "count": 32,
+            "signal": "data",
+            "name": "dSnake",
+        },
+        {
+            "connector": "dsnake",
+            "direction": "out",
+            "count": 16,
+            "signal": "data",
+            "name": "dSnake",
+        },
         {
             "connector": "dsnake",
             "direction": "in",

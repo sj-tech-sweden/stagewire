@@ -342,16 +342,15 @@ async def test_connect_stagebox_prefers_matching_console_interface(auth_headers)
                 headers=h,
             )
 
-        mixer = (
-            await dev(
-                "GLD-80",
-                "mixer",
-                [
-                    {"id": "dante-in", "direction": "in", "signal": "data", "connector": "dante"},
-                    {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
-                ],
-            )
-        ).json()
+        # The console must exist (and carry both interfaces) for the auto-pick to choose dSnake.
+        await dev(
+            "GLD-80",
+            "mixer",
+            [
+                {"id": "dante-in", "direction": "in", "signal": "data", "connector": "dante"},
+                {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
+            ],
+        )
         box = (
             await dev(
                 "Stagebox",
@@ -369,8 +368,8 @@ async def test_connect_stagebox_prefers_matching_console_interface(auth_headers)
 
 @pytest.mark.asyncio
 async def test_connect_stagebox_honours_explicit_ports(auth_headers):
-    # The user can override the auto-pick: choose a specific stagebox output (e.g. the expander) and a
-    # specific console input (e.g. the expander's dSnake in) and the link uses exactly those ports.
+    # The user can override the auto-pick and choose a specific stagebox output and console input
+    # (e.g. the dSnake expander on both), and the link uses exactly those ports.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
         job_id = await _job(client, h)
@@ -389,28 +388,33 @@ async def test_connect_stagebox_honours_explicit_ports(auth_headers):
                 headers=h,
             )
 
-        mixer = (
-            await dev(
-                "GLD-80",
-                "mixer",
-                [
-                    {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
-                    {
-                        "id": "dsnake-exp-in",
-                        "direction": "in",
-                        "signal": "data",
-                        "connector": "dsnake",
-                        "label": "dSnake Expander",
-                    },
-                ],
-            )
-        ).json()
+        # The console must exist (with a base dSnake in and a dSnake-expander in) so the user can
+        # explicitly choose the expander pair.
+        await dev(
+            "GLD-80",
+            "mixer",
+            [
+                {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
+                {
+                    "id": "dsnake-exp-in",
+                    "direction": "in",
+                    "signal": "data",
+                    "connector": "dsnake",
+                    "label": "dSnake Expander",
+                },
+            ],
+        )
         box = (
             await dev(
                 "Stagebox",
                 "digital_stagebox",
                 [
-                    {"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"},
+                    {
+                        "id": "dsnake-out",
+                        "direction": "out",
+                        "signal": "data",
+                        "connector": "dsnake",
+                    },
                     {
                         "id": "dsnake-exp-out",
                         "direction": "out",
@@ -459,13 +463,13 @@ async def test_connect_stagebox_rejects_bad_explicit_port(auth_headers):
                 headers=h,
             )
 
-        mixer = (
-            await dev(
-                "GLD-80",
-                "mixer",
-                [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
-            )
-        ).json()
+        # The console must exist with a network input so the bad-port rejection is about the port,
+        # not the missing console.
+        await dev(
+            "GLD-80",
+            "mixer",
+            [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
+        )
         box = (
             await dev(
                 "Stagebox",
@@ -500,8 +504,20 @@ async def test_device_ports_accept_null_label(auth_headers):
                 "kind": "digital_stagebox",
                 "attributes": {"device_type": "digital_stagebox"},
                 "ports": [
-                    {"id": "xlr-in", "direction": "in", "connector": "xlr3", "channels": 8, "label": None},
-                    {"id": "xlr-out", "direction": "out", "connector": "xlr3", "channels": 8, "label": None},
+                    {
+                        "id": "xlr-in",
+                        "direction": "in",
+                        "connector": "xlr3",
+                        "channels": 8,
+                        "label": None,
+                    },
+                    {
+                        "id": "xlr-out",
+                        "direction": "out",
+                        "connector": "xlr3",
+                        "channels": 8,
+                        "label": None,
+                    },
                 ],
             },
             headers=h,
