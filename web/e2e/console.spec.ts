@@ -941,13 +941,13 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
   // A console with a dSnake input so the quick-connect card's default target exists.
   await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'GLD-80',
-    device_type: 'mixer',
+    kind: 'mixer',
     ports: [{ id: 'dsnake-in', direction: 'in', signal: 'data', connector: 'dsnake' }],
   });
   // AR2412: a stagebox with a dSnake output AND a dSnake expansion input (the cascade target).
   const ar2412 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'AR2412',
-    device_type: 'digital_stagebox',
+    kind: 'digital_stagebox',
     ports: [
       { id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' },
       { id: 'dsnake-exp-in', direction: 'in', signal: 'data', connector: 'dsnake', name: 'dSnake Expander' },
@@ -956,13 +956,15 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
   // AR84: a stagebox with only a dSnake output — the one we cascade into the AR2412.
   const ar84 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'AR84',
-    device_type: 'digital_stagebox',
+    kind: 'digital_stagebox',
     ports: [{ id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' }],
   });
 
   await page.goto(`/jobs/${jobId}/workspace?view=lists`);
   const panel = page.getByTestId('console-panel');
   await expect(panel).toBeVisible();
+  // The stagebox quick-connect card lives on the "patch" tab; make sure it is the active panel.
+  await page.getByTestId('console-tab-patch').click();
 
   // Both stageboxes are listed as unconnected; scope to the AR84 row.
   const rows = panel.getByTestId('console-unconnected-stageboxes');
