@@ -113,6 +113,68 @@ async def mobile_view(
     }
 
 
+def _verify_view_token(token: str, job_id: UUID) -> dict:
+    """The claims of a share token that is valid and scoped to this job (401 otherwise)."""
+    try:
+        claims = verify_share_token(token)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    if str(claims.get("job_id")) != str(job_id):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token is for a different job")
+    return claims
+
+
+@router.get("/crew-sheets")
+async def crew_sheets(
+    job_id: UUID,
+    token: str = Query(..., description="Share token from POST /jobs/{job_id}/share"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The read-only lists the crew view shows next to the gear: sound, lights and video.
+
+    Authenticated solely by the share token and strictly read-only. It reuses the same readers the
+    editor's own endpoints use (so the crew sees exactly what the editor does), one entry per
+    channel list with its console summary, fader map and soft-patch sockets, the lighting
+    fixtures with their DMX flags, and the video lists with their patch sheets. Each section is
+    empty when the job has no data for it; the page hides tabs for empty sections.
+    """
+    _verify_view_token(token, job_id)
+    # imported here: these routers import much of the app and the share router must stay light
+    from app.domains.audio import console_router
+    from app.domains.audio import service as audio_service
+    from app.domains.audio.schemas import ChannelListRead
+    from app.domains.graph.video_readers import load_video_lists
+    from app.domains.lighting import router as lighting_router
+    from app.domains.video import schemas as video_schemas
+    from app.domains.video import service as video_service
+
+    if await db.get(ProductionJob, job_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    sound = []
+    for row in await audio_service.list_channel_lists(db, job_id):
+        sound.append(
+            {
+                "list": ChannelListRead.model_validate(row).model_dump(mode="json"),
+                "console": console_router._summary(row),
+                "fader_map": console_router._fader_map(row),
+                "soft_patch": await console_router.get_soft_patch(job_id, row.id, db),
+            }
+        )
+    fixtures = await lighting_router.list_fixtures(job_id, db)
+    video_rows = await load_video_lists(db, job_id)
+    return {
+        "sound": sound,
+        "lights": [f.model_dump(mode="json") for f in fixtures],
+        "video": {
+            "lists": [
+                video_schemas.VideoInputListRead.model_validate(v).model_dump(mode="json")
+                for v in video_rows
+            ],
+            "sheets": await video_service.build_video_sheets(db, job_id, video_rows),
+        },
+    }
+
+
 def _authorize_asset_binding(token: str, job_id: UUID) -> None:
     try:
         claims = verify_share_token(token)

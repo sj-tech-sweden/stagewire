@@ -228,3 +228,47 @@ async def test_share_token_drops_unsupported_locale(auth_headers):
         view = await client.get(f"{BASE}/jobs/{job_id}/mobile-view", params={"token": token})
         assert view.status_code == 200
         assert view.json()["locale"] is None
+
+
+async def test_crew_sheets_are_read_only_and_scoped_by_the_share_token(auth_headers):
+    """The crew view's sound / lights / video lists: token-only and job-scoped."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _make_job(client, h)
+        other_job = await _make_job(client, h)
+        lst = (
+            await client.post(
+                f"{BASE}/jobs/{job_id}/channel-lists", json={"name": "FOH"}, headers=h
+            )
+        ).json()
+        await client.post(
+            f"{BASE}/jobs/{job_id}/channel-lists/{lst['id']}/channels",
+            json={"channel_number": 1, "source_label": "Kick"},
+            headers=h,
+        )
+        fixture = await client.post(
+            f"{BASE}/jobs/{job_id}/fixtures",
+            json={"device_name": "Wash 1", "universe": 2, "dmx_address": 17},
+            headers=h,
+        )
+        assert fixture.status_code == 201, fixture.text
+        await client.post(
+            f"{BASE}/jobs/{job_id}/graph/video-lists", json={"name": "Main"}, headers=h
+        )
+        token = (await client.post(f"{BASE}/jobs/{job_id}/share", headers=h)).json()["token"]
+
+        res = await client.get(f"{BASE}/jobs/{job_id}/crew-sheets", params={"token": token})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert [c["source_label"] for c in body["sound"][0]["list"]["channels"]] == ["Kick"]
+        assert body["sound"][0]["soft_patch"]["channels"][0]["channel_number"] == 1
+        assert "fader_map" in body["sound"][0] and "console" in body["sound"][0]
+        assert [(f["universe"], f["dmx_address"]) for f in body["lights"]] == [(2, 17)]
+        assert [v["name"] for v in body["video"]["lists"]] == ["Main"]
+
+        # no token, a tampered token and another job's token never open it
+        assert (await client.get(f"{BASE}/jobs/{job_id}/crew-sheets")).status_code == 422
+        bad = await client.get(f"{BASE}/jobs/{job_id}/crew-sheets", params={"token": token + "x"})
+        assert bad.status_code == 401
+        other = await client.get(f"{BASE}/jobs/{other_job}/crew-sheets", params={"token": token})
+        assert other.status_code == 401
