@@ -155,8 +155,8 @@ watch(
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 4px;
-  max-height: 38vh;
-  overflow-y: auto;
+  /* No height cap: the tiles flow down the page and the page scrolls, instead of a small window
+     with its own scrollbar. */
   align-content: start;
 }
 .patch-tile {

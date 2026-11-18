@@ -172,6 +172,10 @@ async def test_device_specs_endpoint_returns_the_normalised_product(auth_headers
                 "name": "Rack mixer",
                 "weight_kg": 9,
                 "power_consumption_watts": 120,
+                # Stockwire sends decimals as strings; height is the vertical size and is ignored
+                "width_cm": "48.30",
+                "depth_cm": "40.00",
+                "height_cm": "13.30",
                 "specs": {
                     "outputs": 8,
                     "power_inlet": "iec_c13",
@@ -192,6 +196,9 @@ async def test_device_specs_endpoint_returns_the_normalised_product(auth_headers
             {"connector": "xlr3", "direction": "out", "count": 8, "signal": None, "name": None}
         ]
         assert body["weight_kg"] == 9 and body["power_watts"] == 120 and body["outputs"] == 8
+        # the plan-view footprint: width and depth, as numbers
+        assert body["width_cm"] == 48.3 and body["depth_cm"] == 40.0
+        assert "height_cm" not in body
 
 
 @pytest.mark.asyncio
@@ -214,3 +221,32 @@ async def test_product_devices_endpoint_lists_physical_assets(auth_headers, monk
             {"id": "asset-1", "product_id": "77", "asset_tag": "TAG-1"},
             {"id": "asset-2", "product_id": "77", "serial_number": "SN-2"},
         ]
+
+
+def test_physical_specs_read_stockwire_strings_and_treat_zero_as_unknown():
+    from app.domains.audio.device_specs import product_physical_specs
+
+    # Stockwire returns decimals as strings; 0 means "not filled in".
+    got = product_physical_specs({"weight_kg": "5.550", "power_consumption_watts": None})
+    assert got["weight_kg"] == 5.55 and got["power_watts"] is None
+    assert product_physical_specs({"weight_kg": "0.000"})["weight_kg"] is None
+
+
+def test_physical_power_falls_back_to_specs_but_top_level_wins():
+    from app.domains.audio.device_specs import product_physical_specs
+
+    fixture = {"power_consumption_watts": None, "specs": {"lt_power_w": 16}}
+    assert product_physical_specs(fixture)["power_watts"] == 16
+    assert product_physical_specs({"specs": {"power_watts": "250"}})["power_watts"] == 250
+    both = {"power_consumption_watts": 120, "specs": {"lt_power_w": 16}}
+    assert product_physical_specs(both)["power_watts"] == 120
+
+
+def test_physical_specs_give_the_plot_footprint_and_treat_zero_as_unknown():
+    from app.domains.audio.device_specs import product_physical_specs
+
+    got = product_physical_specs({"width_cm": "120.00", "depth_cm": "60", "height_cm": "200"})
+    assert got["width_cm"] == 120.0 and got["depth_cm"] == 60.0
+    # Stockwire stores 0 for "not filled in": that must not become a 0 cm box
+    empty = product_physical_specs({"width_cm": "0.00", "depth_cm": None})
+    assert empty["width_cm"] is None and empty["depth_cm"] is None

@@ -2172,6 +2172,10 @@ export default {
       "Weight and power are used for rigging and power planning. A Stockwire value overrides the one entered here.",
     weight: "Weight (kg)",
     power: "Power (W)",
+    plotWidth: "Width on plot (cm)",
+    plotDepth: "Depth on plot (cm)",
+    plotSizeHint:
+      "The box the gear is drawn with on the stage plot. Importing a Stockwire product fills it from the product's width and depth; empty uses the default size.",
     stockwireInUse: "Stockwire value in use: {value}",
     manualInUse: "Value entered here is in use",
     notSet: "Not set",

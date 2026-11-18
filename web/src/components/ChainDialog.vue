@@ -4,7 +4,9 @@
     :maximized="$q.screen.lt.sm"
     @update:model-value="(v) => emit('update:modelValue', v)"
   >
-    <q-card class="chain-card">
+    <q-card
+      :class="['chain-card column no-wrap', { 'chain-card--full': $q.screen.lt.sm }]"
+    >
       <q-card-section>
         <div class="text-h6">
           {{ title }}
@@ -13,218 +15,220 @@
           {{ t('workspace.chainHint') }}
         </div>
       </q-card-section>
-      <q-card-section
-        v-if="direct.length"
-        class="q-pt-none"
-        data-testid="chain-direct"
-      >
-        <div class="text-caption text-grey-6 q-mb-xs">
-          {{ t('workspace.directConnections') }}
-        </div>
-        <div
-          v-for="(line, i) in direct"
-          :key="i"
-          class="text-body2"
+      <div class="dialog-body">
+        <q-card-section
+          v-if="direct.length"
+          class="q-pt-none"
+          data-testid="chain-direct"
         >
-          {{ line }}
-        </div>
-      </q-card-section>
-      <q-card-section class="q-pt-none">
-        <div
-          v-for="(step, i) in steps"
-          :key="i"
-          class="row q-col-gutter-xs items-center q-mb-md chain-step"
-          :class="{ 'chain-step-locked': step.locked }"
-          data-testid="chain-step"
-        >
-          <div class="col-auto text-grey-6">
-            {{ i + 1 }}
+          <div class="text-caption text-grey-6 q-mb-xs">
+            {{ t('workspace.directConnections') }}
           </div>
-          <!-- The soft-patched hop: the device whose socket feeds the mixer strip. It is always the
+          <div
+            v-for="(line, i) in direct"
+            :key="i"
+            class="text-body2"
+          >
+            {{ line }}
+          </div>
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <div
+            v-for="(step, i) in steps"
+            :key="i"
+            class="row q-col-gutter-xs items-center q-mb-md chain-step"
+            :class="{ 'chain-step-locked': step.locked }"
+            data-testid="chain-step"
+          >
+            <div class="col-auto text-grey-6">
+              {{ i + 1 }}
+            </div>
+            <!-- The soft-patched hop: the device whose socket feeds the mixer strip. It is always the
                last step (source first, analog hops in between), so it cannot be moved, changed or
                removed here; its socket is changed in the console panel's Soft patch tab. -->
-          <template v-if="step.locked">
-            <div class="col row items-center q-gutter-sm">
-              <q-icon
-                name="lock"
-                color="primary"
-              />
-              <span
-                class="text-subtitle2"
-                data-testid="chain-locked-device"
-              >{{ deviceName(step.device_id) }}</span>
-              <q-badge
-                color="primary"
-                data-testid="chain-locked-badge"
-              >
-                {{ t('workspace.softPatchBadge', { label: lock?.label || step.patch_label }) }}
-              </q-badge>
-            </div>
-            <div class="col-auto">
-              <q-btn
-                flat
-                dense
-                no-caps
-                icon="settings_input_component"
-                :label="t('workspace.changeInSoftPatch')"
-                data-testid="chain-change-soft-patch"
-                @click="emit('open-soft-patch')"
-              />
-            </div>
-            <div class="col-12 text-caption text-grey-6">
-              {{ t('workspace.softPatchLockedHint') }}
-            </div>
-          </template>
-          <template v-else>
-            <q-select
-              v-model="step.device_id"
-              class="col"
-              dense
-              outlined
-              emit-value
-              map-options
-              use-input
-              input-debounce="0"
-              :options="filtered"
-              :label="t('workspace.stepDevice')"
-              :hint="isNewDeviceValue(step.device_id) ? t('workspace.newDeviceHint') : ''"
-              :display-value="stepDeviceLabel(step)"
-              data-testid="chain-device"
-              @filter="filterDevices"
-            >
-              <template #option="scope">
-                <q-item
-                  v-bind="scope.itemProps"
-                  :data-testid="scope.opt.create ? 'chain-device-create' : undefined"
+            <template v-if="step.locked">
+              <div class="col row items-center q-gutter-sm">
+                <q-icon
+                  name="lock"
+                  color="primary"
+                />
+                <span
+                  class="text-subtitle2"
+                  data-testid="chain-locked-device"
+                >{{ deviceName(step.device_id) }}</span>
+                <q-badge
+                  color="primary"
+                  data-testid="chain-locked-badge"
                 >
-                  <q-item-section
-                    v-if="scope.opt.create"
-                    avatar
+                  {{ t('workspace.softPatchBadge', { label: lock?.label || step.patch_label }) }}
+                </q-badge>
+              </div>
+              <div class="col-auto">
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  icon="settings_input_component"
+                  :label="t('workspace.changeInSoftPatch')"
+                  data-testid="chain-change-soft-patch"
+                  @click="emit('open-soft-patch')"
+                />
+              </div>
+              <div class="col-12 text-caption text-grey-6">
+                {{ t('workspace.softPatchLockedHint') }}
+              </div>
+            </template>
+            <template v-else>
+              <q-select
+                v-model="step.device_id"
+                class="col"
+                dense
+                outlined
+                emit-value
+                map-options
+                use-input
+                input-debounce="0"
+                :options="filtered"
+                :label="t('workspace.stepDevice')"
+                :hint="isNewDeviceValue(step.device_id) ? t('workspace.newDeviceHint') : ''"
+                :display-value="stepDeviceLabel(step)"
+                data-testid="chain-device"
+                @filter="filterDevices"
+              >
+                <template #option="scope">
+                  <q-item
+                    v-bind="scope.itemProps"
+                    :data-testid="scope.opt.create ? 'chain-device-create' : undefined"
                   >
-                    <q-icon
-                      name="add_circle"
-                      color="primary"
-                    />
-                  </q-item-section>
-                  <q-item-section>
-                    <q-item-label>{{ scope.opt.label }}</q-item-label>
-                  </q-item-section>
-                </q-item>
+                    <q-item-section
+                      v-if="scope.opt.create"
+                      avatar
+                    >
+                      <q-icon
+                        name="add_circle"
+                        color="primary"
+                      />
+                    </q-item-section>
+                    <q-item-section>
+                      <q-item-label>{{ scope.opt.label }}</q-item-label>
+                    </q-item-section>
+                  </q-item>
+                </template>
+              </q-select>
+              <q-btn
+                flat
+                dense
+                round
+                icon="edit"
+                :disable="!step.device_id || isNewDeviceValue(step.device_id)"
+                :aria-label="t('workspace.editDevice')"
+                data-testid="chain-edit-device"
+                @click="editedId = step.device_id"
+              >
+                <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
+              </q-btn>
+              <StockwireProductPicker
+                v-if="contextKind === 'job' && stockwire.isEnabled"
+                class="col-12 col-sm-4"
+                :model-value="null"
+                own
+                :label="t('workspace.stepFromStockwire')"
+                :hint="''"
+                data-testid="chain-stockwire"
+                @update:model-value="(p) => addFromStockwire(step, p)"
+              />
+              <div class="col-auto">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="arrow_upward"
+                  :disable="i === 0 || branching"
+                  :aria-label="t('workspace.stepUp')"
+                  @click="move(i, -1)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="arrow_downward"
+                  :disable="i === steps.length - 1 || branching || !!steps[i + 1]?.locked"
+                  :aria-label="t('workspace.stepDown')"
+                  @click="move(i, 1)"
+                />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  color="negative"
+                  icon="close"
+                  :aria-label="t('workspace.remove')"
+                  @click="steps.splice(i, 1)"
+                />
+              </div>
+              <div class="col-12 chain-fields-gap" />
+              <template
+                v-for="field in fields"
+                :key="field.key"
+              >
+                <ConnectorSelect
+                  v-if="field.key === 'connector'"
+                  v-model="step.connector"
+                  class="col-6 col-sm"
+                  :label="t(field.label)"
+                  :data-testid="`chain-${field.key}`"
+                />
+                <q-input
+                  v-else
+                  v-model="step[field.key]"
+                  class="col-6 col-sm"
+                  dense
+                  outlined
+                  :label="t(field.label)"
+                  :data-testid="`chain-${field.key}`"
+                />
               </template>
-            </q-select>
-            <q-btn
-              flat
-              dense
-              round
-              icon="edit"
-              :disable="!step.device_id || isNewDeviceValue(step.device_id)"
-              :aria-label="t('workspace.editDevice')"
-              data-testid="chain-edit-device"
-              @click="editedId = step.device_id"
-            >
-              <q-tooltip>{{ t('workspace.editDevice') }}</q-tooltip>
-            </q-btn>
-            <StockwireProductPicker
-              v-if="contextKind === 'job' && stockwire.isEnabled"
-              class="col-12 col-sm-4"
-              :model-value="null"
-              own
-              :label="t('workspace.stepFromStockwire')"
-              :hint="''"
-              data-testid="chain-stockwire"
-              @update:model-value="(p) => addFromStockwire(step, p)"
-            />
-            <div class="col-auto">
-              <q-btn
-                flat
-                dense
-                round
-                icon="arrow_upward"
-                :disable="i === 0 || branching"
-                :aria-label="t('workspace.stepUp')"
-                @click="move(i, -1)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                icon="arrow_downward"
-                :disable="i === steps.length - 1 || branching || !!steps[i + 1]?.locked"
-                :aria-label="t('workspace.stepDown')"
-                @click="move(i, 1)"
-              />
-              <q-btn
-                flat
-                dense
-                round
-                color="negative"
-                icon="close"
-                :aria-label="t('workspace.remove')"
-                @click="steps.splice(i, 1)"
-              />
-            </div>
-            <div class="col-12 chain-fields-gap" />
-            <template
-              v-for="field in fields"
-              :key="field.key"
-            >
-              <ConnectorSelect
-                v-if="field.key === 'connector'"
-                v-model="step.connector"
-                class="col-6 col-sm"
-                :label="t(field.label)"
-                :data-testid="`chain-${field.key}`"
-              />
-              <q-input
-                v-else
-                v-model="step[field.key]"
+              <q-select
+                v-if="busChannels.length"
+                v-model="step.bus_connector"
                 class="col-6 col-sm"
                 dense
                 outlined
-                :label="t(field.label)"
-                :data-testid="`chain-${field.key}`"
+                clearable
+                use-input
+                hide-selected
+                fill-input
+                new-value-mode="add-unique"
+                input-debounce="0"
+                :options="busChannels"
+                :label="t('workspace.busChannel')"
+                data-testid="chain-bus-channel"
+                @new-value="(v, done) => done(v.trim(), 'add-unique')"
+              />
+              <q-select
+                v-if="branching && i > 0"
+                v-model="step.parent_index"
+                class="col-6 col-sm"
+                dense
+                outlined
+                emit-value
+                map-options
+                clearable
+                :options="parentOptions(i)"
+                :label="t('workspace.stepFrom')"
               />
             </template>
-            <q-select
-              v-if="busChannels.length"
-              v-model="step.bus_connector"
-              class="col-6 col-sm"
-              dense
-              outlined
-              clearable
-              use-input
-              hide-selected
-              fill-input
-              new-value-mode="add-unique"
-              input-debounce="0"
-              :options="busChannels"
-              :label="t('workspace.busChannel')"
-              data-testid="chain-bus-channel"
-              @new-value="(v, done) => done(v.trim(), 'add-unique')"
-            />
-            <q-select
-              v-if="branching && i > 0"
-              v-model="step.parent_index"
-              class="col-6 col-sm"
-              dense
-              outlined
-              emit-value
-              map-options
-              clearable
-              :options="parentOptions(i)"
-              :label="t('workspace.stepFrom')"
-            />
-          </template>
-        </div>
-        <q-btn
-          flat
-          no-caps
-          icon="add"
-          :label="t('workspace.addStep')"
-          data-testid="chain-add-step"
-          @click="addStep"
-        />
-      </q-card-section>
+          </div>
+          <q-btn
+            flat
+            no-caps
+            icon="add"
+            :label="t('workspace.addStep')"
+            data-testid="chain-add-step"
+            @click="addStep"
+          />
+        </q-card-section>
+      </div>
       <q-card-actions align="right">
         <q-btn
           v-close-popup
@@ -444,6 +448,19 @@ function cleaned() {
 .chain-card {
   width: 860px;
   max-width: 100vw;
+  /* A long chain must not push Save off screen: the card is capped to the viewport and only the
+     steps in the middle scroll, so the title and the buttons stay in view. */
+  max-height: calc(100vh - 32px);
+}
+.chain-card--full {
+  max-height: 100vh;
+  height: 100%;
+}
+.dialog-body {
+  flex: 1 1 auto;
+  /* min-height 0 lets a flex child shrink below its content so overflow can scroll */
+  min-height: 0;
+  overflow: auto;
 }
 .chain-step-locked {
   border-left: 3px solid var(--q-primary);

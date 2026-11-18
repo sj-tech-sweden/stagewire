@@ -918,9 +918,9 @@
                     <q-btn
                       :disable="
                         !!connectingId ||
-                        !linkSelections[row.device.id].src ||
-                        !linkSelections[row.device.id].target ||
-                        !linkSelections[row.device.id].dst
+                          !linkSelections[row.device.id].src ||
+                          !linkSelections[row.device.id].target ||
+                          !linkSelections[row.device.id].dst
                       "
                       :icon="connectingId === row.device.id ? 'loop' : 'cable'"
                       :label="t('console.connect')"
@@ -1365,18 +1365,19 @@
             :empty="t('console.noMatch')"
             @tile="onTile2"
           />
-          <q-virtual-scroll
+          <!-- A plain list, not a virtual scroller in a fixed-height box: the page scrolls, so a long
+               channel list is never squeezed into a small window of its own. -->
+          <q-list
             v-else-if="visibleStrips.length"
-            :items="visibleStrips"
-            :virtual-scroll-item-size="36"
             separator
-            style="max-height: 30vh"
             class="rounded-borders"
             data-testid="console-patch-overview"
           >
-            <template #default="{ item: ch }">
+            <template
+              v-for="ch in visibleStrips"
+              :key="ch.id"
+            >
               <q-item
-                :key="ch.id"
                 dense
                 clickable
                 :active="ch.id === selChannelId"
@@ -1432,7 +1433,7 @@
                 </q-item-section>
               </q-item>
             </template>
-          </q-virtual-scroll>
+          </q-list>
           <div
             v-else
             class="text-grey-6"
@@ -1998,7 +1999,9 @@
       v-model="cellOpen"
       :maximized="$q.screen.lt.sm"
     >
-      <q-card style="min-width: 320px; max-width: 520px; width: 100%">
+      <q-card
+        :class="['console-dialog column no-wrap', { 'console-dialog--full': $q.screen.lt.sm }]"
+      >
         <q-card-section class="text-h6">
           {{ t("console.faderCellTitle", { fader: cell?.fader }) }}
         </q-card-section>
@@ -2014,7 +2017,7 @@
         </q-card-section>
         <q-list
           separator
-          style="max-height: 60vh; overflow: auto"
+          class="console-dialog-body"
         >
           <q-item
             v-if="cell?.id"
@@ -2077,6 +2080,14 @@
             </q-item-section>
           </q-item>
         </q-list>
+        <q-card-actions align="right">
+          <q-btn
+            v-close-popup
+            flat
+            no-caps
+            :label="t('common.cancel')"
+          />
+        </q-card-actions>
       </q-card>
     </q-dialog>
 
@@ -2086,124 +2097,125 @@
       :maximized="$q.screen.lt.sm"
     >
       <q-card
-        style="min-width: 320px; max-width: 640px; width: 100%"
+        :class="['console-dialog column no-wrap', { 'console-dialog--full': $q.screen.lt.sm }]"
         data-testid="console-auto-dialog"
       >
         <q-card-section class="text-h6">
           {{ t("console.autoPatch") }}
         </q-card-section>
-        <q-card-section class="q-gutter-sm">
-          <div class="text-caption text-grey-6">
-            {{ t("console.autoHelp") }}
-          </div>
-          <q-btn-toggle
-            v-model="auto.field"
-            no-caps
-            dense
-            unelevated
-            toggle-color="primary"
-            :options="autoTargets"
-            data-testid="console-auto-target"
-            @update:model-value="onAutoField"
-          />
-          <StripPicker
-            v-model="auto.channels"
-            :items="autoItems"
-            :label="t('console.autoChannels')"
-            :title="t('console.autoChannels')"
-            data-testid="console-auto-channels"
-            @update:model-value="auto.plan = null"
-          />
-          <q-select
-            v-model="auto.port"
-            :options="autoPortOptions"
-            emit-value
-            map-options
-            dense
-            outlined
-            :label="t('console.autoPort')"
-            data-testid="console-auto-port"
-            @update:model-value="onAutoPort"
-          />
-          <div class="row q-col-gutter-sm items-center">
-            <div class="col-6">
-              <q-input
-                v-model.number="auto.start"
-                type="number"
-                min="1"
-                dense
-                outlined
-                :label="t('console.autoStart')"
-                data-testid="console-auto-start"
-                @update:model-value="auto.plan = null"
-              />
+        <div class="console-dialog-body">
+          <q-card-section class="q-gutter-sm">
+            <div class="text-caption text-grey-6">
+              {{ t("console.autoHelp") }}
             </div>
-            <div class="col-6">
-              <q-toggle
-                v-model="auto.skip"
-                :label="t('console.autoSkip')"
-                @update:model-value="auto.plan = null"
-              />
-            </div>
-            <div
-              v-if="auto.field === 'out_socket'"
-              class="col-12"
-            >
-              <q-toggle
-                v-model="auto.append"
-                :label="t('console.autoAppend')"
-                data-testid="console-auto-append"
-                @update:model-value="auto.plan = null"
-              />
-              <div class="text-caption text-grey-6">
-                {{ t("console.busRunHint") }}
+            <q-btn-toggle
+              v-model="auto.field"
+              no-caps
+              dense
+              unelevated
+              toggle-color="primary"
+              :options="autoTargets"
+              data-testid="console-auto-target"
+              @update:model-value="onAutoField"
+            />
+            <StripPicker
+              v-model="auto.channels"
+              :items="autoItems"
+              :label="t('console.autoChannels')"
+              :title="t('console.autoChannels')"
+              data-testid="console-auto-channels"
+              @update:model-value="auto.plan = null"
+            />
+            <q-select
+              v-model="auto.port"
+              :options="autoPortOptions"
+              emit-value
+              map-options
+              dense
+              outlined
+              :label="t('console.autoPort')"
+              data-testid="console-auto-port"
+              @update:model-value="onAutoPort"
+            />
+            <div class="row q-col-gutter-sm items-center">
+              <div class="col-6">
+                <q-input
+                  v-model.number="auto.start"
+                  type="number"
+                  min="1"
+                  dense
+                  outlined
+                  :label="t('console.autoStart')"
+                  data-testid="console-auto-start"
+                  @update:model-value="auto.plan = null"
+                />
+              </div>
+              <div class="col-6">
+                <q-toggle
+                  v-model="auto.skip"
+                  :label="t('console.autoSkip')"
+                  @update:model-value="auto.plan = null"
+                />
+              </div>
+              <div
+                v-if="auto.field === 'out_socket'"
+                class="col-12"
+              >
+                <q-toggle
+                  v-model="auto.append"
+                  :label="t('console.autoAppend')"
+                  data-testid="console-auto-append"
+                  @update:model-value="auto.plan = null"
+                />
+                <div class="text-caption text-grey-6">
+                  {{ t("console.busRunHint") }}
+                </div>
+              </div>
+              <div
+                v-if="auto.field === 'dsp_source'"
+                class="col-12"
+              >
+                <q-toggle
+                  v-model="auto.shared"
+                  :label="t('console.autoShared')"
+                  data-testid="console-auto-shared"
+                  @update:model-value="auto.plan = null"
+                />
               </div>
             </div>
-            <div
-              v-if="auto.field === 'dsp_source'"
-              class="col-12"
-            >
-              <q-toggle
-                v-model="auto.shared"
-                :label="t('console.autoShared')"
-                data-testid="console-auto-shared"
-                @update:model-value="auto.plan = null"
-              />
-            </div>
-          </div>
-          <q-banner
-            v-if="auto.error"
-            dense
-            rounded
-            class="bg-negative text-white"
-            data-testid="console-auto-error"
-          >
-            {{ auto.error }}
-          </q-banner>
-          <div
-            v-if="auto.plan"
-            data-testid="console-auto-plan"
-          >
-            <div class="text-subtitle2">
-              {{ t("console.autoPlan", { n: auto.plan.length }) }}
-            </div>
-            <q-list
+            <q-banner
+              v-if="auto.error"
               dense
-              bordered
-              separator
-              style="max-height: 28vh; overflow: auto"
+              rounded
+              class="bg-negative text-white"
+              data-testid="console-auto-error"
             >
-              <q-item
-                v-for="row in auto.plan"
-                :key="row.channel_id || row.bus_id"
+              {{ auto.error }}
+            </q-banner>
+            <div
+              v-if="auto.plan"
+              data-testid="console-auto-plan"
+            >
+              <div class="text-subtitle2">
+                {{ t("console.autoPlan", { n: auto.plan.length }) }}
+              </div>
+              <q-list
+                dense
+                bordered
+                separator
               >
-                <q-item-section data-testid="console-auto-plan-row">
-                  {{ planRowText(row, auto.field === "out_socket" ? t("console.mixShort") : "Ch") }}
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </div>
-        </q-card-section>
+                <q-item
+                  v-for="row in auto.plan"
+                  :key="row.channel_id || row.bus_id"
+                >
+                  <q-item-section data-testid="console-auto-plan-row">
+                    {{ planRowText(row, auto.field === "out_socket" ? t("console.mixShort") : "Ch") }}
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </div>
+          </q-card-section>
+        </div>
         <q-card-actions align="right">
           <q-btn
             v-close-popup
@@ -2239,24 +2251,26 @@
       :maximized="$q.screen.lt.sm"
     >
       <q-card
-        style="min-width: 320px; max-width: 640px; width: 100%"
+        :class="['console-dialog column no-wrap', { 'console-dialog--full': $q.screen.lt.sm }]"
         data-testid="console-bulk-dialog"
       >
         <q-card-section class="text-h6">
           {{ t("console.bulkClear") }}
         </q-card-section>
-        <q-card-section class="q-gutter-sm">
-          <div class="text-caption text-grey-6">
-            {{ t("console.bulkHelp") }}
-          </div>
-          <StripPicker
-            v-model="bulkIds"
-            :items="patchedItems"
-            :label="t('console.autoChannels')"
-            :title="t('console.bulkClear')"
-            data-testid="console-bulk-channels"
-          />
-        </q-card-section>
+        <div class="console-dialog-body">
+          <q-card-section class="q-gutter-sm">
+            <div class="text-caption text-grey-6">
+              {{ t("console.bulkHelp") }}
+            </div>
+            <StripPicker
+              v-model="bulkIds"
+              :items="patchedItems"
+              :label="t('console.autoChannels')"
+              :title="t('console.bulkClear')"
+              data-testid="console-bulk-channels"
+            />
+          </q-card-section>
+        </div>
         <q-card-actions align="right">
           <q-btn
             v-close-popup
@@ -2282,249 +2296,253 @@
       v-model="manualOpen"
       :maximized="$q.screen.lt.sm"
     >
-      <q-card style="min-width: 320px; max-width: 640px; width: 100%">
+      <q-card
+        :class="['console-dialog column no-wrap', { 'console-dialog--full': $q.screen.lt.sm }]"
+      >
         <q-card-section class="text-h6">
           {{ t("console.manual") }}
         </q-card-section>
-        <q-card-section
-          class="q-gutter-sm"
-          data-testid="console-manual-form"
-        >
-          <q-input
-            v-model="form.name"
-            dense
-            outlined
-            :label="t('console.consoleName')"
-          />
-          <div class="row q-col-gutter-sm">
-            <div class="col-6">
-              <q-input
-                v-model.number="form.total_slots"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.totalSlots')"
-                :hint="t('console.totalSlotsHint')"
-                data-testid="console-form-slots"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.max_mixes"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.maxMixes')"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.stereo_slot_cost"
-                type="number"
-                min="1"
-                dense
-                outlined
-                :label="t('console.stereoCost')"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.lcr_slot_cost"
-                type="number"
-                min="1"
-                dense
-                outlined
-                :label="t('console.lcrCost')"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.mono"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.monoInputs')"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.dcas"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.dcas')"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.fx_returns"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.fxReturns')"
-                :hint="t('console.fxReturnsHint')"
-                data-testid="console-form-fx"
-              />
-            </div>
-            <div class="col-6">
-              <q-input
-                v-model.number="form.layers"
-                type="number"
-                min="1"
-                dense
-                outlined
-                :label="t('console.layers')"
-              />
-            </div>
-          </div>
-          <q-toggle
-            v-model="form.odd_even"
-            :label="t('console.oddEven')"
-          />
-          <q-toggle
-            v-model="form.adjacent"
-            :label="t('console.adjacentPairing')"
-          />
-          <div class="text-subtitle2">
-            {{ t("console.banks") }}
-          </div>
-          <div
-            v-for="(b, i) in form.banks"
-            :key="i"
-            class="row q-col-gutter-sm items-center"
+        <div class="console-dialog-body">
+          <q-card-section
+            class="q-gutter-sm"
+            data-testid="console-manual-form"
           >
-            <div class="col-3">
-              <q-input
-                v-model="b.id"
-                dense
-                outlined
-                label="ID"
-              />
+            <q-input
+              v-model="form.name"
+              dense
+              outlined
+              :label="t('console.consoleName')"
+            />
+            <div class="row q-col-gutter-sm">
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.total_slots"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.totalSlots')"
+                  :hint="t('console.totalSlotsHint')"
+                  data-testid="console-form-slots"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.max_mixes"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.maxMixes')"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.stereo_slot_cost"
+                  type="number"
+                  min="1"
+                  dense
+                  outlined
+                  :label="t('console.stereoCost')"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.lcr_slot_cost"
+                  type="number"
+                  min="1"
+                  dense
+                  outlined
+                  :label="t('console.lcrCost')"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.mono"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.monoInputs')"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.dcas"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.dcas')"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.fx_returns"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.fxReturns')"
+                  :hint="t('console.fxReturnsHint')"
+                  data-testid="console-form-fx"
+                />
+              </div>
+              <div class="col-6">
+                <q-input
+                  v-model.number="form.layers"
+                  type="number"
+                  min="1"
+                  dense
+                  outlined
+                  :label="t('console.layers')"
+                />
+              </div>
             </div>
-            <div class="col-5">
-              <q-input
-                v-model="b.label"
-                dense
-                outlined
-                :label="t('console.bankLabel')"
-              />
+            <q-toggle
+              v-model="form.odd_even"
+              :label="t('console.oddEven')"
+            />
+            <q-toggle
+              v-model="form.adjacent"
+              :label="t('console.adjacentPairing')"
+            />
+            <div class="text-subtitle2">
+              {{ t("console.banks") }}
             </div>
-            <div class="col-3">
-              <q-input
-                v-model.number="b.faders"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.faders')"
-              />
+            <div
+              v-for="(b, i) in form.banks"
+              :key="i"
+              class="row q-col-gutter-sm items-center"
+            >
+              <div class="col-3">
+                <q-input
+                  v-model="b.id"
+                  dense
+                  outlined
+                  label="ID"
+                />
+              </div>
+              <div class="col-5">
+                <q-input
+                  v-model="b.label"
+                  dense
+                  outlined
+                  :label="t('console.bankLabel')"
+                />
+              </div>
+              <div class="col-3">
+                <q-input
+                  v-model.number="b.faders"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.faders')"
+                />
+              </div>
+              <div class="col-1">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="close"
+                  :aria-label="t('workspace.remove')"
+                  @click="form.banks.splice(i, 1)"
+                />
+              </div>
             </div>
-            <div class="col-1">
-              <q-btn
-                flat
-                dense
-                round
-                icon="close"
-                :aria-label="t('workspace.remove')"
-                @click="form.banks.splice(i, 1)"
-              />
+            <q-btn
+              flat
+              no-caps
+              icon="add"
+              :label="t('console.addBank')"
+              @click="form.banks.push({ id: String.fromCharCode(65 + form.banks.length), label: '', faders: 12 })"
+            />
+            <div class="text-subtitle2 q-mt-sm">
+              {{ t("console.expansionPorts") }}
             </div>
-          </div>
-          <q-btn
-            flat
-            no-caps
-            icon="add"
-            :label="t('console.addBank')"
-            @click="form.banks.push({ id: String.fromCharCode(65 + form.banks.length), label: '', faders: 12 })"
-          />
-          <div class="text-subtitle2 q-mt-sm">
-            {{ t("console.expansionPorts") }}
-          </div>
-          <div class="text-caption text-grey-6">
-            {{ t("console.expansionPortsHint") }}
-          </div>
-          <div
-            v-for="(x, i) in form.expansion"
-            :key="i"
-            class="row q-col-gutter-sm items-center"
-            data-testid="console-form-expansion"
-          >
-            <div class="col-12 col-sm-3">
-              <q-input
-                v-model="x.protocol"
-                dense
-                outlined
-                :label="t('console.protocol')"
-                placeholder="dante"
-                data-testid="console-form-exp-protocol"
-              />
+            <div class="text-caption text-grey-6">
+              {{ t("console.expansionPortsHint") }}
             </div>
-            <div class="col-3 col-sm-2">
-              <q-input
-                v-model.number="x.slots"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.slotsShort')"
-              />
+            <div
+              v-for="(x, i) in form.expansion"
+              :key="i"
+              class="row q-col-gutter-sm items-center"
+              data-testid="console-form-expansion"
+            >
+              <div class="col-12 col-sm-3">
+                <q-input
+                  v-model="x.protocol"
+                  dense
+                  outlined
+                  :label="t('console.protocol')"
+                  placeholder="dante"
+                  data-testid="console-form-exp-protocol"
+                />
+              </div>
+              <div class="col-3 col-sm-2">
+                <q-input
+                  v-model.number="x.slots"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.slotsShort')"
+                />
+              </div>
+              <div class="col-3 col-sm-2">
+                <q-input
+                  v-model.number="x.max_channels"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.maxTotal')"
+                  data-testid="console-form-exp-max"
+                />
+              </div>
+              <div class="col-3 col-sm-2">
+                <q-input
+                  v-model.number="x.max_channels_in"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.maxIn')"
+                />
+              </div>
+              <div class="col-3 col-sm-2">
+                <q-input
+                  v-model.number="x.max_channels_out"
+                  type="number"
+                  min="0"
+                  dense
+                  outlined
+                  :label="t('console.maxOut')"
+                />
+              </div>
+              <div class="col-auto">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="close"
+                  :aria-label="t('workspace.remove')"
+                  @click="form.expansion.splice(i, 1)"
+                />
+              </div>
             </div>
-            <div class="col-3 col-sm-2">
-              <q-input
-                v-model.number="x.max_channels"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.maxTotal')"
-                data-testid="console-form-exp-max"
-              />
-            </div>
-            <div class="col-3 col-sm-2">
-              <q-input
-                v-model.number="x.max_channels_in"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.maxIn')"
-              />
-            </div>
-            <div class="col-3 col-sm-2">
-              <q-input
-                v-model.number="x.max_channels_out"
-                type="number"
-                min="0"
-                dense
-                outlined
-                :label="t('console.maxOut')"
-              />
-            </div>
-            <div class="col-auto">
-              <q-btn
-                flat
-                dense
-                round
-                icon="close"
-                :aria-label="t('workspace.remove')"
-                @click="form.expansion.splice(i, 1)"
-              />
-            </div>
-          </div>
-          <q-btn
-            flat
-            no-caps
-            icon="add"
-            :label="t('console.addExpansionPort')"
-            data-testid="console-form-exp-add"
-            @click="form.expansion.push({ protocol: '', slots: 1, max_channels: null, max_channels_in: null, max_channels_out: null })"
-          />
-        </q-card-section>
+            <q-btn
+              flat
+              no-caps
+              icon="add"
+              :label="t('console.addExpansionPort')"
+              data-testid="console-form-exp-add"
+              @click="form.expansion.push({ protocol: '', slots: 1, max_channels: null, max_channels_in: null, max_channels_out: null })"
+            />
+          </q-card-section>
+        </div>
         <q-card-actions align="right">
           <q-btn
             v-close-popup
@@ -4139,6 +4157,26 @@ defineExpose({ settle: settleAll, openTab: (name) => (tab.value = name) });
 </script>
 
 <style scoped>
+.console-dialog {
+  width: 100%;
+  min-width: 320px;
+  max-width: 720px;
+  /* Leave a margin under the viewport so the card never runs off screen; the body in between
+     scrolls, which keeps the title and the action buttons in view for long lists and forms. */
+  max-height: calc(100vh - 32px);
+}
+/* On a phone the dialog is maximised: fill the screen instead of hugging the content. */
+.console-dialog--full {
+  max-width: none;
+  max-height: 100vh;
+  height: 100%;
+}
+.console-dialog-body {
+  flex: 1 1 auto;
+  /* min-height 0 lets a flex child shrink below its content so overflow can scroll */
+  min-height: 0;
+  overflow: auto;
+}
 .channel-swatch {
   width: 28px;
   height: 28px;

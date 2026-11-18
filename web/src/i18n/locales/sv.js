@@ -2176,6 +2176,10 @@ export default {
       "Vikt och effekt används för riggning och strömplanering. Ett värde från Stockwire ersätter det som anges här.",
     weight: "Vikt (kg)",
     power: "Effekt (W)",
+    plotWidth: "Bredd på planen (cm)",
+    plotDepth: "Djup på planen (cm)",
+    plotSizeHint:
+      "Rutan som utrustningen ritas med på scenplanen. Importeras en Stockwire-produkt fylls den i från produktens bredd och djup; tom ger standardstorleken.",
     stockwireInUse: "Värde från Stockwire används: {value}",
     manualInUse: "Värdet som anges här används",
     notSet: "Inte angivet",

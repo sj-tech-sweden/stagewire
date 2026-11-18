@@ -1195,6 +1195,9 @@ export const mixerGraphPorts = (groups, existingPorts) =>
   groups?.length ? portsFromGroups(groups, existingPorts, 'mixer') : [];
 
 export const NUMBER_FIELDS = [
+  // the box on the stage plot: width, and depth as the plot's vertical extent
+  'width_cm',
+  'height_cm',
   'weight_kg',
   'power_w',
   'input_override',
@@ -1440,7 +1443,7 @@ export function longFeeds(nodes, outlets, thresholdM = 5) {
 
 // Fill a device form from /stockwire/products/{id}/device-specs and the picked product: name, the
 // connectors (added to what is there with the usual "same connector raises the count" rule), the
-// power inlet, weight and power. Fields the product does not give are left as they are.
+// power inlet, weight, power and plot footprint. Fields the product does not give are left as they are.
 export function fillFormFromSpecs(form, product, specs) {
   form.name = form.name || product.name || specs.name || '';
   form.stockwire_product_id = product.id != null ? String(product.id) : null;
@@ -1456,6 +1459,10 @@ export function fillFormFromSpecs(form, product, specs) {
   if (specs.power_inlet) form.power_inlet = specs.power_inlet;
   if (specs.weight_kg) form.weight_kg = specs.weight_kg;
   if (specs.power_watts) form.power_w = specs.power_watts;
+  // The plot is a plan view: a product's width and depth become the device's box, so it is drawn at
+  // its real size. Stockwire's depth is the plot's vertical extent (height_cm on a device).
+  if (specs.width_cm) form.width_cm = specs.width_cm;
+  if (specs.depth_cm) form.height_cm = specs.depth_cm;
   // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
   // An explicit product spec (e.g. a powered speaker) still wins over this default.
   if (
