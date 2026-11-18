@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.9.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.8.0...stagewire-v1.9.0) (2026-11-18)
+
+
+### Features
+
+* **console:** patch an LCR bus one side at a time (L, R, C) ([#148](https://github.com/sj-tech-sweden/stagewire/issues/148)) ([ad4d4c4](https://github.com/sj-tech-sweden/stagewire/commit/ad4d4c49a3d605081f086befd4a0301bf4f4cb7d))
+* **console:** stereo bus left/right routing, names in the socket grid, fix silent input links ([#147](https://github.com/sj-tech-sweden/stagewire/issues/147)) ([29a81af](https://github.com/sj-tech-sweden/stagewire/commit/29a81afe7883e2e4c7103fc93a0ae717ce9a2477))
+* **share:** read-only sound, lights and video sheets in the crew view ([#150](https://github.com/sj-tech-sweden/stagewire/issues/150)) ([41f520b](https://github.com/sj-tech-sweden/stagewire/commit/41f520bf7006b6dd8f012b6fa3b756abc2b646dc))
+
+
+### Bug Fixes
+
+* **console:** LCR bus sockets are ordered L, C, R ([#152](https://github.com/sj-tech-sweden/stagewire/issues/152)) ([913323f](https://github.com/sj-tech-sweden/stagewire/commit/913323fcf36412436140b1e3c39f40f925039f57))
+* **web:** no plug-in or connector pickers for passive devices in the rigging loads ([#151](https://github.com/sj-tech-sweden/stagewire/issues/151)) ([0c59742](https://github.com/sj-tech-sweden/stagewire/commit/0c59742117dee6fc6399517f82575ff9797da8d2))
+
 ## [1.8.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.7.0...stagewire-v1.8.0) (2026-11-18)
 
 
