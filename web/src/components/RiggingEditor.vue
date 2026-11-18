@@ -341,7 +341,8 @@
             data-testid="load-cable"
           >
             {{ powerInletLabel(graphNode(load.id)?.attributes?.power_inlet) }}
-            <span v-if="load.power_node_id">· {{ cableFor(graphNode(load.id)?.attributes?.power_inlet, connectorLabel(load.power_connector)) }}</span>
+            <template v-if="isPassive(load)" />
+            <span v-else-if="load.power_node_id">· {{ cableFor(graphNode(load.id)?.attributes?.power_inlet, connectorLabel(load.power_connector)) }}</span>
             <span v-else>· {{ t('workspace.notPlugged') }}</span>
           </q-item-label>
         </q-item-section>
@@ -361,6 +362,7 @@
               @update:model-value="(v) => assign(load, { rigging_point_id: v || null })"
             />
             <q-select
+              v-if="!isPassive(load)"
               :model-value="load.power_node_id"
               class="col-12 col-sm-4"
               dense
@@ -374,6 +376,7 @@
               @update:model-value="(v) => assign(load, { power_node_id: v || null, power_connector: v ? load.power_connector || connectorsOf(v)[0]?.value || '' : '' })"
             />
             <q-select
+              v-if="!isPassive(load)"
               :model-value="load.power_connector || null"
               class="col-12 col-sm-4"
               dense
@@ -394,6 +397,7 @@
         >
           <div :class="$q.screen.lt.sm ? 'row q-gutter-xs' : 'column items-end q-gutter-xs'">
             <q-badge
+              v-if="!isPassive(load)"
               :color="loadStatusColor(load.power_status)"
               :label="`${t('workspace.powerWord')}: ${statusLabel(load.power_status)}`"
               data-testid="load-power-status"
@@ -884,7 +888,10 @@ const feeds = computed(() => {
 
 // Devices that draw power but are not plugged into a node, and how many IEC C13 cables they need
 // (an empty inlet means the default, IEC C13; a fixed cable or powerCON needs no separate lead).
-const unplugged = computed(() => loads.value.filter((l) => l.kind === 'device' && !l.power_node_id));
+// A passive device (inlet "No power") has nothing to plug in: no node / connector pickers, no power
+// status, and it never counts as unplugged. It still has a hang point and a weight.
+const isPassive = (load) => load.kind === 'device' && graphNode(load.id)?.attributes?.power_inlet === 'none';
+const unplugged = computed(() => loads.value.filter((l) => l.kind === 'device' && !l.power_node_id && !isPassive(l)));
 const c13Needed = computed(
   () =>
     unplugged.value.filter((l) => {

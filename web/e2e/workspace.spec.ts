@@ -2249,6 +2249,32 @@ test('on a phone lights and video rows are cards with every editor, and power lo
   }
 });
 
+test('a passive device (no power inlet) has no plug or connector picker in the rigging loads', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Passive ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  await post(request, headers, `${g}/rigging-points`, { name: 'Truss A', weight_capacity_kg: 500 });
+  await post(request, headers, `${g}/power-nodes`, { name: 'Mains', kind: 'source', feed_connector: 'cee63_3p', rating_amps: 63, outputs: [{ connector: 'cee32_3p', count: 1 }] });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Passive DI', device_type: 'di', power_inlet: 'none', weight_kg: 4 });
+  await post(request, headers, `${g}/audio-devices`, { name: 'Active amp', device_type: 'other', power_inlet: 'iec_c13', weight_kg: 8, power_watts: 400 });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/rigging & power|rigg & ström/i).click();
+  const passive = page.getByTestId('load-row').filter({ hasText: 'Passive DI' });
+  const active = page.getByTestId('load-row').filter({ hasText: 'Active amp' });
+  await expect(active).toBeVisible();
+  await expect(passive).toBeVisible();
+  // the active one keeps all three pickers; the passive one only has the hang point
+  await expect(active.getByTestId('load-node')).toBeVisible();
+  await expect(active.getByTestId('load-connector')).toBeVisible();
+  await expect(passive.getByTestId('load-point')).toBeVisible();
+  await expect(passive.getByTestId('load-node')).toHaveCount(0);
+  await expect(passive.getByTestId('load-connector')).toHaveCount(0);
+  await expect(passive.getByTestId('load-power-status')).toHaveCount(0);
+  // and it is not counted as an unplugged load to be plugged in
+  await expect(page.getByTestId('plug-all')).toContainText(/: 1(?!\d)/);
+});
+
 test('when the stockwire integration is disabled, every stockwire control is hidden but the settings tab stays', async ({
   page,
   request,
