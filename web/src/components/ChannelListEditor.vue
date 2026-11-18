@@ -417,14 +417,11 @@
             flat
             dense
             bordered
-            virtual-scroll
-            :virtual-scroll-item-size="80"
             :rows="channels"
             row-key="id"
             :rows-per-page-options="[0]"
             hide-bottom
-            class="sticky-header-table channel-table"
-            style="max-height: 70vh"
+            class="channel-table"
             data-testid="channel-table"
           >
             <template #body-cell-number="slot">
