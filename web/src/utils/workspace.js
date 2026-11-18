@@ -1261,12 +1261,20 @@ export function deviceCreateBody(form) {
     name: form.name,
     // The backend stores the device type in `kind`; `device_type` is a frontend-only alias the
     // schema ignores, so we must send `kind` or the device comes back unclassified and
-    // `is_stagebox`/`is_mixer_device` both return False (which breaks quick-connect).
+    // `is_stagebox`/`is_mixer_device` both return False (which breaks quick-connect). We still
+    // echo `device_type` on the body so callers/tests that read the typed alias keep working.
     kind: form.device_type,
+    device_type: form.device_type,
     notes: form.notes,
-    // The create endpoint speaks real ports (id + channels), not connector groups: expand the
-    // groups into ports so every socket gets the id/channels the Port schema requires.
-    ports: portsFromGroups(form.ports.filter((p) => p.connector || p.count), [], form.device_type),
+    // The legacy create endpoint (AudioDevicePort) speaks `count`, not `channels`/id, so expand the
+    // connector groups into count-shaped ports. (The graph PATCH path uses portsFromGroups for the
+    // graph Port schema that needs id + channels + signal.) A digital-transport preset starts
+    // unconfigured (count null, by design) — coerce that to 0 so the legacy `int` field still
+    // validates; an unconfigured link simply has no sockets until the user sets a count.
+    ports: expandGroups(form.ports.filter((p) => p.connector || p.count)).map((g) => ({
+      ...g,
+      count: g.count ?? 0,
+    })),
   };
   if (form.stockwire_product_id) {
     body.stockwire_product_id = form.stockwire_product_id;
@@ -1532,14 +1540,17 @@ export const busChannelsFor = (mode) => OUTPUT_MODES.find((m) => m.value === mod
 // instead of letting them fall through to 'other' and be silently excluded.
 export function deviceTypeFromCategory(category, name = '') {
   const c = String(category || '').toLowerCase();
-  if (/ptz/.test(c)) return 'ptz_camera';
-  if (/camera/.test(c)) return 'camera';
-  if (/projector/.test(c)) return 'projector';
-  if (/screen|display|monitor|led wall/.test(c)) return 'screen';
-  if (/switcher|vision mixer/.test(c)) return 'switcher';
-  if (/mixer|console/.test(c)) return 'mixer';
-  if (/stage\s?box|snake|multicore|splitter|\bio\b/.test(c)) {
-    const hay = `${c} ${String(name || '').toLowerCase()}`;
+  // Both the category and the product name are considered: a "Cameras" row named "PTZ" is a PTZ
+  // camera, and an "I/O" row named "IO rack" is a stagebox. The name also carries the digital
+  // transport hint (dante/dsnake/avb/madi) that promotes a stagebox to digital.
+  const hay = `${c} ${String(name || '').toLowerCase()}`;
+  if (/ptz/.test(hay)) return 'ptz_camera';
+  if (/camera/.test(hay)) return 'camera';
+  if (/projector/.test(hay)) return 'projector';
+  if (/screen|display|monitor|led wall/.test(hay)) return 'screen';
+  if (/switcher|vision mixer/.test(hay)) return 'switcher';
+  if (/mixer|console/.test(hay)) return 'mixer';
+  if (/stage\s?box|snake|multicore|splitter|\b(?:i\/o|io)\b/.test(hay)) {
     return /digital|dante|dsnake|d-snake|avb|madi/.test(hay)
       ? 'digital_stagebox'
       : 'analog_stagebox';

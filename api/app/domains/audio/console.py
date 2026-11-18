@@ -839,14 +839,6 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
 
 # --- console input domain (soft-patch scope) ------------------------------------------------
 
-# Signals that can carry a mic/line signal from a stagebox to the console: analog audio, and
-# "data" (the ethernet switch fabric a Dante/AES50/AVB/MADI link rides over). Power, video, DMX
-# and plot links are not part of the path a console input takes.
-FEED_SIGNALS = frozenset({"audio", "data"})
-
-# Logical/plot nodes are never part of the input domain even when reached by a feed edge.
-_VIRTUAL_KINDS = frozenset({"channel", "output", "channel_list", "bus", "plot_element"})
-
 
 def _dev_kind(d: Any) -> str:
     """The device's type, read from ``kind`` and falling back to the stored ``device_type``.
@@ -869,75 +861,21 @@ def is_stagebox(d: Any) -> bool:
     return _dev_kind(d) in ("digital_stagebox", "analog_stagebox")
 
 
-def _dev_id(d: Any) -> str:
-    return str(getattr(d, "id", None))
-
-
-def feedingStageboxes(mixer: Any, devices: Iterable[Any], edges: Iterable[Any]) -> list[Any]:
-    """Stageboxes reachable from ``mixer`` over audio/data edges through network gear.
-
-    Mirrors the frontend ``feedingStageboxes`` walk (web/src/utils/workspace.js): it never
-    passes through another mixer or a virtual node, so a stagebox feeding a *different* console
-    is not claimed by this one. The mixer's own channels (same ``sound_list_id``) seed the walk.
-    """
-    if mixer is None:
-        return []
-    by_id = {_dev_id(d): d for d in devices}
-    list_id = (getattr(mixer, "attributes", None) or {}).get("sound_list_id")
-    start = {_dev_id(mixer)}
-    if list_id:
-        for d in devices:
-            if (
-                getattr(d, "kind", None) == "channel"
-                and (getattr(d, "attributes", None) or {}).get("sound_list_id") == list_id
-            ):
-                start.add(_dev_id(d))
-    seen = set(start)
-    queue = list(start)
-    found: dict[str, Any] = {}
-    while queue:
-        cur = queue.pop(0)
-        for e in edges:
-            if getattr(e, "signal", None) not in FEED_SIGNALS:
-                continue
-            src = str(getattr(e, "src_device_id", None))
-            dst = str(getattr(e, "dst_device_id", None))
-            nxt = dst if src == cur else (src if dst == cur else None)
-            if not nxt or nxt in seen:
-                continue
-            dev = by_id.get(nxt)
-            if dev is None:
-                continue
-            seen.add(nxt)
-            if is_stagebox(dev):
-                found[nxt] = dev
-                continue  # a stagebox ends the walk; its own inputs are the stage side
-            if getattr(dev, "kind", None) in _VIRTUAL_KINDS or is_mixer_device(dev):
-                continue
-            queue.append(nxt)
-    return list(found.values())
-
-
 def console_input_devices(
     devices: Iterable[Any], edges: Iterable[Any], mixer: Any | None
 ) -> list[Any]:
     """The devices whose sockets belong in the console soft patch — the input domain.
 
-    Hybrid rule (plan §2): with a mixer, the domain is the mixer plus the stageboxes that reach
-    it (feedingStageboxes); without a mixer, every stagebox that participates in at least one
-    audio/data edge (i.e. is wired into the rig). Cameras, mics, DIs and wireless racks are
-    excluded by type, and an isolated stagebox (no edge) is excluded — so a camera XLR in never
-    appears as a soft-patch target and an unconnected stagebox stays out until it is wired in.
+    The console (when one exists) plus every stagebox in the job. A stagebox is a valid soft-patch
+    target whether or not it is already wired into the rig, because you patch the console's inputs
+    and outputs to/from its ports directly. Cameras, mics, DIs and wireless racks are excluded by
+    type — an XLR in on a camera must never appear as a console-input patch target — which is the
+    original point of scoping the soft patch away from the full device list.
     """
     devices = list(devices)
-    if mixer is not None:
-        return [mixer, *feedingStageboxes(mixer, devices, edges)]
-    wired: set[str] = set()
-    for e in edges:
-        if getattr(e, "signal", None) in FEED_SIGNALS:
-            wired.add(str(getattr(e, "src_device_id", None)))
-            wired.add(str(getattr(e, "dst_device_id", None)))
-    return [d for d in devices if is_stagebox(d) and _dev_id(d) in wired]
+    result = [mixer] if mixer is not None else []
+    result.extend(d for d in devices if is_stagebox(d))
+    return result
 
 
 # --- Dante / network patch domain (Phase E, distinct from the mixer soft patch) ---------------

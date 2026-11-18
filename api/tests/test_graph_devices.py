@@ -315,7 +315,9 @@ async def test_connect_stagebox_links_over_dante_and_makes_it_reachable(auth_hea
             attributes={},
             ports=box["ports"],
         )
-        reached = console.feedingStageboxes(mixer_row, [mixer_row, box_row], edge_rows)
+        # The stagebox is now a soft-patch target for the console (console_input_devices returns the
+        # mixer plus every stagebox, so the just-linked box is in the input domain).
+        reached = console.console_input_devices([mixer_row, box_row], edge_rows, mixer_row)
         assert any(console.is_stagebox(d) for d in reached)
 
 

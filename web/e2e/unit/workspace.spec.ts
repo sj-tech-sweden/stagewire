@@ -347,7 +347,9 @@ test('only ports with a connector or channel count are connector groups', () => 
     { id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 32 },
     { id: 'out-audio', direction: 'out', signal: 'audio' },
   ];
-  expect(portGroups(ports)).toEqual([{ direction: 'in', connector: 'xlr3', count: 32 }]);
+  // A group also carries the optional interface `name` and the port `signal` so the editor can
+  // show/round-trip them; an unnamed, un-signalled XLR group has both null.
+  expect(portGroups(ports)).toEqual([{ direction: 'in', connector: 'xlr3', count: 32, name: null, signal: null }]);
 });
 
 test('editing groups keeps generic ports and gives every port a unique id', () => {
@@ -534,15 +536,18 @@ test('dSnake is a selectable digital connector with a bidirectional preset', () 
   expect(CONNECTOR_CHOICES.find((c) => c.value === 'dsnake')).toEqual({ value: 'dsnake', label: 'dSnake' });
   expect(connectorLabel('dsnake')).toBe('dSnake');
   const preset = CONNECTOR_PRESETS.find((p) => p.connector === 'dsnake');
-  expect(preset).toMatchObject({ direction: 'both', count: 1 });
+  // A digital-transport preset is an *unconfigured* link (count null): it is the basis of the soft
+  // patch, not a socket, so the user sets the channel count (and an optional name) before sockets
+  // appear. The link signal is `data` (audio over the network).
+  expect(preset).toMatchObject({ direction: 'both', count: null, signal: 'data' });
   const ports = portsFromGroups([preset], [], 'digital_stagebox');
   expect(ports.map((p) => [p.direction, p.connector, p.channels])).toEqual([
-    ['in', 'dsnake', 1],
-    ['out', 'dsnake', 1],
+    ['in', 'dsnake', null],
+    ['out', 'dsnake', null],
   ]);
-  // AVB and MADI are likewise offered as bidirectional presets for symmetry.
+  // AVB and MADI are likewise offered as bidirectional, unconfigured presets for symmetry.
   for (const conn of ['avb', 'madi']) {
-    expect(CONNECTOR_PRESETS.find((p) => p.connector === conn)).toMatchObject({ direction: 'both', count: 1 });
+    expect(CONNECTOR_PRESETS.find((p) => p.connector === conn)).toMatchObject({ direction: 'both', count: null });
   }
 });
 
@@ -554,7 +559,8 @@ test('a bidirectional connector is two ports and shows as one group again', () =
     ['out', 'dante', 1],
   ]);
   expect(new Set(ports.map((p) => p.id)).size).toBe(2);
-  expect(portGroups(ports)).toEqual([{ direction: 'both', connector: 'dante', count: 1 }]);
+  // portGroups reports the (optional) name and the port signal alongside direction/connector/count.
+  expect(portGroups(ports)).toEqual([{ direction: 'both', connector: 'dante', count: 1, name: null, signal: 'audio' }]);
   expect(expandGroups(groups).map((g) => g.direction)).toEqual(['in', 'out']);
   // different counts are two different groups, not a bidirectional one
   expect(

@@ -597,12 +597,14 @@ test('a device is created and edited in the device editor, with ports and camera
   await expect.poll(async () => (await legacy())?.device_type).toBe('ptz_camera');
   const created = await legacy();
   expect(created.sensor_width_mm).toBe(9.6);
-  // the same preset twice raises the count, a bidirectional connector is stored as an in and an out
+  // the same preset twice raises the count, a bidirectional connector is stored as an in and an out.
+  // A digital-transport preset (Dante) starts unconfigured (count 0): it is a link, not a socket,
+  // until the user sets the channel count, so the saved port reads count 0.
   expect(created.ports).toEqual(
     expect.arrayContaining([
       { direction: 'in', connector: 'sdi', count: 2 },
-      { direction: 'in', connector: 'dante', count: 1 },
-      { direction: 'out', connector: 'dante', count: 1 },
+      { direction: 'in', connector: 'dante', count: 0 },
+      { direction: 'out', connector: 'dante', count: 0 },
       { direction: 'out', connector: 'speakon', count: 1 },
     ]),
   );

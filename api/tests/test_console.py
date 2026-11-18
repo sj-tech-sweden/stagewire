@@ -287,43 +287,31 @@ def _edge(src, dst, signal="audio"):
     return SimpleNamespace(src_device_id=src, dst_device_id=dst, signal=signal)
 
 
-def test_console_input_devices_excludes_cameras_and_isolated_stageboxes():
+def test_console_input_devices_excludes_cameras_and_keeps_all_stageboxes():
     camera = _dev("cam", "camera")
     mixer = _dev("m", "mixer", {"sound_list_id": "L"})
     near = _dev("near", "digital_stagebox")
-    far = _dev("far", "digital_stagebox")  # isolated, no edge
+    far = _dev("far", "digital_stagebox")  # isolated, no edge — still a valid target
     di = _dev("di", "other")
     devices = [camera, mixer, near, far, di]
     edges = [_edge("near", "m"), _edge("di", "cam")]
-    # With a mixer: mixer + stageboxes reaching it (near). Camera/DI/isolated far excluded.
+    # With a mixer: the mixer plus every stagebox, wired or not. Cameras and non-stagebox gear
+    # (the DI) are excluded by type, not by reachability.
     domain = console.console_input_devices(devices, edges, mixer)
-    assert {d.id for d in domain} == {"m", "near"}
-    # Without a mixer: only stageboxes that carry an audio/data edge. near has the near<->m edge,
-    # so it appears; far is isolated and di/camera are not stageboxes.
-    assert {d.id for d in console.console_input_devices(devices, edges, None)} == {"near"}
+    assert {d.id for d in domain} == {"m", "near", "far"}
+    # Without a mixer: every stagebox is a soft-patch target (you patch to its ports directly),
+    # so both near and the isolated far appear; the camera and DI do not.
+    assert {d.id for d in console.console_input_devices(devices, edges, None)} == {"near", "far"}
 
 
-def test_console_input_devices_without_mixer_shows_wired_stagebox():
+def test_console_input_devices_without_mixer_shows_every_stagebox():
     wired = _dev("wired", "analog_stagebox")
     isolated = _dev("iso", "analog_stagebox")
     switch = _dev("sw", "network")
     devices = [wired, isolated, switch]
     edges = [_edge("wired", "sw", "data")]
     domain = console.console_input_devices(devices, edges, None)
-    assert {d.id for d in domain} == {"wired"}
-
-
-def test_feeding_stageboxes_walks_through_network_gear_not_other_mixers():
-    mixer_a = _dev("mA", "mixer", {"sound_list_id": "L"})
-    mixer_b = _dev("mB", "mixer", {"sound_list_id": "X"})
-    box = _dev("box", "digital_stagebox")
-    switch = _dev("sw", "network")
-    other_box = _dev("boxB", "digital_stagebox")  # feeds the other mixer, not ours
-    devices = [mixer_a, mixer_b, box, switch, other_box]
-    edges = [_edge("box", "sw"), _edge("sw", "mA"), _edge("other_box", "mB")]
-    found = console.feedingStageboxes(mixer_a, devices, edges)
-    assert {d.id for d in found} == {"box"}
-    assert "boxB" not in {d.id for d in found}
+    assert {d.id for d in domain} == {"wired", "iso"}
 
 
 def test_device_type_classifiers():
@@ -846,9 +834,9 @@ async def test_soft_patch_excludes_non_stagebox_devices(auth_headers):
         assert box["id"] in {s["device_id"] for s in view["sockets"]}
 
 
-async def test_soft_patch_without_mixer_shows_only_connected_stageboxes(auth_headers):
-    """With no mixer set, a stagebox only appears when it carries an audio/data edge; an isolated
-    stagebox is hidden until it is wired in (plan §2)."""
+async def test_soft_patch_without_mixer_shows_every_stagebox(auth_headers):
+    """With no mixer set, every stagebox is a soft-patch target (you patch to its ports directly),
+    wired or not. Cameras and other non-stagebox gear stay out by type."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
         _, api, post, lst = await _job(client, h)
@@ -891,12 +879,13 @@ async def test_soft_patch_without_mixer_shows_only_connected_stageboxes(auth_hea
         view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
         ids = {s["device_id"] for s in view["sockets"]}
         assert wired["id"] in ids
-        assert isolated["id"] not in ids
+        # An isolated stagebox is still a valid target — you patch to its ports directly.
+        assert isolated["id"] in ids
 
 
-async def test_soft_patch_with_mixer_shows_only_reachable_stageboxes(auth_headers):
-    """With a mixer set, only the mixer plus the stageboxes that reach it appear; a stagebox wired
-    to something else (and an isolated one) are excluded (plan §2)."""
+async def test_soft_patch_with_mixer_shows_mixer_and_every_stagebox(auth_headers):
+    """With a mixer set, the mixer plus every stagebox appear — a stagebox is a target whether or
+    not it currently reaches the mixer. Cameras, DIs and other non-stagebox gear stay out by type."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
         _, api, post, lst = await _job(client, h)
@@ -937,8 +926,7 @@ async def test_soft_patch_with_mixer_shows_only_reachable_stageboxes(auth_header
                 "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 4}],
             },
         )
-        # Near box reaches the mixer; far box reaches only the DI; the isolated far box is wired
-        # to nothing and must stay out of the target list.
+        # Near box reaches the mixer; far box reaches only the DI. Both stageboxes are still targets.
         await post(
             "graph/edges",
             {
@@ -963,7 +951,8 @@ async def test_soft_patch_with_mixer_shows_only_reachable_stageboxes(auth_header
         ids = {s["device_id"] for s in view["sockets"]}
         assert mixer["id"] in ids
         assert near["id"] in ids
-        assert far["id"] not in ids
+        # Far box is a stagebox, so it is a soft-patch target even though it only reaches the DI.
+        assert far["id"] in ids
         assert di["id"] not in ids
 
 
