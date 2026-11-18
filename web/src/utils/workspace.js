@@ -365,34 +365,6 @@ export function feedingStageboxes(mixer, devices, edges) {
   return [...found.values()];
 }
 
-// The physical inputs a channel can be fed from, as a strict dropdown: the mixer's own input ports
-// plus the input ports of every stagebox that reaches the mixer (feedingStageboxes). Each port
-// carrying a channel count expands into its individual physical sockets — an 8-channel XLR group
-// becomes "XLR in 1" … "XLR in 8" — so a channel maps to one specific physical input.
-export function mixerInputChoices(channel, devices, edges) {
-  const listId = channel?.attributes?.list_id;
-  if (!listId) return [];
-  const mixer = devices.find((d) => isMixerDevice(d) && d.sound_list_id === listId);
-  if (!mixer) return [];
-  const choices = [];
-  const seen = new Set();
-  const add = (label) => {
-    if (seen.has(label)) return;
-    seen.add(label);
-    choices.push({ label, value: label });
-  };
-  for (const dev of [mixer, ...feedingStageboxes(mixer, devices, edges)]) {
-    const tag = dev === mixer ? '' : ` (${dev.name})`;
-    for (const p of dev.ports || []) {
-      if (p.direction !== 'in') continue;
-      const conn = (p.connector || 'in').toUpperCase();
-      const n = Number(p.channels) || 1;
-      for (let i = 1; i <= n; i += 1) add(`${conn} in ${i}${tag}`);
-    }
-  }
-  return choices;
-}
-
 // The label a port shows in the signal flow: the port's own label when it has one, else its
 // connector ("XLR out"), never the raw generated id ("out-xlr3") alone.
 export function portLabelOf(device, portId, socket = null) {
@@ -934,6 +906,7 @@ export const CONNECTOR_CHOICES = [
   { value: 'trs', label: 'TRS / jack' },
   { value: 'speakon', label: 'Speakon' },
   { value: 'dante', label: 'Dante' },
+  { value: 'dsnake', label: 'dSnake' },
   { value: 'aes50', label: 'AES50' },
   { value: 'madi', label: 'MADI' },
   { value: 'avb', label: 'AVB' },
@@ -957,7 +930,10 @@ export const CONNECTOR_PRESETS = [
   { label: 'XLR ×8 out', connector: 'xlr3', direction: 'out', count: 8 },
   { label: 'Speakon ×4 out', connector: 'speakon', direction: 'out', count: 4 },
   { label: 'Dante', connector: 'dante', direction: 'both', count: 1 },
+  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: 1 },
   { label: 'AES50', connector: 'aes50', direction: 'both', count: 1 },
+  { label: 'AVB', connector: 'avb', direction: 'both', count: 1 },
+  { label: 'MADI', connector: 'madi', direction: 'both', count: 1 },
   { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1 },
   { label: 'SDI in', connector: 'sdi', direction: 'in', count: 1 },
   { label: 'SDI out', connector: 'sdi', direction: 'out', count: 1 },

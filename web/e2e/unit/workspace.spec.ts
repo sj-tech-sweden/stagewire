@@ -47,6 +47,8 @@ import {
   fillFormFromSpecs,
   expandGroups,
   CONNECTOR_PRESETS,
+  CONNECTOR_CHOICES,
+  connectorLabel,
   powerTreeRows,
   outputsLabel,
   loadStatusColor,
@@ -524,6 +526,24 @@ test('a connector preset adds a group, or raises the count of the same connector
   expect(addConnector(once, xlrIn)[0].count).toBe(16);
   const out = addConnector(once, { connector: 'xlr3', direction: 'out', count: 8 });
   expect(out).toHaveLength(2);
+});
+
+test('dSnake is a selectable digital connector with a bidirectional preset', () => {
+  // Phase B: dSnake was missing from the connector vocabulary. A digital stagebox/mixer linked by
+  // dSnake must be pickable in the connector editor and offer an in+out pair from the preset.
+  expect(CONNECTOR_CHOICES.find((c) => c.value === 'dsnake')).toEqual({ value: 'dsnake', label: 'dSnake' });
+  expect(connectorLabel('dsnake')).toBe('dSnake');
+  const preset = CONNECTOR_PRESETS.find((p) => p.connector === 'dsnake');
+  expect(preset).toMatchObject({ direction: 'both', count: 1 });
+  const ports = portsFromGroups([preset], [], 'digital_stagebox');
+  expect(ports.map((p) => [p.direction, p.connector, p.channels])).toEqual([
+    ['in', 'dsnake', 1],
+    ['out', 'dsnake', 1],
+  ]);
+  // AVB and MADI are likewise offered as bidirectional presets for symmetry.
+  for (const conn of ['avb', 'madi']) {
+    expect(CONNECTOR_PRESETS.find((p) => p.connector === conn)).toMatchObject({ direction: 'both', count: 1 });
+  }
 });
 
 test('a bidirectional connector is two ports and shows as one group again', () => {

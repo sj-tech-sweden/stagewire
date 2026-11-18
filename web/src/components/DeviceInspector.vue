@@ -66,21 +66,6 @@
           @click="notesOpen = true"
         />
       </div>
-      <q-select
-        v-if="device.kind === 'channel'"
-        :model-value="device.attributes?.mixer_input || null"
-        dense
-        outlined
-        emit-value
-        map-options
-        clearable
-        :options="mixerInputOptions"
-        :label="t('workspace.colMixerInput')"
-        :hint="t('workspace.colMixerInputHint')"
-        class="q-mb-sm"
-        data-testid="inspector-channel-mixer-input"
-        @update:model-value="(v) => save({ attributes: { mixer_input: v || null } })"
-      />
       <div
         v-if="pluggedNode"
         class="row items-center q-mb-sm"
@@ -823,7 +808,6 @@ import {
   outputPointOptions,
   channelsOf,
   outputsOf,
-  mixerInputChoices,
   socketOptions,
   splitSocket,
   portLabelOf,
@@ -1025,11 +1009,6 @@ const isNetworkedDomain = computed(() =>
 // Snapshot of the device's attribute bag; new keys (network_*) are merged in by the
 // shallow-merge update path, so sibling keys are never clobbered by a single-field edit.
 const attrs = computed(() => props.device?.attributes || {});
-// Strict dropdown of the physical inputs a channel can be fed from: the mixer's inputs plus any
-// stagebox patched into that mixer (see mixerInputChoices in workspace.js).
-const mixerInputOptions = computed(() =>
-  mixerInputChoices(props.device, graphDevices.value, graphEdges.value),
-);
 const deviceIpWebUi = computed(() => {
   const ip = props.device?.attributes?.network_ip;
   return ip ? `http://${ip}` : null;

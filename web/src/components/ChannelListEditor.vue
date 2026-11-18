@@ -364,19 +364,6 @@
                     :hint="''"
                     @update:model-value="(p) => setStand(ch, p)"
                   />
-                  <q-select
-                    :model-value="ch.attributes.mixer_input || null"
-                    dense
-                    outlined
-                    emit-value
-                    map-options
-                    clearable
-                    :options="mixerInputChoices(ch, graph.devices, graph.edges)"
-                    :label="t('workspace.colMixerInput')"
-                    :hint="t('workspace.colMixerInputHint')"
-                    data-testid="channel-mixer-input"
-                    @update:model-value="(v) => saveAttr(ch, 'mixer_input', v || null)"
-                  />
                   <div class="row items-center">
                     <q-checkbox
                       :model-value="!!ch.attributes.phantom_power"
@@ -1071,7 +1058,6 @@ import {
   isPlotElement,
   isOrphanedBySource,
   isVirtual,
-  mixerInputChoices,
   nextChannelNumber,
   outputsOf,
   stereoPairPlan,

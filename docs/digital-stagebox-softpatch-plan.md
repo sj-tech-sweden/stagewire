@@ -58,9 +58,12 @@ This fixes the camera bug (a camera is neither a mixer nor a stagebox) and enfor
   patched to a snake/camera/etc.; such a device simply does not appear as a selectable socket
   in the soft-patch UI. (Per explicit product decision: "it should still be possible to patch
   those, but not in the softpatch.")
-- The separate `mixerInputChoices` Inputs-tab dropdown (`workspace.js:372`) stays
-  mixer-anchored (it is about the console's own inputs). This is a known minor asymmetry,
-  not a blocker — see §7.
+- **The `mixerInputChoices` Inputs-tab dropdown has been removed.** It was a separate,
+  mixer-anchored "which physical console input" annotation (`channel.attributes.mixer_input`)
+  duplicating what the soft patch already expresses via `dsp_source`. The soft patch is now the
+  single source of truth for "where is this channel physically fed from"; the dropdown and its
+  `mixer_input` attribute writes are gone (existing `mixer_input` values are inert and no longer
+  shown). See §7.
 
 ## 3. Hard prerequisite: `deviceTypeFromCategory` must classify stageboxes (P0)
 
@@ -190,7 +193,6 @@ different mental models (console input patching vs. network routing). So Phase E
 - Treating wireless racks / audio interfaces with digital outs as **direct** soft-patch
   targets. Current decision: mixer + stageboxes only; other digital sources are modelled as
   upstream chain devices.
-- `mixerInputChoices` Inputs-tab dropdown asymmetry (stays mixer-anchored).
 - Adding `dsnake` to the backend connector doc list (`device_specs.py:10`) and
   `docs/stockwire-integration-spec.md` so Stockwire-side data stays consistent.
 
@@ -269,10 +271,10 @@ count: 48}`, but:
 
 ## 9. Phasing & status
 
-- [ ] **Phase A** — backend domain filter (§4.1) + `deviceTypeFromCategory` stagebox rule (§4.2)
+- [x] **Phase A** — backend domain filter (§4.1) + `deviceTypeFromCategory` stagebox rule (§4.2)
       + tests (§6.1, §6.2 camera/connected/mapper cases). *Delivers "connected stageboxes, no
       cameras" — the foundation everything else needs.*
-- [ ] **Phase B** — `dsnake` (+`avb`/`madi`) connector presets, bidirectional, multiple (§4.3)
+- [x] **Phase B** — `dsnake` (+`avb`/`madi`) connector presets, bidirectional, multiple (§4.3)
       + dsnake test.
 - [ ] **Phase C** — Stockwire mixer expansion ports into device specs (§4.4) + imported-mixer test.
 - [ ] **Phase D** — easy-link / Dante convenience (§4.5, later).

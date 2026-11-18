@@ -3,7 +3,6 @@ import {
   channelFlowTree,
   directConnections,
   feedingStageboxes,
-  mixerInputChoices,
   patchSummary,
   portLabelOf,
   socketOptions,
@@ -87,16 +86,6 @@ test('a stagebox feeding a different mixer is not claimed by this one', () => {
   const other = { ...mixer, id: 'mixer2', sound_list_id: 'list2' };
   const edges = [edge('e1', 'box', 'out-dante', 'mixer2', 'in-xlr3', 'audio')];
   expect(feedingStageboxes(mixer, [...devices, other], edges)).toEqual([]);
-});
-
-test('the mixer input choices list the mixer inputs and the reaching stagebox inputs', () => {
-  const edges = [edge('e1', 'box', 'out-dante', 'sw', 'p1', 'data'), edge('e2', 'sw', 'p2', 'mixer', 'in-xlr3', 'data')];
-  const labels = mixerInputChoices(devices[3], devices, edges).map((c) => c.label);
-  expect(labels).toContain('XLR3 in 1');
-  expect(labels).toContain('XLR3 in 16');
-  expect(labels).toContain('XLR3 in 1 (Stagebox)');
-  expect(labels).toContain('XLR3 in 32 (Stagebox)');
-  expect(labels.some((l) => l.includes('legacy'))).toBe(false);
 });
 
 test('a port label falls back to its connector, never the raw generated id alone', () => {
