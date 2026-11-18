@@ -930,3 +930,64 @@ test('source and stand selectors are usable when the Stockwire integration is di
     )
     .toMatchObject({ stand_type: 'K&M 210' });
 });
+
+test('a stagebox can be cascaded into another stagebox over dSnake (expansion port)', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId } = await seed(request, headers);
+  // A console with a dSnake input so the quick-connect card's default target exists.
+  await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+    name: 'GLD-80',
+    device_type: 'mixer',
+    ports: [{ id: 'dsnake-in', direction: 'in', signal: 'data', connector: 'dsnake' }],
+  });
+  // AR2412: a stagebox with a dSnake output AND a dSnake expansion input (the cascade target).
+  const ar2412 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+    name: 'AR2412',
+    device_type: 'digital_stagebox',
+    ports: [
+      { id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' },
+      { id: 'dsnake-exp-in', direction: 'in', signal: 'data', connector: 'dsnake', name: 'dSnake Expander' },
+    ],
+  });
+  // AR84: a stagebox with only a dSnake output — the one we cascade into the AR2412.
+  const ar84 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+    name: 'AR84',
+    device_type: 'digital_stagebox',
+    ports: [{ id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' }],
+  });
+
+  await page.goto(`/jobs/${jobId}/workspace?view=lists`);
+  const panel = page.getByTestId('console-panel');
+  await expect(panel).toBeVisible();
+
+  // Both stageboxes are listed as unconnected; scope to the AR84 row.
+  const rows = panel.getByTestId('console-unconnected-stageboxes');
+  const ar84Row = rows.locator('div.row').filter({ hasText: 'AR84' });
+  await expect(ar84Row).toBeVisible();
+
+  // Pick the cascade target (another stagebox) instead of the console.
+  await ar84Row.getByTestId('console-stagebox-target').click();
+  await page.getByRole('option', { name: 'AR2412' }).click();
+  // The destination port is now the AR2412's expansion input; it is auto-selected on target change.
+  await expect(ar84Row.getByTestId('console-stagebox-dst-port')).toHaveValue(
+    new RegExp('Expander', 'i'),
+  );
+
+  await ar84Row.getByTestId('console-connect-stagebox').click();
+
+  // The link is a data edge AR84 -> AR2412, not through the console.
+  type Edge = { signal: string; src_device_id: string; dst_device_id: string };
+  const edges = (await (
+    await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })
+  ).json()) as { edges: Edge[] };
+  const link = edges.edges.find((e) => e.src_device_id === ar84.id && e.dst_device_id === ar2412.id);
+  expect(link, 'expected an AR84 -> AR2412 data edge').toBeDefined();
+  expect(link!.signal).toBe('data');
+
+  // The AR84 card flips to the linked state.
+  await expect(rows.locator('div.row').filter({ hasText: 'AR84' }).getByTestId('console-stagebox-linked')).toBeVisible();
+});

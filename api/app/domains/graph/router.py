@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -621,17 +621,28 @@ async def join_network(
 
 
 class ConnectStageboxBody(BaseModel):
-    """Link a stagebox into the console over its Dante / network connector (quick-connect).
+    """Link a stagebox into the console, or into another stagebox, over a Dante / network connector.
 
-    When ``stagebox_port`` / ``console_port`` are omitted the server auto-picks a compatible network
-    pair (preferring a console port whose connector matches the stagebox's). Pass them to choose the
-    exact ports to link — useful when a console carries several interfaces (e.g. a dSnake base and a
-    dSnake expander, or dSnake and Dante) and the default is not the one you want.
+    The default target is the job's mixer/console (the original quick-connect). Pass ``target_id``
+    to link the stagebox into a different stagebox instead — e.g. an AR84 into an AR2412's dSnake
+    expansion port (a digital-transport cascade). ``stagebox_port`` is an output network port on the
+    stagebox; ``target_port`` (or the deprecated alias ``console_port``) is an input network port on
+    the destination. Omit the ports to let the server auto-pick a compatible pair.
     """
 
     stagebox_id: UUID
     stagebox_port: str | None = None
-    console_port: str | None = None
+    target_id: UUID | None = None
+    target_port: str | None = None
+    console_port: str | None = None  # deprecated alias for target_port
+
+    @model_validator(mode="after")
+    def _fold_console_port(self) -> "ConnectStageboxBody":
+        # Keep ``console_port`` working for older clients: it only applies when the console is the
+        # target, so fold it into target_port unless an explicit target_port was given.
+        if self.target_port is None and self.console_port is not None:
+            self.target_port = self.console_port
+        return self
 
 
 @router.post("/connect-stagebox", status_code=201)
@@ -640,27 +651,43 @@ async def connect_stagebox(
     body: ConnectStageboxBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Phase D/E follow-up: one click to wire a stagebox into the console over dSnake/Dante."""
+    """Phase D/E follow-up: one click to wire a stagebox into the console, or into another
+    stagebox, over dSnake/Dante (a digital-transport cascade)."""
     stagebox = await _device(db, job_id, body.stagebox_id)
     if not is_stagebox(stagebox):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The target must be a stagebox")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The source must be a stagebox")
     if not network_ports(stagebox):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "The stagebox must carry a Dante / network connector",
         )
     devices = await _all_devices(db, job_id)
-    mixer = next((d for d in devices if is_mixer_device(d)), None)
-    if mixer is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "No console/mixer device to connect to"
-        )
-    mixer_net = network_ports(mixer)
-    if not mixer_net:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "The console has no Dante / network connector — add one (e.g. dSnake) first",
-        )
+    # Destination: another stagebox when target_id is given, otherwise the console/mixer (default).
+    if body.target_id is not None:
+        target = next((d for d in devices if str(d.id) == str(body.target_id)), None)
+        if target is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Target device not found")
+        if not (is_stagebox(target) or is_mixer_device(target)):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "The target must be a stagebox or the console/mixer",
+            )
+        if not network_ports(target):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "The target must carry a Dante / network connector",
+            )
+    else:
+        target = next((d for d in devices if is_mixer_device(d)), None)
+        if target is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "No console/mixer device to connect to"
+            )
+        if not network_ports(target):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "The console has no Dante / network connector — add one (e.g. dSnake) first",
+            )
     # An explicit stagebox port (a network output) wins; otherwise auto-pick a network out.
     if body.stagebox_port:
         sport = next(
@@ -674,26 +701,27 @@ async def connect_stagebox(
         src_port = sport.get("id")
     else:
         src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
-    # Destination: an explicit console port (must be a network input) wins, else prefer a console
-    # port whose connector matches the stagebox's (dSnake stagebox -> dSnake console port, not a
-    # Dante one it also carries), so a compatible link is chosen automatically.
-    if body.console_port:
-        dport = next((p for p in mixer_net if p.get("id") == body.console_port), None)
+    # Destination: an explicit target port (a network input) wins, else prefer a target port whose
+    # connector matches the stagebox's (dSnake stagebox -> dSnake target port, not a Dante one it
+    # also carries), so a compatible link is chosen automatically.
+    target_net = network_ports(target)
+    if body.target_port:
+        dport = next((p for p in target_net if p.get("id") == body.target_port), None)
         if dport is None or dport.get("direction") not in ("in", "both"):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "console_port must name an input network port on the console",
+                "target_port must name an input network port on the target",
             )
         dst_port = dport.get("id")
     else:
-        dst_port = _pick_network_port(mixer, "in", prefer=_port_connector(stagebox, src_port)) or (
-            _pick_network_port(mixer, None)
+        dst_port = _pick_network_port(target, "in", prefer=_port_connector(stagebox, src_port)) or (
+            _pick_network_port(target, None)
         )
     edge_dict = {
         "signal": "data",
         "src_device_id": stagebox.id,
         "src_port": src_port,
-        "dst_device_id": mixer.id,
+        "dst_device_id": target.id,
         "dst_port": dst_port,
         "channels": 1,
     }
@@ -701,11 +729,11 @@ async def connect_stagebox(
     if topology.would_create_cycle(
         [_as_dict(e) for e in existing if getattr(e, "signal", None) == "data"],
         str(stagebox.id),
-        str(mixer.id),
+        str(target.id),
     ):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Connection would form a loop")
     issues = topology.validate_edge(
-        edge_dict, _as_dict(stagebox), _as_dict(mixer), [_as_dict(e) for e in existing]
+        edge_dict, _as_dict(stagebox), _as_dict(target), [_as_dict(e) for e in existing]
     )
     blocking = [i for i in issues if i.code != "signal_mismatch"]
     if blocking:
