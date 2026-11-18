@@ -639,11 +639,17 @@ async def assign_output_endpoints(
     output_id: uuid.UUID,
     list_id: uuid.UUID,
     row: Any,
-    endpoints: list[list[dict]] | None,
+    endpoints: list[list[dict] | dict] | None,
     *,
     append: bool = False,
 ) -> GraphDevice:
     """Set the physical endpoints a bus leaves from; ``None`` / ``[]`` clears them.
+
+    An endpoint is a list of refs, or ``{"refs": [...], "side": "L"|"R"}``. A ``side`` endpoint is
+    *one* socket carrying just that half of a stereo bus (e.g. only the left, into a mono monitor
+    send); it is stored as ``{"id", "refs": [one ref], "side"}`` and is only valid on a stereo bus.
+    Without ``append`` a side endpoint replaces only the endpoints already on that side, so the
+    left and the right can be patched one after the other without the second wiping the first.
 
     A bus may leave from several places (main to FOH *and* to a recording box), so it holds a list
     of endpoints. Each endpoint is one socket for a mono bus, two (L, R) for stereo, three
@@ -659,8 +665,22 @@ async def assign_output_endpoints(
     new: list[dict] = []
     hardware = await job_hardware(db, job_id)
     sockets = {s["key"]: s for s in console.audio_sockets(hardware)}
+    wanted_sides = {e.get("side") for e in endpoints or [] if isinstance(e, dict) and e.get("side")}
+    if wanted_sides and not append:
+        # re-tapping a side moves it: only the endpoints on a side being set are replaced
+        existing = [
+            e for e in attrs.get("out_endpoints") or [] if e.get("side") not in wanted_sides
+        ]
     mine = {k for e in existing for k in console.endpoint_keys(e)}
-    for refs in endpoints or []:
+    for item in endpoints or []:
+        side = item.get("side") if isinstance(item, dict) else None
+        refs = item.get("refs") or [] if isinstance(item, dict) else item
+        if side and _bus_mode(node) != "stereo":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Only a stereo bus can leave from one side"
+            )
+        if side and side not in ("L", "R"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "side must be L or R")
         refs = [
             {
                 "device_id": str(r["device_id"]),
@@ -669,9 +689,15 @@ async def assign_output_endpoints(
             }
             for r in refs
         ]
-        if len(refs) == 1 and width > 1:
+        if side:
+            # one socket for one half: no expansion, and exactly one ref
+            if len(refs) != 1:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT, "A one-sided endpoint is one socket"
+                )
+        elif len(refs) == 1 and width > 1:
             refs = console.expand_refs(refs[0], width)
-        if len(refs) != width:
+        if not side and len(refs) != width:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 f"A {_bus_mode(node)} bus needs {width} socket(s) per endpoint, got {len(refs)}",
@@ -690,7 +716,7 @@ async def assign_output_endpoints(
             if key in mine:
                 raise HTTPException(CONFLICT, "A socket can be used once per bus")
             mine.add(key)
-        new.append({"id": str(uuid.uuid4()), "refs": refs})
+        new.append({"id": str(uuid.uuid4()), "refs": refs, **({"side": side} if side else {})})
     for other in await db.scalars(
         select(GraphDevice).where(
             GraphDevice.job_id == job_id,

@@ -7,7 +7,7 @@ every other audio write.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -424,6 +424,8 @@ class BusEndpoint(BaseModel):
     # one endpoint of a bus: a single socket (mono) or its first socket (stereo / LCR follow on)
     # ... or the full list of refs when the sockets are not adjacent
     refs: list[SocketRef] = Field(min_length=1, max_length=3)
+    # route just one half of a stereo bus ("L" or "R") to the single socket in ``refs``
+    side: Literal["L", "R"] | None = None
 
 
 class BusPatch(BaseModel):
@@ -555,6 +557,8 @@ async def get_soft_patch(job_id: UUID, list_id: UUID, db: AsyncSession = Depends
                 if key in by_key:
                     by_key[key]["out_socket_bus_id"] = bus["id"]
                     by_key[key]["out_endpoint_id"] = endpoint["id"]
+                    # which half of the bus this socket carries (the grid shows "Main L")
+                    by_key[key]["out_socket_side"] = console.endpoint_side(endpoint, key)
     return {"sockets": sockets, "ports": list(ports.values()), "channels": strips, "buses": buses}
 
 
@@ -592,6 +596,14 @@ async def _assign(
     await _publish_channels(db, job_id, [node])
     channel = await service.get_channel(db, channel_id, job_id)
     result = _channel_dict(channel) | {field: getattr(channel, field)}
+    if payload is not None and not getattr(channel, field):
+        # The write was accepted but the graph sync that follows it dropped the link again (the
+        # chain is the source of truth and could not resolve it). Report that instead of a 200 the
+        # UI would turn into a "linked" toast for a link that is not there.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The link was not kept: the patch chain does not resolve that socket",
+        )
     if field == "dsp_source":
         # not an error: one source may feed several strips (FOH + monitor channels, each with its
         # own processing). The caller shows a hint listing them.
@@ -999,11 +1011,16 @@ async def set_bus_socket(
     bus, row = await _bus_context(db, job_id, output_id)
     append = False
     if payload is None:
-        endpoints: list[list[dict]] = []
+        endpoints: list[list[dict] | dict] = []
     elif isinstance(payload, SocketRef):
         endpoints = [[payload.model_dump()]]
     else:
-        endpoints = [[r.model_dump() for r in e.refs] for e in payload.endpoints]
+        endpoints = [
+            {"refs": [r.model_dump() for r in e.refs], "side": e.side}
+            if e.side
+            else [r.model_dump() for r in e.refs]
+            for e in payload.endpoints
+        ]
         append = payload.append
     node = await console_service.assign_output_endpoints(
         db, job_id, output_id, bus.channel_list_id, row, endpoints, append=append

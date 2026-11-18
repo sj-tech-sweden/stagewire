@@ -1444,6 +1444,23 @@ def endpoint_keys(endpoint: dict) -> list[str]:
     return [k for k in (socket_key(r) for r in endpoint.get("refs") or []) if k]
 
 
+def endpoint_side(endpoint: dict, key: str) -> str | None:
+    """Which half ("L", "R", "C") of the bus the socket ``key`` carries; ``None`` for a mono bus.
+
+    A one-sided endpoint stores its ``side``; a full stereo / LCR endpoint is L, R (, C) in ref
+    order. A single-ref endpoint without a ``side`` is a mono bus's output (no side).
+    """
+    if endpoint.get("side"):
+        return endpoint["side"]
+    refs = endpoint.get("refs") or []
+    if len(refs) < 2:
+        return None
+    for ref, side in zip(refs, ("L", "R", "C"), strict=False):
+        if socket_key(ref) == key:
+            return side
+    return None
+
+
 def expand_refs(ref: dict, width: int) -> list[dict]:
     """A stereo/LCR endpoint given only its first socket gets the following sockets (same port)."""
     return [{**ref, "socket": int(ref.get("socket") or 1) + i} for i in range(max(width, 1))]

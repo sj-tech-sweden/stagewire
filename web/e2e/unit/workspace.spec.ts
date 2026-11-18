@@ -1203,7 +1203,10 @@ test('shift-click selects the rows between the anchor and the clicked row over t
   const off = toggleRowSelection(range.selected, { id: 'c4', shift: true, anchor: 'c2', visibleIds: visible });
   expect(off.selected).toEqual(['c6']);
   // a stale anchor (filtered away) falls back to a plain toggle
-  expect(toggleRowSelection(['c2'], { id: 'c8', shift: true, anchor: 'gone', visibleIds: visible }).selected).toEqual(['c2', 'c8']);
+  expect(toggleRowSelection(['c2'], { id: 'c8', shift: true, ctrl: true, anchor: 'gone', visibleIds: visible }).selected).toEqual(['c2', 'c8']);
+  // a plain click switches to that row, replacing the selection; ctrl/cmd toggles it in and out
+  expect(toggleRowSelection(['c2', 'c4'], { id: 'c6', visibleIds: visible }).selected).toEqual(['c6']);
+  expect(toggleRowSelection(['c2'], { id: 'c6', ctrl: true, visibleIds: visible }).selected).toEqual(['c2', 'c6']);
   // the order auto patch uses is the channel order, whatever order the clicks came in
   const numbers = new Map([['a', 3], ['b', 1], ['c', 2]]);
   expect(orderByNumber(['a', 'b', 'c'], numbers)).toEqual(['b', 'c', 'a']);
@@ -1455,7 +1458,7 @@ test('the picker grid pages long lists and a shift-tap selects the run between t
   state = toggleRowSelection(state.selected, { id: 's5', shift: true, anchor: state.anchor, visibleIds: ids });
   expect(state.selected).toEqual(['s2', 's3', 's4', 's5']);
   // tapping a selected tile again turns it off
-  expect(toggleRowSelection(state.selected, { id: 's3', visibleIds: ids }).selected).not.toContain('s3');
+  expect(toggleRowSelection(state.selected, { id: 's3', ctrl: true, visibleIds: ids }).selected).not.toContain('s3');
 });
 
 test('the mixer proposal response becomes the need line and one suggestion per candidate', async () => {
@@ -1661,4 +1664,34 @@ test('the plot box travels in the create body and the edit patch', () => {
   // cleared fields go back to the default box
   Object.assign(form, { width_cm: '', height_cm: null });
   expect(devicePatch(node, form).attributes).toMatchObject({ width_cm: null, height_cm: null });
+});
+
+
+test('the socket grid carries the routed strip name, and a stereo bus socket says which side it is', async () => {
+  const { portSockets, portSocketsOut, endpointShortages } = await import('../../src/utils/workspace');
+  const port = { device_id: 'd1', port_id: 'in-xlr3' };
+  const ins = portSockets(
+    [{ device_id: 'd1', port_id: 'in-xlr3', socket: 1, dsp_source_channel_id: 'c1' }, { device_id: 'd1', port_id: 'in-xlr3', socket: 2 }],
+    port,
+    'dsp_source',
+    new Map([['c1', 3]]),
+    new Map([['c1', ' Kick ']]),
+  );
+  expect(ins[0]).toMatchObject({ ownerLabel: 'Ch 3', ownerName: 'Kick' });
+  expect(ins[1].ownerName).toBe('');
+  const outs = portSocketsOut(
+    [
+      { device_id: 'd1', port_id: 'out', socket: 1, out_socket_bus_id: 'b1', out_socket_side: 'L' },
+      { device_id: 'd1', port_id: 'out', socket: 2, direct_out_channel_id: 'c1' },
+      { device_id: 'd1', port_id: 'out', socket: 3, out_socket_bus_id: 'b2' },
+    ],
+    { device_id: 'd1', port_id: 'out' },
+    new Map([['c1', 3]]),
+    new Map([['b1', 1], ['b2', 2]]),
+    { names: { channels: new Map([['c1', 'Kick']]), buses: new Map([['b1', 'IEM'], ['b2', 'Aux']]) } },
+  );
+  expect(outs.map((o) => o.ownerName)).toEqual(['IEM L', 'Kick', 'Aux']);
+  // a one-sided endpoint is one socket by design, not a shortage of a stereo bus
+  const bus = { mode: 'stereo', out_endpoints: [{ side: 'L', refs: [{ socket: 3 }] }, { refs: [{ socket: 5 }] }] };
+  expect(endpointShortages(bus)).toHaveLength(1);
 });

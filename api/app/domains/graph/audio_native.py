@@ -1256,9 +1256,7 @@ def reconcile_out_endpoints(
     """
     from app.domains.audio import console
 
-    devices = {
-        str(n.id): n for n in by_id.values() if n.legacy_ref and n.legacy_ref.startswith("device:")
-    }
+    devices = _gear_by_id(by_id)
     taken: set[str] = set()
     for channel in channels:
         key = console.socket_key((channel.attributes or {}).get("direct_out"))
@@ -1284,6 +1282,25 @@ def reconcile_out_endpoints(
             node.attributes = changed
 
 
+def _gear_by_id(by_id: dict) -> dict[str, GraphDevice]:
+    """The physical devices a chain or bus endpoint can point at, by node id.
+
+    "Gear" is decided by kind (as ``console_service.job_hardware`` does), not by a ``device:``
+    legacy ref: gear added through the generic ``/graph/devices`` endpoint or the Stockwire import
+    has no such ref. Filtering on the ref here made the sync drop every soft patch to that gear
+    right after the write that created it (the API answered 200, the link was gone), because the
+    write validates against ``job_hardware`` and this sync is what undoes anything it cannot
+    resolve. Both lookups must agree on what counts as a device.
+    """
+    return {
+        str(n.id): n
+        for n in by_id.values()
+        if n.kind not in devices_native.NON_GEAR_KINDS
+        and not n.legacy_ref
+        or (n.legacy_ref or "").startswith("device:")
+    }
+
+
 def reconcile_soft_patch(channels: list[GraphDevice], by_id: dict) -> None:
     """Chain -> soft patch: set each channel's ``dsp_source`` from its patch chain (see console.py).
 
@@ -1294,9 +1311,7 @@ def reconcile_soft_patch(channels: list[GraphDevice], by_id: dict) -> None:
     """
     from app.domains.audio import console
 
-    devices = {
-        str(n.id): n for n in by_id.values() if n.legacy_ref and n.legacy_ref.startswith("device:")
-    }
+    devices = _gear_by_id(by_id)
     socket_cache: dict[str, list[dict]] = {}  # each device's sockets, expanded once per sync
     for node in channels:
         attrs = node.attributes or {}

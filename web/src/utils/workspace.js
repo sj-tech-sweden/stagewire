@@ -1986,13 +1986,20 @@ export function invertIds(selected, visibleIds) {
 // A click on a selection row: a plain click toggles it, a shift-click toggles everything between the
 // anchor (the last row clicked) and this one over the VISIBLE rows, to the state the clicked row is
 // switching to. Returns the new selection and the new anchor.
-export function toggleRowSelection(selected, { id, shift = false, anchor = null, visibleIds = [] }) {
+export function toggleRowSelection(selected, { id, shift = false, ctrl = false, anchor = null, visibleIds = [] }) {
   const isOn = new Set(selected || []).has(id);
   if (shift && anchor != null && anchor !== id && visibleIds.includes(anchor) && visibleIds.includes(id)) {
     const span = rangeBetween(visibleIds, anchor, id);
     return { selected: isOn ? deselectIds(selected, span) : selectIds(selected, span), anchor: id };
   }
-  return { selected: isOn ? deselectIds(selected, [id]) : selectIds(selected, [id]), anchor: id };
+  // Ctrl/Cmd click toggles this row in and out of the selection, leaving the rest intact — the way to
+  // add several non-adjacent rows (e.g. a handful of channels for auto patch) without losing the rest.
+  if (ctrl) {
+    return { selected: isOn ? deselectIds(selected, [id]) : selectIds(selected, [id]), anchor: id };
+  }
+  // A plain click switches to this row only, replacing the selection — clicking a bus or input should
+  // move the patch focus to it, not accumulate. Use Ctrl/Cmd or Shift to build a multi-selection.
+  return { selected: [id], anchor: id };
 }
 
 // Ids in channel-number order (what auto patch wants: the order is the order of the sockets).
@@ -2023,7 +2030,7 @@ export function groupPortsByDevice(ports, direction) {
 // The sockets of one port, in socket order, each with the number of the channel that holds it
 // (`field` is 'dsp_source' for inputs, 'direct_out' for direct outs; `numbers` maps channel id ->
 // channel number).
-export function portSockets(sockets, devicePort, field, numbers) {
+export function portSockets(sockets, devicePort, field, numbers, names = null) {
   if (!devicePort) return [];
   return (sockets || [])
     .filter((s) => s.device_id === devicePort.device_id && s.port_id === devicePort.port_id)
@@ -2041,6 +2048,9 @@ export function portSockets(sockets, devicePort, field, numbers) {
         ownerKind: owner ? 'channel' : null,
         ownerNumber: num,
         ownerLabel: owner ? `Ch ${num ?? '?'}` : '',
+        // the channel's name, so the grid reads "Kick" and not just "Ch 3" (the first owner of a
+        // split source; the badge says there are more)
+        ownerName: owner ? String(names?.get(owner) || '').trim() : '',
       };
     });
 }
@@ -2114,7 +2124,8 @@ export function endpointSides(endpoint, mode) {
 export function endpointShortages(bus) {
   const need = busWidth(bus?.mode);
   return (bus?.out_endpoints || [])
-    .filter((e) => (e.refs || []).length < need)
+    // a one-sided (L or R only) endpoint is one socket by design, not a shortage
+    .filter((e) => !e.side && (e.refs || []).length < need)
     .map((endpoint) => ({ endpoint, have: (endpoint.refs || []).length, need }));
 }
 
@@ -2276,7 +2287,9 @@ export function bulkClearBody(field, ids) {
 // Sockets of one OUTPUT port with whoever holds each: a channel's direct out or a bus (a socket
 // carries one or the other). `ownerKind` says which, `ownerLabel` is what the grid prints ("Ch 3",
 // "Mix 2"); the input side uses portSockets.
-export function portSocketsOut(sockets, devicePort, channelNumbers, busNumbers, { ch = 'Ch', mix = 'Mix' } = {}) {
+// `names` ({channels, buses}: id -> name) fills `ownerName`, the routed strip's name for the grid; a
+// stereo bus's socket also says which half it carries ("Main L").
+export function portSocketsOut(sockets, devicePort, channelNumbers, busNumbers, { ch = 'Ch', mix = 'Mix', names = null } = {}) {
   if (!devicePort) return [];
   return (sockets || [])
     .filter((x) => x.device_id === devicePort.device_id && x.port_id === devicePort.port_id)
@@ -2287,7 +2300,16 @@ export function portSocketsOut(sockets, devicePort, channelNumbers, busNumbers, 
       const owner = channelId || busId;
       const ownerKind = channelId ? 'channel' : busId ? 'bus' : null;
       const num = channelId ? channelNumbers?.get(channelId) : busId ? busNumbers?.get(busId) : null;
-      return { ...x, owner, ownerKind, ownerNumber: num ?? null, ownerLabel: owner ? `${channelId ? ch : mix} ${num ?? '?'}` : '' };
+      const name = String((channelId ? names?.channels?.get(channelId) : busId ? names?.buses?.get(busId) : '') || '').trim();
+      const side = !channelId && busId ? x.out_socket_side || '' : '';
+      return {
+        ...x,
+        owner,
+        ownerKind,
+        ownerNumber: num ?? null,
+        ownerLabel: owner ? `${channelId ? ch : mix} ${num ?? '?'}` : '',
+        ownerName: name ? (side ? `${name} ${side}` : name) : '',
+      };
     });
 }
 
