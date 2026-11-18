@@ -214,3 +214,22 @@ async def test_product_devices_endpoint_lists_physical_assets(auth_headers, monk
             {"id": "asset-1", "product_id": "77", "asset_tag": "TAG-1"},
             {"id": "asset-2", "product_id": "77", "serial_number": "SN-2"},
         ]
+
+
+def test_physical_specs_read_stockwire_strings_and_treat_zero_as_unknown():
+    from app.domains.audio.device_specs import product_physical_specs
+
+    # Stockwire returns decimals as strings; 0 means "not filled in".
+    got = product_physical_specs({"weight_kg": "5.550", "power_consumption_watts": None})
+    assert got == {"weight_kg": 5.55, "power_watts": None}
+    assert product_physical_specs({"weight_kg": "0.000"})["weight_kg"] is None
+
+
+def test_physical_power_falls_back_to_specs_but_top_level_wins():
+    from app.domains.audio.device_specs import product_physical_specs
+
+    fixture = {"power_consumption_watts": None, "specs": {"lt_power_w": 16}}
+    assert product_physical_specs(fixture)["power_watts"] == 16
+    assert product_physical_specs({"specs": {"power_watts": "250"}})["power_watts"] == 250
+    both = {"power_consumption_watts": 120, "specs": {"lt_power_w": 16}}
+    assert product_physical_specs(both)["power_watts"] == 120
