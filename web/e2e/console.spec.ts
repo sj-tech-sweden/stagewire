@@ -984,7 +984,13 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
     new RegExp('Expander', 'i'),
   );
 
+  // Wait for the connect call itself: reading the graph straight after the click races the save.
+  const connectResponse = page.waitForResponse(
+    (r) => r.url().includes('/connect-stagebox') && r.request().method() === 'POST',
+  );
   await ar84Row.getByTestId('console-connect-stagebox').click();
+  const connected = await connectResponse;
+  expect(connected.status(), await connected.text()).toBeLessThan(300);
 
   // The link is a data edge AR84 -> AR2412, not through the console.
   type Edge = { signal: string; src_device_id: string; dst_device_id: string };
