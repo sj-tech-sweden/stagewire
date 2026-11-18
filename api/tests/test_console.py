@@ -885,7 +885,7 @@ async def test_soft_patch_without_mixer_shows_every_stagebox(auth_headers):
 
 async def test_soft_patch_with_mixer_shows_mixer_and_every_stagebox(auth_headers):
     """With a mixer set, the mixer plus every stagebox appear — a stagebox is a target whether or
-    not it currently reaches the mixer. Cameras, DIs and other non-stagebox gear stay out by type."""
+    not it reaches the mixer; cameras, DIs and other non-stagebox gear stay out by type."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
         _, api, post, lst = await _job(client, h)
@@ -926,7 +926,7 @@ async def test_soft_patch_with_mixer_shows_mixer_and_every_stagebox(auth_headers
                 "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 4}],
             },
         )
-        # Near box reaches the mixer; far box reaches only the DI. Both stageboxes are still targets.
+        # Near reaches the mixer; far reaches only the DI — both stageboxes are targets.
         await post(
             "graph/edges",
             {
