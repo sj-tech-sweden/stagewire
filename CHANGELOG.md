@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.2...stagewire-v1.7.0) (2026-11-18)
+
+
+### Features
+
+* **audio:** digital stagebox soft-patch (Phases A–E) + Dante/network patch ([#140](https://github.com/sj-tech-sweden/stagewire/issues/140)) ([eaf2371](https://github.com/sj-tech-sweden/stagewire/commit/eaf2371de1fa89e810d221457b2a1566c91a5f2d))
+
 ## [1.6.2](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.1...stagewire-v1.6.2) (2026-11-17)
 
 
