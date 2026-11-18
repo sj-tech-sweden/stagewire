@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.7.0...stagewire-v1.8.0) (2026-11-18)
+
+
+### Features
+
+* **graph,web:** connect a stagebox to another stagebox over dSnake/Dante ([#142](https://github.com/sj-tech-sweden/stagewire/issues/142)) ([6b1b3d2](https://github.com/sj-tech-sweden/stagewire/commit/6b1b3d25d90dd1a06efc03291c5d8b848da2ed63))
+* Stockwire fixture power import and console dialogs that fit long lists ([#143](https://github.com/sj-tech-sweden/stagewire/issues/143)) ([5146f2a](https://github.com/sj-tech-sweden/stagewire/commit/5146f2af580d21fa7fa2acf82277060089f45d89))
+
+
+### Bug Fixes
+
+* **web:** let the console's input list and soft patch grow with the page ([#144](https://github.com/sj-tech-sweden/stagewire/issues/144)) ([044e649](https://github.com/sj-tech-sweden/stagewire/commit/044e64918c7138b85ced0b286d1e407581ef6bef))
+
 ## [1.7.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.6.2...stagewire-v1.7.0) (2026-11-18)
 
 
