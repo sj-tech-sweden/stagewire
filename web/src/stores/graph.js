@@ -237,6 +237,38 @@ export const useGraphStore = defineStore('graph', {
       });
       this.applyRealtimeEvent({ type: 'graph.edge.delete', payload: { id } });
     },
+    // Phase D convenience: put two Dante / network devices on a shared Dante network. If
+    // `networkDeviceId` is given the endpoints are wired to that switch; otherwise a `network`
+    // switch node is auto-inserted and both endpoints are linked through it. The server returns the
+    // (possibly new) switch device plus the two `data` edges; both are applied as realtime events so
+    // co-editors follow without a refetch.
+    async joinDanteNetwork(jobId, { aDeviceId, bDeviceId, networkDeviceId = null, name = null }) {
+      const { data } = await api.post(`${baseFor(this, jobId)}/network-join`, {
+        a_device_id: aDeviceId,
+        b_device_id: bDeviceId,
+        network_device_id: networkDeviceId,
+        name,
+      });
+      if (data.device) {
+        this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data.device });
+      }
+      (data.edges || []).forEach((edge) =>
+        this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: edge }),
+      );
+      return data;
+    },
+    // Phase D/E follow-up: one-click quick-connect of a stagebox into the console over dSnake/Dante.
+    // The server picks the stagebox network out port and the console network in port and creates a
+    // `data` edge, which is what makes the stagebox appear in the console soft patch (the §2 walk).
+    async connectStagebox(jobId, stageboxId, options = {}) {
+      const { data } = await api.post(`${baseFor(this, jobId)}/connect-stagebox`, {
+        stagebox_id: stageboxId,
+        ...(options.stageboxPort ? { stagebox_port: options.stageboxPort } : {}),
+        ...(options.consolePort ? { console_port: options.consolePort } : {}),
+      });
+      this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: data.edge });
+      return data;
+    },
     async requestStockwireBooking(jobId, id) {
       const { data } = await api.post(`${baseFor(this, jobId)}/devices/${id}/request-stockwire`);
       this.applyRealtimeEvent({ type: 'graph.device.upsert', payload: data });
@@ -385,7 +417,7 @@ export const useGraphStore = defineStore('graph', {
         }
       }
       const form = deviceForm(null);
-      form.device_type = deviceTypeFromCategory(product.category);
+      form.device_type = deviceTypeFromCategory(product.category, product.name);
       fillFormFromSpecs(form, product, specs);
       // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
       // An explicit product spec (e.g. a powered speaker) still wins over this default.

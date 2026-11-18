@@ -1,15 +1,22 @@
 import json
 import xml.etree.ElementTree as ET
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.versioning import run_versioned_delete, run_versioned_write
 from app.domains.audio import wwb_store
+from app.domains.audio.console import (
+    is_mixer_device,
+    is_stagebox,
+    network_ports,
+)
 from app.domains.audio.exports import get_exporter, list_exporters
 from app.domains.audio.models import ProductionJob
 from app.domains.audio.ws import publish_job_event
@@ -475,6 +482,247 @@ async def create_edge(
         schemas.ConnectionEdgeRead.model_validate(edge).model_dump(mode="json"),
     )
     return edge
+
+
+class NetworkJoinBody(BaseModel):
+    """Put two Dante / network devices on a shared Dante network (Phase D convenience).
+
+    If ``network_device_id`` is given (an existing switch), both endpoints are wired to it with
+    ``data`` edges. Otherwise a ``network`` switch node with in/out Dante ports is auto-inserted
+    and both endpoints are linked through it.
+    """
+
+    a_device_id: UUID
+    b_device_id: UUID
+    network_device_id: UUID | None = None
+    name: str | None = None
+
+
+def _pick_network_port(device: Any, side: str | None, prefer: str | None = None) -> str | None:
+    """First network-connector port on ``device`` usable as ``side`` ('in'/'out').
+
+    When ``prefer`` names a connector (e.g. ``dsnake``) we pick a matching port of that side
+    first, so a dSnake stagebox links to the console's dSnake interface rather than a Dante one
+    it also happens to carry. Falls back to the first side port, then the first network port.
+    """
+    ports = network_ports(device)
+    if not ports:
+        return None
+    side_ports = [p for p in ports if not side or p.get("direction") == side]
+    if prefer:
+        pref = prefer.lower()
+        hit = next(
+            (p.get("id") for p in side_ports if (p.get("connector") or "").lower() == pref),
+            None,
+        )
+        if hit:
+            return hit
+    return side_ports[0].get("id") if side_ports else ports[0].get("id")
+
+
+def _port_connector(device: Any, port_id: str | None) -> str | None:
+    """The connector of ``port_id`` on ``device``, lower-cased, or None when unknown."""
+    if not port_id:
+        return None
+    port = next((p for p in network_ports(device) if p.get("id") == port_id), None)
+    return (port.get("connector") or "").lower() if port else None
+
+
+@router.post("/network-join", status_code=201)
+async def join_network(
+    job_id: UUID,
+    body: NetworkJoinBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Phase D convenience: link two Dante/network devices through a (new or existing) switch."""
+    a = await _device(db, job_id, body.a_device_id)
+    b = await _device(db, job_id, body.b_device_id)
+    if not network_ports(a) or not network_ports(b):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Both devices must carry a Dante / network connector",
+        )
+    created_device = None
+    if body.network_device_id is not None:
+        net = await _device(db, job_id, body.network_device_id)
+    else:
+        connector = (network_ports(a)[0].get("connector") or "dante").lower()
+        net = GraphDevice(
+            job_id=job_id,
+            domain="audio",
+            kind="network",
+            name=body.name or "Dante switch",
+            attributes={"device_type": "network"},
+            ports=[
+                {"id": "net-in", "direction": "in", "signal": "data", "connector": connector},
+                {"id": "net-out", "direction": "out", "signal": "data", "connector": connector},
+            ],
+        )
+        db.add(net)
+        await db.flush()
+        created_device = _device_payload(net)
+    existing = list(await _all_edges(db, job_id))
+    new_edges: list[dict] = []
+    for src, dst in ((a, net), (net, b)):
+        src_port = _pick_network_port(src, "out") or _pick_network_port(src, None)
+        dst_port = _pick_network_port(dst, "in") or _pick_network_port(dst, None)
+        if not src_port or not dst_port:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A device has no usable Dante / network port",
+            )
+        edge_dict = {
+            "signal": "data",
+            "src_device_id": src.id,
+            "src_port": src_port,
+            "dst_device_id": dst.id,
+            "dst_port": dst_port,
+            "channels": 1,
+        }
+        if topology.would_create_cycle(
+            [_as_dict(e) for e in existing if getattr(e, "signal", None) == "data"],
+            str(src.id),
+            str(dst.id),
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "Connection would form a loop"
+            )
+        issues = topology.validate_edge(
+            edge_dict,
+            _as_dict(src),
+            _as_dict(dst),
+            [_as_dict(e) for e in existing],
+        )
+        # A `signal_mismatch` here only means the endpoint's network port was stored with the legacy
+        # `audio` signal (pre-normalisation) — the join explicitly builds a `data` edge over a
+        # network connector, so that stale signal is exactly what this endpoint migrates away from.
+        # Real shape errors (missing/unknown port, wrong direction, incompatible connector)
+        # still block.
+        blocking = [i for i in issues if i.code != "signal_mismatch"]
+        if blocking:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "invalid_connection",
+                    "issues": [schemas.IssueRead(**vars(i)).model_dump() for i in blocking],
+                },
+            )
+        edge = ConnectionEdge(job_id=job_id, **edge_dict)
+        db.add(edge)
+        await db.flush()
+        new_edges.append(schemas.ConnectionEdgeRead.model_validate(edge).model_dump(mode="json"))
+        existing.append(edge)
+    await db.commit()
+    for edge_d in new_edges:
+        await publish_job_event(job_id, "graph.edge.upsert", edge_d)
+    if created_device is not None:
+        await publish_job_event(job_id, "graph.device.upsert", created_device)
+    return {"device": created_device, "edges": new_edges}
+
+
+class ConnectStageboxBody(BaseModel):
+    """Link a stagebox into the console over its Dante / network connector (quick-connect).
+
+    When ``stagebox_port`` / ``console_port`` are omitted the server auto-picks a compatible network
+    pair (preferring a console port whose connector matches the stagebox's). Pass them to choose the
+    exact ports to link — useful when a console carries several interfaces (e.g. a dSnake base and a
+    dSnake expander, or dSnake and Dante) and the default is not the one you want.
+    """
+
+    stagebox_id: UUID
+    stagebox_port: str | None = None
+    console_port: str | None = None
+
+
+@router.post("/connect-stagebox", status_code=201)
+async def connect_stagebox(
+    job_id: UUID,
+    body: ConnectStageboxBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Phase D/E follow-up: one click to wire a stagebox into the console over dSnake/Dante."""
+    stagebox = await _device(db, job_id, body.stagebox_id)
+    if not is_stagebox(stagebox):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The target must be a stagebox")
+    if not network_ports(stagebox):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The stagebox must carry a Dante / network connector",
+        )
+    devices = await _all_devices(db, job_id)
+    mixer = next((d for d in devices if is_mixer_device(d)), None)
+    if mixer is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "No console/mixer device to connect to"
+        )
+    mixer_net = network_ports(mixer)
+    if not mixer_net:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The console has no Dante / network connector — add one (e.g. dSnake) first",
+        )
+    # An explicit stagebox port (a network output) wins; otherwise auto-pick a network out.
+    if body.stagebox_port:
+        sport = next(
+            (p for p in network_ports(stagebox) if p.get("id") == body.stagebox_port), None
+        )
+        if sport is None or sport.get("direction") not in ("out", "both"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "stagebox_port must name an output network port on the stagebox",
+            )
+        src_port = sport.get("id")
+    else:
+        src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
+    # Destination: an explicit console port (must be a network input) wins, else prefer a console
+    # port whose connector matches the stagebox's (dSnake stagebox -> dSnake console port, not a
+    # Dante one it also carries), so a compatible link is chosen automatically.
+    if body.console_port:
+        dport = next((p for p in mixer_net if p.get("id") == body.console_port), None)
+        if dport is None or dport.get("direction") not in ("in", "both"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "console_port must name an input network port on the console",
+            )
+        dst_port = dport.get("id")
+    else:
+        dst_port = _pick_network_port(mixer, "in", prefer=_port_connector(stagebox, src_port)) or (
+            _pick_network_port(mixer, None)
+        )
+    edge_dict = {
+        "signal": "data",
+        "src_device_id": stagebox.id,
+        "src_port": src_port,
+        "dst_device_id": mixer.id,
+        "dst_port": dst_port,
+        "channels": 1,
+    }
+    existing = list(await _all_edges(db, job_id))
+    if topology.would_create_cycle(
+        [_as_dict(e) for e in existing if getattr(e, "signal", None) == "data"],
+        str(stagebox.id),
+        str(mixer.id),
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Connection would form a loop")
+    issues = topology.validate_edge(
+        edge_dict, _as_dict(stagebox), _as_dict(mixer), [_as_dict(e) for e in existing]
+    )
+    blocking = [i for i in issues if i.code != "signal_mismatch"]
+    if blocking:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_connection",
+                "issues": [schemas.IssueRead(**vars(i)).model_dump() for i in blocking],
+            },
+        )
+    edge = ConnectionEdge(job_id=job_id, **edge_dict)
+    db.add(edge)
+    await db.commit()
+    await db.refresh(edge)
+    payload = schemas.ConnectionEdgeRead.model_validate(edge).model_dump(mode="json")
+    await publish_job_event(job_id, "graph.edge.upsert", payload)
+    return {"edge": payload}
 
 
 @router.patch("/edges/{edge_id}", response_model=schemas.ConnectionEdgeRead)

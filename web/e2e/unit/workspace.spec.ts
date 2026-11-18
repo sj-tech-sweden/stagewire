@@ -47,6 +47,8 @@ import {
   fillFormFromSpecs,
   expandGroups,
   CONNECTOR_PRESETS,
+  CONNECTOR_CHOICES,
+  connectorLabel,
   powerTreeRows,
   outputsLabel,
   loadStatusColor,
@@ -60,6 +62,7 @@ import {
   centerOf,
   devicesShownAsElements,
   domainForCategory,
+  deviceTypeFromCategory,
   isVirtual,
   linkRoleFor,
   dropPosition,
@@ -77,6 +80,24 @@ test('categories map to a domain and unknown ones stay "other"', () => {
   expect(domainForCategory('Power distro')).toBe('power');
   expect(domainForCategory('Cases')).toBe('other');
   expect(domainForCategory(null)).toBe('other');
+});
+
+test('stageboxes classify digital vs analog from category and name, non-stagebox categories stay other', () => {
+  // A stagebox / snake / multicore / splitter / IO product becomes a stagebox; digital transports
+  // (dante/dsnake/avb/madi) make it a digital_stagebox. This is what lets the backend soft-patch
+  // input-domain filter recognise imported stageboxes instead of dropping them to 'other'.
+  expect(deviceTypeFromCategory('Stageboxes', 'AR2412')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('Digital Stagebox', 'dLive DM48')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Stagebox', 'Dante stagebox')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Snake', 'dsnake AR2412')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Multicore', 'analog multicore')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('Splitter', 'active split')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('I/O', 'IO rack')).toBe('analog_stagebox');
+  // non-stagebox audio gear is not a stagebox
+  expect(deviceTypeFromCategory('Microphones', 'SM58')).toBe('other');
+  expect(deviceTypeFromCategory('Mixer', 'GLD-80')).toBe('mixer');
+  expect(deviceTypeFromCategory('Cameras', 'PTZ')).toBe('ptz_camera');
+  expect(deviceTypeFromCategory(null)).toBe('other');
 });
 
 test('a catalog product becomes a device bound to its Stockwire product', () => {
@@ -326,7 +347,9 @@ test('only ports with a connector or channel count are connector groups', () => 
     { id: 'in-xlr3', direction: 'in', connector: 'xlr3', channels: 32 },
     { id: 'out-audio', direction: 'out', signal: 'audio' },
   ];
-  expect(portGroups(ports)).toEqual([{ direction: 'in', connector: 'xlr3', count: 32 }]);
+  // A group also carries the optional interface `name` and the port `signal` so the editor can
+  // show/round-trip them; an unnamed, un-signalled XLR group has both null.
+  expect(portGroups(ports)).toEqual([{ direction: 'in', connector: 'xlr3', count: 32, name: null, signal: null }]);
 });
 
 test('editing groups keeps generic ports and gives every port a unique id', () => {
@@ -507,6 +530,27 @@ test('a connector preset adds a group, or raises the count of the same connector
   expect(out).toHaveLength(2);
 });
 
+test('dSnake is a selectable digital connector with a bidirectional preset', () => {
+  // Phase B: dSnake was missing from the connector vocabulary. A digital stagebox/mixer linked by
+  // dSnake must be pickable in the connector editor and offer an in+out pair from the preset.
+  expect(CONNECTOR_CHOICES.find((c) => c.value === 'dsnake')).toEqual({ value: 'dsnake', label: 'dSnake' });
+  expect(connectorLabel('dsnake')).toBe('dSnake');
+  const preset = CONNECTOR_PRESETS.find((p) => p.connector === 'dsnake');
+  // A digital-transport preset is an *unconfigured* link (count null): it is the basis of the soft
+  // patch, not a socket, so the user sets the channel count (and an optional name) before sockets
+  // appear. The link signal is `data` (audio over the network).
+  expect(preset).toMatchObject({ direction: 'both', count: null, signal: 'data' });
+  const ports = portsFromGroups([preset], [], 'digital_stagebox');
+  expect(ports.map((p) => [p.direction, p.connector, p.channels])).toEqual([
+    ['in', 'dsnake', null],
+    ['out', 'dsnake', null],
+  ]);
+  // AVB and MADI are likewise offered as bidirectional, unconfigured presets for symmetry.
+  for (const conn of ['avb', 'madi']) {
+    expect(CONNECTOR_PRESETS.find((p) => p.connector === conn)).toMatchObject({ direction: 'both', count: null });
+  }
+});
+
 test('a bidirectional connector is two ports and shows as one group again', () => {
   const groups = [{ direction: 'both', connector: 'dante', count: 1 }];
   const ports = portsFromGroups(groups, [], 'mixer');
@@ -515,7 +559,8 @@ test('a bidirectional connector is two ports and shows as one group again', () =
     ['out', 'dante', 1],
   ]);
   expect(new Set(ports.map((p) => p.id)).size).toBe(2);
-  expect(portGroups(ports)).toEqual([{ direction: 'both', connector: 'dante', count: 1 }]);
+  // portGroups reports the (optional) name and the port signal alongside direction/connector/count.
+  expect(portGroups(ports)).toEqual([{ direction: 'both', connector: 'dante', count: 1, name: null, signal: 'audio' }]);
   expect(expandGroups(groups).map((g) => g.direction)).toEqual(['in', 'out']);
   // different counts are two different groups, not a bidirectional one
   expect(

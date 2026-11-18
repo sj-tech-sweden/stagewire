@@ -1019,6 +1019,15 @@ export default {
     splitSocketInfo: "Uttag {n} matar {who}.",
     sharesSocket: "delar uttag med {who}",
     splitTabHint: "Ett ingångsuttag kan mata flera kanaler (en splittad källa): använd en andra kanal för samma källa när FOH och monitor behöver separat bearbetning.",
+    linkStageboxTitle: "Stageboxar (digitala länkar)",
+    linkStageboxHint:
+      "Varje stagebox med en dSnake/Dante/AES50/AVB/MADI-port listas med sin länkstatus. En stagebox syns i patchen först när den är kopplad till konsolen via sin nätverksport. Saknas en stagebox, lägg till en dSnake/Dante-port på den först (se enhetsinställningar).",
+    fromPort: "Från port",
+    toPort: "Till konsolport",
+    connect: "Koppla",
+    stageboxLinked: "Kopplad",
+    stageboxConnected: "Stagebox inkopplad — dess uttag finns nu i patchen.",
+    stageboxConnectFailed: "Kunde inte koppla stageboxen.",
     pickerChoose: "Välj…",
     pickerMore: "+{n} till",
     pickerGroup: "Instrumentgrupp",
@@ -2156,6 +2165,11 @@ export default {
     port: "Port",
     count: "Antal",
     addPort: "Lägg till port",
+    countHint: "Kanaler över denna länk. 0 / tomt betyder att det bara är en länk utan patchbara uttag; ange antalet (t.ex. dSnake In 1–32 / Ut 1–16) för att visa kanalerna i patchen.",
+    interfaceName: "Gränssnittsnamn",
+    interfaceNameHint: "Valfritt. Namnge denna digitala transport (t.ex. ”dSnake”, ”dSnake Expander”). Namnet etiketterar dess kanaler i patchen istället för en generisk port.",
+    interfaceNameOptional: "valfritt",
+    portsHint: "Lägg till en dSnake/Dante/AES50/AVB/MADI-port som länk, ange därefter kanalantalet för att visa dess in-/utgångar som patchbara uttag. Ge den ett namn (t.ex. ”dSnake”, ”dSnake Expander”) så etiketteras kanalerna i patchen. Två fysiska portar (bas + expander) behålls som separata om de har olika namn.",
     physicalHint:
       "Vikt och effekt används för riggning och strömplanering. Ett värde från Stockwire ersätter det som anges här.",
     weight: "Vikt (kg)",
@@ -2406,5 +2420,24 @@ export default {
     description:
       "Exporterar kanalListans ingångar, utgångar och kanalnamn för att laddas in på en mixer eller som ett generiskt blad.",
     fromList: "Kanallista",
+  },
+  networkPatch: {
+    title: "Dante / nätverkspatch",
+    help:
+      "Rutta Dante och andra nätverkstransporter (dSnake, AES50, AVB, MADI) enhet till enhet. Detta är nätverksflödesytan, skild från mixerens mjukpatch: den listar varje enhet med en nätverkskontakt, inte bara det som matar mixern.",
+    transmitter: "Från (sändare)",
+    receiver: "Till (mottagare)",
+    addToNetwork: "Lägg till i Dante-nätverk",
+    addToNetworkHint:
+      "Sätter in en Dante-switch och kopplar båda ändarna genom den — det snabbaste sättet att lägga två enheter på ett delat nätverk.",
+    connectDirect: "Koppla direkt",
+    connectDirectHint: "Ritar en punkt-till-punkt-datalänk mellan de två enheterna.",
+    switchName: "Switchnamn",
+    empty: "Inga Dante-/nätverksenheter ännu. Lägg till en enhet med en Dante-, dSnake-, AES50-, AVB-, MADI- eller Ethernet-kontakt.",
+    existing: "Nätverkslänkar",
+    noLinks: "Inga nätverkslänkar ännu.",
+    deleteLink: "Ta bort länk",
+    needTwo: "Välj en sändare och en mottagare.",
+    sameDevice: "Välj två olika enheter.",
   },
 };

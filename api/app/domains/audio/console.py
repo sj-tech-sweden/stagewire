@@ -789,6 +789,14 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
     (stagebox, wireless rack, Dante card, the console itself) contributes sockets, so adding or
     hot-swapping a stagebox makes its sockets appear here with no extra step. A port group with
     ``channels`` = 24 yields sockets 1..24. Channel/output/list nodes are logical, not hardware.
+
+    Network transports (dSnake/Dante/AES50/AVB/MADI) are the *basis* of the soft patch — the §2
+    walk over audio/data edges decides which stageboxes are in scope — but a transport port is
+    **not** itself a patch socket. It only contributes per-channel sockets when it carries an
+    explicit channel count (the real I/O carried over the link, e.g. dSnake In 1–32 / Out 1–16). An
+    unconfigured transport port (no count) is purely the link and yields no socket, so you can never
+    assign a console strip to "the dSnake port itself"; you pick a specific channel that maps to the
+    linked stagebox's input/output.
     """
     sockets: list[dict] = []
     for device in devices:
@@ -803,21 +811,104 @@ def audio_sockets(devices: Iterable[Any]) -> list[dict]:
             # filters by direction, so the signal check here is unnecessary.
             if port.get("signal") == "power":
                 continue
+            connector = port.get("connector")
+            if is_network_connector(connector):
+                # A transport port is the link, not a socket: only its explicit channel slots are
+                # patchable. An unconfigured transport (no count) yields nothing here.
+                count = port.get("channels")
+                if not count:
+                    continue
+            else:
+                count = port.get("channels") or 1
             direction = port.get("direction") or "in"
-            count = port.get("channels") or 1
             for index in range(1, int(count) + 1):
                 sockets.append(
                     {
                         "device_id": str(device.id),
                         "device_name": device.name,
                         "port_id": port.get("id"),
+                        "port_label": port.get("label") or None,
                         "socket": index,
                         "direction": direction,
-                        "connector": port.get("connector"),
+                        "connector": connector,
                         "key": f"{device.id}:{port.get('id')}:{index}",
                     }
                 )
     return sockets
+
+
+# --- console input domain (soft-patch scope) ------------------------------------------------
+
+
+def _dev_kind(d: Any) -> str:
+    """The device's type, read from ``kind`` and falling back to the stored ``device_type``.
+
+    ``create_device`` keeps ``kind`` and ``attributes.device_type`` in sync, but a defensive
+    caller (or a hand-built node) may only set one, so we accept either.
+    """
+    kind = getattr(d, "kind", None) or ""
+    if not kind or kind == "other":
+        attrs = getattr(d, "attributes", None) or {}
+        kind = attrs.get("device_type") or kind
+    return kind
+
+
+def is_mixer_device(d: Any) -> bool:
+    return _dev_kind(d) == "mixer"
+
+
+def is_stagebox(d: Any) -> bool:
+    return _dev_kind(d) in ("digital_stagebox", "analog_stagebox")
+
+
+def console_input_devices(
+    devices: Iterable[Any], edges: Iterable[Any], mixer: Any | None
+) -> list[Any]:
+    """The devices whose sockets belong in the console soft patch — the input domain.
+
+    The console (when one exists) plus every stagebox in the job. A stagebox is a valid soft-patch
+    target whether or not it is already wired into the rig, because you patch the console's inputs
+    and outputs to/from its ports directly. Cameras, mics, DIs and wireless racks are excluded by
+    type — an XLR in on a camera must never appear as a console-input patch target — which is the
+    original point of scoping the soft patch away from the full device list.
+    """
+    devices = list(devices)
+    result = [mixer] if mixer is not None else []
+    result.extend(d for d in devices if is_stagebox(d))
+    return result
+
+
+# --- Dante / network patch domain (Phase E, distinct from the mixer soft patch) ---------------
+
+# Digital transports and the switched fabric they ride over that belong to the Dante / network
+# patch surface (Phase E) — *not* the mixer soft patch. dSnake/Dante/AES50/AVB/MADI are the
+# digital transports; ethernet/ethercon are the point-to-point/network carriers. Kept as a
+# frozenset so it can be imported unchanged by the graph router's network-join endpoint.
+NETWORK_CONNECTORS = frozenset({"dsnake", "dante", "aes50", "avb", "madi", "ethernet", "ethercon"})
+
+
+def is_network_connector(connector: str | None) -> bool:
+    return bool(connector) and connector.lower() in NETWORK_CONNECTORS
+
+
+def network_ports(device: Any) -> list[dict]:
+    """The device's ports that carry a Dante / network digital transport (transmitter/receiver
+    capable). A 'both' connector group is stored as two ports (one in, one out) with the same
+    connector (see web/src/utils/workspace.js), so this returns both the in and out sides."""
+    return [
+        p
+        for p in (getattr(device, "ports", None) or [])
+        if is_network_connector(p.get("connector"))
+    ]
+
+
+def network_devices(devices: Iterable[Any]) -> list[Any]:
+    """Every device carrying at least one Dante / network connector — the peer mesh of the Dante
+    domain (Phase E). Unlike ``console_input_devices`` this is NOT mixer-anchored: a Dante
+    stagebox, I/O rack, switch or laptop all appear, independently of whether a console is present,
+    because Dante/AVB/MADI routing is a device-to-device network concern, not console input
+    patching."""
+    return [d for d in devices if network_ports(d)]
 
 
 def socket_key(ref: dict | None) -> str | None:

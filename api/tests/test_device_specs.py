@@ -1,7 +1,12 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.domains.audio.device_specs import product_connector_groups, product_io_specs
+from app.domains.audio.device_specs import (
+    _mixer_expansion_connector_groups,
+    _stagebox_digital_connector_groups,
+    product_connector_groups,
+    product_io_specs,
+)
 from app.domains.stockwire import router as stockwire_router
 from app.main import app
 
@@ -23,10 +28,10 @@ def test_connector_groups_read_both_forms_and_ignore_nonsense():
         }
     }
     assert product_connector_groups(product) == [
-        {"connector": "sdi", "direction": "both", "count": 1, "signal": None},
-        {"connector": "xlr3", "direction": "in", "count": 8, "signal": "audio"},
-        {"connector": "dante", "direction": "both", "count": 1, "signal": None},
-        {"connector": "hdmi", "direction": "both", "count": 1, "signal": None},
+        {"connector": "sdi", "direction": "both", "count": 1, "signal": None, "name": None},
+        {"connector": "xlr3", "direction": "in", "count": 8, "signal": "audio", "name": None},
+        {"connector": "dante", "direction": "both", "count": 1, "signal": None, "name": None},
+        {"connector": "hdmi", "direction": "both", "count": 1, "signal": None, "name": None},
     ]
     io = product_io_specs(product)
     assert io["connectors"] == ["sdi", "xlr3", "dante", "hdmi"] and io["inputs"] == 16
@@ -39,6 +44,123 @@ def test_connector_groups_read_both_forms_and_ignore_nonsense():
 def test_power_inlet_is_read_lowercase_or_left_empty():
     assert product_io_specs({"specs": {"power_inlet": " IEC_C13 "}})["power_inlet"] == "iec_c13"
     assert product_io_specs({"specs": {}})["power_inlet"] is None
+
+
+def test_mixer_expansion_ports_become_input_output_sockets():
+    product = {
+        "specs": {
+            "mixer": {
+                "architecture": "digital_bus_pool",
+                "expansion_ports": [
+                    {"protocol": "dsnake", "max_channels_in": 48, "max_channels_out": 24},
+                    {
+                        "protocol": "io_card",
+                        "max_channels_in": 8,
+                        "max_channels_out": 0,
+                        "slots": 1,
+                    },
+                ],
+            }
+        }
+    }
+    groups = product_connector_groups(product)
+    # dSnake (a network transport) carries data links; io_card is a local audio card -> audio.
+    assert groups == [
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "data", "name": None},
+        {"connector": "dsnake", "direction": "out", "count": 24, "signal": "data", "name": None},
+        {"connector": "io_card", "direction": "in", "count": 8, "signal": "audio", "name": None},
+    ]
+
+
+def test_stagebox_digital_io_becomes_input_output_sockets():
+    product = {
+        "specs": {
+            "stagebox": {
+                "digital_io": [
+                    {"protocol": "dante", "channels_in": 64, "channels_out": 64},
+                    {"protocol": "avb", "channels_out": 16},
+                ]
+            }
+        }
+    }
+    groups = product_connector_groups(product)
+    assert groups == [
+        {"connector": "dante", "direction": "in", "count": 64, "signal": "data", "name": None},
+        {"connector": "dante", "direction": "out", "count": 64, "signal": "data", "name": None},
+        {"connector": "avb", "direction": "out", "count": 16, "signal": "data", "name": None},
+    ]
+
+
+def test_stagebox_digital_io_name_carries_to_group_label():
+    # An optional interface name (e.g. "dSnake", "dSnake Expander") must survive import so an
+    # imported product's channels are labelled in the soft patch instead of a bare connector.
+    product = {
+        "specs": {
+            "stagebox": {
+                "digital_io": [
+                    {"protocol": "dsnake", "channels_in": 32, "channels_out": 16, "name": "dSnake"},
+                    {
+                        "protocol": "dsnake",
+                        "channels_in": 8,
+                        "channels_out": 4,
+                        "name": "dSnake Expander",
+                    },
+                ]
+            }
+        }
+    }
+    groups = product_connector_groups(product)
+    assert groups == [
+        {
+            "connector": "dsnake",
+            "direction": "in",
+            "count": 32,
+            "signal": "data",
+            "name": "dSnake",
+        },
+        {
+            "connector": "dsnake",
+            "direction": "out",
+            "count": 16,
+            "signal": "data",
+            "name": "dSnake",
+        },
+        {
+            "connector": "dsnake",
+            "direction": "in",
+            "count": 8,
+            "signal": "data",
+            "name": "dSnake Expander",
+        },
+        {
+            "connector": "dsnake",
+            "direction": "out",
+            "count": 4,
+            "signal": "data",
+            "name": "dSnake Expander",
+        },
+    ]
+
+
+def test_expansion_and_stagebox_groups_combine_with_explicit_connectors():
+    product = {
+        "specs": {
+            "connectors": [{"connector": "xlr3", "direction": "in", "count": 8}],
+            "mixer": {"expansion_ports": [{"protocol": "dsnake", "max_channels_in": 48}]},
+            "stagebox": {"digital_io": [{"protocol": "dante", "channels_out": 32}]},
+        }
+    }
+    assert product_connector_groups(product) == [
+        {"connector": "xlr3", "direction": "in", "count": 8, "signal": None, "name": None},
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "data", "name": None},
+        {"connector": "dante", "direction": "out", "count": 32, "signal": "data", "name": None},
+    ]
+
+
+def test_missing_mixer_or_stagebox_blocks_yield_no_extra_groups():
+    assert _mixer_expansion_connector_groups({}) == []
+    assert _stagebox_digital_connector_groups({"stagebox": "nope"}) == []
+    assert product_connector_groups({"specs": {"mixer": {"expansion_ports": "bad"}}}) == []
 
 
 @pytest.mark.asyncio
@@ -67,7 +189,7 @@ async def test_device_specs_endpoint_returns_the_normalised_product(auth_headers
         body = res.json()
         assert body["name"] == "Rack mixer" and body["power_inlet"] == "iec_c13"
         assert body["connector_groups"] == [
-            {"connector": "xlr3", "direction": "out", "count": 8, "signal": None}
+            {"connector": "xlr3", "direction": "out", "count": 8, "signal": None, "name": None}
         ]
         assert body["weight_kg"] == 9 and body["power_watts"] == 120 and body["outputs"] == 8
 

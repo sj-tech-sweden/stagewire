@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.audio import console
 from app.domains.graph import audio_native, devices_native
 from app.domains.graph.ids import public_id
-from app.domains.graph.models import GraphDevice
+from app.domains.graph.models import ConnectionEdge, GraphDevice
 
 CONFLICT = status.HTTP_409_CONFLICT
 LINK_KEYS = ("is_stereo_linked", "stereo_link_role", "stereo_partner_id")
@@ -330,6 +330,12 @@ async def job_channel_nodes(db: AsyncSession, job_id: uuid.UUID) -> list[GraphDe
             GraphDevice.job_id == job_id, GraphDevice.kind == audio_native.CHANNEL
         )
     )
+    return list(rows.all())
+
+
+async def job_edges(db: AsyncSession, job_id: uuid.UUID) -> list[ConnectionEdge]:
+    """Every connection on the job, used to scope the soft patch to the input domain."""
+    rows = await db.scalars(select(ConnectionEdge).where(ConnectionEdge.job_id == job_id))
     return list(rows.all())
 
 

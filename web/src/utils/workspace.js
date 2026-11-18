@@ -57,22 +57,53 @@ const PRODUCT_DIRECTIONS = { in: 'in', input: 'in', out: 'out', output: 'out', b
 // list of names, or of {connector, direction, count}. Returns editor groups (direction in, out or both).
 export function connectorGroupsFromProduct(product) {
   const raw = product?.specs?.connectors;
-  if (!Array.isArray(raw)) return [];
   const groups = [];
-  for (const entry of raw) {
-    const item = typeof entry === 'string' ? { connector: entry } : entry;
-    if (!item || typeof item !== 'object') continue;
-    const name = String(item.connector || item.type || item.name || '').trim().toLowerCase();
-    if (!name) continue;
-    const count = Number.parseInt(item.count, 10);
-    groups.push({
-      direction: PRODUCT_DIRECTIONS[String(item.direction || '').toLowerCase()] || 'both',
-      connector: name,
-      count: count >= 1 ? count : 1,
-      signal: ['audio', 'video', 'dmx', 'power', 'data'].includes(item.signal) ? item.signal : null,
-    });
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const item = typeof entry === 'string' ? { connector: entry } : entry;
+      if (!item || typeof item !== 'object') continue;
+      const name = String(item.connector || item.type || item.name || '').trim().toLowerCase();
+      if (!name) continue;
+      const count = Number.parseInt(item.count, 10);
+      groups.push({
+        direction: PRODUCT_DIRECTIONS[String(item.direction || '').toLowerCase()] || 'both',
+        connector: name,
+        count: count >= 1 ? count : 1,
+        signal: ['audio', 'video', 'dmx', 'power', 'data'].includes(item.signal) ? item.signal : null,
+      });
+    }
   }
+  // Structured digital links (dSnake/Dante/AES50/AVB/MADI) carry separate in/out channel counts and
+  // an optional interface name — expand them into real sockets so an imported digital stagebox or
+  // mixer actually gains the dSnake channels (mirrors api/app/domains/audio/device_specs.py).
+  groups.push(...digitalIoGroupsFromProduct(product));
   return groups;
+}
+
+// Expand a product's structured digital links into connector groups. Returns [] when there is no
+// such block, so callers can treat it as optional. Each protocol becomes an `in` and/or `out`
+// group with the channel counts and an optional name (e.g. "dSnake", "dSnake Expander").
+export function digitalIoGroupsFromProduct(product) {
+  const specs = product?.specs;
+  if (!specs || typeof specs !== 'object') return [];
+  const out = [];
+  const blocks = [];
+  if (Array.isArray(specs?.stagebox?.digital_io)) blocks.push(specs.stagebox.digital_io);
+  if (Array.isArray(specs?.mixer?.expansion_ports)) blocks.push(specs.mixer.expansion_ports);
+  for (const ports of blocks) {
+    for (const port of ports) {
+      if (!port || typeof port !== 'object') continue;
+      const protocol = String(port.protocol || '').trim().toLowerCase();
+      if (!protocol) continue;
+      const signal = NETWORK_CONNECTORS.has(protocol) ? 'data' : 'audio';
+      const name = String(port.name || '').trim() || undefined;
+      const chIn = Number.parseInt(port.channels_in ?? port.max_channels_in, 10);
+      const chOut = Number.parseInt(port.channels_out ?? port.max_channels_out, 10);
+      if (chIn >= 1) out.push({ connector: protocol, direction: 'in', count: chIn, signal, name });
+      if (chOut >= 1) out.push({ connector: protocol, direction: 'out', count: chOut, signal, name });
+    }
+  }
+  return out;
 }
 
 export function deviceFromProduct(product, { parentId = null } = {}) {
@@ -330,6 +361,39 @@ export const isStagebox = (d) =>
   d.device_type === 'analog_stagebox';
 export const isMixerDevice = (d) => d.kind === 'mixer' || d.device_type === 'mixer';
 
+// Digital transports and the switched fabric they ride over that belong to the Dante / network
+// patch surface (Phase E) — *not* the mixer soft patch. dSnake/Dante/AES50/AVB/MADI are the network
+// transports; ethernet/ethercon are the point-to-point/network carriers. Kept in sync with the
+// backend vocabulary in app/domains/audio/console.py (NETWORK_CONNECTORS) so a port labelled as a
+// network connector on either side routes as a `data` edge.
+export const NETWORK_CONNECTORS = new Set([
+  'dsnake',
+  'dante',
+  'aes50',
+  'avb',
+  'madi',
+  'ethernet',
+  'ethercon',
+]);
+
+export const isNetworkConnector = (connector) =>
+  !!connector && NETWORK_CONNECTORS.has(String(connector).toLowerCase());
+
+// The device's ports that carry a Dante / network digital transport (transmitter/receiver capable).
+// A 'both' connector group is stored as two ports (one in, one out) with the same connector, so
+// this returns both the in and out sides.
+export function networkPorts(device) {
+  return (device?.ports || []).filter((p) => isNetworkConnector(p.connector));
+}
+
+// Every device carrying at least one Dante / network connector — the peer mesh of the Dante domain
+// (Phase E). Unlike the console soft patch this is NOT mixer-anchored: a Dante stagebox, I/O rack,
+// switch or laptop all appear, independently of whether a console is present, because Dante/AVB/MADI
+// routing is a device-to-device network concern, not console input patching.
+export function networkDevices(devices) {
+  return (devices || []).filter((d) => networkPorts(d).length);
+}
+
 // The stageboxes that reach a mixer, directly or indirectly: a stagebox patched into the mixer (or
 // one of its channels) with an audio cable, or through any chain of network gear (switches,
 // routers, computers) in between. The walk is undirected over audio/data edges, never expands into
@@ -363,34 +427,6 @@ export function feedingStageboxes(mixer, devices, edges) {
     }
   }
   return [...found.values()];
-}
-
-// The physical inputs a channel can be fed from, as a strict dropdown: the mixer's own input ports
-// plus the input ports of every stagebox that reaches the mixer (feedingStageboxes). Each port
-// carrying a channel count expands into its individual physical sockets — an 8-channel XLR group
-// becomes "XLR in 1" … "XLR in 8" — so a channel maps to one specific physical input.
-export function mixerInputChoices(channel, devices, edges) {
-  const listId = channel?.attributes?.list_id;
-  if (!listId) return [];
-  const mixer = devices.find((d) => isMixerDevice(d) && d.sound_list_id === listId);
-  if (!mixer) return [];
-  const choices = [];
-  const seen = new Set();
-  const add = (label) => {
-    if (seen.has(label)) return;
-    seen.add(label);
-    choices.push({ label, value: label });
-  };
-  for (const dev of [mixer, ...feedingStageboxes(mixer, devices, edges)]) {
-    const tag = dev === mixer ? '' : ` (${dev.name})`;
-    for (const p of dev.ports || []) {
-      if (p.direction !== 'in') continue;
-      const conn = (p.connector || 'in').toUpperCase();
-      const n = Number(p.channels) || 1;
-      for (let i = 1; i <= n; i += 1) add(`${conn} in ${i}${tag}`);
-    }
-  }
-  return choices;
 }
 
 // The label a port shows in the signal flow: the port's own label when it has one, else its
@@ -934,6 +970,7 @@ export const CONNECTOR_CHOICES = [
   { value: 'trs', label: 'TRS / jack' },
   { value: 'speakon', label: 'Speakon' },
   { value: 'dante', label: 'Dante' },
+  { value: 'dsnake', label: 'dSnake' },
   { value: 'aes50', label: 'AES50' },
   { value: 'madi', label: 'MADI' },
   { value: 'avb', label: 'AVB' },
@@ -952,13 +989,24 @@ export const CONNECTOR_CHOICES = [
 ];
 
 // One-tap additions for the connector editor. Adding one that already exists adds to its count.
+// The digital transports (Dante/dSnake/AES50/AVB/MADI) and the switched fabric (Ethernet) carry
+// audio *over* the network, so their link signal is `data` (not `audio`): that is what lets Phase E
+// route Dante/network flows as `data` edges and still be treated as a feed signal by the stagebox
+// walk. Adding `signal` here means a device built from a preset gets the right port signal without a
+// manual step.
 export const CONNECTOR_PRESETS = [
   { label: 'XLR ×8 in', connector: 'xlr3', direction: 'in', count: 8 },
   { label: 'XLR ×8 out', connector: 'xlr3', direction: 'out', count: 8 },
   { label: 'Speakon ×4 out', connector: 'speakon', direction: 'out', count: 4 },
-  { label: 'Dante', connector: 'dante', direction: 'both', count: 1 },
-  { label: 'AES50', connector: 'aes50', direction: 'both', count: 1 },
-  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: 1 },
+  // Digital transports are the *basis* of the soft patch, not a socket: a transport preset starts
+  // as an unconfigured link (count null) with no patchable socket. The user sets the channel count
+  // (and an optional name like "dSnake" / "dSnake Expander") so the per-channel sockets appear.
+  { label: 'Dante', connector: 'dante', direction: 'both', count: null, signal: 'data' },
+  { label: 'dSnake', connector: 'dsnake', direction: 'both', count: null, signal: 'data' },
+  { label: 'AES50', connector: 'aes50', direction: 'both', count: null, signal: 'data' },
+  { label: 'AVB', connector: 'avb', direction: 'both', count: null, signal: 'data' },
+  { label: 'MADI', connector: 'madi', direction: 'both', count: null, signal: 'data' },
+  { label: 'Ethernet', connector: 'ethernet', direction: 'both', count: null, signal: 'data' },
   { label: 'SDI in', connector: 'sdi', direction: 'in', count: 1 },
   { label: 'SDI out', connector: 'sdi', direction: 'out', count: 1 },
   { label: 'HDMI in', connector: 'hdmi', direction: 'in', count: 1 },
@@ -973,13 +1021,29 @@ export const connectorLabel = (value) =>
   CONNECTOR_CHOICES.find((c) => c.value === String(value || '').toLowerCase())?.label || value || '';
 
 // Add a preset to a list of groups: bump the count of the same connector and direction, else append.
+// Named groups (e.g. a "dSnake" base and a "dSnake Expander") are never merged, so the user can
+// model several physical connections that share a connector.
 export function addConnector(groups, preset) {
   const key = String(preset.connector).toLowerCase();
   const hit = groups.find(
-    (g) => String(g.connector).toLowerCase() === key && g.direction === preset.direction,
+    (g) =>
+      String(g.connector).toLowerCase() === key &&
+      g.direction === preset.direction &&
+      !g.name &&
+      !preset.name,
   );
-  if (!hit) return [...groups, { direction: preset.direction, connector: key, count: preset.count }];
-  return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + preset.count } : g));
+  if (!hit)
+    return [
+      ...groups,
+      {
+        direction: preset.direction,
+        connector: key,
+        count: preset.count,
+        signal: preset.signal,
+        name: preset.name || undefined,
+      },
+    ];
+  return groups.map((g) => (g === hit ? { ...g, count: (g.count || 0) + (preset.count || 0) } : g));
 }
 
 // Connector groups the editor shows: the ports that carry a connector or a channel count, with a
@@ -987,7 +1051,13 @@ export function addConnector(groups, preset) {
 export function portGroups(ports) {
   const groups = (ports || [])
     .filter((p) => p.connector || p.channels)
-    .map((p) => ({ direction: p.direction, connector: p.connector || '', count: p.channels || 0 }));
+    .map((p) => ({
+      direction: p.direction,
+      connector: p.connector || '',
+      count: p.channels || 0,
+      name: p.label || null,
+      signal: p.signal || null,
+    }));
   const folded = [];
   const used = new Set();
   groups.forEach((g, i) => {
@@ -1011,14 +1081,15 @@ export function portGroups(ports) {
 }
 
 // Groups as plain in/out groups (a 'both' group becomes two), the form the create endpoint takes.
+// The interface `name` is carried as `label` so the resulting ports/soft-patch sockets are named.
 export const expandGroups = (groups) =>
   groups.flatMap((g) =>
     g.direction === 'both'
       ? [
-          { ...g, direction: 'in' },
-          { ...g, direction: 'out' },
+          { ...g, direction: 'in', label: g.name || '' },
+          { ...g, direction: 'out', label: g.name || '' },
         ]
-      : [g],
+      : [{ ...g, label: g.name || '' }],
   );
 
 // Graph ports for a set of connector groups, keeping the device's own generic ports as they are.
@@ -1037,6 +1108,7 @@ export function portsFromGroups(groups, existing, type) {
       signal: g.signal || signal,
       connector: g.connector ? g.connector.toLowerCase() : null,
       channels: g.count || null,
+      label: g.label || '',
     };
   });
   return [...fromGroups, ...generic];
@@ -1187,9 +1259,22 @@ export function devicePatch(node, form) {
 export function deviceCreateBody(form) {
   const body = {
     name: form.name,
+    // The backend stores the device type in `kind`; `device_type` is a frontend-only alias the
+    // schema ignores, so we must send `kind` or the device comes back unclassified and
+    // `is_stagebox`/`is_mixer_device` both return False (which breaks quick-connect). We still
+    // echo `device_type` on the body so callers/tests that read the typed alias keep working.
+    kind: form.device_type,
     device_type: form.device_type,
     notes: form.notes,
-    ports: expandGroups(form.ports.filter((p) => p.connector || p.count)),
+    // The legacy create endpoint (AudioDevicePort) speaks `count`, not `channels`/id, so expand the
+    // connector groups into count-shaped ports. (The graph PATCH path uses portsFromGroups for the
+    // graph Port schema that needs id + channels + signal.) A digital-transport preset starts
+    // unconfigured (count null, by design) — coerce that to 0 so the legacy `int` field still
+    // validates; an unconfigured link simply has no sockets until the user sets a count.
+    ports: expandGroups(form.ports.filter((p) => p.connector || p.count)).map((g) => ({
+      ...g,
+      count: g.count ?? 0,
+    })),
   };
   if (form.stockwire_product_id) {
     body.stockwire_product_id = form.stockwire_product_id;
@@ -1365,6 +1450,7 @@ export function fillFormFromSpecs(form, product, specs) {
       connector: group.connector,
       direction: group.direction,
       count: group.count,
+      name: group.name || undefined,
     });
   }
   if (specs.power_inlet) form.power_inlet = specs.power_inlet;
@@ -1447,14 +1533,28 @@ export const OUTPUT_MODES = [
 export const busChannelsFor = (mode) => OUTPUT_MODES.find((m) => m.value === mode)?.channels || [];
 
 // The device type to give gear imported from a Stockwire product, from its category path.
-export function deviceTypeFromCategory(category) {
+// A stagebox / snake / multicore / IO / splitter product becomes digital_stagebox or
+// analog_stagebox (digital when the category or name also names a digital transport:
+// dante/dsnake/avb/madi). Classifying stageboxes correctly is what lets the soft-patch
+// input-domain filter (backend console_input_devices) recognise imported stageboxes
+// instead of letting them fall through to 'other' and be silently excluded.
+export function deviceTypeFromCategory(category, name = '') {
   const c = String(category || '').toLowerCase();
-  if (/ptz/.test(c)) return 'ptz_camera';
-  if (/camera/.test(c)) return 'camera';
-  if (/projector/.test(c)) return 'projector';
-  if (/screen|display|monitor|led wall/.test(c)) return 'screen';
-  if (/switcher|vision mixer/.test(c)) return 'switcher';
-  if (/mixer|console/.test(c)) return 'mixer';
+  // Both the category and the product name are considered: a "Cameras" row named "PTZ" is a PTZ
+  // camera, and an "I/O" row named "IO rack" is a stagebox. The name also carries the digital
+  // transport hint (dante/dsnake/avb/madi) that promotes a stagebox to digital.
+  const hay = `${c} ${String(name || '').toLowerCase()}`;
+  if (/ptz/.test(hay)) return 'ptz_camera';
+  if (/camera/.test(hay)) return 'camera';
+  if (/projector/.test(hay)) return 'projector';
+  if (/screen|display|monitor|led wall/.test(hay)) return 'screen';
+  if (/switcher|vision mixer/.test(hay)) return 'switcher';
+  if (/mixer|console/.test(hay)) return 'mixer';
+  if (/stage\s?box|snake|multicore|splitter|\b(?:i\/o|io)\b/.test(hay)) {
+    return /digital|dante|dsnake|d-snake|avb|madi/.test(hay)
+      ? 'digital_stagebox'
+      : 'analog_stagebox';
+  }
   return 'other';
 }
 

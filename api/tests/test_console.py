@@ -277,6 +277,52 @@ def test_audio_sockets_come_from_any_device_and_skip_logical_nodes():
     assert [s["key"] for s in sockets] == ["b1:in-xlr3:1", "b1:in-xlr3:2", "b1:in-xlr3:3"]
 
 
+def _dev(id, kind, attributes=None, ports=None):
+    return SimpleNamespace(
+        id=id, kind=kind, name=id, attributes=attributes or {}, ports=ports or []
+    )
+
+
+def _edge(src, dst, signal="audio"):
+    return SimpleNamespace(src_device_id=src, dst_device_id=dst, signal=signal)
+
+
+def test_console_input_devices_excludes_cameras_and_keeps_all_stageboxes():
+    camera = _dev("cam", "camera")
+    mixer = _dev("m", "mixer", {"sound_list_id": "L"})
+    near = _dev("near", "digital_stagebox")
+    far = _dev("far", "digital_stagebox")  # isolated, no edge — still a valid target
+    di = _dev("di", "other")
+    devices = [camera, mixer, near, far, di]
+    edges = [_edge("near", "m"), _edge("di", "cam")]
+    # With a mixer: the mixer plus every stagebox, wired or not. Cameras and non-stagebox gear
+    # (the DI) are excluded by type, not by reachability.
+    domain = console.console_input_devices(devices, edges, mixer)
+    assert {d.id for d in domain} == {"m", "near", "far"}
+    # Without a mixer: every stagebox is a soft-patch target (you patch to its ports directly),
+    # so both near and the isolated far appear; the camera and DI do not.
+    assert {d.id for d in console.console_input_devices(devices, edges, None)} == {"near", "far"}
+
+
+def test_console_input_devices_without_mixer_shows_every_stagebox():
+    wired = _dev("wired", "analog_stagebox")
+    isolated = _dev("iso", "analog_stagebox")
+    switch = _dev("sw", "network")
+    devices = [wired, isolated, switch]
+    edges = [_edge("wired", "sw", "data")]
+    domain = console.console_input_devices(devices, edges, None)
+    assert {d.id for d in domain} == {"wired", "iso"}
+
+
+def test_device_type_classifiers():
+    assert console.is_stagebox(_dev("a", "digital_stagebox"))
+    assert console.is_stagebox(_dev("b", "analog_stagebox"))
+    assert not console.is_stagebox(_dev("c", "camera"))
+    assert not console.is_stagebox(_dev("d", "other"))
+    assert console.is_mixer_device(_dev("m", "mixer"))
+    assert not console.is_mixer_device(_dev("x", "digital_stagebox"))
+
+
 def test_normalize_accessories_accepts_common_envelopes():
     rows = normalize_accessories(
         {
@@ -562,14 +608,16 @@ async def test_catalog_imported_device_is_a_soft_patch_target(auth_headers):
             "id"
         ]
         api = f"{BASE}/jobs/{job_id}"
-        # Mirrors web/src/utils/workspace.js::deviceFromProduct for a digital stagebox.
+        # Mirrors web/src/utils/workspace.js::deviceFromProduct for a digital stagebox (note the
+        # normalised device_type the frontend assigns via deviceTypeFromCategory, not the raw kind).
         box = (
             await client.post(
                 f"{api}/graph/devices/batch",
                 json=[
                     {
                         "domain": "audio",
-                        "kind": "Digital Stagebox",
+                        "kind": "digital_stagebox",
+                        "device_type": "digital_stagebox",
                         "name": "Repro Stagebox",
                         "attributes": {},
                         "ports": [
@@ -597,13 +645,41 @@ async def test_catalog_imported_device_is_a_soft_patch_target(auth_headers):
         ).json()[0]
         assert box["legacy_ref"] is None  # the bug's precondition: no legacy ref
         lst = (await client.post(f"{api}/channel-lists", json={"name": "FOH"}, headers=h)).json()
+        # Wire the stagebox into the rig (plan §2): a stagebox is a soft-patch target only when it
+        # carries an audio/data edge. Feed it from a mic so it is "connected".
+        mic = (
+            await client.post(
+                f"{api}/devices",
+                json={
+                    "name": "Vox",
+                    "device_type": "mic",
+                    "ports": [
+                        {"id": "out-xlr3", "direction": "out", "connector": "xlr3", "channels": 1}
+                    ],
+                },
+                headers=h,
+            )
+        ).json()
+        await client.post(
+            f"{api}/graph/edges",
+            json={
+                "signal": "audio",
+                "src_device_id": mic["id"],
+                "src_port": "out-xlr3",
+                "dst_device_id": box["id"],
+                "dst_port": "in-xlr3",
+            },
+            headers=h,
+        )
         view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
         box_sockets = [s for s in view["sockets"] if s["device_id"] == box["id"]]
         assert {s["direction"] for s in box_sockets} == {"in", "out"}
         assert len([s for s in box_sockets if s["direction"] == "in"]) == 8
 
 
-async def test_soft_patch_and_direct_outs_use_any_device_and_never_double_book(auth_headers):
+async def test_soft_patch_and_direct_outs_target_connected_stagebox_and_never_double_book(
+    auth_headers,
+):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
         _, api, post, lst = await _job(client, h)
@@ -614,9 +690,30 @@ async def test_soft_patch_and_direct_outs_use_any_device_and_never_double_book(a
                 "name": "AR2412",
                 "device_type": "analog_stagebox",
                 "ports": [
-                    {"direction": "in", "connector": "xlr3", "count": 24},
-                    {"direction": "out", "connector": "xlr3", "count": 12},
+                    {"id": "in-xlr3", "direction": "in", "connector": "xlr3", "count": 24},
+                    {"id": "out-xlr3", "direction": "out", "connector": "xlr3", "count": 12},
                 ],
+            },
+        )
+        # A stagebox is only a soft-patch target when it carries an audio/data edge (plan §2):
+        # wire it to a mic so it is "connected". The mic is not a stagebox and must stay out of
+        # the target list even though patching to it remains possible.
+        mic = await post(
+            "devices",
+            {
+                "name": "Vox",
+                "device_type": "mic",
+                "ports": [{"id": "in-xlr3", "direction": "in", "connector": "xlr3", "count": 1}],
+            },
+        )
+        await post(
+            "graph/edges",
+            {
+                "signal": "audio",
+                "src_device_id": box["id"],
+                "src_port": "out-xlr3",
+                "dst_device_id": mic["id"],
+                "dst_port": "in-xlr3",
             },
         )
         patch = f"{api}/channel-lists/{lst['id']}/soft-patch"
@@ -687,6 +784,176 @@ async def test_soft_patch_and_direct_outs_use_any_device_and_never_double_book(a
         for channel in [*ch[:3], ch4]:
             await client.put(f"{api}/channels/{channel['id']}/soft-patch", json=None, headers=h)
         assert (await client.delete(f"{api}/devices/{box['id']}", headers=h)).status_code == 204
+
+
+async def test_soft_patch_excludes_non_stagebox_devices(auth_headers):
+    """A camera (or mic / DI / wireless rack) must never appear as a soft-patch target, even
+    though patching a channel to it stays possible. Only the input domain (mixer + stageboxes)
+    is offered (plan §2)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        camera = await post(
+            "devices",
+            {
+                "name": "Cam",
+                "device_type": "camera",
+                "ports": [{"id": "out-xlr3", "direction": "out", "connector": "xlr3", "count": 2}],
+            },
+        )
+        box = await post(
+            "devices",
+            {
+                "name": "AR2412",
+                "device_type": "analog_stagebox",
+                "ports": [{"id": "out-xlr3", "direction": "out", "connector": "xlr3", "count": 8}],
+            },
+        )
+        # Connect the camera and the stagebox both to a mic so each carries an audio edge.
+        mic = await post(
+            "devices",
+            {
+                "name": "Vox",
+                "device_type": "mic",
+                "ports": [{"id": "in-xlr3", "direction": "in", "connector": "xlr3", "count": 2}],
+            },
+        )
+        for src in (camera, box):
+            await post(
+                "graph/edges",
+                {
+                    "signal": "audio",
+                    "src_device_id": src["id"],
+                    "src_port": "out-xlr3",
+                    "dst_device_id": mic["id"],
+                    "dst_port": "in-xlr3",
+                },
+            )
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        assert camera["id"] not in {s["device_id"] for s in view["sockets"]}
+        assert box["id"] in {s["device_id"] for s in view["sockets"]}
+
+
+async def test_soft_patch_without_mixer_shows_every_stagebox(auth_headers):
+    """With no mixer set, every stagebox is a soft-patch target (you patch to its ports directly),
+    wired or not. Cameras and other non-stagebox gear stay out by type."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        wired = await post(
+            "devices",
+            {
+                "name": "Wired Box",
+                "device_type": "digital_stagebox",
+                "ports": [
+                    {"id": "out-dante", "direction": "out", "connector": "dante", "count": 16}
+                ],
+            },
+        )
+        isolated = await post(
+            "devices",
+            {
+                "name": "Lonely Box",
+                "device_type": "digital_stagebox",
+                "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 16}],
+            },
+        )
+        switch = await post(
+            "devices",
+            {
+                "name": "Switch",
+                "device_type": "network",
+                "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 1}],
+            },
+        )
+        await post(
+            "graph/edges",
+            {
+                "signal": "audio",
+                "src_device_id": wired["id"],
+                "src_port": "out-dante",
+                "dst_device_id": switch["id"],
+                "dst_port": "in-dante",
+            },
+        )
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        ids = {s["device_id"] for s in view["sockets"]}
+        assert wired["id"] in ids
+        # An isolated stagebox is still a valid target — you patch to its ports directly.
+        assert isolated["id"] in ids
+
+
+async def test_soft_patch_with_mixer_shows_mixer_and_every_stagebox(auth_headers):
+    """With a mixer set, the mixer plus every stagebox appear — a stagebox is a target whether or
+    not it reaches the mixer; cameras, DIs and other non-stagebox gear stay out by type."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        mixer = await post(
+            "devices",
+            {
+                "name": "Desk",
+                "device_type": "mixer",
+                "sound_list_id": lst["id"],
+                "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 8}],
+            },
+        )
+        near = await post(
+            "devices",
+            {
+                "name": "Near Box",
+                "device_type": "digital_stagebox",
+                "ports": [
+                    {"id": "out-dante", "direction": "out", "connector": "dante", "count": 16}
+                ],
+            },
+        )
+        far = await post(
+            "devices",
+            {
+                "name": "Far Box",
+                "device_type": "digital_stagebox",
+                "ports": [
+                    {"id": "out-dante", "direction": "out", "connector": "dante", "count": 16}
+                ],
+            },
+        )
+        di = await post(
+            "devices",
+            {
+                "name": "DI",
+                "device_type": "other",
+                "ports": [{"id": "in-dante", "direction": "in", "connector": "dante", "count": 4}],
+            },
+        )
+        # Near reaches the mixer; far reaches only the DI — both stageboxes are targets.
+        await post(
+            "graph/edges",
+            {
+                "signal": "audio",
+                "src_device_id": near["id"],
+                "src_port": "out-dante",
+                "dst_device_id": mixer["id"],
+                "dst_port": "in-dante",
+            },
+        )
+        await post(
+            "graph/edges",
+            {
+                "signal": "audio",
+                "src_device_id": far["id"],
+                "src_port": "out-dante",
+                "dst_device_id": di["id"],
+                "dst_port": "in-dante",
+            },
+        )
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        ids = {s["device_id"] for s in view["sockets"]}
+        assert mixer["id"] in ids
+        assert near["id"] in ids
+        # Far box is a stagebox, so it is a soft-patch target even though it only reaches the DI.
+        assert far["id"] in ids
+        assert di["id"] not in ids
 
 
 @pytest.mark.asyncio
@@ -1158,12 +1425,27 @@ async def _channel(client, h, api, channel_id):
 async def _chain_job(client, h):
     _, api, post, lst = await _job(client, h)
     ch = await _channels(post, lst["id"], 3)
-    ports = [{"direction": "in", "connector": "xlr3", "count": 24}]
+    ports = [
+        {"id": "in-xlr3", "direction": "in", "connector": "xlr3", "count": 24},
+        {"id": "out-xlr3", "direction": "out", "connector": "xlr3", "count": 24},
+    ]
     box = await post(
         "devices", {"name": "AR2412", "device_type": "analog_stagebox", "ports": ports}
     )
     box2 = await post(
         "devices", {"name": "AB168", "device_type": "analog_stagebox", "ports": ports}
+    )
+    # Wire the two stageboxes together so they count as connected: per plan §2 a stagebox is only
+    # a soft-patch target when it carries an audio/data edge (even with no mixer present).
+    await post(
+        "graph/edges",
+        {
+            "signal": "audio",
+            "src_device_id": box["id"],
+            "src_port": "out-xlr3",
+            "dst_device_id": box2["id"],
+            "dst_port": "in-xlr3",
+        },
     )
     return api, post, lst, ch, box, box2
 
@@ -2645,3 +2927,94 @@ async def test_talkback_presets_and_tap_points_round_trip(auth_headers):
         )
         assert res.status_code == 200, res.text
         assert res.json()["tap_point"] == "post_eq"
+
+
+# --- Dante / network patch domain (Phase E) ---------------------------------------------------
+
+
+def _ndev(kind, ports, **attrs):
+    return SimpleNamespace(id=kind, kind=kind, name=kind, attributes=attrs, ports=ports)
+
+
+def test_network_ports_picks_dante_and_network_connectors():
+    d = _ndev(
+        "digital_stagebox",
+        [
+            {"id": "in-dante", "direction": "in", "connector": "dante"},
+            {"id": "out-dante", "direction": "out", "connector": "dante"},
+            {"id": "in-xlr", "direction": "in", "connector": "xlr3"},
+        ],
+    )
+    ports = console.network_ports(d)
+    assert {p["id"] for p in ports} == {"in-dante", "out-dante"}
+
+
+def test_network_devices_is_not_mixer_anchored():
+    mixer = _ndev("mixer", [{"id": "in-dante", "direction": "in", "connector": "dante"}])
+    box_a = _ndev(
+        "digital_stagebox", [{"id": "out-dante", "direction": "out", "connector": "dante"}]
+    )
+    box_b = _ndev("analog_stagebox", [{"id": "in-xlr", "direction": "in", "connector": "xlr3"}])
+    cam = _ndev("camera", [{"id": "out-sdi", "direction": "out", "connector": "sdi"}])
+    found = console.network_devices([mixer, box_a, box_b, cam])
+    ids = {d.id for d in found}
+    # A Dante mixer and a Dante stagebox appear; an analog stagebox and a camera do not.
+    assert ids == {"mixer", "digital_stagebox"}
+
+
+def test_is_network_connector_vocabulary():
+    assert console.is_network_connector("dante")
+    assert console.is_network_connector("DSNAKE")
+    assert console.is_network_connector("ethernet")
+    assert not console.is_network_connector("xlr3")
+    assert not console.is_network_connector(None)
+
+
+def test_audio_sockets_excludes_unconfigured_network_port_but_keeps_channels():
+    # A dSnake port with no channel count is the link, not a socket: it must not appear. Once it
+    # carries an explicit channel count it yields per-channel sockets (the real I/O over the link).
+    dev = SimpleNamespace(
+        id="sb",
+        kind="digital_stagebox",
+        name="SB",
+        attributes={},
+        ports=[
+            {"id": "dsnake-both", "direction": "both", "connector": "dsnake", "channels": None},
+            {"id": "xlr-in", "direction": "in", "connector": "xlr3", "channels": 4},
+        ],
+    )
+    sockets = console.audio_sockets([dev])
+    keys = {(s["port_id"], s["socket"]) for s in sockets}
+    # the unconfigured dSnake port contributes nothing; the XLR port yields 4 sockets
+    assert ("dsnake-both", 1) not in keys
+    assert {("xlr-in", n) for n in range(1, 5)} <= keys
+
+
+def test_audio_sockets_channelises_configured_network_port():
+    dev = SimpleNamespace(
+        id="gld",
+        kind="mixer",
+        name="GLD-80",
+        attributes={},
+        ports=[
+            {
+                "id": "dsnake-in",
+                "direction": "in",
+                "connector": "dsnake",
+                "channels": 32,
+                "label": "dSnake",
+            },
+            {
+                "id": "dsnake-out",
+                "direction": "out",
+                "connector": "dsnake",
+                "channels": 16,
+                "label": "dSnake",
+            },
+        ],
+    )
+    sockets = console.audio_sockets([dev])
+    ins = [s for s in sockets if s["direction"] == "in"]
+    outs = [s for s in sockets if s["direction"] == "out"]
+    assert len(ins) == 32 and len(outs) == 16
+    assert all(s["port_label"] == "dSnake" for s in sockets)

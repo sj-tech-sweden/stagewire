@@ -120,6 +120,9 @@
         <div class="text-subtitle2 q-mt-md">
           {{ t('devices.ports') }}
         </div>
+        <div class="text-caption text-grey-6 q-mb-xs">
+          {{ t('devices.portsHint') }}
+        </div>
         <div
           class="row q-gutter-xs q-mb-sm"
           data-testid="connector-presets"
@@ -158,9 +161,19 @@
           />
           <ConnectorSelect
             v-model="port.connector"
-            class="col-5 col-sm-5"
+            class="col-4 col-sm-4"
             :label="t('channels.patchPoint.connector')"
             data-testid="port-connector"
+          />
+          <q-input
+            v-model="port.name"
+            class="col-4 col-sm-3"
+            dense
+            outlined
+            :label="t('devices.interfaceName')"
+            :placeholder="t('devices.interfaceNameOptional')"
+            :hint="isNetworkConnector(port.connector) ? t('devices.interfaceNameHint') : null"
+            data-testid="port-name"
           />
           <q-input
             v-model.number="port.count"
@@ -170,6 +183,8 @@
             type="number"
             min="0"
             :label="t('devices.count')"
+            :hint="isNetworkConnector(port.connector) ? t('devices.countHint') : null"
+            data-testid="port-count"
           />
           <q-btn
             flat
@@ -187,7 +202,7 @@
           icon="add"
           :label="t('devices.addPort')"
           data-testid="add-port"
-          @click="form.ports.push({ direction: 'in', connector: '', count: 1 })"
+          @click="form.ports.push({ direction: 'in', connector: '', count: 1, name: null })"
         />
 
         <div class="row q-col-gutter-sm q-mt-md">
@@ -473,6 +488,7 @@ import {
   addConnector,
   deviceForm,
   fillFormFromSpecs,
+  isNetworkConnector,
   physicalHintKey,
 } from '@/utils/workspace';
 
