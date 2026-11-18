@@ -1258,9 +1258,14 @@ export function devicePatch(node, form) {
 export function deviceCreateBody(form) {
   const body = {
     name: form.name,
-    device_type: form.device_type,
+    // The backend stores the device type in `kind`; `device_type` is a frontend-only alias the
+    // schema ignores, so we must send `kind` or the device comes back unclassified and
+    // `is_stagebox`/`is_mixer_device` both return False (which breaks quick-connect).
+    kind: form.device_type,
     notes: form.notes,
-    ports: expandGroups(form.ports.filter((p) => p.connector || p.count)),
+    // The create endpoint speaks real ports (id + channels), not connector groups: expand the
+    // groups into ports so every socket gets the id/channels the Port schema requires.
+    ports: portsFromGroups(form.ports.filter((p) => p.connector || p.count), [], form.device_type),
   };
   if (form.stockwire_product_id) {
     body.stockwire_product_id = form.stockwire_product_id;

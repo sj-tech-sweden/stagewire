@@ -3543,11 +3543,20 @@ async function connectStagebox(id) {
     await load(); // immediate soft-patch refresh so the new device's sockets show up at once
     $q.notify({ type: "positive", message: t("console.stageboxConnected") });
   } catch (err) {
+    // The backend returns a clear reason on 422: either a plain string message, a structured
+    // {code, issues[]} object (invalid_connection), or a FastAPI validation-error list. Surface
+    // whichever it is so the user sees *why* the link failed instead of a generic toast.
     const detail = err?.response?.data?.detail;
-    const msg =
-      typeof detail === "string"
-        ? detail
-        : (detail && detail.message) || t("console.stageboxConnectFailed");
+    let msg = t("console.stageboxConnectFailed");
+    if (typeof detail === "string") {
+      msg = detail;
+    } else if (Array.isArray(detail)) {
+      msg = detail.map((d) => d?.msg || d?.message || "").filter(Boolean).join("; ");
+    } else if (detail && Array.isArray(detail.issues)) {
+      msg = detail.issues.map((i) => i.message || i.code || "").filter(Boolean).join("; ");
+    } else if (detail && detail.message) {
+      msg = detail.message;
+    }
     $q.notify({ type: "negative", message: msg });
   } finally {
     connectingId.value = null;
