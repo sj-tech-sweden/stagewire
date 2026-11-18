@@ -2650,6 +2650,14 @@ async def test_an_lcr_bus_can_leave_from_each_of_its_three_sides(auth_headers):
         # a plain tap on an LCR bus still claims three adjacent sockets
         res = await client.put(url, json=out(5), headers=h)
         assert [r["socket"] for r in res.json()["out_endpoints"][0]["refs"]] == [5, 6, 7]
+        # ... in the order L, C, R (centre in the middle, as on the LCR bus itself)
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        full = {
+            s["socket"]: s.get("out_socket_side")
+            for s in view["sockets"]
+            if s["port_id"] == "out-xlr3" and s["socket"] in (5, 6, 7)
+        }
+        assert full == {5: "L", 6: "C", 7: "R"}
 
 
 @pytest.mark.asyncio

@@ -1020,6 +1020,7 @@ export default {
     busEndpoints: "Outputs of this bus",
     busNoEndpoints: "Not patched",
     sideBoth: "Both",
+    sideAll: "All",
     sideLeft: "Left",
     sideRight: "Right",
     sideCenter: "Center",

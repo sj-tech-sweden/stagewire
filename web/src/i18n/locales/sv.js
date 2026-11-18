@@ -1022,6 +1022,7 @@ export default {
     busEndpoints: "Utgångar för den här bussen",
     busNoEndpoints: "Inte patchad",
     sideBoth: "Båda",
+    sideAll: "Alla",
     sideLeft: "Vänster",
     sideRight: "Höger",
     sideCenter: "Mitt",

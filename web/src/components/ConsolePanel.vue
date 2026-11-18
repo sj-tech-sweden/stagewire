@@ -1130,10 +1130,10 @@
                   toggle-color="primary"
                   class="q-mt-xs"
                   :options="[
-                    { label: t('console.sideBoth'), value: 'both' },
+                    { label: selChannel.mode === 'lcr' ? t('console.sideAll') : t('console.sideBoth'), value: 'both' },
                     { label: t('console.sideLeft'), value: 'L' },
-                    { label: t('console.sideRight'), value: 'R' },
                     ...(selChannel.mode === 'lcr' ? [{ label: t('console.sideCenter'), value: 'C' }] : []),
+                    { label: t('console.sideRight'), value: 'R' },
                   ]"
                   data-testid="console-bus-side"
                 />
@@ -3745,9 +3745,9 @@ const softBusStrips = computed(() =>
 const addEndpoint = ref(false);
 // which part of a stereo / LCR bus a tap routes: all of it (adjacent sockets, the default) or one side
 // to a single socket. A mono bus has no sides and always routes as before. A side that the bus's
-// mode does not have (L/R/C picked on an LCR bus, then a stereo one selected) falls back to all.
+// mode does not have (L/C/R picked on an LCR bus, then a stereo one selected) falls back to all.
 const busSide = ref("both");
-const BUS_SIDES = { stereo: ["L", "R"], lcr: ["L", "R", "C"] };
+const BUS_SIDES = { stereo: ["L", "R"], lcr: ["L", "C", "R"] };
 const sideOf = () => (patchMode.value === "bus" && BUS_SIDES[selChannel.value?.mode]?.includes(busSide.value) ? busSide.value : null);
 const outWord = computed(() => t("console.outWord"));
 const endpointText = (bus, ep) =>

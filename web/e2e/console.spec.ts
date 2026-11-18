@@ -799,14 +799,21 @@ test('an LCR bus can be patched one side at a time, centre included', async ({ p
   await page.getByTestId('console-port').filter({ hasText: 'out-xlr3' }).click();
   await page.getByTestId('console-patch-channel').click();
   await page.getByRole('option', { name: /PA/ }).click();
+  // each step waits for the toggle to show the side and for the endpoint to land before the next
+  // one: the side is read when the socket is tapped, and taps during a refresh are dropped
   const side = page.getByTestId('console-bus-side');
-  await side.getByText(/^left$/i).click();
-  await page.getByTestId('console-socket-1').click();
-  await side.getByText(/^right$/i).click();
-  await page.getByTestId('console-socket-2').click();
-  await side.getByText(/^center$/i).click();
-  await page.getByTestId('console-socket-9').click();
-  await expect(page.getByTestId('console-bus-endpoint')).toHaveCount(3);
+  // an LCR bus routes all three by default, so its first option is "All", not "Both"
+  await expect(side.getByRole('button', { name: /^all$/i })).toBeVisible();
+  await expect(side.getByRole('button', { name: /^both$/i })).toHaveCount(0);
+  let landed = 0;
+  for (const [label, socket] of [['left', 1], ['right', 2], ['center', 9]] as const) {
+    const button = side.getByRole('button', { name: new RegExp(`^${label}$`, 'i') });
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId(`console-socket-${socket}`).click();
+    landed += 1;
+    await expect(page.getByTestId('console-bus-endpoint')).toHaveCount(landed);
+  }
   await expect(page.getByTestId('console-socket-9').getByTestId('console-socket-name')).toHaveText('PA C');
   const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json();
   const out = lists[0].outputs.find((o: { id: string }) => o.id === bus.id);
