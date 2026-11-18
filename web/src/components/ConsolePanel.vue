@@ -906,8 +906,8 @@
                     <q-btn
                       :disable="
                         !!connectingId ||
-                        !linkSelections[row.device.id].src ||
-                        !linkSelections[row.device.id].dst
+                          !linkSelections[row.device.id].src ||
+                          !linkSelections[row.device.id].dst
                       "
                       :icon="connectingId === row.device.id ? 'loop' : 'cable'"
                       :label="t('console.connect')"
@@ -1352,18 +1352,19 @@
             :empty="t('console.noMatch')"
             @tile="onTile2"
           />
-          <q-virtual-scroll
+          <!-- A plain list, not a virtual scroller in a fixed-height box: the page scrolls, so a long
+               channel list is never squeezed into a small window of its own. -->
+          <q-list
             v-else-if="visibleStrips.length"
-            :items="visibleStrips"
-            :virtual-scroll-item-size="36"
             separator
-            style="max-height: 30vh"
             class="rounded-borders"
             data-testid="console-patch-overview"
           >
-            <template #default="{ item: ch }">
+            <template
+              v-for="ch in visibleStrips"
+              :key="ch.id"
+            >
               <q-item
-                :key="ch.id"
                 dense
                 clickable
                 :active="ch.id === selChannelId"
@@ -1419,7 +1420,7 @@
                 </q-item-section>
               </q-item>
             </template>
-          </q-virtual-scroll>
+          </q-list>
           <div
             v-else
             class="text-grey-6"
