@@ -1021,7 +1021,9 @@ export default {
     linkStageboxHint:
       "Every stagebox that carries a dSnake/Dante/AES50/AVB/MADI port is listed with its link state. A stagebox only appears in this patch once it is linked to the console over its network port. If a stagebox is missing, add a dSnake/Dante port to it first (see device setup).",
     fromPort: "From port",
-    toPort: "To console port",
+    toPort: "To port",
+    linkTarget: "Link to",
+    linkTargetConsole: "Console",
     connect: "Connect",
     stageboxLinked: "Linked",
     stageboxConnected: "Stagebox connected — its sockets are now in the patch.",

@@ -257,13 +257,18 @@ export const useGraphStore = defineStore('graph', {
       );
       return data;
     },
-    // Phase D/E follow-up: one-click quick-connect of a stagebox into the console over dSnake/Dante.
-    // The server picks the stagebox network out port and the console network in port and creates a
-    // `data` edge, which is what makes the stagebox appear in the console soft patch (the §2 walk).
+    // Phase D/E follow-up: one-click quick-connect of a stagebox over dSnake/Dante. The default
+    // target is the console/mixer, but `targetId` may name another stagebox (a digital-transport
+    // cascade, e.g. an AR84 into an AR2412's dSnake expansion port). The server picks the stagebox
+    // network out port and the target network in port and creates a `data` edge, which is what makes
+    // the stagebox appear in the console soft patch (the §2 walk).
     async connectStagebox(jobId, stageboxId, options = {}) {
       const { data } = await api.post(`${baseFor(this, jobId)}/connect-stagebox`, {
         stagebox_id: stageboxId,
         ...(options.stageboxPort ? { stagebox_port: options.stageboxPort } : {}),
+        ...(options.targetId ? { target_id: options.targetId } : {}),
+        ...(options.targetPort ? { target_port: options.targetPort } : {}),
+        // Backwards-compatible alias: older callers pass consolePort for the console target.
         ...(options.consolePort ? { console_port: options.consolePort } : {}),
       });
       this.applyRealtimeEvent({ type: 'graph.edge.upsert', payload: data.edge });

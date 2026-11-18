@@ -894,8 +894,20 @@
                       data-testid="console-stagebox-src-port"
                     />
                     <q-select
+                      v-model="linkSelections[row.device.id].target"
+                      :options="targetOptions(row.device.id)"
+                      :label="t('console.linkTarget')"
+                      dense
+                      emit-value
+                      map-options
+                      clearable
+                      class="col-12 col-sm-3"
+                      data-testid="console-stagebox-target"
+                      @update:model-value="(v) => onTargetChange(row.device, v)"
+                    />
+                    <q-select
                       v-model="linkSelections[row.device.id].dst"
-                      :options="consoleInPorts"
+                      :options="targetInPorts(linkSelections[row.device.id].target)"
                       :label="t('console.toPort')"
                       dense
                       emit-value
@@ -907,6 +919,7 @@
                       :disable="
                         !!connectingId ||
                           !linkSelections[row.device.id].src ||
+                          !linkSelections[row.device.id].target ||
                           !linkSelections[row.device.id].dst
                       "
                       :icon="connectingId === row.device.id ? 'loop' : 'cable'"
@@ -3570,6 +3583,10 @@ const connectedStageboxIds = computed(() => {
     if (s && d) {
       if (isStagebox(s) && isMixerDevice(d)) set.add(s.id);
       if (isStagebox(d) && isMixerDevice(s)) set.add(d.id);
+      // A stagebox cascaded into another stagebox (e.g. AR84 -> AR2412 dSnake expander) is itself
+      // wired, so it leaves the "unconnected" list. The target stagebox stays put so it can still be
+      // linked to the console — only the cascade origin flips to "linked".
+      if (isStagebox(s) && isStagebox(d)) set.add(s.id);
     }
   }
   return set;
@@ -3599,26 +3616,57 @@ function stageboxOutPorts(device) {
     .filter((p) => p.direction === "out" || p.direction === "both")
     .map(portOption);
 }
-// Network input ports on the console (the destinations a link can end at).
-const consoleInPorts = computed(() =>
-  networkPorts(consoleDevice.value || {})
+// Where a stagebox can be linked: the console/mixer first, then every *other* network stagebox
+// (a digital-transport cascade, e.g. an AR84 into an AR2412's dSnake expansion port). The stagebox
+// itself is excluded — a loop back to its own port is never a valid link.
+function targetOptions(selfId) {
+  const opts = [];
+  const mixer = graph.devices.find((d) => isMixerDevice(d));
+  if (mixer) opts.push({ label: mixer.name || t("console.linkTargetConsole"), value: mixer.id });
+  for (const d of graph.devices) {
+    if (isStagebox(d) && networkPorts(d).length && d.id !== selfId) {
+      opts.push({ label: d.name, value: d.id });
+    }
+  }
+  return opts;
+}
+// Input network ports on the chosen target (console or another stagebox) — the destinations a link
+// can end at. Depends on the target picker, so it is recomputed per card.
+function targetInPorts(targetValue) {
+  const target = graph.devices.find((d) => d.id === targetValue);
+  if (!target) return [];
+  return networkPorts(target)
     .filter((p) => p.direction === "in" || p.direction === "both")
-    .map(portOption),
-);
-// Per-stagebox port choice (src = stagebox output, dst = console input). Defaults are seeded from the
-// auto-pick the server would use so the one-tap flow still works; the user can override either side.
+    .map(portOption);
+}
+// Auto-pick a target input port that matches the stagebox's connector (dSnake -> dSnake), else the
+// first input. Used to seed the default and to reset dst when the target changes.
+function pickTargetDst(srcConn, targetValue) {
+  const target = graph.devices.find((d) => d.id === targetValue);
+  if (!target) return null;
+  const ins = networkPorts(target).filter((p) => p.direction === "in" || p.direction === "both");
+  return (ins.find((p) => p.connector === srcConn) || ins[0])?.id || null;
+}
+// Per-stagebox port choice (src = stagebox output, target = console or another stagebox, dst = target
+// input). Defaults are seeded from the auto-pick the server would use so the one-tap flow still works;
+// the user can override any side.
 const linkSelections = reactive({});
 function defaultSelection(device) {
   const outs = stageboxOutPorts(device);
   const src = outs[0]?.value || null;
-  if (!src) return { src: null, dst: null };
+  const target = consoleDevice.value?.id || null;
+  if (!src) return { src: null, target, dst: null };
   const srcConn = (networkPorts(device).find((p) => p.id === src) || {}).connector;
-  const dst =
-    consoleInPorts.value.find((o) => {
-      const p = networkPorts(consoleDevice.value || {}).find((pp) => pp.id === o.value);
-      return p && p.connector === srcConn;
-    })?.value || consoleInPorts.value[0]?.value || null;
-  return { src, dst };
+  const dst = pickTargetDst(srcConn, target);
+  return { src, target, dst };
+}
+// The dst port ids belong to a specific target; if the user switches targets the old dst is invalid,
+// so re-seed it from the new target's ports.
+function onTargetChange(device, targetValue) {
+  const sel = linkSelections[device.id];
+  if (!sel) return;
+  const srcConn = (networkPorts(device).find((p) => p.id === sel.src) || {}).connector;
+  sel.dst = pickTargetDst(srcConn, targetValue);
 }
 watch(
   stageboxLinkRows,
@@ -3635,7 +3683,11 @@ async function connectStagebox(id) {
   const sel = linkSelections[id] || {};
   connectingId.value = id;
   try {
-    await graph.connectStagebox(props.jobId, id, { stageboxPort: sel.src, consolePort: sel.dst });
+    await graph.connectStagebox(props.jobId, id, {
+      stageboxPort: sel.src,
+      targetId: sel.target,
+      targetPort: sel.dst,
+    });
     await load(); // immediate soft-patch refresh so the new device's sockets show up at once
     $q.notify({ type: "positive", message: t("console.stageboxConnected") });
   } catch (err) {

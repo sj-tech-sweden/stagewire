@@ -486,7 +486,9 @@ async def test_connect_stagebox_rejects_bad_explicit_port(auth_headers):
             headers=h,
         )
         assert res.status_code == 422, res.text
-        assert "console_port" in res.text
+        # console_port is a deprecated alias folded into target_port, so the message references the
+        # canonical field name.
+        assert "target_port" in res.text or "console_port" in res.text
 
 
 @pytest.mark.asyncio
@@ -549,6 +551,194 @@ async def test_connect_stagebox_rejects_non_stagebox(auth_headers):
         ).json()
         res = await client.post(f"{g}/connect-stagebox", json={"stagebox_id": mic["id"]}, headers=h)
         assert res.status_code == 422, res.text
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_to_stagebox_links_over_dsnake(auth_headers):
+    # An AR84 cascaded into an AR2412's dSnake expansion port: a digital-transport (data) edge
+    # between two stageboxes, not through the console. The edge goes stagebox -> target stagebox.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        mixer = (
+            await dev(
+                "GLD-80",
+                "mixer",
+                [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+        ar2412 = (
+            await dev(
+                "AR2412",
+                "digital_stagebox",
+                [
+                    {
+                        "id": "dsnake-out",
+                        "direction": "out",
+                        "signal": "data",
+                        "connector": "dsnake",
+                    },
+                    {
+                        "id": "dsnake-exp-in",
+                        "direction": "in",
+                        "signal": "data",
+                        "connector": "dsnake",
+                        "name": "dSnake Expander",
+                    },
+                ],
+            )
+        ).json()
+        ar84 = (
+            await dev(
+                "AR84",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+
+        res = await client.post(
+            f"{g}/connect-stagebox",
+            json={
+                "stagebox_id": ar84["id"],
+                "target_id": ar2412["id"],
+                "target_port": "dsnake-exp-in",
+            },
+            headers=h,
+        )
+        assert res.status_code == 201, res.text
+        edge = res.json()["edge"]
+        assert edge["signal"] == "data"
+        assert edge["src_device_id"] == ar84["id"]
+        assert edge["dst_device_id"] == ar2412["id"]
+        assert edge["src_port"] == "dsnake-out"
+        assert edge["dst_port"] == "dsnake-exp-in"
+        # The console (mixer) is untouched — this link does not route through it.
+        assert edge["dst_device_id"] != mixer["id"]
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_to_stagebox_rejects_non_network_target(auth_headers):
+    # A target that is not a stagebox or mixer, or a target with no network port, must be rejected.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        await dev(
+            "GLD-80",
+            "mixer",
+            [{"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"}],
+        )
+        ar84 = (
+            await dev(
+                "AR84",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+        # A non-network device cannot be a transport target.
+        mic = (
+            await dev(
+                "Mic",
+                "other",
+                [{"id": "xlr", "direction": "out", "signal": "audio", "connector": "xlr"}],
+            )
+        ).json()
+
+        res = await client.post(
+            f"{g}/connect-stagebox",
+            json={"stagebox_id": ar84["id"], "target_id": mic["id"]},
+            headers=h,
+        )
+        assert res.status_code == 422, res.text
+
+        # A stagebox target missing a network in-port is also rejected (no port to land on).
+        noin = (
+            await dev(
+                "NoIn",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+        res2 = await client.post(
+            f"{g}/connect-stagebox",
+            json={"stagebox_id": ar84["id"], "target_id": noin["id"]},
+            headers=h,
+        )
+        assert res2.status_code == 422, res2.text
+
+
+@pytest.mark.asyncio
+async def test_connect_stagebox_to_stagebox_rejects_unknown_or_loop_target(auth_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        ar84 = (
+            await dev(
+                "AR84",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+
+        # Unknown target id is rejected.
+        res = await client.post(
+            f"{g}/connect-stagebox",
+            json={"stagebox_id": ar84["id"], "target_id": "00000000-0000-0000-0000-000000000000"},
+            headers=h,
+        )
+        assert res.status_code == 422, res.text
+
+        # Linking a stagebox to itself would form a self-loop; the server must reject it.
+        res2 = await client.post(
+            f"{g}/connect-stagebox",
+            json={"stagebox_id": ar84["id"], "target_id": ar84["id"]},
+            headers=h,
+        )
+        assert res2.status_code == 422, res2.text
 
 
 def test_validate_edge_accepts_bidirectional_both_port():
