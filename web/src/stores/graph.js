@@ -385,7 +385,7 @@ export const useGraphStore = defineStore('graph', {
         }
       }
       const form = deviceForm(null);
-      form.device_type = deviceTypeFromCategory(product.category);
+      form.device_type = deviceTypeFromCategory(product.category, product.name);
       fillFormFromSpecs(form, product, specs);
       // Passive source gear (microphones, mic stands, DIs, instruments) takes no power by default.
       // An explicit product spec (e.g. a powered speaker) still wins over this default.

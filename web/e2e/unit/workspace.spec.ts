@@ -60,6 +60,7 @@ import {
   centerOf,
   devicesShownAsElements,
   domainForCategory,
+  deviceTypeFromCategory,
   isVirtual,
   linkRoleFor,
   dropPosition,
@@ -77,6 +78,24 @@ test('categories map to a domain and unknown ones stay "other"', () => {
   expect(domainForCategory('Power distro')).toBe('power');
   expect(domainForCategory('Cases')).toBe('other');
   expect(domainForCategory(null)).toBe('other');
+});
+
+test('stageboxes classify digital vs analog from category and name, non-stagebox categories stay other', () => {
+  // A stagebox / snake / multicore / splitter / IO product becomes a stagebox; digital transports
+  // (dante/dsnake/avb/madi) make it a digital_stagebox. This is what lets the backend soft-patch
+  // input-domain filter recognise imported stageboxes instead of dropping them to 'other'.
+  expect(deviceTypeFromCategory('Stageboxes', 'AR2412')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('Digital Stagebox', 'dLive DM48')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Stagebox', 'Dante stagebox')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Snake', 'dsnake AR2412')).toBe('digital_stagebox');
+  expect(deviceTypeFromCategory('Multicore', 'analog multicore')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('Splitter', 'active split')).toBe('analog_stagebox');
+  expect(deviceTypeFromCategory('I/O', 'IO rack')).toBe('analog_stagebox');
+  // non-stagebox audio gear is not a stagebox
+  expect(deviceTypeFromCategory('Microphones', 'SM58')).toBe('other');
+  expect(deviceTypeFromCategory('Mixer', 'GLD-80')).toBe('mixer');
+  expect(deviceTypeFromCategory('Cameras', 'PTZ')).toBe('ptz_camera');
+  expect(deviceTypeFromCategory(null)).toBe('other');
 });
 
 test('a catalog product becomes a device bound to its Stockwire product', () => {

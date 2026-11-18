@@ -1447,7 +1447,12 @@ export const OUTPUT_MODES = [
 export const busChannelsFor = (mode) => OUTPUT_MODES.find((m) => m.value === mode)?.channels || [];
 
 // The device type to give gear imported from a Stockwire product, from its category path.
-export function deviceTypeFromCategory(category) {
+// A stagebox / snake / multicore / IO / splitter product becomes digital_stagebox or
+// analog_stagebox (digital when the category or name also names a digital transport:
+// dante/dsnake/avb/madi). Classifying stageboxes correctly is what lets the soft-patch
+// input-domain filter (backend console_input_devices) recognise imported stageboxes
+// instead of letting them fall through to 'other' and be silently excluded.
+export function deviceTypeFromCategory(category, name = '') {
   const c = String(category || '').toLowerCase();
   if (/ptz/.test(c)) return 'ptz_camera';
   if (/camera/.test(c)) return 'camera';
@@ -1455,6 +1460,12 @@ export function deviceTypeFromCategory(category) {
   if (/screen|display|monitor|led wall/.test(c)) return 'screen';
   if (/switcher|vision mixer/.test(c)) return 'switcher';
   if (/mixer|console/.test(c)) return 'mixer';
+  if (/stage\s?box|snake|multicore|splitter|\bio\b/.test(c)) {
+    const hay = `${c} ${String(name || '').toLowerCase()}`;
+    return /digital|dante|dsnake|d-snake|avb|madi/.test(hay)
+      ? 'digital_stagebox'
+      : 'analog_stagebox';
+  }
   return 'other';
 }
 

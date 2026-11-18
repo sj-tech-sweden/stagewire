@@ -459,15 +459,32 @@ class ExpansionSet(BaseModel):
 
 @router.get("/{job_id}/channel-lists/{list_id}/soft-patch")
 async def get_soft_patch(job_id: UUID, list_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
-    """Every audio socket on the job's hardware, and which DSP strip uses it (input / direct out).
+    """Console input-domain audio sockets, and which DSP strip uses each (input / direct out).
 
-    Sockets come from *any* device on the graph, so a stagebox or Dante card added to the job shows
-    up here immediately. A strip pointing at a socket that no longer exists (device removed or
-    swapped for one with fewer sockets) is flagged ``orphaned`` instead of silently dropped.
+    Sockets come from the console input domain only: the mixer plus the stageboxes that reach it
+    (when a mixer is set), or every stagebox wired into the rig (when none is). A stagebox or
+    Dante card added to the job shows up here as soon as it is connected. Cameras, mics, DIs and
+    isolated stageboxes are excluded, so a camera XLR in never appears as a soft-patch target. A
+    strip pointing at a socket that no longer exists (device removed, or dropped out of the input
+    domain) is flagged ``orphaned`` instead of silently dropped.
     """
     row = await _require_list(db, job_id, list_id)
     hardware = await console_service.job_hardware(db, job_id)
-    sockets = console.audio_sockets(hardware)
+    edges = await console_service.job_edges(db, job_id)
+    # Scope the soft patch to the console input domain: the mixer plus the stageboxes that
+    # reach it (when a mixer is set), or every stagebox wired into the rig (when none is).
+    # This keeps cameras/mics/DIs and isolated stageboxes out of the target list (plan §2).
+    mixer = next(
+        (
+            d
+            for d in hardware
+            if console.is_mixer_device(d)
+            and (d.attributes or {}).get("sound_list_id") == str(list_id)
+        ),
+        None,
+    )
+    domain = console.console_input_devices(hardware, edges, mixer)
+    sockets = console.audio_sockets(domain)
     by_key = {s["key"]: s for s in sockets}
     channel_nodes = await console_service.job_channel_nodes(db, job_id)
     nodes = {str(audio_native.public_id(n)): n for n in channel_nodes}
