@@ -3888,8 +3888,10 @@ const patchTiles = computed(() =>
     out: outWord.value,
   }),
 );
-// A tile click is a selection click (toggle, shift-click = range over the shown tiles), like the
-// checkbox of a list row; with exactly one selected the socket grid follows that channel.
+// A tile click is a selection click: a plain click switches to that row (replacing the selection, so
+// the socket grid follows just that channel/bus), Ctrl/Cmd toggles it in or out (add more), and Shift
+// selects the range between the last click and this one. With exactly one selected the socket grid
+// follows that channel.
 function onTile2(tile, evt) {
   onCheck(tile.id, evt);
 }
@@ -3898,7 +3900,13 @@ function syncSingle() {
   if (selIds.value.length === 1) selChannelId.value = selIds.value[0];
 }
 function onCheck(id, evt) {
-  const next = toggleRowSelection(selIds.value, { id, shift: !!evt?.shiftKey, anchor: selAnchor, visibleIds: visibleIds.value });
+  const next = toggleRowSelection(selIds.value, {
+    id,
+    shift: !!evt?.shiftKey,
+    ctrl: !!(evt?.ctrlKey || evt?.metaKey),
+    anchor: selAnchor,
+    visibleIds: visibleIds.value,
+  });
   selIds.value = next.selected;
   selAnchor = next.anchor;
   syncSingle();
