@@ -144,8 +144,8 @@ drop, and "From Stockwire" in the device dialog). The fields live in the product
 - `specs.connectors`: a list of connector groups. Each group is
   `{"connector": "xlr3", "direction": "in", "count": 8, "signal": "audio"}`:
   - `connector` (required): the connector kind. Use one of Stagewire's kinds where it fits: `xlr3`,
-    `xlr5`, `trs`, `speakon`, `dante`, `aes50`, `madi`, `avb`, `ethernet`, `ethercon`, `fiber`,
-    `sdi`, `hdmi`, `displayport`, `bnc`, `usb`, `dmx`, `powercon`, `schuko`, `cee16`. Any other
+    `xlr5`, `trs`, `speakon`, `dante`, `dsnake`, `aes50`, `madi`, `avb`, `ethernet`, `ethercon`,
+    `fiber`, `sdi`, `hdmi`, `displayport`, `bnc`, `usb`, `dmx`, `powercon`, `schuko`, `cee16`. Any other
     text is kept as given (lower-cased) and is added to Stagewire's shared list of connector kinds.
   - `direction`: `in`, `out` or `both` (a bidirectional connector such as Dante or Ethernet).
     Missing or unknown counts as `both`.
@@ -157,6 +157,18 @@ drop, and "From Stockwire" in the device dialog). The fields live in the product
   with a Schuko plug), `powercon`, `cee16` or `other`. Stagewire assumes `iec_c13` when it is
   missing.
 - `specs.inputs` / `specs.outputs` keep their meaning from §3.1 (total counts).
+- `specs.mixer.expansion_ports` and `specs.stagebox.digital_io` are structured digital links
+  (protocol + separate input/output channel counts) and are **expanded into connector groups**
+  on read, in addition to `specs.connectors`:
+  - `specs.mixer.expansion_ports[]`: `{ "protocol": "dsnake", "max_channels_in": 48,
+    "max_channels_out": 24 }` → an `in` group (`count = max_channels_in`) and/or an `out` group
+    (`count = max_channels_out`), `connector = protocol`.
+  - `specs.stagebox.digital_io[]`: `{ "protocol": "dante", "channels_in": 64,
+    "channels_out": 64 }` → the same `in`/`out` expansion using `channels_in` / `channels_out`.
+  - Only the `dsnake` / `dante` / `aes50` / `avb` / `madi` protocol vocabulary is recognised; a
+    link with no protocol, or no channel count on a side, is skipped. This is how a digital
+    mixer or stagebox gains its real input/output sockets on import (and how the Stagewire soft
+    patch then surfaces them) — see `api/app/domains/audio/device_specs.py`.
 
 Stagewire also exposes what it read, for checking an integration: `GET /api/v1/stockwire/products/{id}/device-specs`
 returns `connector_groups`, `power_inlet`, `inputs`, `outputs`, `weight_kg` and `power_watts` for a

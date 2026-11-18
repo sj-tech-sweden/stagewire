@@ -1,7 +1,12 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.domains.audio.device_specs import product_connector_groups, product_io_specs
+from app.domains.audio.device_specs import (
+    _mixer_expansion_connector_groups,
+    _stagebox_digital_connector_groups,
+    product_connector_groups,
+    product_io_specs,
+)
 from app.domains.stockwire import router as stockwire_router
 from app.main import app
 
@@ -39,6 +44,72 @@ def test_connector_groups_read_both_forms_and_ignore_nonsense():
 def test_power_inlet_is_read_lowercase_or_left_empty():
     assert product_io_specs({"specs": {"power_inlet": " IEC_C13 "}})["power_inlet"] == "iec_c13"
     assert product_io_specs({"specs": {}})["power_inlet"] is None
+
+
+def test_mixer_expansion_ports_become_input_output_sockets():
+    product = {
+        "specs": {
+            "mixer": {
+                "architecture": "digital_bus_pool",
+                "expansion_ports": [
+                    {"protocol": "dsnake", "max_channels_in": 48, "max_channels_out": 24},
+                    {
+                        "protocol": "io_card",
+                        "max_channels_in": 8,
+                        "max_channels_out": 0,
+                        "slots": 1,
+                    },
+                ],
+            }
+        }
+    }
+    groups = product_connector_groups(product)
+    # dSnake carries both in and out sockets; io_card has no out channels so only in appears.
+    assert groups == [
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "audio"},
+        {"connector": "dsnake", "direction": "out", "count": 24, "signal": "audio"},
+        {"connector": "io_card", "direction": "in", "count": 8, "signal": "audio"},
+    ]
+
+
+def test_stagebox_digital_io_becomes_input_output_sockets():
+    product = {
+        "specs": {
+            "stagebox": {
+                "digital_io": [
+                    {"protocol": "dante", "channels_in": 64, "channels_out": 64},
+                    {"protocol": "avb", "channels_out": 16},
+                ]
+            }
+        }
+    }
+    groups = product_connector_groups(product)
+    assert groups == [
+        {"connector": "dante", "direction": "in", "count": 64, "signal": "audio"},
+        {"connector": "dante", "direction": "out", "count": 64, "signal": "audio"},
+        {"connector": "avb", "direction": "out", "count": 16, "signal": "audio"},
+    ]
+
+
+def test_expansion_and_stagebox_groups_combine_with_explicit_connectors():
+    product = {
+        "specs": {
+            "connectors": [{"connector": "xlr3", "direction": "in", "count": 8}],
+            "mixer": {"expansion_ports": [{"protocol": "dsnake", "max_channels_in": 48}]},
+            "stagebox": {"digital_io": [{"protocol": "dante", "channels_out": 32}]},
+        }
+    }
+    assert product_connector_groups(product) == [
+        {"connector": "xlr3", "direction": "in", "count": 8, "signal": None},
+        {"connector": "dsnake", "direction": "in", "count": 48, "signal": "audio"},
+        {"connector": "dante", "direction": "out", "count": 32, "signal": "audio"},
+    ]
+
+
+def test_missing_mixer_or_stagebox_blocks_yield_no_extra_groups():
+    assert _mixer_expansion_connector_groups({}) == []
+    assert _stagebox_digital_connector_groups({"stagebox": "nope"}) == []
+    assert product_connector_groups({"specs": {"mixer": {"expansion_ports": "bad"}}}) == []
 
 
 @pytest.mark.asyncio

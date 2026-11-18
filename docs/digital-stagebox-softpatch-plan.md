@@ -276,21 +276,26 @@ count: 48}`, but:
       cameras" — the foundation everything else needs.*
 - [x] **Phase B** — `dsnake` (+`avb`/`madi`) connector presets, bidirectional, multiple (§4.3)
       + dsnake test.
-- [ ] **Phase C** — Stockwire mixer expansion ports into device specs (§4.4) + imported-mixer test.
+- [x] **Phase C** — Stockwire mixer expansion ports into device specs (§4.4) + imported-mixer test. **Done.**
 - [ ] **Phase D** — easy-link / Dante convenience (§4.5, later).
 - [ ] **Phase E** — separate Dante / network patch surface, distinct from the mixer soft patch
       (§4.6, later).
 
 ### stockwire-rental phases (§8)
 
-- [ ] **Phase R1** — `dsnake` (+`avb`/`madi`) into `COMMON_CONNECTOR_OPTIONS`; preserve `protocol`
+- [x] **Phase R1** — `dsnake` (+`avb`/`madi`) into `COMMON_CONNECTOR_OPTIONS`; preserve `protocol`
       on connector export (§8.3 R1).
-- [ ] **Phase R2** — structured `specs.stagebox` model (`StageboxSpec` + `StageboxDigitalPort`),
+      **Deviation from the plan text:** the plan said `COMMON_CONNECTOR_OPTIONS`, but that list
+      is the physical *cable* connector menu (PowerCON/XLR/RJ45) and is the wrong home for a
+      digital transport. `STAGEWIRE_CONNECTOR_OPTIONS` is the code-correct home (the connector-groups
+      editor reads it at `ProductDialog.vue:596`) and already carries `dante`/`aes50`/`madi`/`avb`;
+      dSnake now joins them. R4's vocabulary is kept identical across repos by the new tests.
+- [x] **Phase R2** — structured `specs.stagebox` model (`StageboxSpec` + `StageboxDigitalPort`), **Done.**
       frontend editor, shared `STAGEWIRE_STAGEBOX_PROTOCOLS` (§8.3 R2).
-- [ ] **Phase R3** — emit `stagebox` (digital I/O) from `get_stagewire_device_specs` (§8.3 R3).
-- [ ] **Phase R4** — keep the digital-protocol vocabulary identical across both repos; add a
+- [x] **Phase R3** — emit `stagebox` (digital I/O) from `get_stagewire_device_specs` (§8.3 R3). **Done.**
+- [x] **Phase R4** — keep the digital-protocol vocabulary identical across both repos; add a **Done.**
       matching-vocabulary test (§8.3 R4).
-- [ ] **Phase R5** — rental unit + frontend tests for the stagebox digital-I/O model/editor (§8.3 R5).
+- [x] **Phase R5** — rental unit + frontend tests for the stagebox digital-I/O model/editor (§8.3 R5). **Done.**
 
 ## 10. Acceptance criteria (definition of done)
 1. A camera / mic / DI / wireless rack never appears as a soft-patch socket target.
