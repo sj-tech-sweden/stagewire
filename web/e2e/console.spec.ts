@@ -938,15 +938,19 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
   await login(page);
   const headers = await authedHeaders(page);
   const { jobId } = await seed(request, headers);
-  // A console with a dSnake input so the quick-connect card's default target exists.
-  await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+  // A console with a dSnake input so the quick-connect card's default target exists. Devices must be
+  // created through the graph endpoint (not the legacy audio endpoint) so `kind` is honoured — the
+  // legacy route drops `kind` and the console card's `isStagebox` check then never matches.
+  await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
     name: 'GLD-80',
+    domain: 'audio',
     kind: 'mixer',
     ports: [{ id: 'dsnake-in', direction: 'in', signal: 'data', connector: 'dsnake' }],
   });
   // AR2412: a stagebox with a dSnake output AND a dSnake expansion input (the cascade target).
-  const ar2412 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+  const ar2412 = await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
     name: 'AR2412',
+    domain: 'audio',
     kind: 'digital_stagebox',
     ports: [
       { id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' },
@@ -954,8 +958,9 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
     ],
   });
   // AR84: a stagebox with only a dSnake output — the one we cascade into the AR2412.
-  const ar84 = await call(request, headers, 'post', `/jobs/${jobId}/devices`, {
+  const ar84 = await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
     name: 'AR84',
+    domain: 'audio',
     kind: 'digital_stagebox',
     ports: [{ id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' }],
   });
