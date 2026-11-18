@@ -482,6 +482,7 @@ import {
   addConnector,
   deviceForm,
   fillFormFromSpecs,
+  isNetworkConnector,
   physicalHintKey,
 } from '@/utils/workspace';
 
