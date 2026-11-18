@@ -320,6 +320,54 @@ async def test_connect_stagebox_links_over_dante_and_makes_it_reachable(auth_hea
 
 
 @pytest.mark.asyncio
+async def test_connect_stagebox_prefers_matching_console_interface(auth_headers):
+    # A console that carries BOTH dSnake and Dante network ports must link a dSnake stagebox to its
+    # dSnake port, not the Dante one (otherwise the edge is dSnake->Dante and validate_edge rejects
+    # it with "cannot mate"). The dSnake port is listed second to prove ordering does not win.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        job_id = await _job(client, h)
+        g = f"{BASE}/jobs/{job_id}/graph"
+
+        def dev(name, kind, ports):
+            return client.post(
+                f"{g}/devices",
+                json={
+                    "name": name,
+                    "domain": "audio",
+                    "kind": kind,
+                    "attributes": {"device_type": kind},
+                    "ports": ports,
+                },
+                headers=h,
+            )
+
+        mixer = (
+            await dev(
+                "GLD-80",
+                "mixer",
+                [
+                    {"id": "dante-in", "direction": "in", "signal": "data", "connector": "dante"},
+                    {"id": "dsnake-in", "direction": "in", "signal": "data", "connector": "dsnake"},
+                ],
+            )
+        ).json()
+        box = (
+            await dev(
+                "Stagebox",
+                "digital_stagebox",
+                [{"id": "dsnake-out", "direction": "out", "signal": "data", "connector": "dsnake"}],
+            )
+        ).json()
+
+        res = await client.post(f"{g}/connect-stagebox", json={"stagebox_id": box["id"]}, headers=h)
+        assert res.status_code == 201, res.text
+        edge = res.json()["edge"]
+        assert edge["src_port"] == "dsnake-out"
+        assert edge["dst_port"] == "dsnake-in"
+
+
+@pytest.mark.asyncio
 async def test_connect_stagebox_rejects_non_stagebox(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers

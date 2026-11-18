@@ -498,14 +498,34 @@ class NetworkJoinBody(BaseModel):
     name: str | None = None
 
 
-def _pick_network_port(device: Any, side: str | None) -> str | None:
-    """First network-connector port on ``device`` usable as ``side`` ('in'/'out'), else any."""
+def _pick_network_port(device: Any, side: str | None, prefer: str | None = None) -> str | None:
+    """First network-connector port on ``device`` usable as ``side`` ('in'/'out').
+
+    When ``prefer`` names a connector (e.g. ``dsnake``) we pick a matching port of that side
+    first, so a dSnake stagebox links to the console's dSnake interface rather than a Dante one
+    it also happens to carry. Falls back to the first side port, then the first network port.
+    """
     ports = network_ports(device)
-    if side:
-        hit = next((p.get("id") for p in ports if p.get("direction") == side), None)
+    if not ports:
+        return None
+    side_ports = [p for p in ports if not side or p.get("direction") == side]
+    if prefer:
+        pref = prefer.lower()
+        hit = next(
+            (p.get("id") for p in side_ports if (p.get("connector") or "").lower() == pref),
+            None,
+        )
         if hit:
             return hit
-    return ports[0].get("id") if ports else None
+    return side_ports[0].get("id") if side_ports else ports[0].get("id")
+
+
+def _port_connector(device: Any, port_id: str | None) -> str | None:
+    """The connector of ``port_id`` on ``device``, lower-cased, or None when unknown."""
+    if not port_id:
+        return None
+    port = next((p for p in network_ports(device) if p.get("id") == port_id), None)
+    return (port.get("connector") or "").lower() if port else None
 
 
 @router.post("/network-join", status_code=201)
@@ -639,7 +659,11 @@ async def connect_stagebox(
             "The console has no Dante / network connector — add one (e.g. dSnake) first",
         )
     src_port = _pick_network_port(stagebox, "out") or _pick_network_port(stagebox, None)
-    dst_port = _pick_network_port(mixer, "in") or _pick_network_port(mixer, None)
+    # Prefer a console port whose connector matches the stagebox's (dSnake stagebox -> dSnake
+    # console port, not a Dante one it also carries), so a compatible link is chosen automatically.
+    dst_port = _pick_network_port(mixer, "in", prefer=_port_connector(stagebox, src_port)) or (
+        _pick_network_port(mixer, None)
+    )
     edge_dict = {
         "signal": "data",
         "src_device_id": stagebox.id,
