@@ -404,6 +404,8 @@ class AudioDeviceBase(BaseModel):
     stockwire_product_name: str | None = None
     sound_list_id: UUID | None = None
     video_list_id: UUID | None = None
+    width_cm: float | None = Field(None, gt=0)
+    height_cm: float | None = Field(None, gt=0)
     sensor_width_mm: float | None = Field(None, gt=0)
     focal_min_mm: float | None = Field(None, gt=0)
     focal_max_mm: float | None = Field(None, gt=0)

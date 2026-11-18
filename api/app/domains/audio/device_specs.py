@@ -186,11 +186,26 @@ def _positive(value: Any) -> float | None:
 
 
 def product_physical_specs(product: dict | None) -> dict:
-    """Weight and power are top-level product fields in Stockwire, not under ``specs``."""
+    """Weight, power and footprint are top-level product fields in Stockwire, not under ``specs``.
+
+    Stockwire sends the numbers as strings (``"5.550"``) and uses ``0`` / null for "unknown", which
+    ``_positive`` turns into ``None`` so a manual value on the device is not shadowed by a zero.
+    Power has a fallback: when the top-level ``power_consumption_watts`` is empty, the product's
+    own ``specs`` may still carry it (lighting fixtures use ``specs.lt_power_w``;
+    ``specs.power_watts`` is accepted too). The top-level value always wins when it is set.
+    """
     product = product or {}
+    specs = product.get("specs") or {}
+    power = _positive(product.get("power_consumption_watts"))
+    if power is None:
+        power = _positive(specs.get("power_watts")) or _positive(specs.get("lt_power_w"))
     return {
         "weight_kg": _positive(product.get("weight_kg")),
-        "power_watts": _positive(product.get("power_consumption_watts")),
+        "power_watts": power,
+        # The top-down footprint for the stage plot is width x depth. Stockwire's ``height_cm`` is
+        # the vertical height, which a plan view has no use for, so it is not read here.
+        "width_cm": _positive(product.get("width_cm")),
+        "depth_cm": _positive(product.get("depth_cm")),
     }
 
 

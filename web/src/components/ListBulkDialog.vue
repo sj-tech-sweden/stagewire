@@ -4,111 +4,115 @@
     :maximized="$q.screen.lt.sm"
     @update:model-value="(v) => emit('update:modelValue', v)"
   >
-    <q-card style="width: 560px; max-width: 100vw">
+    <q-card
+      :class="['bulk-card column no-wrap', { 'bulk-card--full': $q.screen.lt.sm }]"
+    >
       <q-card-section class="text-h6">
         {{ outputs ? t('workspace.bulkOutputs') : t('workspace.bulkChannels') }}
       </q-card-section>
-      <q-card-section class="q-pt-none row q-col-gutter-sm">
-        <q-input
-          v-model.number="form.count"
-          class="col-6"
-          dense
-          outlined
-          type="number"
-          min="1"
-          max="200"
-          :label="t('workspace.bulkQuantity')"
-          data-testid="list-bulk-count"
-        />
-        <q-input
-          v-if="!outputs"
-          v-model.number="form.start"
-          class="col-6"
-          dense
-          outlined
-          type="number"
-          min="1"
-          :label="t('workspace.bulkStartNumber')"
-          data-testid="list-bulk-start"
-        />
-        <q-input
-          v-model="form.prefix"
-          class="col-12"
-          dense
-          outlined
-          :label="outputs ? t('workspace.bulkOutputPrefix') : t('workspace.bulkChannelPrefix')"
-          :hint="t('workspace.bulkPrefixHint')"
-          data-testid="list-bulk-prefix"
-        />
-        <template v-if="!outputs">
+      <div class="bulk-body">
+        <q-card-section class="q-pt-none row q-col-gutter-sm">
+          <q-input
+            v-model.number="form.count"
+            class="col-6"
+            dense
+            outlined
+            type="number"
+            min="1"
+            max="200"
+            :label="t('workspace.bulkQuantity')"
+            data-testid="list-bulk-count"
+          />
+          <q-input
+            v-if="!outputs"
+            v-model.number="form.start"
+            class="col-6"
+            dense
+            outlined
+            type="number"
+            min="1"
+            :label="t('workspace.bulkStartNumber')"
+            data-testid="list-bulk-start"
+          />
+          <q-input
+            v-model="form.prefix"
+            class="col-12"
+            dense
+            outlined
+            :label="outputs ? t('workspace.bulkOutputPrefix') : t('workspace.bulkChannelPrefix')"
+            :hint="t('workspace.bulkPrefixHint')"
+            data-testid="list-bulk-prefix"
+          />
+          <template v-if="!outputs">
+            <q-select
+              v-model="form.input_type"
+              class="col-12 col-sm-6"
+              dense
+              outlined
+              emit-value
+              map-options
+              :options="inputTypes"
+              :label="t('workspace.colKind')"
+            />
+            <q-select
+              v-model="form.instrument_group"
+              class="col-12 col-sm-6"
+              dense
+              outlined
+              emit-value
+              map-options
+              :options="groupOptions"
+              :label="t('channels.instrumentGroup')"
+            />
+            <q-checkbox
+              v-model="form.phantom_power"
+              class="col-12"
+              label="48V"
+            />
+            <q-select
+              v-model="form.patch_device_id"
+              class="col-12"
+              dense
+              outlined
+              clearable
+              emit-value
+              map-options
+              :options="deviceOptions"
+              :label="t('workspace.bulkPatchDevice')"
+              :hint="t('workspace.bulkPatchDeviceHint')"
+              data-testid="list-bulk-device"
+            />
+          </template>
           <q-select
-            v-model="form.input_type"
+            v-else
+            v-model="form.mode"
             class="col-12 col-sm-6"
             dense
             outlined
             emit-value
             map-options
-            :options="inputTypes"
-            :label="t('workspace.colKind')"
+            :options="modeOptions"
+            :label="t('channels.outputMode')"
           />
           <q-select
-            v-model="form.instrument_group"
+            v-if="outputs && roles.length"
+            v-model="form.role"
             class="col-12 col-sm-6"
             dense
             outlined
             emit-value
             map-options
-            :options="groupOptions"
-            :label="t('channels.instrumentGroup')"
+            :options="roleOptions"
+            :label="t('workspace.bulkRole')"
+            data-testid="list-bulk-role"
           />
-          <q-checkbox
-            v-model="form.phantom_power"
-            class="col-12"
-            label="48V"
+          <ConnectorSelect
+            v-model="form.connector"
+            class="col-12 col-sm-6"
+            :label="t('workspace.stepConnector')"
           />
-          <q-select
-            v-model="form.patch_device_id"
-            class="col-12"
-            dense
-            outlined
-            clearable
-            emit-value
-            map-options
-            :options="deviceOptions"
-            :label="t('workspace.bulkPatchDevice')"
-            :hint="t('workspace.bulkPatchDeviceHint')"
-            data-testid="list-bulk-device"
-          />
-        </template>
-        <q-select
-          v-else
-          v-model="form.mode"
-          class="col-12 col-sm-6"
-          dense
-          outlined
-          emit-value
-          map-options
-          :options="modeOptions"
-          :label="t('channels.outputMode')"
-        />
-        <q-select
-          v-if="outputs && roles.length"
-          v-model="form.role"
-          class="col-12 col-sm-6"
-          dense
-          outlined
-          emit-value
-          map-options
-          :options="roleOptions"
-          :label="t('workspace.bulkRole')"
-          data-testid="list-bulk-role"
-        />
-        <ConnectorSelect
-          v-model="form.connector"
-          class="col-12 col-sm-6"
-          :label="t('workspace.stepConnector')"
-        />
-      </q-card-section>
+        </q-card-section>
+      </div>
       <q-card-actions align="right">
         <q-btn
           v-close-popup
@@ -208,3 +212,22 @@ function create() {
   emit('create', items, { deviceId: props.outputs ? null : form.patch_device_id });
 }
 </script>
+
+<style scoped>
+.bulk-card {
+  width: 560px;
+  max-width: 100vw;
+  /* Capped to the viewport so the buttons stay visible; only the fields scroll. */
+  max-height: calc(100vh - 32px);
+}
+.bulk-card--full {
+  max-height: 100vh;
+  height: 100%;
+}
+.bulk-body {
+  flex: 1 1 auto;
+  /* min-height 0 lets a flex child shrink below its content so overflow can scroll */
+  min-height: 0;
+  overflow: auto;
+}
+</style>

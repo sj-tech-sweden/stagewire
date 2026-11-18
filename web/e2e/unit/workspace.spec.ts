@@ -1638,3 +1638,27 @@ test('the console signature changes with everything the panel shows, and only wi
   expect(changed(list, [{ ...channels[0], notes: 'other' }], outputs, devices)).toBe(false);
   expect(changed(list, channels, outputs, [...devices, { id: 'p', name: 'Plot', legacy_ref: null, ports: [] }])).toBe(false);
 });
+
+test('a Stockwire product gives the device its plot box: width, and depth as the plot height', () => {
+  const form: Record<string, unknown> = { name: '', ports: [], width_cm: null, height_cm: null, device_type: 'monitor' };
+  fillFormFromSpecs(form, { id: 9, name: 'Wedge' }, { width_cm: 60, depth_cm: 45 });
+  expect(form).toMatchObject({ width_cm: 60, height_cm: 45 });
+  // the box is what the canvas draws, scaled by zoom
+  expect(boxFor({ attributes: { width_cm: form.width_cm, height_cm: form.height_cm } } as never, 2)).toEqual({ w: 120, h: 90 });
+  // a product without dimensions leaves whatever the form had (here: the default box)
+  const keep: Record<string, unknown> = { name: '', ports: [], width_cm: 80, height_cm: null, device_type: 'monitor' };
+  fillFormFromSpecs(keep, { id: 9, name: 'Wedge' }, {});
+  expect(keep).toMatchObject({ width_cm: 80, height_cm: null });
+});
+
+test('the plot box travels in the create body and the edit patch', () => {
+  const form = deviceForm(null);
+  Object.assign(form, { name: 'Wedge', device_type: 'monitor', width_cm: 60, height_cm: 45 });
+  const body = deviceCreateBody(form) as Record<string, unknown>;
+  expect(body).toMatchObject({ width_cm: 60, height_cm: 45 });
+  const node = { id: 'n1', ports: [], attributes: {} } as never;
+  expect(devicePatch(node, form).attributes).toMatchObject({ width_cm: 60, height_cm: 45 });
+  // cleared fields go back to the default box
+  Object.assign(form, { width_cm: '', height_cm: null });
+  expect(devicePatch(node, form).attributes).toMatchObject({ width_cm: null, height_cm: null });
+});
