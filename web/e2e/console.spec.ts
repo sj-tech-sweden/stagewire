@@ -954,7 +954,7 @@ test('a stagebox can be cascaded into another stagebox over dSnake (expansion po
     kind: 'digital_stagebox',
     ports: [
       { id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' },
-      { id: 'dsnake-exp-in', direction: 'in', signal: 'data', connector: 'dsnake', name: 'dSnake Expander' },
+      { id: 'dsnake-exp-in', direction: 'in', signal: 'data', connector: 'dsnake', label: 'dSnake Expander' },
     ],
   });
   // AR84: a stagebox with only a dSnake output — the one we cascade into the AR2412.
