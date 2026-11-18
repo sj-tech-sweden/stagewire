@@ -907,7 +907,7 @@
                     />
                     <q-select
                       v-model="linkSelections[row.device.id].dst"
-                      :options="targetInPorts(linkSelections[row.device.id].target, row.device.id)"
+                      :options="targetInPorts(linkSelections[row.device.id].target)"
                       :label="t('console.toPort')"
                       dense
                       emit-value
@@ -3614,7 +3614,7 @@ function targetOptions(selfId) {
 }
 // Input network ports on the chosen target (console or another stagebox) — the destinations a link
 // can end at. Depends on the target picker, so it is recomputed per card.
-function targetInPorts(targetValue, selfId) {
+function targetInPorts(targetValue) {
   const target = graph.devices.find((d) => d.id === targetValue);
   if (!target) return [];
   return networkPorts(target)
