@@ -1265,6 +1265,8 @@ def validate_expansion(profile: MixerProfile | None, installed: list[dict]) -> l
 
 
 BUS_WIDTH = {"mono": 1, "stereo": 2, "lcr": 3}
+# the parts of a multi-channel bus that can be routed on their own (mono has none)
+BUS_SIDES = {"stereo": ("L", "R"), "lcr": ("L", "R", "C")}
 
 
 def bus_width(mode: str | None) -> int:

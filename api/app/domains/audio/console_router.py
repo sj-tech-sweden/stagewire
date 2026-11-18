@@ -424,8 +424,8 @@ class BusEndpoint(BaseModel):
     # one endpoint of a bus: a single socket (mono) or its first socket (stereo / LCR follow on)
     # ... or the full list of refs when the sockets are not adjacent
     refs: list[SocketRef] = Field(min_length=1, max_length=3)
-    # route just one half of a stereo bus ("L" or "R") to the single socket in ``refs``
-    side: Literal["L", "R"] | None = None
+    # route just one part of a stereo / LCR bus (L, R or C) to the single socket in ``refs``
+    side: Literal["L", "R", "C"] | None = None
 
 
 class BusPatch(BaseModel):

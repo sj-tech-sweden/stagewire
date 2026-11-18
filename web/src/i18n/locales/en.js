@@ -1007,6 +1007,7 @@ export default {
     sideBoth: "Both",
     sideLeft: "Left",
     sideRight: "Right",
+    sideCenter: "Center",
     addEndpoint: "Add endpoint",
     addEndpointHint: "Tap a free socket to add another output for this bus (for example the main to FOH and to a recorder).",
     removeEndpoint: "Remove this output",
