@@ -1960,6 +1960,38 @@ test('the device dialog says which weight and power value is in use', async ({ p
   await expect(page.locator('.q-field', { has: page.getByTestId('device-power') })).toContainText(/not set|inte angivet/i);
 });
 
+test('the device dialog edits the box the gear is drawn with on the stage plot', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Footprint ${Date.now()}` })).id as string;
+  // a device made from a Stockwire product arrives with its width and depth as the plot box
+  await post(request, headers, `/jobs/${jobId}/graph/audio-devices`, {
+    name: 'Wedge',
+    device_type: 'monitor',
+    width_cm: 60,
+    height_cm: 45,
+  });
+  const nodeOf = async () =>
+    ((await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/graph`, { headers })).json()) as any).devices.find(
+      (d: any) => d.name === 'Wedge',
+    );
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(devices|enheter)$/i).click();
+  await page.getByTestId('edit-device').first().click();
+  await expect(page.getByTestId('device-plot-width')).toHaveValue('60');
+  await expect(page.getByTestId('device-plot-depth')).toHaveValue('45');
+  await page.getByTestId('device-plot-depth').fill('55');
+  await page.getByTestId('device-save').click();
+  await expect.poll(async () => (await nodeOf()).attributes.height_cm).toBe(55);
+  expect((await nodeOf()).attributes.width_cm).toBe(60);
+  // the inspector shows the same box
+  await page.getByTestId('mode-toggle').getByText(/^(all gear|all utrustning)$/i).click();
+  await dataRows(page).first().locator('td').nth(1).click();
+  await expect(page.getByTestId('inspector-width')).toHaveValue('60');
+  await expect(page.getByTestId('inspector-height')).toHaveValue('55');
+});
+
 test('the gear behind a channel or a video input is edited from its list', async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await login(page);

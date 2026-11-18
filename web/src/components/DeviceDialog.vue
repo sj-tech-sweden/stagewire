@@ -226,6 +226,27 @@
             :hint="hintFor('power_watts_effective', 'power_source')"
             data-testid="device-power"
           />
+          <q-input
+            v-model="form.width_cm"
+            class="col-6"
+            dense
+            outlined
+            type="number"
+            min="1"
+            :label="t('devices.plotWidth')"
+            data-testid="device-plot-width"
+          />
+          <q-input
+            v-model="form.height_cm"
+            class="col-6"
+            dense
+            outlined
+            type="number"
+            min="1"
+            :label="t('devices.plotDepth')"
+            :hint="t('devices.plotSizeHint')"
+            data-testid="device-plot-depth"
+          />
           <q-select
             v-model="form.power_inlet"
             class="col-12"
