@@ -645,9 +645,9 @@ async def assign_output_endpoints(
 ) -> GraphDevice:
     """Set the physical endpoints a bus leaves from; ``None`` / ``[]`` clears them.
 
-    An endpoint is a list of refs, or ``{"refs": [...], "side": "L"|"R"}``. A ``side`` endpoint is
-    *one* socket carrying just that half of a stereo bus (e.g. only the left, into a mono monitor
-    send); it is stored as ``{"id", "refs": [one ref], "side"}`` and is only valid on a stereo bus.
+    An endpoint is a list of refs, or ``{"refs": [...], "side": "L"|"R"|"C"}``. A ``side`` endpoint
+    is *one* socket carrying just that part of a stereo (L, R) or LCR (L, R, C) bus (e.g. only the
+    left, into a mono monitor send); it is stored as ``{"id", "refs": [one ref], "side"}``.
     Without ``append`` a side endpoint replaces only the endpoints already on that side, so the
     left and the right can be patched one after the other without the second wiping the first.
 
@@ -675,12 +675,13 @@ async def assign_output_endpoints(
     for item in endpoints or []:
         side = item.get("side") if isinstance(item, dict) else None
         refs = item.get("refs") or [] if isinstance(item, dict) else item
-        if side and _bus_mode(node) != "stereo":
+        if side and side not in console.BUS_SIDES.get(_bus_mode(node), ()):
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT, "Only a stereo bus can leave from one side"
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"A {_bus_mode(node)} bus has no side {side}"
+                if console.BUS_SIDES.get(_bus_mode(node))
+                else "Only a stereo or LCR bus can leave from one side",
             )
-        if side and side not in ("L", "R"):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "side must be L or R")
         refs = [
             {
                 "device_id": str(r["device_id"]),

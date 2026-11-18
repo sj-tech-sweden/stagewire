@@ -2604,6 +2604,55 @@ async def test_a_stereo_bus_can_leave_from_just_its_left_or_right(auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_an_lcr_bus_can_leave_from_each_of_its_three_sides(auth_headers):
+    """LCR buses take L, R and C one socket at a time; a stereo bus has no C."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        box = await post(
+            "devices",
+            {
+                "name": "AR2412",
+                "device_type": "analog_stagebox",
+                "ports": [{"direction": "out", "connector": "xlr3", "count": 16}],
+            },
+        )
+        lcr = await post(f"channel-lists/{lst['id']}/outputs", {"name": "PA", "mode": "lcr"})
+        st = await post(f"channel-lists/{lst['id']}/outputs", {"name": "IEM", "mode": "stereo"})
+        out = lambda n: {"device_id": box["id"], "port_id": "out-xlr3", "socket": n}  # noqa: E731
+        url = f"{api}/outputs/{lcr['id']}/soft-patch"
+        for side, socket in (("L", 1), ("R", 2), ("C", 9)):
+            res = await client.put(
+                url, json={"endpoints": [{"refs": [out(socket)], "side": side}]}, headers=h
+            )
+            assert res.status_code == 200, res.text
+        eps = res.json()["out_endpoints"]
+        assert sorted((e["side"], e["refs"][0]["socket"]) for e in eps) == [
+            ("C", 9),
+            ("L", 1),
+            ("R", 2),
+        ]
+        # the socket view says which part each socket carries
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        sides = {
+            s["socket"]: s.get("out_socket_side")
+            for s in view["sockets"]
+            if s["port_id"] == "out-xlr3" and s["socket"] in (1, 2, 9)
+        }
+        assert sides == {1: "L", 2: "R", 9: "C"}
+        # a stereo bus has no centre
+        bad = await client.put(
+            f"{api}/outputs/{st['id']}/soft-patch",
+            json={"endpoints": [{"refs": [out(12)], "side": "C"}]},
+            headers=h,
+        )
+        assert bad.status_code == 422
+        # a plain tap on an LCR bus still claims three adjacent sockets
+        res = await client.put(url, json=out(5), headers=h)
+        assert [r["socket"] for r in res.json()["out_endpoints"][0]["refs"]] == [5, 6, 7]
+
+
+@pytest.mark.asyncio
 async def test_auto_patch_gives_stereo_buses_pairs_and_can_add_a_second_endpoint(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers

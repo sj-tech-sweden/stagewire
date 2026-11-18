@@ -1009,6 +1009,7 @@ export default {
     sideBoth: "Båda",
     sideLeft: "Vänster",
     sideRight: "Höger",
+    sideCenter: "Mitt",
     addEndpoint: "Lägg till utgång",
     addEndpointHint: "Tryck på ett ledigt uttag för att lägga till ytterligare en utgång för bussen (till exempel main till FOH och till en inspelare).",
     removeEndpoint: "Ta bort den här utgången",

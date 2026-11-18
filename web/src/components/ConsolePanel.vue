@@ -1120,9 +1120,9 @@
                     {{ t("console.endpointNeeds", { need: sh.need, have: sh.have }) }}
                   </q-chip>
                 </div>
-                <!-- a stereo bus can leave from both sides (default) or just its left or right -->
+                <!-- a stereo / LCR bus can leave from all its sides (default) or just one of them -->
                 <q-btn-toggle
-                  v-if="selChannel.mode === 'stereo'"
+                  v-if="['stereo', 'lcr'].includes(selChannel.mode)"
                   v-model="busSide"
                   dense
                   no-caps
@@ -1133,6 +1133,7 @@
                     { label: t('console.sideBoth'), value: 'both' },
                     { label: t('console.sideLeft'), value: 'L' },
                     { label: t('console.sideRight'), value: 'R' },
+                    ...(selChannel.mode === 'lcr' ? [{ label: t('console.sideCenter'), value: 'C' }] : []),
                   ]"
                   data-testid="console-bus-side"
                 />
@@ -3742,10 +3743,12 @@ const softBusStrips = computed(() =>
 );
 // "add another output" mode for the selected bus: a tap adds an endpoint instead of replacing them
 const addEndpoint = ref(false);
-// which part of a stereo bus a tap routes: both sides (an adjacent L/R pair, the default) or one side
-// to a single socket. Only a stereo bus has sides; other modes always route as before.
+// which part of a stereo / LCR bus a tap routes: all of it (adjacent sockets, the default) or one side
+// to a single socket. A mono bus has no sides and always routes as before. A side that the bus's
+// mode does not have (L/R/C picked on an LCR bus, then a stereo one selected) falls back to all.
 const busSide = ref("both");
-const sideOf = () => (patchMode.value === "bus" && selChannel.value?.mode === "stereo" && busSide.value !== "both" ? busSide.value : null);
+const BUS_SIDES = { stereo: ["L", "R"], lcr: ["L", "R", "C"] };
+const sideOf = () => (patchMode.value === "bus" && BUS_SIDES[selChannel.value?.mode]?.includes(busSide.value) ? busSide.value : null);
 const outWord = computed(() => t("console.outWord"));
 const endpointText = (bus, ep) =>
   `${endpointLabel(ep, deviceNames.value, { out: outWord.value })}${ep.side ? ` (${ep.side})` : (ep.refs || []).length > 1 ? ` (${endpointSides(ep, bus.mode)})` : ""}`;
