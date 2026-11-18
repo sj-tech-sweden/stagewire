@@ -2541,6 +2541,69 @@ async def test_a_stereo_bus_takes_adjacent_sockets_and_a_bus_can_have_several_en
 
 
 @pytest.mark.asyncio
+async def test_a_stereo_bus_can_leave_from_just_its_left_or_right(auth_headers):
+    """``side`` routes one half of a stereo bus to a single socket (e.g. L into a mono monitor)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        box = await post(
+            "devices",
+            {
+                "name": "AR2412",
+                "device_type": "analog_stagebox",
+                "ports": [{"direction": "out", "connector": "xlr3", "count": 16}],
+            },
+        )
+        main = await post(f"channel-lists/{lst['id']}/outputs", {"name": "Main", "mode": "stereo"})
+        mono = await post(f"channel-lists/{lst['id']}/outputs", {"name": "Aux", "mode": "mono"})
+        out = lambda n: {"device_id": box["id"], "port_id": "out-xlr3", "socket": n}  # noqa: E731
+        url = f"{api}/outputs/{main['id']}/soft-patch"
+
+        # left only: one socket, no pair claimed (socket 4 stays free)
+        res = await client.put(
+            url, json={"endpoints": [{"refs": [out(3)], "side": "L"}]}, headers=h
+        )
+        assert res.status_code == 200, res.text
+        eps = res.json()["out_endpoints"]
+        assert [(e["side"], [r["socket"] for r in e["refs"]]) for e in eps] == [("L", [3])]
+        # the right is patched next without wiping the left
+        res = await client.put(
+            url, json={"endpoints": [{"refs": [out(7)], "side": "R"}]}, headers=h
+        )
+        eps = res.json()["out_endpoints"]
+        assert [(e["side"], [r["socket"] for r in e["refs"]]) for e in eps] == [
+            ("L", [3]),
+            ("R", [7]),
+        ]
+        # tapping the left again moves it (replaces only that side)
+        res = await client.put(
+            url, json={"endpoints": [{"refs": [out(5)], "side": "L"}]}, headers=h
+        )
+        eps = res.json()["out_endpoints"]
+        assert sorted((e["side"], e["refs"][0]["socket"]) for e in eps) == [("L", 5), ("R", 7)]
+        # socket 3 was released by the move: a mono bus can take it
+        free = await client.put(f"{api}/outputs/{mono['id']}/soft-patch", json=out(3), headers=h)
+        assert free.status_code == 200, free.text
+        # a side endpoint is one socket, and only a stereo bus has sides
+        two = await client.put(
+            url,
+            json={"endpoints": [{"refs": [out(9), out(10)], "side": "L"}]},
+            headers=h,
+        )
+        assert two.status_code == 422
+        mono_side = await client.put(
+            f"{api}/outputs/{mono['id']}/soft-patch",
+            json={"endpoints": [{"refs": [out(12)], "side": "L"}]},
+            headers=h,
+        )
+        assert mono_side.status_code == 422
+        # a plain tap still claims the full pair and replaces every endpoint
+        res = await client.put(url, json=out(9), headers=h)
+        eps = res.json()["out_endpoints"]
+        assert [(e.get("side"), [r["socket"] for r in e["refs"]]) for e in eps] == [(None, [9, 10])]
+
+
+@pytest.mark.asyncio
 async def test_auto_patch_gives_stereo_buses_pairs_and_can_add_a_second_endpoint(auth_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         h = auth_headers
@@ -3018,3 +3081,47 @@ def test_audio_sockets_channelises_configured_network_port():
     outs = [s for s in sockets if s["direction"] == "out"]
     assert len(ins) == 32 and len(outs) == 16
     assert all(s["port_label"] == "dSnake" for s in sockets)
+
+
+@pytest.mark.asyncio
+async def test_linking_an_input_to_gear_added_through_the_graph_endpoint_sticks(auth_headers):
+    """Regression: a link to gear created via ``/graph/devices`` answered 200 and then vanished.
+
+    That gear has no ``device:`` legacy ref. ``assign_socket`` accepted it (it validates against
+    every physical device), but the graph sync that runs after the write only looked at
+    ``device:``-ref devices, found no input sockets and dropped ``dsp_source`` again, so the UI said
+    "linked" while nothing was. The link must survive the sync, and must read back the same.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        h = auth_headers
+        _, api, post, lst = await _job(client, h)
+        box = await client.post(
+            f"{api}/graph/devices",
+            json={
+                "name": "Rio",
+                "domain": "audio",
+                "kind": "analog_stagebox",
+                "attributes": {"device_type": "analog_stagebox"},
+                "ports": [
+                    {
+                        "id": "in-xlr3",
+                        "direction": "in",
+                        "signal": "audio",
+                        "connector": "xlr3",
+                        "channels": 16,
+                    }
+                ],
+            },
+            headers=h,
+        )
+        assert box.status_code in (200, 201), box.text
+        box_id = box.json()["device"]["id"] if "device" in box.json() else box.json()["id"]
+        ch = await post(
+            f"channel-lists/{lst['id']}/channels", {"channel_number": 1, "source_label": "Kick"}
+        )
+        ref = {"device_id": box_id, "port_id": "in-xlr3", "socket": 5}
+        res = await client.put(f"{api}/channels/{ch['id']}/soft-patch", json=ref, headers=h)
+        assert res.status_code == 200, res.text
+        view = (await client.get(f"{api}/channel-lists/{lst['id']}/soft-patch", headers=h)).json()
+        strip = next(c for c in view["channels"] if c["id"] == ch["id"])
+        assert strip["dsp_source"] and strip["dsp_source"]["socket"] == 5, strip

@@ -1120,6 +1120,22 @@
                     {{ t("console.endpointNeeds", { need: sh.need, have: sh.have }) }}
                   </q-chip>
                 </div>
+                <!-- a stereo bus can leave from both sides (default) or just its left or right -->
+                <q-btn-toggle
+                  v-if="selChannel.mode === 'stereo'"
+                  v-model="busSide"
+                  dense
+                  no-caps
+                  unelevated
+                  toggle-color="primary"
+                  class="q-mt-xs"
+                  :options="[
+                    { label: t('console.sideBoth'), value: 'both' },
+                    { label: t('console.sideLeft'), value: 'L' },
+                    { label: t('console.sideRight'), value: 'R' },
+                  ]"
+                  data-testid="console-bus-side"
+                />
                 <q-toggle
                   v-model="addEndpoint"
                   dense
@@ -1167,6 +1183,7 @@
                     :outline="!sk.owner"
                     :color="sk.owner ? ((sk.owners || [sk.owner]).includes(selChannelId) ? 'primary' : 'grey-8') : undefined"
                     :data-testid="`console-socket-${sk.socket}`"
+                    :title="sk.owner ? [sk.ownerLabel, sk.ownerName].filter(Boolean).join(' · ') : undefined"
                     @click="clickSocket(sk)"
                   >
                     <div class="column items-center no-wrap">
@@ -1175,6 +1192,11 @@
                         v-if="sk.owner"
                         class="text-caption"
                       >{{ sk.ownerLabel || "?" }}</span>
+                      <span
+                        v-if="sk.owner && sk.ownerName"
+                        class="socket-name text-caption"
+                        data-testid="console-socket-name"
+                      >{{ sk.ownerName }}</span>
                     </div>
                     <q-badge
                       v-if="sk.shared"
@@ -1391,7 +1413,7 @@
                     dense
                     data-testid="console-patch-check"
                     @click.stop
-                    @update:model-value="(v, evt) => onCheck(ch.id, evt)"
+                    @update:model-value="(v, evt) => onCheck(ch.id, evt, true)"
                   />
                 </q-item-section>
                 <q-item-section>
@@ -3711,22 +3733,30 @@ async function connectStagebox(id) {
   }
 }
 const channelNumbers = computed(() => new Map(softStrips.value.map((c) => [c.id, c.channel_number])));
+// names for the socket grid, so a routed socket reads "Kick" and not only "Ch 3"
+const channelNames = computed(() => new Map(softStrips.value.map((c) => [c.id, c.source_label])));
+const busNames = computed(() => new Map((soft.value?.buses || []).map((b) => [b.id, b.name])));
 // buses look like channels to the shared list code: a number (their order), a name, their socket
 const softBusStrips = computed(() =>
   (soft.value?.buses || []).map((b, i) => ({ id: b.id, channel_number: i + 1, source_label: b.name, out_socket: b.out_endpoints?.length ? b.out_socket : null, out_endpoints: b.out_endpoints || [], mode: b.mode })),
 );
 // "add another output" mode for the selected bus: a tap adds an endpoint instead of replacing them
 const addEndpoint = ref(false);
+// which part of a stereo bus a tap routes: both sides (an adjacent L/R pair, the default) or one side
+// to a single socket. Only a stereo bus has sides; other modes always route as before.
+const busSide = ref("both");
+const sideOf = () => (patchMode.value === "bus" && selChannel.value?.mode === "stereo" && busSide.value !== "both" ? busSide.value : null);
 const outWord = computed(() => t("console.outWord"));
-const endpointText = (bus, ep) => `${endpointLabel(ep, deviceNames.value, { out: outWord.value })}${(ep.refs || []).length > 1 ? ` (${endpointSides(ep, bus.mode)})` : ""}`;
+const endpointText = (bus, ep) =>
+  `${endpointLabel(ep, deviceNames.value, { out: outWord.value })}${ep.side ? ` (${ep.side})` : (ep.refs || []).length > 1 ? ` (${endpointSides(ep, bus.mode)})` : ""}`;
 const selShortages = computed(() => (patchMode.value === "bus" && selChannel.value ? endpointShortages(selChannel.value) : []));
 const busNumbers = computed(() => new Map(softBusStrips.value.map((b) => [b.id, b.channel_number])));
 const targetStrips = computed(() => (patchMode.value === "bus" ? softBusStrips.value : softStrips.value));
 const targetNumbers = computed(() => new Map(targetStrips.value.map((c) => [c.id, c.channel_number])));
 const socketRows = computed(() =>
   isOutMode.value
-    ? portSocketsOut(soft.value?.sockets, selPort.value, channelNumbers.value, busNumbers.value, { mix: t("console.mixShort") })
-    : portSockets(soft.value?.sockets, selPort.value, "dsp_source", channelNumbers.value),
+    ? portSocketsOut(soft.value?.sockets, selPort.value, channelNumbers.value, busNumbers.value, { mix: t("console.mixShort"), names: { channels: channelNames.value, buses: busNames.value } })
+    : portSockets(soft.value?.sockets, selPort.value, "dsp_source", channelNumbers.value, channelNames.value),
 );
 const socketPages = computed(() => Math.max(1, Math.ceil(socketRows.value.length / 64)));
 const pagedSockets = computed(() => pageOf(socketRows.value, gridPage.value));
@@ -3784,7 +3814,10 @@ async function assignSocket(ch, ref, { append = false } = {}) {
       : `/jobs/${props.jobId}/channels/${ch.id}/${patchMode.value === "in" ? "soft-patch" : "direct-out"}`;
   // a bus: a bare ref replaces its endpoints (the server claims the following sockets of a stereo
   // bus); with `append` the tap adds one more endpoint
-  const body = patchMode.value === "bus" && ref && append ? { endpoints: [{ refs: [ref] }], append: true } : ref;
+  const side = sideOf();
+  const body = patchMode.value === "bus" && ref && (append || side)
+    ? { endpoints: [{ refs: [ref], ...(side ? { side } : {}) }], append }
+    : ref;
   try {
     const { data } = await api.put(url, body);
     applied();
@@ -3835,7 +3868,7 @@ function clickSocket(sk) {
   }
   if (patchMode.value === "bus") {
     // a stereo / LCR bus claims a run of adjacent sockets: tell the user when it does not fit
-    const width = busWidth(selChannel.value.mode);
+    const width = sideOf() ? 1 : busWidth(selChannel.value.mode);
     if (width > 1 && !busRunAt(socketRows.value, sk.socket, width, selChannel.value.id)) {
       $q.notify({ type: "warning", message: t("console.endpointNoFit", { n: width }) });
       return;
@@ -3899,11 +3932,13 @@ function onTile2(tile, evt) {
 function syncSingle() {
   if (selIds.value.length === 1) selChannelId.value = selIds.value[0];
 }
-function onCheck(id, evt) {
+// `alwaysToggle` is for the row checkboxes: a checkbox click always flips that row (that is what a
+// checkbox means), whereas a tile click without a modifier switches the selection to that row.
+function onCheck(id, evt, alwaysToggle = false) {
   const next = toggleRowSelection(selIds.value, {
     id,
     shift: !!evt?.shiftKey,
-    ctrl: !!(evt?.ctrlKey || evt?.metaKey),
+    ctrl: alwaysToggle || !!(evt?.ctrlKey || evt?.metaKey),
     anchor: selAnchor,
     visibleIds: visibleIds.value,
   });
@@ -4215,10 +4250,12 @@ defineExpose({ settle: settleAll, openTab: (name) => (tab.value = name) });
 .kind-fxsend { background: rgba(233, 30, 99, 0.25); }
 .socket-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
   gap: 4px;
 }
 .socket-btn { min-height: 40px; }
+/* the routed strip's name under its number: one truncated line, the full text in the button tooltip */
+.socket-name { max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
 .fader-over { outline: 2px solid var(--q-primary); }
 .fader-tray { border: 1px dashed rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 8px; }
 .fader-strip[draggable="true"] { cursor: grab; }

@@ -757,6 +757,35 @@ test('a stereo bus is patched onto an adjacent pair and gets a second endpoint',
   await expect(page.getByTestId('console-bus-endpoint')).toHaveCount(1);
 });
 
+test('a stereo bus can be routed to just its left or right, and the grid shows who is routed', async ({ page, request }) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  const base = `/jobs/${jobId}/channel-lists/${listId}`;
+  await seedStageboxWithOutputs(request, headers, jobId);
+  const bus = await call(request, headers, 'post', `${base}/outputs`, { name: 'IEM', mode: 'stereo' });
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-patch').click();
+  await page.getByTestId('console-patch-mode').getByText(/bus outputs/i).click();
+  await page.getByTestId('console-port').filter({ hasText: 'out-xlr3' }).click();
+  await page.getByTestId('console-patch-channel').click();
+  await page.getByRole('option', { name: /IEM/ }).click();
+  // left only: one socket, and the neighbour stays free
+  await page.getByTestId('console-bus-side').getByText(/^left$/i).click();
+  await page.getByTestId('console-socket-3').click();
+  await expect(page.getByTestId('console-bus-endpoint')).toContainText('(L)');
+  await expect(page.getByTestId('console-socket-3').getByTestId('console-socket-name')).toHaveText('IEM L');
+  await expect(page.getByTestId('console-socket-4').getByTestId('console-socket-name')).toHaveCount(0);
+  // the right goes to another socket without wiping the left
+  await page.getByTestId('console-bus-side').getByText(/^right$/i).click();
+  await page.getByTestId('console-socket-7').click();
+  await expect(page.getByTestId('console-bus-endpoint')).toHaveCount(2);
+  await expect(page.getByTestId('console-socket-7').getByTestId('console-socket-name')).toHaveText('IEM R');
+  const lists = await (await request.get(`${API_BASE}/api/v1/jobs/${jobId}/channel-lists`, { headers })).json();
+  const out = lists[0].outputs.find((o: { id: string }) => o.id === bus.id);
+  expect(out.out_endpoints.map((e: { side: string; refs: { socket: number }[] }) => [e.side, e.refs[0].socket])).toEqual([['L', 3], ['R', 7]]);
+});
+
 test('patching a socket another channel already uses is allowed and shows the split-source hint', async ({ page, request }) => {
   await login(page);
   const headers = await authedHeaders(page);
