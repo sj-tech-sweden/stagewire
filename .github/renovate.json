@@ -3,7 +3,7 @@
   "extends": [
     "config:recommended"
   ],
-  "semanticCommits": true,
+  "semanticCommits": "enabled",
   "argocd": {
     "managerFilePatterns": [
       "/k8s/.+\\.yaml$/"
