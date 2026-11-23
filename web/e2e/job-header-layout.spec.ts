@@ -28,3 +28,22 @@ for (const width of [420, 700, 900, 1100]) {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 }
+
+// Phones: secondary actions live in one menu whose entries carry both an icon and a text label
+// (icon-only buttons were unclear and tooltips don't exist on touch).
+test('phone header moves secondary actions into a labelled menu', async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await login(page);
+  const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
+  const res = await request.post(`${API_BASE}/api/v1/jobs`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { title: `Header ${Date.now()}` },
+  });
+  const job = await res.json();
+  await page.goto(`/jobs/${job.id}/workspace`);
+  await expect(page.getByTestId('open-reports')).toHaveCount(0);
+  await page.getByTestId('header-more-menu').click();
+  await expect(page.getByTestId('more-open-reports')).toContainText(/PDF/i);
+  await expect(page.getByTestId('more-open-share')).toBeVisible();
+  await expect(page.getByTestId('more-import')).toBeVisible();
+});

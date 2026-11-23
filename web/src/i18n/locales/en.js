@@ -427,6 +427,7 @@ export default {
     catalog: "Stockwire catalog",
     import: "Import",
     pdfReports: "PDF reports",
+    moreActions: "More actions",
     importLegacy: "Import existing lists",
     importDone: "Imported {devices} devices and {edges} connections",
     empty:

@@ -429,6 +429,7 @@ export default {
     catalog: "Stockwire-katalog",
     import: "Importera",
     pdfReports: "PDF-rapporter",
+    moreActions: "Fler åtgärder",
     importLegacy: "Importera befintliga listor",
     importDone: "Importerade {devices} enheter och {edges} kopplingar",
     empty:
