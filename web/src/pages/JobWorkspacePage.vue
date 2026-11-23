@@ -29,7 +29,10 @@
       @discard="graph.clearConflict()"
     />
 
-    <div class="row items-center q-col-gutter-sm q-mb-md">
+    <div
+      class="job-header row items-center q-mb-md"
+      data-testid="job-header"
+    >
       <q-btn
         flat
         round
@@ -37,7 +40,7 @@
         :aria-label="t('workspace.back')"
         @click="router.push('/')"
       />
-      <div class="col">
+      <div class="job-header__title">
         <div class="text-h6">
           {{ t('workspace.title') }}
         </div>
@@ -61,125 +64,130 @@
           </q-chip>
         </div>
       </div>
-      <HistoryControls
-        kind="job"
-        :scope-id="jobId"
-        @restored="onHistoryRestore"
-      />
-      <q-btn
-        flat
-        no-caps
-        icon="event_note"
-        :label="t('workspace.jobDetails')"
-        data-testid="open-job-details"
-        @click="jobDialog = true"
-      />
-      <q-btn
-        v-if="job?.stockwire_job_id && stockwireStore.isEnabled"
-        flat
-        no-caps
-        icon="open_in_new"
-        :label="t('stockwire.openInStockwire')"
-        data-testid="open-in-stockwire"
-        @click="openInStockwire"
-      />
-      <q-btn
-        v-if="stockwireStore.isEnabled"
-        color="primary"
-        no-caps
-        icon="inventory_2"
-        :label="t('workspace.catalog')"
-        data-testid="open-catalog"
-        @click="catalogOpen = true"
-      />
-      <q-btn
-        v-if="stockwireStore.isEnabled"
-        flat
-        no-caps
-        icon="inventory"
-        :label="t('stockwire.availabilityTitle')"
-        data-testid="open-availability"
-        @click="availabilityOpen = true"
-      />
-      <q-btn-dropdown
-        flat
-        no-caps
-        icon="file_upload"
-        :label="t('workspace.import')"
-        data-testid="import-menu"
+      <div
+        class="job-header__actions row items-center"
+        data-testid="job-header-actions"
       >
-        <q-list>
-          <q-item
-            v-close-popup
-            clickable
-            data-testid="import-fixtures-file"
-            @click="importInput.click()"
-          >
-            <q-item-section>
-              <q-item-label>{{ t('workspace.importFixtures') }}</q-item-label>
-              <q-item-label caption>
-                CSV, MVR
-              </q-item-label>
-            </q-item-section>
-          </q-item>
-        </q-list>
-      </q-btn-dropdown>
-      <input
-        ref="importInput"
-        type="file"
-        accept=".csv,.mvr"
-        class="hidden"
-        data-testid="header-import-file"
-        @change="importFixturesFile"
-      >
-      <q-btn-dropdown
-        v-if="graph.channelLists.length"
-        flat
-        no-caps
-        icon="file_download"
-        :label="t('workspace.export')"
-        data-testid="export-menu"
-        @before-show="loadPlugins"
-      >
-        <q-list>
-          <template
-            v-for="list in graph.channelLists"
-            :key="list.id"
-          >
-            <q-item-label header>
-              {{ list.name }}
-            </q-item-label>
+        <HistoryControls
+          kind="job"
+          :scope-id="jobId"
+          @restored="onHistoryRestore"
+        />
+        <q-btn
+          flat
+          no-caps
+          icon="event_note"
+          :label="t('workspace.jobDetails')"
+          data-testid="open-job-details"
+          @click="jobDialog = true"
+        />
+        <q-btn
+          v-if="job?.stockwire_job_id && stockwireStore.isEnabled"
+          flat
+          no-caps
+          icon="open_in_new"
+          :label="t('stockwire.openInStockwire')"
+          data-testid="open-in-stockwire"
+          @click="openInStockwire"
+        />
+        <q-btn
+          v-if="stockwireStore.isEnabled"
+          color="primary"
+          no-caps
+          icon="inventory_2"
+          :label="t('workspace.catalog')"
+          data-testid="open-catalog"
+          @click="catalogOpen = true"
+        />
+        <q-btn
+          v-if="stockwireStore.isEnabled"
+          flat
+          no-caps
+          icon="inventory"
+          :label="t('stockwire.availabilityTitle')"
+          data-testid="open-availability"
+          @click="availabilityOpen = true"
+        />
+        <q-btn-dropdown
+          flat
+          no-caps
+          icon="file_upload"
+          :label="t('workspace.import')"
+          data-testid="import-menu"
+        >
+          <q-list>
             <q-item
-              v-for="plugin in plugins"
-              :key="`${list.id}-${plugin.key}`"
               v-close-popup
               clickable
-              :data-testid="`export-${plugin.key}`"
-              @click="exportList(list, plugin)"
+              data-testid="import-fixtures-file"
+              @click="importInput.click()"
             >
               <q-item-section>
-                <q-item-label>{{ plugin.label }}</q-item-label>
+                <q-item-label>{{ t('workspace.importFixtures') }}</q-item-label>
+                <q-item-label caption>
+                  CSV, MVR
+                </q-item-label>
               </q-item-section>
             </q-item>
-          </template>
-        </q-list>
-      </q-btn-dropdown>
-      <q-btn
-        flat
-        no-caps
-        icon="picture_as_pdf"
-        :label="t('workspace.pdfReports')"
-        data-testid="open-reports"
-        @click="reportDialog = true"
-      />
-      <q-btn
-        flat
-        no-caps
-        icon="share"
-        :label="t('workspace.share.openMobile')"
-        data-testid="open-share"
-        @click="shareOpen = true"
-      />
+          </q-list>
+        </q-btn-dropdown>
+        <input
+          ref="importInput"
+          type="file"
+          accept=".csv,.mvr"
+          class="hidden"
+          data-testid="header-import-file"
+          @change="importFixturesFile"
+        >
+        <q-btn-dropdown
+          v-if="graph.channelLists.length"
+          flat
+          no-caps
+          icon="file_download"
+          :label="t('workspace.export')"
+          data-testid="export-menu"
+          @before-show="loadPlugins"
+        >
+          <q-list>
+            <template
+              v-for="list in graph.channelLists"
+              :key="list.id"
+            >
+              <q-item-label header>
+                {{ list.name }}
+              </q-item-label>
+              <q-item
+                v-for="plugin in plugins"
+                :key="`${list.id}-${plugin.key}`"
+                v-close-popup
+                clickable
+                :data-testid="`export-${plugin.key}`"
+                @click="exportList(list, plugin)"
+              >
+                <q-item-section>
+                  <q-item-label>{{ plugin.label }}</q-item-label>
+                </q-item-section>
+              </q-item>
+            </template>
+          </q-list>
+        </q-btn-dropdown>
+        <q-btn
+          flat
+          no-caps
+          icon="picture_as_pdf"
+          :label="t('workspace.pdfReports')"
+          data-testid="open-reports"
+          @click="reportDialog = true"
+        />
+        <q-btn
+          flat
+          no-caps
+          icon="share"
+          :label="t('workspace.share.openMobile')"
+          data-testid="open-share"
+          @click="shareOpen = true"
+        />
+      </div>
     </div>
 
     <q-tabs
@@ -1682,6 +1690,31 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* Header layout. The title block used to be a bare `.col` (flex-basis 0) beside ~9 action buttons
+   in one wrapping row, so at tablet/narrow-desktop widths the buttons claimed the line and the
+   title was squeezed into a one-word-per-line column. Now the title has a real minimum basis
+   (18rem): when the actions no longer fit beside it, the actions row wraps onto its own line
+   under the title instead of crushing it. Both blocks wrap internally, so nothing scrolls
+   horizontally. */
+.job-header {
+  gap: 8px 12px;
+}
+.job-header__title {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.job-header__actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+@media (max-width: 1299px) {
+  /* Below the width where title + actions share a line, actions take the full row and
+     right-align the leading buttons naturally via wrapping. */
+  .job-header__actions {
+    flex: 1 1 100%;
+  }
+}
 .inspector-sticky {
   position: sticky;
   top: 8px;
