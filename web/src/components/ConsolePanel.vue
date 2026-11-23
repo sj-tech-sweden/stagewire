@@ -3105,7 +3105,9 @@ function openBusFlow(bus) {
               : s.parent_index,
       }));
   }
-  busFlowSteps.value = flowTree(sourceLabel, shown, graph.devices);
+  // Endpoints that were children of the dropped mixer hop are now roots. Keep them as siblings of
+  // the source (parallel outputs) instead of letting flowTree chain them into a serial daisy-chain.
+  busFlowSteps.value = flowTree(sourceLabel, shown, graph.devices, { separateRoots: mixerIndex >= 0 });
   busFlowOpen.value = true;
 }
 // "Edit patch" in the flow dialog opens the chain editor for the same bus.

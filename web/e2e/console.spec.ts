@@ -757,6 +757,56 @@ test('a bus flow starts at the console/bus, shows the stagebox after it, and Edi
   await expect(page.getByTestId('chain-save')).toBeVisible();
 });
 
+test('a bus soft-patched to multiple outputs shows them parallel, not daisy-chained', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+    name: 'GLD-80', domain: 'audio', kind: 'mixer',
+    attributes: { sound_list_id: listId },
+    ports: [{ id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' }],
+  });
+  const mkBox = (name: string) =>
+    call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+      name, domain: 'audio', kind: 'digital_stagebox',
+      ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 24 }],
+    });
+  const box1 = await mkBox('AR2412');
+  const box2 = await mkBox('AB168');
+  const bus = await call(request, headers, 'post', `/jobs/${jobId}/channel-lists/${listId}/outputs`, {
+    name: 'Speaker', mode: 'mono',
+  });
+  // Two endpoints: both hang off the console hop, so they are parallel outputs of the bus.
+  await call(request, headers, 'put', `/jobs/${jobId}/outputs/${bus.id}/soft-patch`, {
+    endpoints: [
+      { refs: [{ device_id: box1.id, port_id: 'out-xlr3', socket: 5 }] },
+      { refs: [{ device_id: box2.id, port_id: 'out-xlr3', socket: 6 }] },
+    ],
+  });
+
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bus-show-flow').first().click();
+  const flow = page.getByTestId('chain-flow');
+  const nodes = await flow.locator('.dmx-flow-node').evaluateAll((els) =>
+    els.map((el) => ({
+      title: (el.querySelector('.dmx-flow-title') as HTMLElement)?.textContent?.trim() || '',
+      left: (el as HTMLElement).style.left,
+    })),
+  );
+  const source = nodes.find((n) => n.title === 'GLD-80 · Speaker');
+  const devices = nodes.filter((n) => n.title === 'AR2412' || n.title === 'AB168');
+  expect(source).toBeDefined();
+  expect(devices).toHaveLength(2);
+  // Same `left` means the same tree depth: siblings of the source, i.e. parallel (a daisy-chain
+  // would put the second box one column further right). The source is one column left of them.
+  expect(devices[0].left).toBe(devices[1].left);
+  expect(source!.left).not.toBe(devices[0].left);
+});
+
 async function seedStageboxWithOutputs(request: APIRequestContext, headers: Record<string, string>, jobId: string) {
   return call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'AR2412',
