@@ -136,9 +136,10 @@ defineEmits(['edit', 'add-child', 'delete', 'edit-device']);
 
 const { t } = useI18n();
 
-// The horizontal step: nodeW (168) leaves a wide gap for the port/cable label on the arrow between
-// two nodes. Too small a gap and the label is hidden behind (or collides with) the node boxes.
-const colW = 280;
+// The horizontal step: nodeW (168) leaves a 72px gap for the port/cable label on the arrow. Labels
+// render on a layer above the nodes with a halo, so they stay readable without a huge gap, and 3
+// devices still fit inside the 900px dialog without a scrollbar.
+const colW = 240;
 const rowH = 80;
 const nodeW = 168;
 const nodeH = 54;
@@ -289,7 +290,7 @@ function nodeStyle(n) {
   text-overflow: ellipsis;
 }
 .dmx-flow-edge-label {
-  font-size: 10px;
+  font-size: 11px;
   fill: var(--ec-flow-edge-label, #37474f);
   /* Paint a thick halo behind the glyphs so port labels stay legible where the arrow passes over a
      node box or another line. paint-order puts the halo under the fill rather than over it. */
