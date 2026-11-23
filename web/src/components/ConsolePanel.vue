@@ -2594,6 +2594,7 @@
       v-model="busFlowOpen"
       :title="`${t('workspace.showFlow')}: ${busChainNode?.name || ''}`"
       :steps="busFlowSteps"
+      @edit="editFromBusFlow"
     />
     <ChainDialog
       v-model="busChainOpen"
@@ -3076,8 +3077,41 @@ const busFlowOpen = ref(false);
 const busFlowSteps = ref([]);
 function openBusFlow(bus) {
   busChainNode.value = bus;
-  busFlowSteps.value = flowTree(bus.name, chainForm(bus, graph.edges, graph.devices), graph.devices);
+  // The console and the bus are one node: the console's output strip. A soft patch stores a root hop
+  // for that strip followed by the patched gear (stagebox, then any later patch points). The flow
+  // should start on that single console/bus node and run outward, so drop the root hop — otherwise it
+  // renders the same thing twice, first as the source label and again as a device — and rebase the
+  // remaining steps' parent links so branches survive. The stagebox then sits right after the mixer
+  // and any patch points added after it follow in order.
+  const steps = chainForm(bus, graph.edges, graph.devices);
+  const mixerIndex = steps.findIndex((s) => {
+    const d = graph.devices.find((x) => x.id === s.device_id);
+    return d && isMixerDevice(d);
+  });
+  let shown = steps;
+  let sourceLabel = bus.name;
+  if (mixerIndex >= 0) {
+    const mixer = graph.devices.find((x) => x.id === steps[mixerIndex].device_id);
+    sourceLabel = mixer ? `${mixer.name} · ${bus.name}` : bus.name;
+    shown = steps
+      .filter((_, i) => i !== mixerIndex)
+      .map((s) => ({
+        ...s,
+        parent_index:
+          s.parent_index == null || s.parent_index === mixerIndex
+            ? null
+            : s.parent_index > mixerIndex
+              ? s.parent_index - 1
+              : s.parent_index,
+      }));
+  }
+  busFlowSteps.value = flowTree(sourceLabel, shown, graph.devices);
   busFlowOpen.value = true;
+}
+// "Edit patch" in the flow dialog opens the chain editor for the same bus.
+function editFromBusFlow() {
+  busFlowOpen.value = false;
+  openBusChain(busChainNode.value);
 }
 async function saveBusChain(steps) {
   try {

@@ -717,6 +717,46 @@ test('a device typed into Edit patch is created with that name when the chain is
   await expect.poll(chainDevices).toEqual([snake.id]);
 });
 
+test('a bus flow starts at the console/bus, shows the stagebox after it, and Edit patch opens the chain', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  // The console and the bus are one node. The soft patch stores a root hop for the console followed
+  // by the patched stagebox; the flow must not draw the console twice (once as source, once as a hop).
+  await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+    name: 'GLD-80', domain: 'audio', kind: 'mixer',
+    attributes: { sound_list_id: listId },
+    ports: [{ id: 'dsnake-out', direction: 'out', signal: 'data', connector: 'dsnake' }],
+  });
+  const box = await call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+    name: 'AR2412', domain: 'audio', kind: 'digital_stagebox',
+    ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 24 }],
+  });
+  const bus = await call(request, headers, 'post', `/jobs/${jobId}/channel-lists/${listId}/outputs`, {
+    name: 'Speaker', mode: 'mono',
+  });
+  await call(request, headers, 'put', `/jobs/${jobId}/outputs/${bus.id}/soft-patch`, {
+    device_id: box.id, port_id: 'out-xlr3', socket: 5,
+  });
+
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bus-show-flow').first().click();
+  const flow = page.getByTestId('chain-flow');
+  const titles = flow.locator('.dmx-flow-node .dmx-flow-title');
+  // One combined console/bus node + the stagebox after it — no duplicate console hop.
+  await expect(titles).toHaveCount(2);
+  await expect(flow).toContainText('GLD-80 · Speaker');
+  await expect(flow).toContainText('AR2412');
+
+  // "Edit patch" used to emit into the void for buses: it must open the chain dialog.
+  await page.getByTestId('flow-edit-chain').click();
+  await expect(page.getByTestId('chain-save')).toBeVisible();
+});
+
 async function seedStageboxWithOutputs(request: APIRequestContext, headers: Record<string, string>, jobId: string) {
   return call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'AR2412',
