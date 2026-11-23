@@ -895,6 +895,7 @@ export default {
     busChain: "Patch chain for {name}",
     // A bus chain runs from the bus out to the gear it feeds; the hop feeding the bus in is hidden.
     busChainHint: "The signal path in order, from the bus to the devices it feeds.",
+    flowBusSource: "Bus",
     busMode: { mono: "Mono", stereo: "Stereo", lcr: "LCR" },
     busNotes: "Notes",
     busTapPoint: "Tap point",

@@ -147,6 +147,7 @@ function truncate(value, max = 18) {
 function subLabel(node) {
   const bits = [];
   if (node.kind === 'fixture') bits.push(t('dmxChain.kindFixture'));
+  else if (node.kind === 'bus') bits.push(t('console.flowBusSource'));
   else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
   else if (node.kind === 'channel') bits.push(t('workspace.channel'));
   else bits.push(t('dmxChain.kindDevice'));

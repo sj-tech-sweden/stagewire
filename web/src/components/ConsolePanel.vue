@@ -3076,12 +3076,14 @@ const busChainNode = ref(null);
 const busChainInitial = ref([]);
 function openBusChain(bus) {
   busChainNode.value = bus;
-  // Hide the hop feeding the bus input: the bus is the source of its output chain. The step stays in
-  // the list so Save writes it back unchanged (see busChainEditorSteps).
+  // Lock soft-patched outputs, hide a console root hop; manual hops stay visible/editable. Steps keep
+  // their position so Save writes them back unchanged (see busChainEditorSteps).
   busChainInitial.value = busChainEditorSteps(
     bus,
     chainForm(bus, graph.edges, graph.devices),
     graph.edges,
+    graph.devices,
+    isMixerDevice,
   );
   busChainOpen.value = true;
 }

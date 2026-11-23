@@ -645,42 +645,50 @@ test('a chain becomes a flow tree: a line of devices, with branches and separate
   expect(flowTree('', [{ device_id: 'a' }], devices)[0].label).toBe('Stagebox');
 });
 
-test('a bus flow makes the bus the source, keeps soft-patch output hops, and follows patched-forward steps', () => {
+test('a bus flow puts the bus first, soft-patch outputs next, and manual devices last', () => {
   const devices = [
     { id: 'box', name: 'AR2412' },
-    { id: 'spk', name: 'DXR10-2' },
-    { id: 'amp', name: 'Amp Spk' },
+    { id: 'spk', name: 'DXR10' },
     { id: 'mixer', name: 'GLD-80', kind: 'mixer' },
   ];
   const isMixer = (d) => d.kind === 'mixer';
-  // The Test Vireda Main bus: the first hop is a soft-patched output stored at position 0 (not a
-  // console feed), so it stays. The bus is the source; all outputs hang off it and a patched-forward
-  // speaker follows the output it came from.
+  // Out 1: a manual speaker hop is stored at position 0 (the soft-patch output hangs off it), and
+  // GLD-80 is the soft-patched output. In the flow the bus is first, then the output, then the speaker.
+  const out1Bus = { id: 'out1', name: 'Out 1', out_endpoints: [{ refs: [{ device_id: 'mixer', socket: 2 }] }] };
   const edges = [
-    { attributes: { chain: 'main', first_point: { position: 0, patch_label: 'Out 11-12' } } },
-    { attributes: { chain: 'main', position: 1, parent_id: 'root' } },
-    { attributes: { chain: 'main', position: 2, parent_id: 'root' } },
-    { attributes: { chain: 'main', position: 3, parent_id: 'hop-1' } },
+    { attributes: { chain: 'out1', first_point: { position: 0 } } },
+    { attributes: { chain: 'out1', position: 1, parent_id: 'root' } },
   ];
   const steps = [
-    { device_id: 'box', parent_index: null, patch_label: 'Out 11-12' },
+    { device_id: 'spk', parent_index: null }, // manual hop at position 0
+    { device_id: 'mixer', parent_index: 0 },  // soft-patch output
+  ];
+  const tree = busFlowTree(out1Bus, steps, devices, edges, isMixer);
+  expect(tree).toHaveLength(1);
+  expect(tree[0]).toMatchObject({ label: 'Out 1', kind: 'bus' });
+  // GLD-80 (the output) is parallel off the bus; the manual DXR10 follows it, i.e. it is last.
+  expect(tree[0].children.map((n) => n.label)).toEqual(['GLD-80']);
+  expect(tree[0].children[0].children.map((n) => n.label)).toEqual(['DXR10']);
+
+  // Main bus: two soft-patch outputs stay parallel, a speaker patched forward from one follows it.
+  const mainBus = { id: 'main', name: 'Main', out_endpoints: [{ refs: [{ device_id: 'box', socket: 11 }] }, { refs: [{ device_id: 'box', socket: 9 }] }] };
+  const mainEdges = [
+    { attributes: { chain: 'main', first_point: { position: 0 } } },
+    { attributes: { chain: 'main', position: 1 } },
+    { attributes: { chain: 'main', position: 2 } },
+  ];
+  const mainSteps = [
+    { device_id: 'box', parent_index: null },
     { device_id: 'box', parent_index: null },
     { device_id: 'spk', parent_index: 0 },
-    { device_id: 'amp', parent_index: 2 },
   ];
-  const tree = busFlowTree({ id: 'main', name: 'Main' }, steps, devices, edges, isMixer);
-  expect(tree).toHaveLength(1);
-  // The bus is the source; no device is shown feeding into it.
-  expect(tree[0]).toMatchObject({ label: 'Main', kind: 'source' });
-  // The two soft-patch outputs are parallel children of the bus; the speaker follows the output it
-  // was patched from, and a further amp follows the speaker.
-  expect(tree[0].children.map((n) => n.label)).toEqual(['AR2412', 'AR2412']);
-  expect(tree[0].children[0].children.map((n) => n.label)).toEqual(['DXR10-2']);
-  expect(tree[0].children[0].children[0].children.map((n) => n.label)).toEqual(['Amp Spk']);
+  const main = busFlowTree(mainBus, mainSteps, devices, mainEdges, isMixer);
+  expect(main[0].children.map((n) => n.label)).toEqual(['AR2412', 'AR2412']);
+  expect(main[0].children[0].children.map((n) => n.label)).toEqual(['DXR10']);
 
-  // A console/mixer root hop is dropped (console and bus are one strip); its children become outputs.
+  // A console/mixer root hop is dropped (console and bus are one strip).
   const mixerTree = busFlowTree(
-    { id: 'main', name: 'Main' },
+    { id: 'main', name: 'Main', out_endpoints: [{ refs: [{ device_id: 'box', socket: 5 }] }] },
     [{ device_id: 'mixer', parent_index: null }, { device_id: 'box', parent_index: 0 }],
     devices,
     [{ attributes: { chain: 'main', first_point: {} } }],
@@ -690,7 +698,13 @@ test('a bus flow makes the bus the source, keeps soft-patch output hops, and fol
   expect(mixerTree[0].children.map((n) => n.label)).toEqual(['AR2412']);
 });
 
-test('a bus chain editor hides a console feed and locks soft-patch output hops without rewiring them', () => {
+test('a bus chain editor hides only a console feed, locks soft-patch outputs, and keeps manual hops visible', () => {
+  const devices = [
+    { id: 'mixer', name: 'GLD-80', kind: 'mixer' },
+    { id: 'box', name: 'AR2412' },
+    { id: 'spk', name: 'DXR10' },
+  ];
+  const isMixer = (d) => d.kind === 'mixer';
   const edges = [
     { attributes: { chain: 'main', first_point: { position: 0 } } },
     { attributes: { chain: 'main', position: 1, parent_id: 'root' } },
@@ -699,23 +713,28 @@ test('a bus chain editor hides a console feed and locks soft-patch output hops w
   const steps = [
     { device_id: 'mixer', parent_index: null }, // console feed -> hidden
     { device_id: 'box', parent_index: 0 },       // soft-patch output -> locked
-    { device_id: 'spk', parent_index: 0 },       // manual step -> editable
+    { device_id: 'spk', parent_index: 0 },       // manual step -> visible + editable
   ];
   const bus = {
     id: 'main', name: 'Main',
     out_endpoints: [{ refs: [{ device_id: 'box', port_id: 'out-xlr3', socket: 5 }] }],
   };
-  const editorSteps = busChainEditorSteps(bus, steps, edges);
+  const editorSteps = busChainEditorSteps(bus, steps, edges, devices, isMixer);
   expect(editorSteps.map((s) => s.hidden)).toEqual([true, false, false]);
   expect(editorSteps.map((s) => s.locked)).toEqual([false, true, false]);
   // Saving sends every step back unchanged: position and parent_index are not rewired.
   expect(editorSteps[1]).toMatchObject({ device_id: 'box', parent_index: 0 });
   expect(editorSteps[2]).toMatchObject({ device_id: 'spk', parent_index: 0 });
-  // out_endpoints may also live under attributes (graph node shape).
-  const viaAttrs = busChainEditorSteps(
-    { id: 'main', name: 'Main', attributes: { out_endpoints: bus.out_endpoints } }, steps, edges,
-  );
-  expect(viaAttrs.map((s) => s.locked)).toEqual([false, true, false]);
+
+  // A manual hop stored at position 0 (e.g. DXR10 on Out 1) is NOT hidden — it must be editable.
+  const manualRootSteps = [
+    { device_id: 'spk', parent_index: null },
+    { device_id: 'box', parent_index: 0 },
+  ];
+  const out1Bus = { id: 'out1', name: 'Out 1', out_endpoints: [{ refs: [{ device_id: 'box', socket: 5 }] }] };
+  const out1Editor = busChainEditorSteps(out1Bus, manualRootSteps, edges, devices, isMixer);
+  expect(out1Editor.map((s) => s.hidden)).toEqual([false, false]);
+  expect(out1Editor.map((s) => s.locked)).toEqual([false, true]);
 });
 
 test('a device signal flow includes each matching channel route without unrelated graph edges', () => {
