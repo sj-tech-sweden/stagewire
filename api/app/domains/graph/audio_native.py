@@ -1012,7 +1012,11 @@ async def sync_edges(builder) -> None:
         points = []
         for point in _sorted(node):
             target = by_id.get(_uuid(point.get("device_id")))
-            if target is None or target.legacy_ref is None:
+            # Gear is defined by kind (as job_hardware and _gear_by_id do), not by a legacy ref:
+            # stageboxes from /graph/devices or Stockwire import have no `device:` ref. Filtering
+            # on the ref dropped their patch hop from the graph — the soft patch and editor
+            # still agreed, but the flow, reports and every edge-based read lost it.
+            if target is None or target.kind in devices_native.NON_GEAR_KINDS:
                 builder.result.notes.append(f"patch point {point['point_id']}: device missing")
                 continue
             points.append((point, target))
