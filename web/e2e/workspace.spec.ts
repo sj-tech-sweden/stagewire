@@ -2188,6 +2188,32 @@ test('on a phone every channel is a card with its kind, source, stand, connector
   expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
 });
 
+test('on a tablet the channel list is cards in two columns, not a sideways-scrolling table', async ({ page, request }) => {
+  await login(page);
+  // 800px is wider than a phone but narrower than md: the ~1180px table would only scroll sideways.
+  await page.setViewportSize({ width: 800, height: 900 });
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `E2E Tablet ${Date.now()}` })).id as string;
+  const g = `/jobs/${jobId}/graph`;
+  const list = await post(request, headers, `${g}/lists`, { name: 'FOH' });
+  await post(request, headers, `${g}/lists/${list.id}/channels`, { channel_number: 1, source_label: 'Lead' });
+  await page.goto(`/jobs/${jobId}/workspace`);
+  await page.getByTestId('mode-toggle').getByText(/^(sound|ljud)$/i).click();
+
+  await expect(page.getByTestId('channel-cards')).toBeVisible();
+  await expect(page.getByTestId('channel-table')).toHaveCount(0);
+  const card = page.getByTestId('channel-card').first();
+  // Two columns on a tablet: header on the left, details on the right and already open.
+  await expect(card.locator('.col-sm-5')).toHaveCount(1);
+  await expect(card.locator('.col-sm-7')).toHaveCount(1);
+  await expect(card.getByTestId('channel-card-details')).toHaveClass(/q-expansion-item--expanded/);
+
+  // At md and up the table comes back.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.getByTestId('channel-cards')).toHaveCount(0);
+  await expect(page.getByTestId('channel-table')).toBeVisible();
+});
+
 test('on a phone lights and video rows are cards with every editor, and power loads stack', async ({ page, request }) => {
   await login(page);
   await page.setViewportSize({ width: 390, height: 800 });
