@@ -31,6 +31,7 @@
 
     <div
       class="job-header row items-center q-mb-md"
+      :class="{ 'job-header--stacked': $q.screen.lt.lg }"
       data-testid="job-header"
     >
       <q-btn
@@ -194,96 +195,110 @@
              menu where each entry keeps its icon AND its text (icon-only buttons were not
              self-explanatory, and tooltips do not exist on touch). Same handlers/testids as the
              desktop buttons, so nothing is lost on mobile. -->
-        <q-btn-dropdown
+        <q-btn
           v-else
           flat
-          no-caps
-          dropdown-icon="more_vert"
-          icon="more_horiz"
+          round
+          icon="more_vert"
           :aria-label="t('workspace.moreActions')"
           data-testid="header-more-menu"
-          @before-show="loadPlugins"
         >
-          <q-list style="min-width: 220px">
-            <q-item
-              v-if="job?.stockwire_job_id && stockwireStore.isEnabled"
-              v-close-popup
-              clickable
-              data-testid="more-open-in-stockwire"
-              @click="openInStockwire"
-            >
-              <q-item-section avatar><q-icon name="open_in_new" /></q-item-section>
-              <q-item-section>{{ t('stockwire.openInStockwire') }}</q-item-section>
-            </q-item>
-            <q-item
-              v-if="stockwireStore.isEnabled"
-              v-close-popup
-              clickable
-              data-testid="more-open-catalog"
-              @click="catalogOpen = true"
-            >
-              <q-item-section avatar><q-icon name="inventory_2" /></q-item-section>
-              <q-item-section>{{ t('workspace.catalog') }}</q-item-section>
-            </q-item>
-            <q-item
-              v-if="stockwireStore.isEnabled"
-              v-close-popup
-              clickable
-              data-testid="more-open-availability"
-              @click="availabilityOpen = true"
-            >
-              <q-item-section avatar><q-icon name="inventory" /></q-item-section>
-              <q-item-section>{{ t('stockwire.availabilityTitle') }}</q-item-section>
-            </q-item>
-            <q-item
-              v-close-popup
-              clickable
-              data-testid="more-import"
-              @click="importInput.click()"
-            >
-              <q-item-section avatar><q-icon name="file_upload" /></q-item-section>
-              <q-item-section>{{ t('workspace.importFixtures') }}</q-item-section>
-            </q-item>
-            <template
-              v-for="list in graph.channelLists"
-              :key="`more-${list.id}`"
-            >
-              <q-item-label header>
-                {{ t('workspace.export') }} · {{ list.name }}
-              </q-item-label>
+          <q-menu @before-show="loadPlugins">
+            <q-list style="min-width: 220px">
               <q-item
-                v-for="plugin in plugins"
-                :key="`more-${list.id}-${plugin.key}`"
+                v-if="job?.stockwire_job_id && stockwireStore.isEnabled"
                 v-close-popup
                 clickable
-                :data-testid="`more-export-${plugin.key}`"
-                @click="exportList(list, plugin)"
+                data-testid="more-open-in-stockwire"
+                @click="openInStockwire"
               >
-                <q-item-section avatar><q-icon name="file_download" /></q-item-section>
-                <q-item-section>{{ plugin.label }}</q-item-section>
+                <q-item-section avatar>
+                  <q-icon name="open_in_new" />
+                </q-item-section>
+                <q-item-section>{{ t('stockwire.openInStockwire') }}</q-item-section>
               </q-item>
-            </template>
-            <q-separator />
-            <q-item
-              v-close-popup
-              clickable
-              data-testid="more-open-reports"
-              @click="reportDialog = true"
-            >
-              <q-item-section avatar><q-icon name="picture_as_pdf" /></q-item-section>
-              <q-item-section>{{ t('workspace.pdfReports') }}</q-item-section>
-            </q-item>
-            <q-item
-              v-close-popup
-              clickable
-              data-testid="more-open-share"
-              @click="shareOpen = true"
-            >
-              <q-item-section avatar><q-icon name="share" /></q-item-section>
-              <q-item-section>{{ t('workspace.share.openMobile') }}</q-item-section>
-            </q-item>
-          </q-list>
-        </q-btn-dropdown>
+              <q-item
+                v-if="stockwireStore.isEnabled"
+                v-close-popup
+                clickable
+                data-testid="more-open-catalog"
+                @click="catalogOpen = true"
+              >
+                <q-item-section avatar>
+                  <q-icon name="inventory_2" />
+                </q-item-section>
+                <q-item-section>{{ t('workspace.catalog') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-if="stockwireStore.isEnabled"
+                v-close-popup
+                clickable
+                data-testid="more-open-availability"
+                @click="availabilityOpen = true"
+              >
+                <q-item-section avatar>
+                  <q-icon name="inventory" />
+                </q-item-section>
+                <q-item-section>{{ t('stockwire.availabilityTitle') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-close-popup
+                clickable
+                data-testid="more-import"
+                @click="importInput.click()"
+              >
+                <q-item-section avatar>
+                  <q-icon name="file_upload" />
+                </q-item-section>
+                <q-item-section>{{ t('workspace.importFixtures') }}</q-item-section>
+              </q-item>
+              <template
+                v-for="list in graph.channelLists"
+                :key="`more-${list.id}`"
+              >
+                <q-item-label header>
+                  {{ t('workspace.export') }} · {{ list.name }}
+                </q-item-label>
+                <q-item
+                  v-for="plugin in plugins"
+                  :key="`more-${list.id}-${plugin.key}`"
+                  v-close-popup
+                  clickable
+                  :data-testid="`more-export-${plugin.key}`"
+                  @click="exportList(list, plugin)"
+                >
+                  <q-item-section avatar>
+                    <q-icon name="file_download" />
+                  </q-item-section>
+                  <q-item-section>{{ plugin.label }}</q-item-section>
+                </q-item>
+              </template>
+              <q-separator />
+              <q-item
+                v-close-popup
+                clickable
+                data-testid="more-open-reports"
+                @click="reportDialog = true"
+              >
+                <q-item-section avatar>
+                  <q-icon name="picture_as_pdf" />
+                </q-item-section>
+                <q-item-section>{{ t('workspace.pdfReports') }}</q-item-section>
+              </q-item>
+              <q-item
+                v-close-popup
+                clickable
+                data-testid="more-open-share"
+                @click="shareOpen = true"
+              >
+                <q-item-section avatar>
+                  <q-icon name="share" />
+                </q-item-section>
+                <q-item-section>{{ t('workspace.share.openMobile') }}</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-btn>
       </div>
     </div>
 
@@ -1805,12 +1820,10 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 4px;
 }
-@media (max-width: 1299px) {
-  /* Below the width where title + actions share a line, actions take the full row and
-     right-align the leading buttons naturally via wrapping. */
-  .job-header__actions {
-    flex: 1 1 100%;
-  }
+/* Stacked below Quasar's lg breakpoint (1440px; AGENTS §10 prefers $q.screen over px media
+   queries): the actions take the full row under the title. */
+.job-header--stacked .job-header__actions {
+  flex: 1 1 100%;
 }
 .inspector-sticky {
   position: sticky;
