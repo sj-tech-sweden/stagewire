@@ -41,15 +41,6 @@
             stroke-width="2"
             :marker-end="`url(#${arrowId})`"
           />
-          <text
-            v-if="e.label"
-            :x="(e.x1 + e.x2) / 2"
-            :y="(e.y1 + e.y2) / 2 - 5"
-            class="dmx-flow-edge-label"
-            text-anchor="middle"
-          >
-            {{ truncate(e.label, 16) }}
-          </text>
         </g>
       </svg>
       <div
@@ -101,6 +92,29 @@
           @click.stop="$emit('delete', n.node)"
         />
       </div>
+      <!-- Edge labels live in their own SVG rendered after the node boxes, so a label is never
+           painted over by a node. The wide column gap (colW - nodeW) gives each label room to sit
+           between the boxes it connects. -->
+      <svg
+        :width="layout.width"
+        :height="layout.height"
+        class="dmx-flow-labels"
+      >
+        <template
+          v-for="(e, i) in layout.edges"
+          :key="`l-${i}`"
+        >
+          <text
+            v-if="e.label"
+            :x="(e.x1 + e.x2) / 2"
+            :y="(e.y1 + e.y2) / 2 - 5"
+            class="dmx-flow-edge-label"
+            text-anchor="middle"
+          >
+            {{ truncate(e.label, 16) }}
+          </text>
+        </template>
+      </svg>
     </div>
   </div>
 </template>
@@ -122,7 +136,9 @@ defineEmits(['edit', 'add-child', 'delete', 'edit-device']);
 
 const { t } = useI18n();
 
-const colW = 200;
+// The horizontal step: nodeW (168) leaves a wide gap for the port/cable label on the arrow between
+// two nodes. Too small a gap and the label is hidden behind (or collides with) the node boxes.
+const colW = 280;
 const rowH = 80;
 const nodeW = 168;
 const nodeH = 54;
@@ -234,10 +250,15 @@ function nodeStyle(n) {
 .dmx-flow {
   position: relative;
 }
-.dmx-flow-arrows {
+.dmx-flow-arrows,
+.dmx-flow-labels {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+.dmx-flow-labels {
+  /* Rendered after the node divs so edge labels are never covered by a node box. */
+  z-index: 2;
 }
 .dmx-flow-node {
   position: absolute;
