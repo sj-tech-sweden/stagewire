@@ -1449,6 +1449,21 @@ test('the soft-patched hop is found, kept last, and described', async () => {
   expect(chainStepsWithLock({ attributes: {} }, steps, softDevices)).toEqual(steps);
 });
 
+test('the signal flow keeps the soft-patched stagebox even when the chain hop edge is missing', async () => {
+  const { channelFlowTree } = await import('../../src/utils/workspace');
+  // Production case: dsp_source says the channel is patched to the AR2412, but the chain graph has
+  // no hop for it (stale/missing edge). The editor re-adds the hop; the flow must do the same instead
+  // of showing the source wired straight into the mixer strip.
+  const sourceEdge = { id: 'e0', signal: 'audio', src_device_id: 'pro-d2', dst_device_id: 'ch1', src_port: 'out', dst_port: 'in',
+    attributes: { channel_source: true, channel_id: 'ch1' } };
+  const devices = [...softDevices, { id: 'pro-d2', name: 'Pro D2', kind: 'other', ports: [] }];
+  const [root] = channelFlowTree(softChannel, [sourceEdge], devices, 'Drums', []);
+  const stagebox = root.children.find((n) => n.label === 'AR2412');
+  expect(stagebox).toBeDefined();
+  expect(stagebox.soft_patch).toEqual({ connector: 'XLR3', socket: 5 });
+  expect(stagebox.children[0]).toMatchObject({ kind: 'channel', label: 'GLD · Ch 5 Drums' });
+});
+
 test('the signal flow of a soft-patched channel shows the socket and ends on the console strip', async () => {
   const { channelFlowTree } = await import('../../src/utils/workspace');
   const edges = [
