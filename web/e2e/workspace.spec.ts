@@ -2190,8 +2190,9 @@ test('on a phone every channel is a card with its kind, source, stand, connector
 
 test('on a tablet the channel list is cards in two columns, not a sideways-scrolling table', async ({ page, request }) => {
   await login(page);
-  // 800px is wider than a phone but narrower than md: the ~1180px table would only scroll sideways.
-  await page.setViewportSize({ width: 800, height: 900 });
+  // 1100px is wider than a phone/md but below the ~1180px the default table columns need, so it
+  // would only scroll sideways — cards replace it up to that cut-off.
+  await page.setViewportSize({ width: 1100, height: 900 });
   const headers = await authedHeaders(page);
   const jobId = (await post(request, headers, '/jobs', { title: `E2E Tablet ${Date.now()}` })).id as string;
   const g = `/jobs/${jobId}/graph`;

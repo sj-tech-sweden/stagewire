@@ -101,7 +101,10 @@ test('a column can be resized by dragging its handle, keeps the width after a re
 });
 
 test('when the space is too small the table scrolls sideways instead of squeezing Name', async ({ page, request }) => {
-  await open(page, request, 1100);
+  // 1200 is just above the card cut-off (1180); the optional columns push the table past the
+  // container so it still proves the table scrolls rather than squeezing Name.
+  await open(page, request, 1200);
+  await showOptionalColumns(page);
   expect(await widthOf(page, 'Name')).toBeGreaterThanOrEqual(150);
   const [scroll, client] = await page.getByTestId('channel-table').locator('.q-table__middle').first().evaluate((el) => [el.scrollWidth, el.clientWidth]);
   expect(scroll).toBeGreaterThan(client);

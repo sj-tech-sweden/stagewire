@@ -205,13 +205,13 @@
           <div class="text-subtitle1 q-mt-md">
             {{ t("workspace.inputs") }}
           </div>
-          <!-- On anything narrower than a desktop (phones and tablets) every channel is a card with
-               the same editors as the table row: the header has the number, name and actions, the
-               summary line says what is set, and "Details" opens kind, source, stand, mixer input,
-               48V, stereo, wireless and notes. Below md the table's default columns need ~1180px and
-               would only scroll sideways, so cards replace it until there is room for a real table. -->
+          <!-- Until the viewport can hold the table's default columns at their minimum widths
+               (~1180px) every channel is a card with the same editors as the table row: the header
+               has the number, name and actions, the summary says what is set, and "Details" opens
+               kind, source, stand, mixer input, 48V, stereo, wireless and notes. A table any narrower
+               would only scroll sideways, so cards replace it until there is room for a real one. -->
           <div
-            v-if="$q.screen.lt.md"
+            v-if="$q.screen.width < 1180"
             class="column q-gutter-sm"
             data-testid="channel-cards"
           >
