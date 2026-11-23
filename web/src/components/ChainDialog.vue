@@ -298,6 +298,9 @@ const props = defineProps({
   hintKey: { type: String, default: 'workspace.chainHint' },
   // Name of the source node for chains whose first step is hidden (a bus feeds its own chain).
   sourceLabel: { type: String, default: '' },
+  // When true, locked steps keep their place instead of being moved to the end on Save. Bus chains
+  // lock several soft-patch hops in the middle of a branched chain, where reordering would rewire it.
+  lockInPlace: { type: Boolean, default: false },
   fields: {
     type: Array,
     default: () => [
@@ -447,8 +450,11 @@ async function save() {
 }
 
 function cleaned() {
-  // the locked hop is always sent last, whatever happened to the editable steps
-  const ordered = [...steps.value.filter((s) => !s.locked), ...steps.value.filter((s) => s.locked)];
+  // Channels keep their single locked soft-patched hop last; bus chains lock several hops in place
+  // (reordering them would rewire their parent_index links).
+  const ordered = props.lockInPlace
+    ? steps.value
+    : [...steps.value.filter((s) => !s.locked), ...steps.value.filter((s) => s.locked)];
   return ordered.map((s) => ({
     device_id: s.device_id,
     ...Object.fromEntries(props.fields.map((f) => [f.key, s[f.key] || ''])),

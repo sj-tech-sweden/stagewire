@@ -747,9 +747,9 @@ test('a bus flow starts at the console/bus, shows the stagebox after it, and Edi
   await page.getByTestId('console-bus-show-flow').first().click();
   const flow = page.getByTestId('chain-flow');
   const titles = flow.locator('.dmx-flow-node .dmx-flow-title');
-  // One combined console/bus node + the stagebox output after it — no duplicate console hop.
+  // The bus itself is the source, with the stagebox output hanging off it — no console node feeding in.
   await expect(titles).toHaveCount(2);
-  await expect(flow).toContainText('GLD-80 · Speaker');
+  await expect(titles.first()).toHaveText('Speaker');
   await expect(flow).toContainText('AR2412');
 
   // "Edit patch" used to emit into the void for buses: it must open the chain dialog.
@@ -799,7 +799,7 @@ test('a bus soft-patched to multiple outputs shows them parallel, not daisy-chai
       left: (el as HTMLElement).style.left,
     })),
   );
-  const source = nodes.find((n) => n.title === 'GLD-80 · Speaker');
+  const source = nodes.find((n) => n.title === 'Speaker');
   const devices = nodes.filter((n) => n.title === 'AR2412' || n.title === 'AB168');
   expect(source).toBeDefined();
   expect(devices).toHaveLength(2);

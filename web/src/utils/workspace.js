@@ -1511,60 +1511,59 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
   return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
 }
 
-// The signal-flow tree of a bus. A soft-patched chain stores a root hop (the edge carrying
-// `first_point`) for whatever feeds the bus input — the console mixer, or a real device such as a
-// stagebox or speaker. The bus is the central node: a real input device stays visible feeding it,
-// the console mixer collapses into the bus label (they are one strip), and every patched output fans
-// out in parallel. Steps patched forward from an output keep their parent and follow that output.
-export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
-  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
-  const rootStep = hasRootHop && steps.length ? steps[0] : null;
-  const rootDevice = rootStep ? devices.find((d) => d.id === rootStep.device_id) : null;
-  const mixerRoot = !!(rootDevice && isMixer(rootDevice));
-
-  // Drop the root hop and rebase the rest: children of the root become parallel outputs of the bus;
-  // steps patched after an output keep pointing at (and follow) that output.
-  const outputs = (rootStep ? steps.slice(1) : steps).map((s) => ({
-    ...s,
-    parent_index: s.parent_index == null || s.parent_index === 0 ? null : s.parent_index - 1,
-  }));
-  const outputNodes = flowTree("", outputs, devices, { separateRoots: true });
-
-  const busNode = {
-    id: `bus-${bus.id}`,
-    device_id: bus.id,
-    label: mixerRoot ? `${rootDevice.name} · ${bus.name}` : bus.name,
-    kind: "channel", // the bus is the console strip at the centre of the flow
-    in_port: "", out_port: "", connector: "", patch_label: "",
-    children: outputNodes,
-  };
-
-  // A real input device (stagebox/speaker) feeding the bus must stay visible — it is the source.
-  if (rootStep && rootDevice && !mixerRoot) {
-    return [{
-      id: "bus-input",
-      device_id: rootDevice.id,
-      label: rootDevice.name,
-      kind: "source",
-      in_port: rootStep.in_port || "",
-      out_port: rootStep.out_port || "",
-      connector: rootStep.connector || "",
-      patch_label: rootStep.patch_label || "",
-      children: [busNode],
-    }];
+// Device ids a bus is soft-patched out to (the refs of its out_endpoints). Those hops are owned by
+// the Soft patch tab, so the chain editor locks them and the flow shows them as outputs of the bus.
+export function busSoftPatchDeviceIds(bus) {
+  const ids = new Set();
+  // The console summary exposes out_endpoints at the top level; the graph node keeps them in
+  // attributes. Accept both so the helper works whichever object the caller has.
+  const endpoints = bus?.out_endpoints || bus?.attributes?.out_endpoints || [];
+  for (const ep of endpoints) {
+    for (const ref of ep.refs || []) {
+      if (ref.device_id != null) ids.add(String(ref.device_id));
+    }
   }
-  return [busNode];
+  return ids;
 }
 
-// Steps for a bus's Edit-patch dialog. The first stored point is the hop feeding the bus input —
-// for an output chain the bus itself is the source, so that input hop is hidden in the editor while
-// remaining in the list (it is saved back with the rest, otherwise the bus would lose its input).
+// The signal-flow tree of a bus. The bus is always the source; nothing "feeds into" it. Every hop is
+// an output hanging off it. The one exception is a console root hop (the list's mixer feeding the
+// bus, point_type "mixer") — the console and bus are one strip, so that hop is dropped and its former
+// children become parallel outputs. A stagebox/speaker hop stored at position 0 is a real soft-patch
+// output and stays visible. Steps patched forward from an output keep their parent and follow it.
+export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
+  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
+  const rootDevice = hasRootHop && steps.length
+    ? devices.find((d) => d.id === steps[0].device_id)
+    : null;
+  const dropRoot = !!(rootDevice && isMixer(rootDevice));
+  const shown = dropRoot
+    ? steps.slice(1).map((s) => ({
+        ...s,
+        parent_index: s.parent_index == null || s.parent_index === 0 ? null : s.parent_index - 1,
+      }))
+    : steps.map((s) => ({ ...s }));
+  // separateRoots keeps parentless outputs as parallel children of the bus; parented steps still
+  // follow the output they were patched forward from.
+  return flowTree(bus.name, shown, devices, { separateRoots: true });
+}
+
+// Steps for a bus's Edit-patch dialog. A console root hop (the strip feeding the bus) is hidden —
+// the bus itself is the source. Every soft-patched output hop (out_endpoints) is locked: it is edited
+// in the Soft patch tab, like a channel's locked soft-patched device. The hop stays in the list with
+// its position and parent_index untouched, because cleaned() saves every step back — reindexing here
+// would silently rewire the bus on Save.
 export function busChainEditorSteps(bus, steps, edges) {
   const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
-  // The first stored point is the hop feeding the bus input. Hide it in the editor (the bus itself is
-  // the source) but keep its position and parent_index untouched — cleaned() saves every step back,
-  // so changing indices here would silently rewire the bus on Save.
-  return steps.map((s, i) => ({ ...s, hidden: hasRootHop && i === 0 }));
+  const softIds = busSoftPatchDeviceIds(bus);
+  return steps.map((s, i) => {
+    const isConsoleRoot = hasRootHop && i === 0 && !softIds.has(String(s.device_id));
+    return {
+      ...s,
+      hidden: isConsoleRoot,
+      locked: softIds.has(String(s.device_id)),
+    };
+  });
 }
 
 export const powerInletLabel = (inlet) =>

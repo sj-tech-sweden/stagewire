@@ -2607,6 +2607,8 @@
       :bus-channels="busChannelsFor(busChainNode?.mode)"
       hint-key="console.busChainHint"
       :source-label="busChainNode?.name || ''"
+      :lock-in-place="true"
+      @open-soft-patch="openBusSoftPatch"
       @save="saveBusChain"
     />
 
@@ -3083,12 +3085,17 @@ function openBusChain(bus) {
   );
   busChainOpen.value = true;
 }
+// A locked soft-patched hop sends the user to the Patch tab, where the socket is actually changed.
+function openBusSoftPatch() {
+  busChainOpen.value = false;
+  requestTab("patch");
+}
 const busFlowOpen = ref(false);
 const busFlowSteps = ref([]);
 function openBusFlow(bus) {
   busChainNode.value = bus;
-  // The bus is the single source; all patched outputs hang off it in parallel, and steps patched
-  // forward from an output follow that output. busFlowTree drops the console-end root hop for us.
+  // The bus is the source; every patched output hangs off it, and steps patched forward from an
+  // output follow it. busFlowTree drops a console root hop (console and bus are one strip).
   busFlowSteps.value = busFlowTree(
     bus,
     chainForm(bus, graph.edges, graph.devices),
