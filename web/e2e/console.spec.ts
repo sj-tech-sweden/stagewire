@@ -747,7 +747,7 @@ test('a bus flow starts at the console/bus, shows the stagebox after it, and Edi
   await page.getByTestId('console-bus-show-flow').first().click();
   const flow = page.getByTestId('chain-flow');
   const titles = flow.locator('.dmx-flow-node .dmx-flow-title');
-  // One combined console/bus node + the stagebox after it — no duplicate console hop.
+  // One combined console/bus node + the stagebox output after it — no duplicate console hop.
   await expect(titles).toHaveCount(2);
   await expect(flow).toContainText('GLD-80 · Speaker');
   await expect(flow).toContainText('AR2412');

@@ -1511,28 +1511,49 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
   return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
 }
 
-// The signal-flow tree of a bus. The bus is the single source; a soft patch stores a root hop (the
-// edge carrying `first_point`) for the console end, which the source label already represents. Drop
-// it regardless of what device it names (a mixer, or a stagebox feeding the bus input) so every
-// patched output becomes a parallel child of the bus, and steps patched forward from an output keep
-// their parent and follow it. `isMixer` only decides whether to prefix the label with the console.
+// The signal-flow tree of a bus. A soft-patched chain stores a root hop (the edge carrying
+// `first_point`) for whatever feeds the bus input — the console mixer, or a real device such as a
+// stagebox or speaker. The bus is the central node: a real input device stays visible feeding it,
+// the console mixer collapses into the bus label (they are one strip), and every patched output fans
+// out in parallel. Steps patched forward from an output keep their parent and follow that output.
 export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
-  let sourceLabel = bus.name;
-  let shown = steps;
-  if (hasRootHop && steps.length) {
-    // chainForm sorts by position, so the root hop is the first step.
-    const rootDevice = devices.find((x) => x.id === steps[0].device_id);
-    if (rootDevice && isMixer(rootDevice)) sourceLabel = `${rootDevice.name} · ${bus.name}`;
-    shown = steps.slice(1).map((s) => ({
-      ...s,
-      parent_index:
-        s.parent_index == null || s.parent_index === 0
-          ? null // parented to the root hop -> a parallel output of the bus
-          : s.parent_index - 1, // patched forward from another output -> follow it
-    }));
+  const rootStep = hasRootHop && steps.length ? steps[0] : null;
+  const rootDevice = rootStep ? devices.find((d) => d.id === rootStep.device_id) : null;
+  const mixerRoot = !!(rootDevice && isMixer(rootDevice));
+
+  // Drop the root hop and rebase the rest: children of the root become parallel outputs of the bus;
+  // steps patched after an output keep pointing at (and follow) that output.
+  const outputs = (rootStep ? steps.slice(1) : steps).map((s) => ({
+    ...s,
+    parent_index: s.parent_index == null || s.parent_index === 0 ? null : s.parent_index - 1,
+  }));
+  const outputNodes = flowTree("", outputs, devices, { separateRoots: true });
+
+  const busNode = {
+    id: `bus-${bus.id}`,
+    device_id: bus.id,
+    label: mixerRoot ? `${rootDevice.name} · ${bus.name}` : bus.name,
+    kind: "channel", // the bus is the console strip at the centre of the flow
+    in_port: "", out_port: "", connector: "", patch_label: "",
+    children: outputNodes,
+  };
+
+  // A real input device (stagebox/speaker) feeding the bus must stay visible — it is the source.
+  if (rootStep && rootDevice && !mixerRoot) {
+    return [{
+      id: "bus-input",
+      device_id: rootDevice.id,
+      label: rootDevice.name,
+      kind: "source",
+      in_port: rootStep.in_port || "",
+      out_port: rootStep.out_port || "",
+      connector: rootStep.connector || "",
+      patch_label: rootStep.patch_label || "",
+      children: [busNode],
+    }];
   }
-  return flowTree(sourceLabel, shown, devices, { separateRoots: hasRootHop });
+  return [busNode];
 }
 
 export const powerInletLabel = (inlet) =>
