@@ -205,11 +205,13 @@
           <div class="text-subtitle1 q-mt-md">
             {{ t("workspace.inputs") }}
           </div>
-          <!-- On phones every channel is a card with the same editors as the table row: the header
-               has the number, name and actions, the summary line says what is set, and "Details"
-               opens kind, source, stand, mixer input, 48V, stereo, wireless and notes. -->
+          <!-- Until the viewport can hold the table's default columns at their minimum widths
+               (~1180px) every channel is a card with the same editors as the table row: the header
+               has the number, name and actions, the summary says what is set, and "Details" opens
+               kind, source, stand, mixer input, 48V, stereo, wireless and notes. A table any narrower
+               would only scroll sideways, so cards replace it until there is room for a real one. -->
           <div
-            v-if="$q.screen.lt.sm"
+            v-if="$q.screen.width < 1180"
             class="column q-gutter-sm"
             data-testid="channel-cards"
           >
@@ -220,193 +222,199 @@
               bordered
               data-testid="channel-card"
             >
-              <q-card-section class="q-pa-sm">
-                <div class="row items-center no-wrap">
-                  <div class="text-subtitle2 q-pr-sm">
-                    {{ ch.attributes.channel_number }}
-                  </div>
-                  <q-input
-                    :model-value="ch.name"
-                    dense
-                    borderless
-                    class="col"
-                    data-testid="channel-card-label"
-                    @change="(v) => save(ch, { name: v })"
-                  />
-                  <q-btn
-                    flat
-                    dense
-                    round
-                    icon="route"
-                    :aria-label="t('workspace.editChain')"
-                    @click="openChain(ch, 'channel')"
-                  />
-                  <q-btn
-                    flat
-                    dense
-                    round
-                    icon="edit"
-                    :aria-label="t('channels.editChannel')"
-                    data-testid="channel-edit-open"
-                    @click="openChannelEdit(ch)"
-                  />
-                  <q-btn
-                    flat
-                    dense
-                    round
-                    icon="account_tree"
-                    :aria-label="t('workspace.showFlow')"
-                    @click="openFlow(ch, 'channel')"
-                  />
-                  <q-btn
-                    flat
-                    dense
-                    round
-                    color="negative"
-                    icon="delete"
-                    :aria-label="t('workspace.remove')"
-                    @click="removeNode(ch)"
-                  />
+              <div class="row items-start">
+                <div class="col-12 col-sm-5">
+                  <q-card-section class="q-pa-sm">
+                    <div class="row items-center no-wrap">
+                      <div class="text-subtitle2 q-pr-sm">
+                        {{ ch.attributes.channel_number }}
+                      </div>
+                      <q-input
+                        :model-value="ch.name"
+                        dense
+                        borderless
+                        class="col"
+                        data-testid="channel-card-label"
+                        @change="(v) => save(ch, { name: v })"
+                      />
+                      <q-btn
+                        flat
+                        dense
+                        round
+                        icon="route"
+                        :aria-label="t('workspace.editChain')"
+                        @click="openChain(ch, 'channel')"
+                      />
+                      <q-btn
+                        flat
+                        dense
+                        round
+                        icon="edit"
+                        :aria-label="t('channels.editChannel')"
+                        data-testid="channel-edit-open"
+                        @click="openChannelEdit(ch)"
+                      />
+                      <q-btn
+                        flat
+                        dense
+                        round
+                        icon="account_tree"
+                        :aria-label="t('workspace.showFlow')"
+                        @click="openFlow(ch, 'channel')"
+                      />
+                      <q-btn
+                        flat
+                        dense
+                        round
+                        color="negative"
+                        icon="delete"
+                        :aria-label="t('workspace.remove')"
+                        @click="removeNode(ch)"
+                      />
+                    </div>
+                    <div class="text-caption text-grey-6">
+                      {{ channelSummary(ch) || t("workspace.chainEmpty") }}
+                    </div>
+                    <div class="text-caption text-grey-6">
+                      {{ chain(ch) || t("workspace.chainEmpty") }}
+                    </div>
+                  </q-card-section>
                 </div>
-                <div class="text-caption text-grey-6">
-                  {{ channelSummary(ch) || t("workspace.chainEmpty") }}
-                </div>
-                <div class="text-caption text-grey-6">
-                  {{ chain(ch) || t("workspace.chainEmpty") }}
-                </div>
-              </q-card-section>
-              <q-expansion-item
-                dense
-                :label="t('workspace.details')"
-                header-class="text-caption"
-                data-testid="channel-card-details"
-              >
-                <div class="q-pa-sm q-gutter-sm">
-                  <q-select
-                    :model-value="ch.attributes.input_type"
+                <div class="col-12 col-sm-7">
+                  <q-expansion-item
                     dense
-                    outlined
-                    clearable
-                    emit-value
-                    map-options
-                    :options="inputTypes"
-                    :label="t('workspace.colKind')"
-                    @update:model-value="(v) => saveAttr(ch, 'input_type', v)"
-                  />
-                  <div
-                    v-if="ch.attributes.input_type === 'wireless'"
-                    class="row q-col-gutter-sm"
+                    :label="t('workspace.details')"
+                    header-class="text-caption"
+                    data-testid="channel-card-details"
                   >
-                    <q-input
-                      :model-value="ch.attributes.wireless_pack"
-                      class="col-12 col-sm-6"
-                      dense
-                      outlined
-                      :label="t('channels.fieldWirelessPack')"
-                      @change="(v) => saveAttr(ch, 'wireless_pack', v)"
-                    />
-                    <q-input
-                      :model-value="ch.attributes.wireless_frequency_mhz"
-                      class="col-6"
-                      dense
-                      outlined
-                      type="number"
-                      step="0.001"
-                      :label="t('channels.fieldWirelessFrequencyMhz')"
-                      @change="
-                        (v) =>
-                          saveAttr(
-                            ch,
-                            'wireless_frequency_mhz',
-                            v === '' || v === null ? null : Number(v),
-                          )
-                      "
-                    />
-                    <q-input
-                      :model-value="ch.attributes.wireless_group"
-                      class="col-3"
-                      dense
-                      outlined
-                      :label="t('channels.fieldWirelessGroup')"
-                      @change="(v) => saveAttr(ch, 'wireless_group', v || null)"
-                    />
-                    <q-input
-                      :model-value="ch.attributes.wireless_channel"
-                      class="col-3"
-                      dense
-                      outlined
-                      :label="t('channels.fieldWirelessChannel')"
-                      @change="(v) => saveAttr(ch, 'wireless_channel', v || null)"
-                    />
-                  </div>
-                  <StockwireProductPicker
-                    :model-value="sourceOf(ch)"
-                    own
-                    :local-items="gearItems"
-                    :label="t('channels.fieldDevice')"
-                    :hint="''"
-                    @update:model-value="(p) => setSource(ch, p)"
-                  />
-                  <q-btn
-                    v-if="sourceDevice(ch)"
-                    flat
-                    dense
-                    no-caps
-                    icon="edit"
-                    :label="t('workspace.editSource')"
-                    @click="editDevice(sourceDevice(ch))"
-                  />
-                  <StockwireProductPicker
-                    :model-value="standOf(ch)"
-                    gear-type="stand"
-                    own
-                    :label="t('stockwire.selectStand')"
-                    :hint="''"
-                    @update:model-value="(p) => setStand(ch, p)"
-                  />
-                  <div class="row items-center">
-                    <q-checkbox
-                      :model-value="!!ch.attributes.phantom_power"
-                      :disable="ch.attributes.stereo_link_role === 'secondary'"
-                      label="48V"
-                      @update:model-value="(v) => saveAttr(ch, 'phantom_power', v)"
-                    />
-                    <q-checkbox
-                      :model-value="!!ch.attributes.stereo"
-                      :label="t('channels.fieldStereo')"
-                      @update:model-value="(v) => setStereo(ch, v)"
-                    />
-                    <q-chip
-                      v-if="stereoView(ch, channels).linked"
-                      dense
-                      color="primary"
-                      text-color="white"
-                      size="sm"
-                    >
-                      {{ stereoView(ch, channels).isL ? "L" : "R" }}
-                    </q-chip>
-                  </div>
-                  <div class="row items-start q-gutter-xs">
-                    <NotesDisplay
-                      v-if="ch.notes"
-                      class="col"
-                      :notes="ch.notes"
-                      :rows="3"
-                    />
-                    <q-btn
-                      dense
-                      flat
-                      no-caps
-                      size="sm"
-                      :icon="ch.notes ? 'edit' : 'add'"
-                      :label="ch.notes ? undefined : t('workspace.colNotes')"
-                      :aria-label="t('workspace.editNotes')"
-                      data-testid="channel-edit-notes"
-                      @click="openNotes(ch)"
-                    />
-                  </div>
+                    <div class="q-pa-sm q-gutter-sm">
+                      <q-select
+                        :model-value="ch.attributes.input_type"
+                        dense
+                        outlined
+                        clearable
+                        emit-value
+                        map-options
+                        :options="inputTypes"
+                        :label="t('workspace.colKind')"
+                        @update:model-value="(v) => saveAttr(ch, 'input_type', v)"
+                      />
+                      <div
+                        v-if="ch.attributes.input_type === 'wireless'"
+                        class="row q-col-gutter-sm"
+                      >
+                        <q-input
+                          :model-value="ch.attributes.wireless_pack"
+                          class="col-12 col-sm-6"
+                          dense
+                          outlined
+                          :label="t('channels.fieldWirelessPack')"
+                          @change="(v) => saveAttr(ch, 'wireless_pack', v)"
+                        />
+                        <q-input
+                          :model-value="ch.attributes.wireless_frequency_mhz"
+                          class="col-6"
+                          dense
+                          outlined
+                          type="number"
+                          step="0.001"
+                          :label="t('channels.fieldWirelessFrequencyMhz')"
+                          @change="
+                            (v) =>
+                              saveAttr(
+                                ch,
+                                'wireless_frequency_mhz',
+                                v === '' || v === null ? null : Number(v),
+                              )
+                          "
+                        />
+                        <q-input
+                          :model-value="ch.attributes.wireless_group"
+                          class="col-3"
+                          dense
+                          outlined
+                          :label="t('channels.fieldWirelessGroup')"
+                          @change="(v) => saveAttr(ch, 'wireless_group', v || null)"
+                        />
+                        <q-input
+                          :model-value="ch.attributes.wireless_channel"
+                          class="col-3"
+                          dense
+                          outlined
+                          :label="t('channels.fieldWirelessChannel')"
+                          @change="(v) => saveAttr(ch, 'wireless_channel', v || null)"
+                        />
+                      </div>
+                      <StockwireProductPicker
+                        :model-value="sourceOf(ch)"
+                        own
+                        :local-items="gearItems"
+                        :label="t('channels.fieldDevice')"
+                        :hint="''"
+                        @update:model-value="(p) => setSource(ch, p)"
+                      />
+                      <q-btn
+                        v-if="sourceDevice(ch)"
+                        flat
+                        dense
+                        no-caps
+                        icon="edit"
+                        :label="t('workspace.editSource')"
+                        @click="editDevice(sourceDevice(ch))"
+                      />
+                      <StockwireProductPicker
+                        :model-value="standOf(ch)"
+                        gear-type="stand"
+                        own
+                        :label="t('stockwire.selectStand')"
+                        :hint="''"
+                        @update:model-value="(p) => setStand(ch, p)"
+                      />
+                      <div class="row items-center">
+                        <q-checkbox
+                          :model-value="!!ch.attributes.phantom_power"
+                          :disable="ch.attributes.stereo_link_role === 'secondary'"
+                          label="48V"
+                          @update:model-value="(v) => saveAttr(ch, 'phantom_power', v)"
+                        />
+                        <q-checkbox
+                          :model-value="!!ch.attributes.stereo"
+                          :label="t('channels.fieldStereo')"
+                          @update:model-value="(v) => setStereo(ch, v)"
+                        />
+                        <q-chip
+                          v-if="stereoView(ch, channels).linked"
+                          dense
+                          color="primary"
+                          text-color="white"
+                          size="sm"
+                        >
+                          {{ stereoView(ch, channels).isL ? "L" : "R" }}
+                        </q-chip>
+                      </div>
+                      <div class="row items-start q-gutter-xs">
+                        <NotesDisplay
+                          v-if="ch.notes"
+                          class="col"
+                          :notes="ch.notes"
+                          :rows="3"
+                        />
+                        <q-btn
+                          dense
+                          flat
+                          no-caps
+                          size="sm"
+                          :icon="ch.notes ? 'edit' : 'add'"
+                          :label="ch.notes ? undefined : t('workspace.colNotes')"
+                          :aria-label="t('workspace.editNotes')"
+                          data-testid="channel-edit-notes"
+                          @click="openNotes(ch)"
+                        />
+                      </div>
+                    </div>
+                  </q-expansion-item>
                 </div>
-              </q-expansion-item>
+              </div>
             </q-card>
           </div>
           <AdaptiveTable
