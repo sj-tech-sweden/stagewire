@@ -2659,6 +2659,7 @@ import {
   fieldOfMode,
   busRunAt,
   busWidth,
+  busFlowTree,
   endpointLabel,
   endpointShortages,
   endpointSides,
@@ -3077,37 +3078,15 @@ const busFlowOpen = ref(false);
 const busFlowSteps = ref([]);
 function openBusFlow(bus) {
   busChainNode.value = bus;
-  // The console and the bus are one node: the console's output strip. A soft patch stores a root hop
-  // for that strip followed by the patched gear (stagebox, then any later patch points). The flow
-  // should start on that single console/bus node and run outward, so drop the root hop — otherwise it
-  // renders the same thing twice, first as the source label and again as a device — and rebase the
-  // remaining steps' parent links so branches survive. The stagebox then sits right after the mixer
-  // and any patch points added after it follow in order.
-  const steps = chainForm(bus, graph.edges, graph.devices);
-  const mixerIndex = steps.findIndex((s) => {
-    const d = graph.devices.find((x) => x.id === s.device_id);
-    return d && isMixerDevice(d);
-  });
-  let shown = steps;
-  let sourceLabel = bus.name;
-  if (mixerIndex >= 0) {
-    const mixer = graph.devices.find((x) => x.id === steps[mixerIndex].device_id);
-    sourceLabel = mixer ? `${mixer.name} · ${bus.name}` : bus.name;
-    shown = steps
-      .filter((_, i) => i !== mixerIndex)
-      .map((s) => ({
-        ...s,
-        parent_index:
-          s.parent_index == null || s.parent_index === mixerIndex
-            ? null
-            : s.parent_index > mixerIndex
-              ? s.parent_index - 1
-              : s.parent_index,
-      }));
-  }
-  // Endpoints that were children of the dropped mixer hop are now roots. Keep them as siblings of
-  // the source (parallel outputs) instead of letting flowTree chain them into a serial daisy-chain.
-  busFlowSteps.value = flowTree(sourceLabel, shown, graph.devices, { separateRoots: mixerIndex >= 0 });
+  // The bus is the single source; all patched outputs hang off it in parallel, and steps patched
+  // forward from an output follow that output. busFlowTree drops the console-end root hop for us.
+  busFlowSteps.value = busFlowTree(
+    bus,
+    chainForm(bus, graph.edges, graph.devices),
+    graph.devices,
+    graph.edges,
+    isMixerDevice,
+  );
   busFlowOpen.value = true;
 }
 // "Edit patch" in the flow dialog opens the chain editor for the same bus.

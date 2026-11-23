@@ -1511,6 +1511,30 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
   return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
 }
 
+// The signal-flow tree of a bus. The bus is the single source; a soft patch stores a root hop (the
+// edge carrying `first_point`) for the console end, which the source label already represents. Drop
+// it regardless of what device it names (a mixer, or a stagebox feeding the bus input) so every
+// patched output becomes a parallel child of the bus, and steps patched forward from an output keep
+// their parent and follow it. `isMixer` only decides whether to prefix the label with the console.
+export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
+  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
+  let sourceLabel = bus.name;
+  let shown = steps;
+  if (hasRootHop && steps.length) {
+    // chainForm sorts by position, so the root hop is the first step.
+    const rootDevice = devices.find((x) => x.id === steps[0].device_id);
+    if (rootDevice && isMixer(rootDevice)) sourceLabel = `${rootDevice.name} · ${bus.name}`;
+    shown = steps.slice(1).map((s) => ({
+      ...s,
+      parent_index:
+        s.parent_index == null || s.parent_index === 0
+          ? null // parented to the root hop -> a parallel output of the bus
+          : s.parent_index - 1, // patched forward from another output -> follow it
+    }));
+  }
+  return flowTree(sourceLabel, shown, devices, { separateRoots: hasRootHop });
+}
+
 export const powerInletLabel = (inlet) =>
   POWER_INLETS.find((i) => i.value === (inlet || 'iec_c13'))?.label || inlet;
 

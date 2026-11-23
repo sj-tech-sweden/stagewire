@@ -25,6 +25,7 @@ import {
   portGroups,
   portsFromGroups,
   chainForm,
+  busFlowTree,
   stereoPairPlan,
   mixerSpecsOf,
   portUsage,
@@ -641,6 +642,49 @@ test('a chain becomes a flow tree: a line of devices, with branches and separate
   const roots = flowTree('Out', [{ device_id: 'a' }, { device_id: 'b' }], devices, { separateRoots: true });
   expect(roots[0].children.map((n) => n.label)).toEqual(['Stagebox', 'Console']);
   expect(flowTree('', [{ device_id: 'a' }], devices)[0].label).toBe('Stagebox');
+});
+
+test('a bus flow drops its root hop and shows its outputs in parallel, with later steps following their output', () => {
+  const devices = [
+    { id: 'box', name: 'AR2412' },
+    { id: 'spk', name: 'DXR10-2' },
+    { id: 'amp', name: 'Amp Spk' },
+    { id: 'mixer', name: 'GLD-80', kind: 'mixer' },
+  ];
+  const isMixer = (d) => d.kind === 'mixer';
+  // The Test Vireda Main bus: root hop is a stagebox feeding the bus input (not a mixer), then two
+  // outputs, the second with a speaker patched on after it.
+  const edges = [
+    { attributes: { chain: 'main', first_point: { position: 0 } } },
+    { attributes: { chain: 'main', position: 1, parent_id: 'root' } },
+    { attributes: { chain: 'main', position: 2, parent_id: 'root' } },
+    { attributes: { chain: 'main', position: 3, parent_id: 'hop-1' } },
+  ];
+  // chainForm output: root hop first, then the outputs (index 0 parent = root, index 2 parent = hop 1).
+  const steps = [
+    { device_id: 'box', parent_index: null },
+    { device_id: 'box', parent_index: 0 },
+    { device_id: 'spk', parent_index: 0 },
+    { device_id: 'amp', parent_index: 2 },
+  ];
+  const tree = busFlowTree({ id: 'main', name: 'Main' }, steps, devices, edges, isMixer);
+  expect(tree).toHaveLength(1);
+  expect(tree[0]).toMatchObject({ label: 'Main', kind: 'source' }); // root hop dropped, no mixer prefix
+  // Both outputs are parallel children of the bus; the speaker follows its own output.
+  expect(tree[0].children.map((n) => n.label)).toEqual(['AR2412', 'DXR10-2']);
+  expect(tree[0].children[0].children.map((n) => n.label)).toEqual([]);
+  expect(tree[0].children[1].children.map((n) => n.label)).toEqual(['Amp Spk']);
+
+  // A mixer root hop collapses the console and bus into one labelled node.
+  const mixerTree = busFlowTree(
+    { id: 'main', name: 'Main' },
+    [{ device_id: 'mixer', parent_index: null }, { device_id: 'box', parent_index: 0 }],
+    devices,
+    [{ attributes: { chain: 'main', first_point: {} } }],
+    isMixer,
+  );
+  expect(mixerTree[0].label).toBe('GLD-80 · Main');
+  expect(mixerTree[0].children.map((n) => n.label)).toEqual(['AR2412']);
 });
 
 test('a device signal flow includes each matching channel route without unrelated graph edges', () => {
