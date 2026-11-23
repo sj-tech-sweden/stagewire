@@ -246,7 +246,9 @@ test('on a phone the list becomes cards and the catalog is full screen', async (
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
 
-  await page.getByTestId('open-catalog').click();
+  // On a phone the catalog button lives in the header's "more" menu (labelled entries).
+  await page.getByTestId('header-more-menu').click();
+  await page.getByTestId('more-open-catalog').click();
   const box = await page.getByTestId('catalog-search').boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true);
 });

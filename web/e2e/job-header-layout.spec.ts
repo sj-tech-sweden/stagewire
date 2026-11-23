@@ -10,8 +10,10 @@ test.beforeEach(async ({ request }) => {
 
 for (const width of [420, 700, 900, 1100]) {
   test(`job header keeps a readable title at ${width}px`, async ({ page, request }) => {
-    await page.setViewportSize({ width, height: 800 });
+    // Log in at the default size first: the login helper waits for the account button, which is
+    // hidden on phone-width screens.
     await login(page);
+    await page.setViewportSize({ width, height: 800 });
     const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
     const res = await request.post(`${API_BASE}/api/v1/jobs`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -32,8 +34,8 @@ for (const width of [420, 700, 900, 1100]) {
 // Phones: secondary actions live in one menu whose entries carry both an icon and a text label
 // (icon-only buttons were unclear and tooltips don't exist on touch).
 test('phone header moves secondary actions into a labelled menu', async ({ page, request }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
   await login(page);
+  await page.setViewportSize({ width: 390, height: 800 });
   const token = await page.evaluate(() => localStorage.getItem('sw_access_token'));
   const res = await request.post(`${API_BASE}/api/v1/jobs`, {
     headers: { Authorization: `Bearer ${token}` },
