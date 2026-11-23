@@ -601,6 +601,13 @@ export function chainStepsWithLock(channel, steps, devices) {
 // The channel's selected source and explicit patch points define its input route. Other cables
 // connected to the channel remain separate branches; a physical device does not imply port routing.
 export function channelFlowTree(channel, edges, devices, sourceLabel, steps = []) {
+  // A soft-patched channel can lose the hop edge that represents its dsp_source (e.g. a stale graph
+  // after a repatch). The chain editor already re-adds that hop with chainStepsWithLock; do the same
+  // here so the flow never jumps from the source straight to the mixer strip and skips the stagebox
+  // the channel is actually patched to. It is a no-op when the hop is already present.
+  if (channel?.attributes?.dsp_source?.device_id) {
+    steps = chainStepsWithLock(channel, steps, devices);
+  }
   const byId = new Map(devices.map((d) => [d.id, d]));
   const sourceId = channel.attributes?.source_device_id;
   const ownerMixer = mixerForChannel(channel, devices);
