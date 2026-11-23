@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.10.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.9.0...stagewire-v1.10.0) (2026-11-23)
+
+
+### Features
+
+* **web:** channel cards instead of a cramped table on tablets ([#162](https://github.com/sj-tech-sweden/stagewire/issues/162)) ([4f4e25b](https://github.com/sj-tech-sweden/stagewire/commit/4f4e25b98c469685796bb26fb47afb7fae95abbf))
+
+
+### Bug Fixes
+
+* **web:** bus signal flow order and Edit patch button ([#161](https://github.com/sj-tech-sweden/stagewire/issues/161)) ([2f79d54](https://github.com/sj-tech-sweden/stagewire/commit/2f79d545a18ec3d4bded3cda1e1111b8d4f466c3))
+
+
+### Other
+
+* **config:** migrate config .github/renovate.json ([#153](https://github.com/sj-tech-sweden/stagewire/issues/153)) ([eca056e](https://github.com/sj-tech-sweden/stagewire/commit/eca056e2820370d008e48b3b5b44e21ec170ab53))
+* **deps:** update astral-sh/setup-uv action to v10.4.0 ([#158](https://github.com/sj-tech-sweden/stagewire/issues/158)) ([c245d3c](https://github.com/sj-tech-sweden/stagewire/commit/c245d3c4633b286b4b09b673bad7494ddc11149d))
+* **deps:** update dependency dompurify to v3.5.0 ([#160](https://github.com/sj-tech-sweden/stagewire/issues/160)) ([638afdc](https://github.com/sj-tech-sweden/stagewire/commit/638afdc7dfc5fb66feb5339110762a1189473cd9))
+* **deps:** update dependency quasar to v2.35.6 ([#159](https://github.com/sj-tech-sweden/stagewire/issues/159)) ([55c9bde](https://github.com/sj-tech-sweden/stagewire/commit/55c9bde64b8fcdbdb4389bf68aa77b445010f21f))
+* **deps:** update dependency vue-i18n to v11.4.23 ([#154](https://github.com/sj-tech-sweden/stagewire/issues/154)) ([dfd6cf5](https://github.com/sj-tech-sweden/stagewire/commit/dfd6cf56475eac52388aed00d54446244a3b5717))
+* **deps:** update frontend dependencies ([#156](https://github.com/sj-tech-sweden/stagewire/issues/156)) ([88586a8](https://github.com/sj-tech-sweden/stagewire/commit/88586a8e19e9fb4f2ab9e49c562e55dc6c6aaceb))
+* **deps:** update postgres docker tag to v19 ([#157](https://github.com/sj-tech-sweden/stagewire/issues/157)) ([ff9d15f](https://github.com/sj-tech-sweden/stagewire/commit/ff9d15fddeea889686657bf34290d86c4526c46e))
+
 ## [1.9.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.8.0...stagewire-v1.9.0) (2026-11-18)
 
 
