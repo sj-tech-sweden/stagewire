@@ -755,6 +755,8 @@ test('a bus flow starts at the console/bus, shows the stagebox after it, and Edi
   // "Edit patch" used to emit into the void for buses: it must open the chain dialog.
   await page.getByTestId('flow-edit-chain').click();
   await expect(page.getByTestId('chain-save')).toBeVisible();
+  // The bus chain editor uses a bus-specific hint (the old one said "from the source to the console").
+  await expect(page.getByText('from the bus to the devices it feeds')).toBeVisible();
 });
 
 test('a bus soft-patched to multiple outputs shows them parallel, not daisy-chained', async ({

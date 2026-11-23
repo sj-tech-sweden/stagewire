@@ -1556,6 +1556,17 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   return [busNode];
 }
 
+// Steps for a bus's Edit-patch dialog. The first stored point is the hop feeding the bus input —
+// for an output chain the bus itself is the source, so that input hop is hidden in the editor while
+// remaining in the list (it is saved back with the rest, otherwise the bus would lose its input).
+export function busChainEditorSteps(bus, steps, edges) {
+  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
+  // The first stored point is the hop feeding the bus input. Hide it in the editor (the bus itself is
+  // the source) but keep its position and parent_index untouched — cleaned() saves every step back,
+  // so changing indices here would silently rewire the bus on Save.
+  return steps.map((s, i) => ({ ...s, hidden: hasRootHop && i === 0 }));
+}
+
 export const powerInletLabel = (inlet) =>
   POWER_INLETS.find((i) => i.value === (inlet || 'iec_c13'))?.label || inlet;
 

@@ -895,6 +895,7 @@ export default {
     addBus: "Lägg till buss",
     bulkAddBuses: "Lägg till flera bussar",
     busChain: "Patchkedja för {name}",
+    busChainHint: "Signalvägen i ordning, från bussen till enheterna den matar.",
     busMode: { mono: "Mono", stereo: "Stereo", lcr: "LCR" },
     busNotes: "Anteckningar",
     busTapPoint: "Tap-punkt",

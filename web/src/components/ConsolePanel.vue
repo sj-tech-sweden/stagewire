@@ -2605,6 +2605,8 @@
       :devices="graph.devices"
       :branching="true"
       :bus-channels="busChannelsFor(busChainNode?.mode)"
+      hint-key="console.busChainHint"
+      :source-label="busChainNode?.name || ''"
       @save="saveBusChain"
     />
 
@@ -2660,6 +2662,7 @@ import {
   busRunAt,
   busWidth,
   busFlowTree,
+  busChainEditorSteps,
   endpointLabel,
   endpointShortages,
   endpointSides,
@@ -3071,7 +3074,13 @@ const busChainNode = ref(null);
 const busChainInitial = ref([]);
 function openBusChain(bus) {
   busChainNode.value = bus;
-  busChainInitial.value = chainForm(bus, graph.edges, graph.devices);
+  // Hide the hop feeding the bus input: the bus is the source of its output chain. The step stays in
+  // the list so Save writes it back unchanged (see busChainEditorSteps).
+  busChainInitial.value = busChainEditorSteps(
+    bus,
+    chainForm(bus, graph.edges, graph.devices),
+    graph.edges,
+  );
   busChainOpen.value = true;
 }
 const busFlowOpen = ref(false);

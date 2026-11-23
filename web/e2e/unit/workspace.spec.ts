@@ -26,6 +26,7 @@ import {
   portsFromGroups,
   chainForm,
   busFlowTree,
+  busChainEditorSteps,
   stereoPairPlan,
   mixerSpecsOf,
   portUsage,
@@ -688,6 +689,24 @@ test('a bus flow keeps a real input device feeding the bus, fans outputs out in 
   );
   expect(mixerTree[0].label).toBe('GLD-80 · Main');
   expect(mixerTree[0].children.map((n) => n.label)).toEqual(['AR2412']);
+});
+
+test('a bus chain editor hides the input hop but keeps its data for Save', () => {
+  const edges = [
+    { attributes: { chain: 'main', first_point: { position: 0 } } },
+    { attributes: { chain: 'main', position: 1, parent_id: 'root' } },
+  ];
+  const steps = [
+    { device_id: 'box', parent_index: null },
+    { device_id: 'spk', parent_index: 0 },
+  ];
+  const editorSteps = busChainEditorSteps({ id: 'main', name: 'Main' }, steps, edges);
+  expect(editorSteps.map((s) => s.hidden)).toEqual([true, false]);
+  // Saving sends every step back unchanged: position and parent_index are not rewired.
+  expect(editorSteps[0].device_id).toBe('box');
+  expect(editorSteps[1]).toMatchObject({ device_id: 'spk', parent_index: 0 });
+  // Without a root hop nothing is hidden.
+  expect(busChainEditorSteps({ id: 'main', name: 'Main' }, steps, []).map((s) => s.hidden)).toEqual([false, false]);
 });
 
 test('a device signal flow includes each matching channel route without unrelated graph edges', () => {

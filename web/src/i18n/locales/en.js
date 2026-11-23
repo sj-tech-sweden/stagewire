@@ -893,6 +893,8 @@ export default {
     addBus: "Add bus",
     bulkAddBuses: "Bulk add buses",
     busChain: "Patch chain for {name}",
+    // A bus chain runs from the bus out to the gear it feeds; the hop feeding the bus in is hidden.
+    busChainHint: "The signal path in order, from the bus to the devices it feeds.",
     busMode: { mono: "Mono", stereo: "Stereo", lcr: "LCR" },
     busNotes: "Notes",
     busTapPoint: "Tap point",
