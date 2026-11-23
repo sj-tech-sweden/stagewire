@@ -78,7 +78,7 @@
                   />
                 </div>
                 <div class="col-12 text-caption text-grey-6">
-                  {{ t('workspace.softPatchLockedHint') }}
+                  {{ t(lockedHintKey) }}
                 </div>
               </template>
               <template v-else>
@@ -296,6 +296,8 @@ const props = defineProps({
   busChannels: { type: Array, default: () => [] },
   // i18n key for the hint line; buses explain that the path runs from the bus to its outputs.
   hintKey: { type: String, default: 'workspace.chainHint' },
+  // i18n key for the note under a locked soft-patched hop; buses invert the input-channel wording.
+  lockedHintKey: { type: String, default: 'workspace.softPatchLockedHint' },
   // Name of the source node for chains whose first step is hidden (a bus feeds its own chain).
   sourceLabel: { type: String, default: '' },
   // When true, locked steps keep their place instead of being moved to the end on Save. Bus chains

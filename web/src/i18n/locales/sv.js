@@ -896,6 +896,8 @@ export default {
     bulkAddBuses: "Lägg till flera bussar",
     busChain: "Patchkedja för {name}",
     busChainHint: "Signalvägen i ordning, från bussen till enheterna den matar.",
+    busSoftPatchLockedHint:
+      "Den här enheten är där bussen lämnar. Uttaget sätts i Softpatch-fliken och är låst här så att utgången behålls. Lägg till fler enheter efter den nedan.",
     flowBusSource: "Buss",
     busMode: { mono: "Mono", stereo: "Stereo", lcr: "LCR" },
     busNotes: "Anteckningar",

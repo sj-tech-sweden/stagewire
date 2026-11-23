@@ -269,7 +269,13 @@ function nodeStyle(n) {
 }
 .dmx-flow-edge-label {
   font-size: 10px;
-  fill: #5f6368;
+  fill: var(--ec-flow-edge-label, #37474f);
+  /* Paint a thick halo behind the glyphs so port labels stay legible where the arrow passes over a
+     node box or another line. paint-order puts the halo under the fill rather than over it. */
+  paint-order: stroke fill;
+  stroke: var(--ec-flow-edge-halo, #f7fcf7);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 .dmx-flow-add {
   position: absolute;

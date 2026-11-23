@@ -2606,6 +2606,7 @@
       :branching="true"
       :bus-channels="busChannelsFor(busChainNode?.mode)"
       hint-key="console.busChainHint"
+      locked-hint-key="console.busSoftPatchLockedHint"
       :source-label="busChainNode?.name || ''"
       :lock-in-place="true"
       @open-soft-patch="openBusSoftPatch"

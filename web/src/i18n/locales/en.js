@@ -895,6 +895,9 @@ export default {
     busChain: "Patch chain for {name}",
     // A bus chain runs from the bus out to the gear it feeds; the hop feeding the bus in is hidden.
     busChainHint: "The signal path in order, from the bus to the devices it feeds.",
+    // Locked bus output hop: it is patched in the Soft patch tab, and manual steps follow it.
+    busSoftPatchLockedHint:
+      "This device is where the bus leaves from. Its socket is set in the Soft patch tab; it is locked here so the output stays intact. Add further devices after it below.",
     flowBusSource: "Bus",
     busMode: { mono: "Mono", stereo: "Stereo", lcr: "LCR" },
     busNotes: "Notes",
