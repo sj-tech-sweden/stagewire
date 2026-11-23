@@ -41,15 +41,6 @@
             stroke-width="2"
             :marker-end="`url(#${arrowId})`"
           />
-          <text
-            v-if="e.label"
-            :x="(e.x1 + e.x2) / 2"
-            :y="(e.y1 + e.y2) / 2 - 5"
-            class="dmx-flow-edge-label"
-            text-anchor="middle"
-          >
-            {{ truncate(e.label, 16) }}
-          </text>
         </g>
       </svg>
       <div
@@ -101,6 +92,29 @@
           @click.stop="$emit('delete', n.node)"
         />
       </div>
+      <!-- Edge labels live in their own SVG rendered after the node boxes, so a label is never
+           painted over by a node. The wide column gap (colW - nodeW) gives each label room to sit
+           between the boxes it connects. -->
+      <svg
+        :width="layout.width"
+        :height="layout.height"
+        class="dmx-flow-labels"
+      >
+        <template
+          v-for="(e, i) in layout.edges"
+          :key="`l-${i}`"
+        >
+          <text
+            v-if="e.label"
+            :x="(e.x1 + e.x2) / 2"
+            :y="(e.y1 + e.y2) / 2 - 5"
+            class="dmx-flow-edge-label"
+            text-anchor="middle"
+          >
+            {{ truncate(e.label, 16) }}
+          </text>
+        </template>
+      </svg>
     </div>
   </div>
 </template>
@@ -122,7 +136,10 @@ defineEmits(['edit', 'add-child', 'delete', 'edit-device']);
 
 const { t } = useI18n();
 
-const colW = 200;
+// The horizontal step: nodeW (168) leaves a 72px gap for the port/cable label on the arrow. Labels
+// render on a layer above the nodes with a halo, so they stay readable without a huge gap, and 3
+// devices still fit inside the 900px dialog without a scrollbar.
+const colW = 240;
 const rowH = 80;
 const nodeW = 168;
 const nodeH = 54;
@@ -147,6 +164,7 @@ function truncate(value, max = 18) {
 function subLabel(node) {
   const bits = [];
   if (node.kind === 'fixture') bits.push(t('dmxChain.kindFixture'));
+  else if (node.kind === 'bus') bits.push(t('console.flowBusSource'));
   else if (node.kind === 'source') bits.push(t('workspace.flowSource'));
   else if (node.kind === 'channel') bits.push(t('workspace.channel'));
   else bits.push(t('dmxChain.kindDevice'));
@@ -233,10 +251,15 @@ function nodeStyle(n) {
 .dmx-flow {
   position: relative;
 }
-.dmx-flow-arrows {
+.dmx-flow-arrows,
+.dmx-flow-labels {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+.dmx-flow-labels {
+  /* Rendered after the node divs so edge labels are never covered by a node box. */
+  z-index: 2;
 }
 .dmx-flow-node {
   position: absolute;
@@ -267,8 +290,14 @@ function nodeStyle(n) {
   text-overflow: ellipsis;
 }
 .dmx-flow-edge-label {
-  font-size: 10px;
-  fill: #5f6368;
+  font-size: 11px;
+  fill: var(--ec-flow-edge-label, #37474f);
+  /* Paint a thick halo behind the glyphs so port labels stay legible where the arrow passes over a
+     node box or another line. paint-order puts the halo under the fill rather than over it. */
+  paint-order: stroke fill;
+  stroke: var(--ec-flow-edge-halo, #f7fcf7);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 .dmx-flow-add {
   position: absolute;

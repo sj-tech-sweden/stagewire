@@ -1511,6 +1511,110 @@ export function flowTree(sourceLabel, steps, devices, { separateRoots = false } 
   return [{ id: 'source', label: sourceLabel, kind: 'source', in_port: '', out_port: '', connector: '', children: roots }];
 }
 
+// Device ids a bus is soft-patched out to (the refs of its out_endpoints). Those hops are owned by
+// the Soft patch tab, so the chain editor locks them and the flow shows them as outputs of the bus.
+export function busSoftPatchDeviceIds(bus) {
+  const ids = new Set();
+  // The console summary exposes out_endpoints at the top level; the graph node keeps them in
+  // attributes. Accept both so the helper works whichever object the caller has.
+  const endpoints = bus?.out_endpoints || bus?.attributes?.out_endpoints || [];
+  for (const ep of endpoints) {
+    for (const ref of ep.refs || []) {
+      if (ref.device_id != null) ids.add(String(ref.device_id));
+    }
+  }
+  return ids;
+}
+
+// The signal-flow tree of a bus. The bus is always the source; nothing "feeds into" it. Everything
+// else is an output: soft-patched outputs (out_endpoints) hang straight off the bus in parallel, and
+// any device the user added further down the chain comes last, following the output it branches from.
+// A console root hop (the list's mixer, dropped in the editor too) is removed — console and bus are
+// one strip. Manual hops stored at position 0 are NOT a feed: they sort after the soft-patch outputs.
+export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
+  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
+  const rootDevice = hasRootHop && steps.length
+    ? devices.find((d) => d.id === steps[0].device_id)
+    : null;
+  const softIds = busSoftPatchDeviceIds(bus);
+  // Drop a console root only when it is NOT itself the soft-patch output. When a bus is patched to
+  // the console's own sockets (e.g. Out 2 -> GLD-80 ports 3-4), the backend stores just that one
+  // mixer root point and it is the output — dropping it would hide the patch from the flow.
+  const dropRoot = !!(rootDevice && isMixer(rootDevice) && !softIds.has(String(rootDevice.id)));
+
+  const base = (dropRoot ? steps.slice(1) : steps).map((s) => ({ ...s }));
+  if (dropRoot) {
+    for (const s of base) {
+      s.parent_index = s.parent_index == null || s.parent_index === 0 ? null : s.parent_index - 1;
+    }
+  }
+  // Partition into soft-patch outputs and manual steps. Soft outputs are parallel children of the
+  // bus (parent null). Manual steps come last: one patched forward from an output follows that output,
+  // and a manual hop stored at position 0 (which soft-patch outputs hang off in the stored chain) is
+  // chained after the last output rather than shown as a feed into the bus.
+  const soft = base.filter((s) => softIds.has(String(s.device_id)));
+  const manual = base.filter((s) => !softIds.has(String(s.device_id)));
+  const ordered = [...soft, ...manual];
+  const newIndex = new Map(ordered.map((s, i) => [s, i]));
+  const lastSoftIndex = soft.length ? newIndex.get(soft[soft.length - 1]) : null;
+  const softLabel = busPatchLabel(bus);
+  for (const s of ordered) {
+    if (softIds.has(String(s.device_id))) {
+      s.parent_index = null;
+      if (!s.patch_label && softLabel) s.patch_label = softLabel; // show the sockets, e.g. "Out 3–4"
+      continue;
+    }
+    const oldParent = s.parent_index == null ? null : base[s.parent_index];
+    s.parent_index = oldParent && newIndex.has(oldParent) ? newIndex.get(oldParent) : lastSoftIndex;
+  }
+  const tree = flowTree(bus.name, ordered, devices, { separateRoots: true });
+  // Make the source node read "Bus" rather than the generic "Source".
+  if (tree.length && tree[0].kind === 'source') tree[0].kind = 'bus';
+  return tree;
+}
+
+// A readable label for the sockets a bus is soft-patched out to, e.g. "Out 3–4 / Out 2 (L)". Used on
+// the locked hop in the chain editor, where the stored point itself has no patch_label.
+export function busPatchLabel(bus) {
+  const endpoints = bus?.out_endpoints || bus?.attributes?.out_endpoints || [];
+  const labels = endpoints.map((e) => {
+    const run = socketRunText((e.refs || []).map((r) => r.socket));
+    const side = e.side ? ` (${String(e.side).toUpperCase()})` : '';
+    return run ? `Out ${run}${side}` : '';
+  }).filter(Boolean);
+  return [...new Set(labels)].join(' · ');
+}
+
+// Steps for a bus's Edit-patch dialog. Soft-patched output hops (out_endpoints) are locked — they are
+// edited in the Soft patch tab, like a channel's locked soft-patched device. Other hops (a manual
+// device such as a speaker further down the chain, or a manual hop stored at position 0) stay visible
+// and editable. Only a console root hop — the list's mixer feeding the bus, which is not itself a
+// soft-patch output — is hidden, because the bus is the source. Steps keep their position and
+// parent_index untouched: cleaned() saves every step back, so reindexing here would rewire the bus.
+export function busChainEditorSteps(bus, steps, edges, devices = [], isMixer = () => false) {
+  const hasRootHop = edges.some((e) => e.attributes?.chain === bus.id && e.attributes?.first_point);
+  const softIds = busSoftPatchDeviceIds(bus);
+  const rootDevice = hasRootHop && steps.length
+    ? devices.find((d) => d.id === steps[0].device_id)
+    : null;
+  return steps.map((s, i) => {
+    // Only hide a console/mixer root hop (console and bus are one strip). A manual hop at position 0
+    // (e.g. a speaker) is a real chain step and stays visible.
+    const isConsoleRoot = !!(rootDevice && i === 0 && isMixer(rootDevice) && !softIds.has(String(s.device_id)));
+    // A soft-patched hop's sockets live in out_endpoints, not in the stored point's patch_label. Give
+    // the locked row a readable "Out 3–4" label so the editor shows which ports the bus leaves from.
+    const patchLabel = softIds.has(String(s.device_id)) && !s.patch_label
+      ? busPatchLabel(bus) || s.patch_label
+      : s.patch_label;
+    return {
+      ...s,
+      patch_label: patchLabel,
+      hidden: isConsoleRoot,
+      locked: softIds.has(String(s.device_id)),
+    };
+  });
+}
+
 export const powerInletLabel = (inlet) =>
   POWER_INLETS.find((i) => i.value === (inlet || 'iec_c13'))?.label || inlet;
 

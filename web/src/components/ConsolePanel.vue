@@ -2594,6 +2594,7 @@
       v-model="busFlowOpen"
       :title="`${t('workspace.showFlow')}: ${busChainNode?.name || ''}`"
       :steps="busFlowSteps"
+      @edit="editFromBusFlow"
     />
     <ChainDialog
       v-model="busChainOpen"
@@ -2604,6 +2605,11 @@
       :devices="graph.devices"
       :branching="true"
       :bus-channels="busChannelsFor(busChainNode?.mode)"
+      hint-key="console.busChainHint"
+      locked-hint-key="console.busSoftPatchLockedHint"
+      :source-label="busChainNode?.name || ''"
+      :lock-in-place="true"
+      @open-soft-patch="openBusSoftPatch"
       @save="saveBusChain"
     />
 
@@ -2658,6 +2664,8 @@ import {
   fieldOfMode,
   busRunAt,
   busWidth,
+  busFlowTree,
+  busChainEditorSteps,
   endpointLabel,
   endpointShortages,
   endpointSides,
@@ -3069,15 +3077,41 @@ const busChainNode = ref(null);
 const busChainInitial = ref([]);
 function openBusChain(bus) {
   busChainNode.value = bus;
-  busChainInitial.value = chainForm(bus, graph.edges, graph.devices);
+  // Lock soft-patched outputs, hide a console root hop; manual hops stay visible/editable. Steps keep
+  // their position so Save writes them back unchanged (see busChainEditorSteps).
+  busChainInitial.value = busChainEditorSteps(
+    bus,
+    chainForm(bus, graph.edges, graph.devices),
+    graph.edges,
+    graph.devices,
+    isMixerDevice,
+  );
   busChainOpen.value = true;
+}
+// A locked soft-patched hop sends the user to the Patch tab, where the socket is actually changed.
+function openBusSoftPatch() {
+  busChainOpen.value = false;
+  requestTab("patch");
 }
 const busFlowOpen = ref(false);
 const busFlowSteps = ref([]);
 function openBusFlow(bus) {
   busChainNode.value = bus;
-  busFlowSteps.value = flowTree(bus.name, chainForm(bus, graph.edges, graph.devices), graph.devices);
+  // The bus is the source; every patched output hangs off it, and steps patched forward from an
+  // output follow it. busFlowTree drops a console root hop (console and bus are one strip).
+  busFlowSteps.value = busFlowTree(
+    bus,
+    chainForm(bus, graph.edges, graph.devices),
+    graph.devices,
+    graph.edges,
+    isMixerDevice,
+  );
   busFlowOpen.value = true;
+}
+// "Edit patch" in the flow dialog opens the chain editor for the same bus.
+function editFromBusFlow() {
+  busFlowOpen.value = false;
+  openBusChain(busChainNode.value);
 }
 async function saveBusChain(steps) {
   try {

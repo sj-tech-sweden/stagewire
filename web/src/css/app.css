@@ -67,6 +67,9 @@ body {
   --ec-drawer-bg: var(--ec-surface-800);
   --ec-drawer-text: #b8ccc4;
   --ec-text: var(--ec-text-primary);
+  /* Signal-flow edge labels: light text on a dark halo so they stay legible over arrows and nodes. */
+  --ec-flow-edge-label: #e9f1ee;
+  --ec-flow-edge-halo: #0c1114;
   background: var(--ec-bg);
   color: var(--ec-text);
 }
@@ -81,6 +84,8 @@ body.body--light {
   --ec-drawer-bg: #f6faf6;
   --ec-drawer-text: #2f3a3a;
   --ec-text: #111827;
+  --ec-flow-edge-label: #37474f;
+  --ec-flow-edge-halo: #f7fcf7;
 }
 
 body {
