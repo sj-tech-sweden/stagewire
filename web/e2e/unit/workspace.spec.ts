@@ -27,6 +27,7 @@ import {
   chainForm,
   busFlowTree,
   busChainEditorSteps,
+  busPatchLabel,
   stereoPairPlan,
   mixerSpecsOf,
   portUsage,
@@ -735,6 +736,33 @@ test('a bus chain editor hides only a console feed, locks soft-patch outputs, an
   const out1Editor = busChainEditorSteps(out1Bus, manualRootSteps, edges, devices, isMixer);
   expect(out1Editor.map((s) => s.hidden)).toEqual([false, false]);
   expect(out1Editor.map((s) => s.locked)).toEqual([false, true]);
+});
+
+test('a bus patched to the console own ports keeps the console in the flow and labels the sockets', () => {
+  const devices = [{ id: 'gld', name: 'GLD-80', kind: 'mixer' }];
+  const isMixer = (d) => d.kind === 'mixer';
+  // Out 2 -> GLD-80 sockets 3-4 (XLR) and socket 2 (Dante, L). The backend stores ONE root point that
+  // is both the console hop and the soft-patch output; it must not be dropped from the flow.
+  const bus = {
+    id: 'out2', name: 'Out 2',
+    out_endpoints: [
+      { refs: [{ device_id: 'gld', port_id: 'out-xlr3', socket: 3 }, { device_id: 'gld', port_id: 'out-xlr3', socket: 4 }] },
+      { refs: [{ device_id: 'gld', port_id: 'out-dante', socket: 2 }], side: 'L' },
+    ],
+  };
+  const edges = [{ attributes: { chain: 'out2', first_point: { position: 0 } } }];
+  const steps = [{ device_id: 'gld', parent_index: null }];
+  const tree = busFlowTree(bus, steps, devices, edges, isMixer);
+  expect(tree[0]).toMatchObject({ label: 'Out 2', kind: 'bus' });
+  // The console output is kept as a child of the bus, not dropped, and shows the patched sockets.
+  expect(tree[0].children.map((n) => n.label)).toEqual(['GLD-80']);
+  expect(tree[0].children[0].patch_label).toBe('Out 3–4 · Out 2 (L)');
+
+  // The editor keeps it visible, locked, and shows the sockets.
+  const editor = busChainEditorSteps(bus, steps, edges, devices, isMixer);
+  expect(editor[0]).toMatchObject({ hidden: false, locked: true });
+  expect(editor[0].patch_label).toBe('Out 3–4 · Out 2 (L)');
+  expect(busPatchLabel(bus)).toBe('Out 3–4 · Out 2 (L)');
 });
 
 test('a device signal flow includes each matching channel route without unrelated graph edges', () => {

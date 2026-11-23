@@ -1536,8 +1536,11 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   const rootDevice = hasRootHop && steps.length
     ? devices.find((d) => d.id === steps[0].device_id)
     : null;
-  const dropRoot = !!(rootDevice && isMixer(rootDevice));
   const softIds = busSoftPatchDeviceIds(bus);
+  // Drop a console root only when it is NOT itself the soft-patch output. When a bus is patched to
+  // the console's own sockets (e.g. Out 2 -> GLD-80 ports 3-4), the backend stores just that one
+  // mixer root point and it is the output — dropping it would hide the patch from the flow.
+  const dropRoot = !!(rootDevice && isMixer(rootDevice) && !softIds.has(String(rootDevice.id)));
 
   const base = (dropRoot ? steps.slice(1) : steps).map((s) => ({ ...s }));
   if (dropRoot) {
@@ -1554,8 +1557,13 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   const ordered = [...soft, ...manual];
   const newIndex = new Map(ordered.map((s, i) => [s, i]));
   const lastSoftIndex = soft.length ? newIndex.get(soft[soft.length - 1]) : null;
+  const softLabel = busPatchLabel(bus);
   for (const s of ordered) {
-    if (softIds.has(String(s.device_id))) { s.parent_index = null; continue; }
+    if (softIds.has(String(s.device_id))) {
+      s.parent_index = null;
+      if (!s.patch_label && softLabel) s.patch_label = softLabel; // show the sockets, e.g. "Out 3–4"
+      continue;
+    }
     const oldParent = s.parent_index == null ? null : base[s.parent_index];
     s.parent_index = oldParent && newIndex.has(oldParent) ? newIndex.get(oldParent) : lastSoftIndex;
   }
@@ -1563,6 +1571,18 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   // Make the source node read "Bus" rather than the generic "Source".
   if (tree.length && tree[0].kind === 'source') tree[0].kind = 'bus';
   return tree;
+}
+
+// A readable label for the sockets a bus is soft-patched out to, e.g. "Out 3–4 / Out 2 (L)". Used on
+// the locked hop in the chain editor, where the stored point itself has no patch_label.
+export function busPatchLabel(bus) {
+  const endpoints = bus?.out_endpoints || bus?.attributes?.out_endpoints || [];
+  const labels = endpoints.map((e) => {
+    const run = socketRunText((e.refs || []).map((r) => r.socket));
+    const side = e.side ? ` (${String(e.side).toUpperCase()})` : '';
+    return run ? `Out ${run}${side}` : '';
+  }).filter(Boolean);
+  return [...new Set(labels)].join(' · ');
 }
 
 // Steps for a bus's Edit-patch dialog. Soft-patched output hops (out_endpoints) are locked — they are
@@ -1581,8 +1601,14 @@ export function busChainEditorSteps(bus, steps, edges, devices = [], isMixer = (
     // Only hide a console/mixer root hop (console and bus are one strip). A manual hop at position 0
     // (e.g. a speaker) is a real chain step and stays visible.
     const isConsoleRoot = !!(rootDevice && i === 0 && isMixer(rootDevice) && !softIds.has(String(s.device_id)));
+    // A soft-patched hop's sockets live in out_endpoints, not in the stored point's patch_label. Give
+    // the locked row a readable "Out 3–4" label so the editor shows which ports the bus leaves from.
+    const patchLabel = softIds.has(String(s.device_id)) && !s.patch_label
+      ? busPatchLabel(bus) || s.patch_label
+      : s.patch_label;
     return {
       ...s,
+      patch_label: patchLabel,
       hidden: isConsoleRoot,
       locked: softIds.has(String(s.device_id)),
     };
