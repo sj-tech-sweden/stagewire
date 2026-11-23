@@ -2204,10 +2204,11 @@ test('on a tablet the channel list is cards in two columns, not a sideways-scrol
   await expect(page.getByTestId('channel-cards')).toBeVisible();
   await expect(page.getByTestId('channel-table')).toHaveCount(0);
   const card = page.getByTestId('channel-card').first();
-  // Two columns on a tablet: header on the left, details on the right and already open.
+  // Two columns on a tablet: header on the left, details on the right. Details stay collapsed so a
+  // long channel list doesn't become a very tall page of fully expanded cards.
   await expect(card.locator('.col-sm-5')).toHaveCount(1);
   await expect(card.locator('.col-sm-7')).toHaveCount(1);
-  await expect(card.getByTestId('channel-card-details')).toHaveClass(/q-expansion-item--expanded/);
+  await expect(card.getByTestId('channel-card-details')).toHaveClass(/q-expansion-item--collapsed/);
 
   // At md and up the table comes back.
   await page.setViewportSize({ width: 1280, height: 900 });

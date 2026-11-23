@@ -285,7 +285,6 @@
                     dense
                     :label="t('workspace.details')"
                     header-class="text-caption"
-                    :default-opened="$q.screen.gt.xs"
                     data-testid="channel-card-details"
                   >
                     <div class="q-pa-sm q-gutter-sm">
