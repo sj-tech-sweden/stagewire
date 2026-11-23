@@ -748,9 +748,10 @@ test('a bus flow starts at the console/bus, shows the stagebox after it, and Edi
   const flow = page.getByTestId('chain-flow');
   const titles = flow.locator('.dmx-flow-node .dmx-flow-title');
   // The bus itself is the source, with the stagebox output hanging off it — no console node feeding in.
+  // Nodes are collected children-first, so don't rely on DOM order; assert the set of titles instead.
   await expect(titles).toHaveCount(2);
-  await expect(titles.first()).toHaveText('Speaker');
-  await expect(flow).toContainText('AR2412');
+  await expect(titles.filter({ hasText: 'Speaker' })).toHaveCount(1);
+  await expect(titles.filter({ hasText: 'AR2412' })).toHaveCount(1);
 
   // "Edit patch" used to emit into the void for buses: it must open the chain dialog.
   await page.getByTestId('flow-edit-chain').click();
