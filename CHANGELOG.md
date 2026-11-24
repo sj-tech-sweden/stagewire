@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.10.0...stagewire-v1.10.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **graph:** sync chain hops to native gear with no legacy ref ([#164](https://github.com/sj-tech-sweden/stagewire/issues/164)) ([a9665e4](https://github.com/sj-tech-sweden/stagewire/commit/a9665e4794521391d3f76607b642a9d59b84a040))
+* **web:** responsive job header on tablet and phone widths ([#166](https://github.com/sj-tech-sweden/stagewire/issues/166)) ([d9ec6ce](https://github.com/sj-tech-sweden/stagewire/commit/d9ec6ce5b55081c3ab6f13b26d7b431f43ac34a1))
+* **web:** show the soft-patched stagebox in the flow even if its chain edge is missing ([#163](https://github.com/sj-tech-sweden/stagewire/issues/163)) ([b816383](https://github.com/sj-tech-sweden/stagewire/commit/b816383f58e538f5f28a1c1e19a23bf7ff023f13))
+
+
+### Other
+
+* **deps:** update frontend dependencies ([#167](https://github.com/sj-tech-sweden/stagewire/issues/167)) ([92bd3f4](https://github.com/sj-tech-sweden/stagewire/commit/92bd3f47a6dfbc5d664b3722946779f0cb40c46f))
+
 ## [1.10.0](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.9.0...stagewire-v1.10.0) (2026-11-23)
 
 
