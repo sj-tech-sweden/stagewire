@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { getApiBaseUrl } from '../utils/runtime-config'
 import { useAuthStore } from '../stores/auth'
+import { isShareViewLocation } from '../utils/shareView'
 
 const baseURL = getApiBaseUrl() + '/api/v1'
 
@@ -50,6 +51,9 @@ function redirectToLogin() {
   const hash = window.location.hash || ''
   // Avoid bouncing if we are already on an auth screen.
   if (hash.startsWith('#/login') || hash.startsWith('#/setup')) return
+  // The crew share view needs no session; a failed background refresh of a stale user token
+  // must not hijack it (the caller has already cleared the stale session).
+  if (isShareViewLocation(window.location)) return
   const currentPath = window.location.pathname + window.location.search + hash
   window.location.assign(`/#/login?reason=expired&redirect=${encodeURIComponent(currentPath)}`)
 }
