@@ -6,6 +6,7 @@ import {
   createWebHistory,
 } from 'vue-router';
 import { api } from '@/boot/api';
+import { isShareViewPath } from '@/utils/shareView';
 import routes from './routes';
 
 export default route(function (/* ctx */) {
@@ -26,7 +27,7 @@ export default route(function (/* ctx */) {
     // The read-only crew view is reached by a share token in the URL, never by a user session,
     // so it must pass the guard without a login.
     const publicRoutes = ['/login', '/setup']
-    const isPublicShareView = to.path.startsWith('/jobs/') && to.path.endsWith('/view')
+    const isPublicShareView = isShareViewPath(to.path)
 
     if (publicRoutes.includes(to.path) || isPublicShareView) {
       return true

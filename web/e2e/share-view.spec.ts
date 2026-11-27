@@ -794,3 +794,26 @@ test('the crew view has read-only sound, lights and video sheets that update liv
   // read-only: no editing controls
   await expect(page.getByTestId('crew-lights').getByRole('button')).toHaveCount(0);
 });
+
+test('a stale user session in the browser does not bounce the crew view to login', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const jobId = (await post(request, headers, '/jobs', { title: `Share E2E ${Date.now()}` })).id;
+  const share = await request.post(`${API_BASE}/api/v1/jobs/${jobId}/share`, { headers });
+  const { token } = await share.json();
+
+  // Leave an expired access token behind and drop the refresh cookie, as on a device whose
+  // session lapsed. The startup refresh then fails; that used to redirect to /login once.
+  await page.evaluate(() => {
+    const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '');
+    localStorage.setItem('sw_access_token', `${b64({ alg: 'none' })}.${b64({ exp: 1 })}.x`);
+  });
+  await page.context().clearCookies();
+
+  await page.goto(`/jobs/${jobId}/view?token=${token}`);
+  await expect(page.getByTestId('share-device-list')).toBeVisible();
+  await expect(page).not.toHaveURL(/login/);
+});
