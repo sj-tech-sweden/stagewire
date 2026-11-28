@@ -18,7 +18,7 @@ from app.domains.audio.console import (
     network_ports,
 )
 from app.domains.audio.exports import get_exporter, list_exporters
-from app.domains.audio.models import ProductionJob
+from app.domains.audio.models import ProductionJob, StockwireRequirementLink
 from app.domains.audio.ws import publish_job_event
 from app.domains.audio.wwb import match_wireless_rows, parse_wwb_show_file
 from app.domains.auth.deps import get_current_user
@@ -928,7 +928,7 @@ async def request_stockwire_booking(
     await db.refresh(device)
     await publish_job_event(job_id, "graph.device.upsert", _device_payload(device))
     try:
-        await sw.add_requirement(
+        created = await sw.add_requirement(
             job.stockwire_job_id,
             {
                 "product_id": device.stockwire_product_id,
@@ -939,6 +939,34 @@ async def request_stockwire_booking(
         )
         device.stockwire_request_status = "requested"
         device.stockwire_booked = True
+        # Record where this rental requirement came from. The product-level sync must not
+        # reconcile it: this is a one-off request to the rental company, not a mirror of a
+        # patch slot, so deleting the gear in Stagewire does not cancel the request.
+        link_key = f"request:{device_id}"
+        existing_link = (
+            (
+                await db.execute(
+                    select(StockwireRequirementLink).where(
+                        StockwireRequirementLink.job_id == job_id,
+                        StockwireRequirementLink.item_key == link_key,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing_link is None:
+            db.add(
+                StockwireRequirementLink(
+                    job_id=job_id,
+                    item_key=link_key,
+                    product_id=str(device.stockwire_product_id),
+                    product_name=device.stockwire_product_name or device.name,
+                    rental_requirement_id=int(created["id"]),
+                    quantity=1,
+                    source="request",
+                )
+            )
     except Exception:  # noqa: BLE001
         device.stockwire_request_status = "failed"
     await db.commit()
