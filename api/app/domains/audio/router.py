@@ -1253,7 +1253,9 @@ async def sync_job_to_stockwire(
 
     One requirement per product, with the total quantity across all slots. Adds new
     products, updates changed quantities, removes products no longer used. Only
-    requirements this sync created are touched.
+    requirements this sync created (``source='sync'`` links) are touched: a manual
+    rental requirement has no link, and an explicit "request to add" has a
+    ``source='request'`` link that is recorded but never reconciled here.
     """
     cfg = await load_integration_config(db)
     if not cfg.get("api_key"):
@@ -1296,7 +1298,12 @@ async def sync_job_to_stockwire(
     errors: list[str] = []
 
     # Remove products that are gone (or whose link was made by an older per-slot sync).
+    # Only sync-owned links may be reconciled: a link created by the explicit "request to
+    # add" flow is a standing request to the rental company, not a mirror of the plot,
+    # and a requirement with no link belongs to a human in the rental job.
     for key, link in list(links_by_key.items()):
+        if link.source != "sync":
+            continue
         pid = int(link.product_id)
         if pid in desired and key == _product_key(pid):
             continue
@@ -1412,6 +1419,7 @@ async def sync_job_to_stockwire(
             product_name=label,
             rental_requirement_id=int(created["id"]),
             quantity=want["quantity"],
+            source="sync",
         )
         db.add(new_link)
         await db.flush()

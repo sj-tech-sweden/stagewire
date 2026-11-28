@@ -63,9 +63,20 @@ class ProductionJob(Base):
 
 
 class StockwireRequirementLink(Base):
-    """Maps one product in a Stagewire job to the stockwire-rental requirement for it.
+    """Maps a Stagewire-created rental requirement back to the thing that created it.
 
-    One row per product: ``quantity`` is the number of patch slots using it.
+    ``source`` is the provenance the sync uses to decide what it may delete:
+
+    * ``sync`` — a product-level requirement created by ``sync_job_to_stockwire``.
+      These are the only requirements the sync is allowed to remove, and only
+      when the Stagewire gear behind them is gone.
+    * ``request`` — a requirement created by the explicit "request to add" flow.
+      It is recorded so it is never mistaken for sync-owned, but it is a request
+      to the rental company, not a mirror of the plot, so the sync leaves it be.
+
+    Requirements a human added in the rental job have no link row at all and are
+    therefore never touched by either path. Never delete a requirement by product
+    match: two people can need the same product for different reasons.
     """
 
     __tablename__ = "stockwire_requirement_links"
@@ -83,6 +94,9 @@ class StockwireRequirementLink(Base):
     product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rental_requirement_id: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="sync", server_default="sync"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now()
     )
