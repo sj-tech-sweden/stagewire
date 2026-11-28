@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.10.2](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.10.1...stagewire-v1.10.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **web:** don't redirect the crew share view to login on a stale session ([#171](https://github.com/sj-tech-sweden/stagewire/issues/171)) ([f795d17](https://github.com/sj-tech-sweden/stagewire/commit/f795d172ee43f10730040451d170328cf37cd93e))
+* **web:** wire bus devices one per soft-patch output and allow manual override ([#174](https://github.com/sj-tech-sweden/stagewire/issues/174)) ([7eb6e32](https://github.com/sj-tech-sweden/stagewire/commit/7eb6e3235fa337e726e5edfbc9905b7b33983ea6))
+
+
+### Other
+
+* **deps:** update dependency eslint to v10.16.0 ([#172](https://github.com/sj-tech-sweden/stagewire/issues/172)) ([6e7b338](https://github.com/sj-tech-sweden/stagewire/commit/6e7b338d13b18aec6c673f3ca284f4ff4c97f482))
+* **deps:** update dependency vue-i18n to v11.4.24 ([#168](https://github.com/sj-tech-sweden/stagewire/issues/168)) ([739990c](https://github.com/sj-tech-sweden/stagewire/commit/739990ce01396761018e1a02287e2263f9b78534))
+* **deps:** update frontend dependencies ([#170](https://github.com/sj-tech-sweden/stagewire/issues/170)) ([100ceb0](https://github.com/sj-tech-sweden/stagewire/commit/100ceb0efdf085e00f0e901124fc74aab75775a7))
+
 ## [1.10.1](https://github.com/sj-tech-sweden/stagewire/compare/stagewire-v1.10.0...stagewire-v1.10.1) (2026-11-24)
 
 
