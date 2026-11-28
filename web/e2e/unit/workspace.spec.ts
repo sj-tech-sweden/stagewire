@@ -699,6 +699,42 @@ test('a bus flow puts the bus first, soft-patch outputs next, and manual devices
   expect(mixerTree[0].children.map((n) => n.label)).toEqual(['AR2412']);
 });
 
+test('a bus flow spreads parentless devices one per soft-patch output', () => {
+  const devices = [
+    { id: 'stage', name: 'AR84-stage' },
+    { id: 'zxa', name: 'ZXA1' },
+  ];
+  // Both soft-patch hooks are on the same stagebox (Out 1 and Out 2), as in a real AR84 patch.
+  const bus = {
+    id: 'choir',
+    name: 'Choir',
+    out_endpoints: [
+      { refs: [{ device_id: 'stage', socket: 1 }] },
+      { refs: [{ device_id: 'stage', socket: 2 }] },
+    ],
+  };
+  const edges = [
+    { attributes: { chain: 'choir', first_point: { position: 0 } } },
+    { attributes: { chain: 'choir', position: 1 } },
+    { attributes: { chain: 'choir', position: 2 } },
+    { attributes: { chain: 'choir', position: 3 } },
+  ];
+  // Two manual devices with an empty "Från steg", followed by the two locked soft-patch steps.
+  const steps = [
+    { device_id: 'zxa', parent_index: null },
+    { device_id: 'zxa', parent_index: null },
+    { device_id: 'stage', parent_index: null },
+    { device_id: 'stage', parent_index: null },
+  ];
+  const tree = busFlowTree(bus, steps, devices, edges);
+  expect(tree).toHaveLength(1);
+  expect(tree[0].label).toBe('Choir');
+  const outputs = tree[0].children;
+  expect(outputs.map((n) => n.label)).toEqual(['AR84-stage', 'AR84-stage']);
+  // Each output feeds exactly one ZXA1; both devices must not pile onto the last output.
+  expect(outputs.map((n) => n.children.map((c) => c.label))).toEqual([['ZXA1'], ['ZXA1']]);
+});
+
 test('a bus chain editor hides only a console feed, locks soft-patch outputs, and keeps manual hops visible', () => {
   const devices = [
     { id: 'mixer', name: 'GLD-80', kind: 'mixer' },

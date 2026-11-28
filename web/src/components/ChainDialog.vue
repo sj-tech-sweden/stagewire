@@ -219,6 +219,7 @@
                   clearable
                   :options="parentOptions(i)"
                   :label="t('workspace.stepFrom')"
+                  data-testid="chain-from-step"
                 />
               </template>
             </div>
@@ -404,8 +405,16 @@ const deviceName = (id) => props.devices.find((d) => d.id === id)?.name || graph
 // Hidden steps (e.g. a bus's input hop) don't get a visible number or a parent-picker slot.
 const displayedNumber = (i) => steps.value.slice(0, i + 1).filter((s) => !s.hidden).length;
 
-// New steps go BEFORE the locked soft-patched hop, never after it.
+// Channels have one locked soft-patched hop at the strip end, so a new device goes before it. Bus
+// chains lock several soft-patch outputs that the bus leaves *through*: those stay first and a new
+// device is appended after them. That order lets the "Från steg" picker offer every output as a
+// parent (it only lists earlier steps) and keeps the saved parent_index valid (a parent must be an
+// earlier step). It also matches the locked hint, which says to add devices after the output.
 function addStep() {
+  if (props.lockInPlace) {
+    steps.value.push(blank());
+    return;
+  }
   const at = steps.value.findIndex((s) => s.locked);
   if (at < 0) steps.value.push(blank());
   else steps.value.splice(at, 0, blank());

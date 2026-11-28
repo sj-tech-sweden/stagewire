@@ -1563,8 +1563,14 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
   const manual = base.filter((s) => !softIds.has(String(s.device_id)));
   const ordered = [...soft, ...manual];
   const newIndex = new Map(ordered.map((s, i) => [s, i]));
-  const lastSoftIndex = soft.length ? newIndex.get(soft[soft.length - 1]) : null;
+  const softIndices = soft.map((s) => newIndex.get(s));
+  const lastSoftIndex = softIndices.length ? softIndices[softIndices.length - 1] : null;
   const softLabel = busPatchLabel(bus);
+  // Manual hops with no explicit "Från steg" follow the soft outputs one-to-one: the first follows
+  // the first output, the second the second, and so on. Using the single lastSoftIndex for all of
+  // them stacked every device onto the last output (e.g. two speakers both under "Out 2"). When
+  // there are more hops than outputs, the extras repeat from the first output.
+  let autoParent = 0;
   for (const s of ordered) {
     if (softIds.has(String(s.device_id))) {
       s.parent_index = null;
@@ -1572,7 +1578,14 @@ export function busFlowTree(bus, steps, devices, edges, isMixer = () => false) {
       continue;
     }
     const oldParent = s.parent_index == null ? null : base[s.parent_index];
-    s.parent_index = oldParent && newIndex.has(oldParent) ? newIndex.get(oldParent) : lastSoftIndex;
+    if (oldParent && newIndex.has(oldParent)) {
+      s.parent_index = newIndex.get(oldParent);
+    } else if (softIndices.length) {
+      s.parent_index = softIndices[autoParent % softIndices.length];
+      autoParent += 1;
+    } else {
+      s.parent_index = lastSoftIndex; // null when the bus has no soft outputs
+    }
   }
   const tree = flowTree(bus.name, ordered, devices, { separateRoots: true });
   // Make the source node read "Bus" rather than the generic "Source".

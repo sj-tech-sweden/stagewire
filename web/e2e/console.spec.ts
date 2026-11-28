@@ -810,6 +810,76 @@ test('a bus soft-patched to multiple outputs shows them parallel, not daisy-chai
   expect(source!.left).not.toBe(devices[0].left);
 });
 
+test('a bus chain offers every soft-patch output as a parent for manual devices', async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  const headers = await authedHeaders(page);
+  const { jobId, listId } = await seed(request, headers);
+  const mkBox = (name: string) =>
+    call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+      name,
+      domain: 'audio',
+      kind: 'digital_stagebox',
+      ports: [{ id: 'out-xlr3', direction: 'out', signal: 'audio', connector: 'xlr3', channels: 4 }],
+    });
+  const mkSpk = (name: string) =>
+    call(request, headers, 'post', `/jobs/${jobId}/graph/devices`, {
+      name,
+      domain: 'audio',
+      kind: 'loudspeaker',
+      ports: [{ id: 'in-xlr3', direction: 'in', signal: 'audio', connector: 'xlr3', channels: 1 }],
+    });
+  const stageA = await mkBox('Stage A');
+  const stageB = await mkBox('Stage B');
+  const spkA = await mkSpk('Speaker A');
+  const spkB = await mkSpk('Speaker B');
+  const bus = await call(request, headers, 'post', `/jobs/${jobId}/channel-lists/${listId}/outputs`, {
+    name: 'Choir',
+    mode: 'mono',
+  });
+  await call(request, headers, 'put', `/jobs/${jobId}/outputs/${bus.id}/soft-patch`, {
+    endpoints: [
+      { refs: [{ device_id: stageA.id, port_id: 'out-xlr3', socket: 1 }] },
+      { refs: [{ device_id: stageB.id, port_id: 'out-xlr3', socket: 2 }] },
+    ],
+  });
+
+  await openConsole(page, jobId);
+  await page.getByTestId('console-tab-buses').click();
+  await page.getByTestId('console-bus-show-flow').first().click();
+  await page.getByTestId('flow-edit-chain').click();
+
+  // The two locked soft-patch outputs come first; new devices append after them, so the "From step"
+  // picker can list both outputs as parents (it only offers earlier steps).
+  await page.getByTestId('chain-add-step').click();
+  await page.getByTestId('chain-add-step').click();
+  const steps = page.getByTestId('chain-step');
+  await expect(steps).toHaveCount(4);
+  const first = steps.nth(2);
+  const second = steps.nth(3);
+  await first.getByTestId('chain-device').click();
+  await page.getByRole('option', { name: 'Speaker A', exact: true }).click();
+  await second.getByTestId('chain-device').click();
+  await page.getByRole('option', { name: 'Speaker B', exact: true }).click();
+
+  // Both outputs are offered, and an explicit choice is saved as that step's parent.
+  await first.getByTestId('chain-from-step').click();
+  await expect(page.getByRole('option', { name: 'From step 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'From step 2', exact: true })).toBeVisible();
+  await page.getByRole('option', { name: 'From step 2', exact: true }).click();
+  await second.getByTestId('chain-from-step').click();
+  await page.getByRole('option', { name: 'From step 1', exact: true }).click();
+  await page.getByTestId('chain-save').click();
+
+  // Reopen and confirm the two devices kept distinct, explicit parents (crossed on purpose).
+  await page.getByTestId('console-bus-edit-chain').first().click();
+  const saved = page.getByTestId('chain-step');
+  await expect(saved.nth(2).getByTestId('chain-from-step')).toHaveValue('From step 2');
+  await expect(saved.nth(3).getByTestId('chain-from-step')).toHaveValue('From step 1');
+});
+
 async function seedStageboxWithOutputs(request: APIRequestContext, headers: Record<string, string>, jobId: string) {
   return call(request, headers, 'post', `/jobs/${jobId}/devices`, {
     name: 'AR2412',
